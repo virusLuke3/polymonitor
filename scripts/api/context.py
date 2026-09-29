@@ -9,7 +9,8 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 import logging
 import threading
-from concurrent.futures import ThreadPoolExecutor
+import time
+from concurrent.futures import ThreadPoolExecutor, wait
 
 
 @dataclass
@@ -19,6 +20,7 @@ class RuntimeResources:
     clickhouse: ClickHouseSettings = field(default_factory=ClickHouseSettings.from_environment)
     snapshot_workers: int = 2
     workspace_workers: int = 2
+    shutdown_timeout_seconds: float = 20
     clickhouse_slots: Any = field(init=False)
     snapshot_slots: Any = field(init=False)
     workspace_slots: Any = field(init=False)
@@ -52,8 +54,6 @@ class RuntimeResources:
     quality_lock: Any = field(default_factory=threading.Lock)
     quality_last_good: dict | None = None
     quality_last_error: dict | None = None
-    signal_lock: Any = field(default_factory=threading.Lock)
-    signal_refreshing: dict[str, bool] = field(default_factory=dict)
     agent_lock: Any = field(default_factory=threading.Lock)
     agent_refreshing: set[str] = field(default_factory=set)
     agent_rate_lock: Any = field(default_factory=threading.Lock)
@@ -74,6 +74,7 @@ class RuntimeResources:
     http_lock: Any = field(default_factory=threading.Lock)
     stopped: threading.Event = field(default_factory=threading.Event)
     _threads: set[threading.Thread] = field(default_factory=set, repr=False)
+    _futures: set = field(default_factory=set, repr=False)
     _thread_lock: Any = field(default_factory=threading.Lock, repr=False)
 
     def start_thread(self, target: Callable[[], None], *, name: str) -> bool:
@@ -93,20 +94,34 @@ class RuntimeResources:
         return True
 
     def submit(self, executor, target, *args, **kwargs):
+        def finished(future):
+            with self._thread_lock:
+                self._futures.discard(future)
+
         with self._thread_lock:
             if self.stopped.is_set():
                 raise RuntimeError("service runtime is closed")
-            return executor.submit(target, *args, **kwargs)
+            future = executor.submit(target, *args, **kwargs)
+            self._futures.add(future)
+        future.add_done_callback(finished)
+        return future
 
     def close(self) -> None:
+        deadline = time.monotonic() + self.shutdown_timeout_seconds
         with self._thread_lock:
             self.stopped.set()
             threads = tuple(self._threads)
+            futures = tuple(self._futures)
+        for executor in (self.hazard_executor, self.zone_executor):
+            executor.shutdown(wait=False, cancel_futures=True)
         for thread in threads:
             if thread is not threading.current_thread():
-                thread.join()
-        for executor in (self.hazard_executor, self.zone_executor):
-            executor.shutdown(wait=True, cancel_futures=True)
+                thread.join(timeout=max(0, deadline - time.monotonic()))
+        if futures:
+            wait(futures, timeout=max(0, deadline - time.monotonic()))
+        pending = sum(thread.is_alive() for thread in threads) + sum(not future.done() for future in futures)
+        if pending:
+            logging.getLogger(__name__).warning("Runtime shutdown deadline reached; pending tasks=%d", pending)
         with self.http_lock:
             for session in self.http_sessions:
                 session.close()

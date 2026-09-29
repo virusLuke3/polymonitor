@@ -79,6 +79,11 @@ def get_postgres_settings() -> Dict[str, Any]:
         "password": "",
         "database": "poly_data_core",
         "search_path": "core,oracle,ops,public",
+        "connect_timeout": 5,
+        "statement_timeout_ms": 15000,
+        "lock_timeout_ms": 3000,
+        "idle_in_transaction_session_timeout_ms": 30000,
+        "tcp_user_timeout_ms": 20000,
     }
     settings = {}
     for name, default in defaults.items():
@@ -90,6 +95,11 @@ def get_postgres_settings() -> Dict[str, Any]:
             "postgres_" + name, next((os.environ[key] for key in aliases if os.environ.get(key)), default)
         )
     settings["port"] = int(settings["port"])
+    for name in defaults:
+        if "timeout" in name:
+            settings[name] = int(settings[name])
+            if settings[name] <= 0:
+                raise ValueError(f"PostgreSQL {name} must be positive")
     return settings
 
 
@@ -105,9 +115,9 @@ class DatabaseSettings:
         settings = get_postgres_settings() if backend in {"postgres", "postgresql"} else get_mysql_settings()
         return cls(backend, get_sqlite_path(), MappingProxyType(settings))
 
-    def connect(self, db_path=None, *, readonly=False):
+    def connect(self, db_path=None, *, readonly=False, connect_timeout=None):
         if self.backend in {"postgres", "postgresql"}:
-            return get_postgres_connection(self.connection)
+            return get_postgres_connection(self.connection, connect_timeout=connect_timeout)
         if self.backend == "mysql":
             return get_mysql_connection(self.connection)
         if self.backend == "sqlite":
@@ -497,10 +507,25 @@ def get_mysql_connection(settings: Optional[Mapping[str, Any]] = None) -> MySQLC
     return MySQLConnectionWrapper(raw)
 
 
-def get_postgres_connection(settings: Optional[Mapping[str, Any]] = None) -> PostgresConnectionWrapper:
+def get_postgres_connection(
+    settings: Optional[Mapping[str, Any]] = None, *, connect_timeout: int | None = None
+) -> PostgresConnectionWrapper:
     if psycopg is None:
         raise RuntimeError("psycopg is not installed. Please install psycopg[binary] first.")
     settings = settings if settings is not None else get_postgres_settings()
+    timeout = int(settings.get("connect_timeout", 5))
+    if connect_timeout is not None:
+        timeout = min(timeout, connect_timeout)
+    limits = {
+        name: int(settings.get(name + "_ms", default))
+        for name, default in (
+            ("statement_timeout", 15000), ("lock_timeout", 3000),
+            ("idle_in_transaction_session_timeout", 30000),
+        )
+    }
+    tcp_timeout = int(settings.get("tcp_user_timeout_ms", 20000))
+    if min(timeout, tcp_timeout, *limits.values()) <= 0:
+        raise ValueError("PostgreSQL timeouts must be positive")
     raw = psycopg.connect(
         host=settings["host"],
         port=settings["port"],
@@ -508,6 +533,9 @@ def get_postgres_connection(settings: Optional[Mapping[str, Any]] = None) -> Pos
         password=settings["password"],
         dbname=settings["database"],
         autocommit=False,
+        connect_timeout=timeout,
+        tcp_user_timeout=tcp_timeout,
+        options=" ".join(f"-c {name}={value}" for name, value in limits.items()),
     )
     search_path = str(settings.get("search_path") or "").strip()
     if search_path:

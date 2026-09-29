@@ -209,6 +209,7 @@ class ApiSettings:
     tech_app_store_top_free_url: str
     sports_runtime_ttl_seconds: int
     signal_runtime_ttl_seconds: int
+    signal_refresh_interval_seconds: int
     grid_open_access_base_url: str
     grid_central_data_graphql_url: str
     grid_series_state_graphql_url: str
@@ -303,6 +304,9 @@ class ApiSettings:
     jin10_flash_app_id: str
     jin10_flash_version: str
     clickhouse: ClickHouseSettings = field(default_factory=ClickHouseSettings.from_environment)
+    shutdown_timeout_seconds: float = field(
+        default_factory=lambda: max(0.1, min(_get_float("POLYDATA_SHUTDOWN_TIMEOUT_SECONDS", 20), 25))
+    )
     snapshot_refresh_workers: int = field(
         default_factory=lambda: max(1, min(_get_int("POLYDATA_SNAPSHOT_REFRESH_WORKERS", 2), 8))
     )
@@ -316,6 +320,7 @@ def load_api_settings() -> ApiSettings:
     snapshot_default = str((PROJECT_ROOT / "data" / "panel_snapshots.sqlite3").resolve())
     deploy_role = _get_str("POLYDATA_DEPLOY_ROLE", "local-data").strip().lower()
     snapshot_prewarm_default = deploy_role in {"gcp-api", "remote-api", "production-api"}
+    signal_interval = max(120, _get_int("POLYDATA_SIGNAL_WATCH_INTERVAL_SECONDS", 120))
     return ApiSettings(
         market_selection=MarketSelectionSettings(
             max_age_hours=_get_int("POLYDATA_ACTIVE_MARKET_MAX_AGE_HOURS", 336),
@@ -419,7 +424,8 @@ def load_api_settings() -> ApiSettings:
             "https://rss.applemarketingtools.com/api/v2/us/apps/top-free/25/apps.json",
         ),
         sports_runtime_ttl_seconds=_get_int("POLYDATA_SPORTS_RUNTIME_TTL_SECONDS", 60),
-        signal_runtime_ttl_seconds=_get_int("POLYDATA_SIGNAL_RUNTIME_TTL_SECONDS", 45),
+        signal_refresh_interval_seconds=signal_interval,
+        signal_runtime_ttl_seconds=max(signal_interval + 60, _get_int("POLYDATA_SIGNAL_RUNTIME_TTL_SECONDS", 2 * signal_interval + 60)),
         grid_open_access_base_url=_get_str(
             "POLYDATA_GRID_OPEN_ACCESS_BASE_URL",
             "https://api-op.grid.gg",

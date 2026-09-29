@@ -49,7 +49,20 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
                 limit=limit,
                 interval_seconds=45,
             )
+        self.addCleanup(watcher.close)
         return watcher, fake_redis
+
+    def test_signal_schedule_and_ttl_share_settings_and_prevent_duplicate_workers(self):
+        watcher, _ = self.make_watcher()
+        self.assertEqual(120, watcher.interval_seconds)
+        self.assertEqual(300, watcher.ttl_seconds())
+        with patch.object(signals_watcher, "redis", SimpleNamespace(from_url=lambda *a, **kw: FakeRedis())):
+            with self.assertRaisesRegex(RuntimeError, "already running"):
+                signals_watcher.SignalsWatcher(
+                    redis_url="redis://test/0", redis_prefix="polydata:",
+                    snapshot_sqlite_path=str(watcher._lock.name).replace("signals-whales.lock", "snapshots.sqlite3"),
+                    component="whales", limit=100, interval_seconds=120,
+                )
 
     def test_watcher_stores_whale_payload_and_seed_meta(self):
         watcher, fake_redis = self.make_watcher(component="whales", limit=14)
@@ -414,16 +427,16 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
         self.assertEqual(previous["generatedAt"], stored["generatedAt"])
         self.assertEqual(previous["items"], stored["items"])
 
-    def test_small_limit_on_expired_seed_schedules_default_snapshot_refresh(self):
+    def test_repeated_requests_read_canonical_seed_without_refresh(self):
         old = {"items": [{"title": "old"}], "generatedAt": "2026-09-28T10:00:00Z", "status": "ok"}
-        ctx = {"get_cached_runtime_payload": lambda *a: old, "utc_now_iso": lambda: "2026-09-29T10:00:00Z",
+        ctx = {"get_cached_json": lambda *a: old, "utc_now_iso": lambda: "2026-09-29T10:00:00Z",
                "SIGNAL_RUNTIME_TTL_SECONDS": 45}
-        with patch.object(signal_service, "_schedule_runtime_snapshot_refresh") as refresh:
-            result = signal_service.get_whale_trades_snapshot(ctx, limit=1)
+        with patch.object(signal_service, "fetch_live_whale_trades_payload") as refresh:
+            for limit in (1, 100, 1):
+                result = signal_service.get_whale_trades_snapshot(ctx, limit=limit)
         self.assertEqual("stale", result["status"])
         self.assertEqual(old["generatedAt"], result["generatedAt"])
-        refresh.assert_called_once()
-        self.assertEqual(signal_service.build_whale_trades_cache_key(limit=14), refresh.call_args.kwargs["cache_key"])
+        refresh.assert_not_called()
 
     def test_watcher_marks_old_payload_stale_even_with_records(self):
         watcher, fake_redis = self.make_watcher(component="whales", limit=14)

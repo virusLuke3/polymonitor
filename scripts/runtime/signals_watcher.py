@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import sys
@@ -32,12 +33,10 @@ from runtime.snapshot_store import SnapshotStore
 from runtime.telegram_panel_publish import publish_cached_panel_snapshot
 
 
-DEFAULT_INTERVAL_SECONDS = 45
 DEFAULT_ALPHA_LIMIT = 8
 DEFAULT_WHALE_LIMIT = 14
 DEFAULT_SUSPICIOUS_LIMIT = 12
 DEFAULT_POLYBEATS_LIMIT = 8
-DEFAULT_DB_READ_TIMEOUT_SECONDS = 12
 DEFAULT_SIGNAL_DATA_STALE_AFTER_SECONDS = 7 * 24 * 60 * 60
 SEED_META_NAMESPACE = "seed-meta:signals"
 
@@ -179,17 +178,23 @@ class SignalsWatcher:
         self.settings = settings or load_api_settings()
         self.spec = COMPONENTS[component]
         self.limit = max(1, int(limit or self.spec["default_limit"]))
-        self.interval_seconds = max(15, int(interval_seconds or DEFAULT_INTERVAL_SECONDS))
+        self.interval_seconds = max(self.settings.signal_refresh_interval_seconds, int(interval_seconds or 0))
+        if self.settings.signal_runtime_ttl_seconds < self.interval_seconds + 60:
+            raise ValueError("Signal snapshot TTL must allow at least 60 seconds beyond the refresh interval")
         self.redis_prefix = str(redis_prefix or "")
-        self.redis_client = redis.from_url(redis_url, decode_responses=True)
+        self.redis_client = redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2)
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
+        self._lock = Path(snapshot_sqlite_path).with_name(f"signals-{component}.lock").open("a")
+        try:
+            fcntl.flock(self._lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            self._lock.close()
+            self.redis_client.close()
+            raise RuntimeError(f"Signal watcher already running: {component}") from None
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
 
     def ttl_seconds(self) -> int:
-        configured = int(os.environ.get("POLYDATA_SIGNAL_SEED_TTL_SECONDS", "0") or 0)
-        if configured > 0:
-            return configured
-        return max(60, self.interval_seconds * 3)
+        return self.settings.signal_runtime_ttl_seconds
 
     def stale_after_seconds(self) -> int:
         configured = int(os.environ.get("POLYDATA_SIGNAL_DATA_STALE_AFTER_SECONDS", "0") or 0)
@@ -197,7 +202,7 @@ class SignalsWatcher:
 
     def cache_key(self) -> str:
         builder: Callable[..., str] = self.spec["cache_key_builder"]
-        return builder(limit=self.limit)
+        return builder()
 
     def namespace(self) -> str:
         return str(self.spec["namespace"])
@@ -261,16 +266,19 @@ class SignalsWatcher:
         self.seed_meta_store.store(SEED_META_NAMESPACE, str(self.spec["cache_key"]), payload)
 
     def close(self) -> None:
-        if hasattr(self, "_service_runtime"):
-            self._service_runtime.close()
-        self.redis_client.close()
+        try:
+            if hasattr(self, "_service_runtime"):
+                self._service_runtime.close()
+            self.redis_client.close()
+        finally:
+            self._lock.close()
 
     def service_context(self):
         from api.runtime import ServiceRuntime
 
         if not hasattr(self, "_service_runtime"):
             self._service_runtime = ServiceRuntime(self.settings, application=_AppAdapter())
-        return self._service_runtime.signal_context
+        return self._service_runtime.polybeats_context if self.component == "polybeats" else self._service_runtime.signal_context
 
     def fetch_payload(self) -> Dict[str, Any]:
         fetcher: Callable[..., Dict[str, Any]] = self.spec["fetcher"]
@@ -291,20 +299,20 @@ class SignalsWatcher:
                 self.store_seed_meta(
                     status="preserved",
                     record_count=_record_count(previous),
-                    error_summary=str(exc),
+                    error_summary=type(exc).__name__,
                     preserve_last_success=True,
                     metadata={"result": "preserved", "component": self.component, **stats},
                     payload_status=preserved.get("status") or "preserved",
                 )
-                return {"status": "preserved", "recordCount": _record_count(previous), "error": str(exc)}
+                return {"status": "preserved", "recordCount": _record_count(previous), "error": type(exc).__name__}
             self.store_seed_meta(
                 status="error",
                 record_count=0,
-                error_summary=str(exc),
+                error_summary=type(exc).__name__,
                 preserve_last_success=True,
                 metadata={"result": "error", "component": self.component},
             )
-            return {"status": "error", "recordCount": 0, "error": str(exc)}
+            return {"status": "error", "recordCount": 0, "error": type(exc).__name__}
 
         record_count = _record_count(payload)
         stats = _payload_timestamp_stats(payload, stale_after_seconds=self.stale_after_seconds())
@@ -333,7 +341,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Seed signal panel snapshots into Redis and SQLite")
     parser.add_argument("--component", choices=sorted(COMPONENTS.keys()), required=True)
     parser.add_argument("--watch", action="store_true", help="Run continuously instead of once")
-    parser.add_argument("--interval", type=int, default=int(os.environ.get("POLYDATA_SIGNAL_WATCH_INTERVAL_SECONDS", DEFAULT_INTERVAL_SECONDS)))
     parser.add_argument("--limit", type=int, default=0, help="Override the component default limit")
     return parser
 
@@ -342,10 +349,6 @@ def main() -> int:
     from runtime.environment import load_environment
     load_environment()
     args = build_arg_parser().parse_args()
-    db_read_timeout = max(3, int(os.environ.get("POLYDATA_SIGNAL_DB_READ_TIMEOUT_SECONDS", DEFAULT_DB_READ_TIMEOUT_SECONDS)))
-    current_read_timeout = int(os.environ.get("POLYMARKET_MYSQL_READ_TIMEOUT", "60") or "60")
-    if current_read_timeout > db_read_timeout:
-        os.environ["POLYMARKET_MYSQL_READ_TIMEOUT"] = str(db_read_timeout)
     settings = load_api_settings()
     spec = COMPONENTS[args.component]
     limit = args.limit or int(os.environ.get(str(spec["limit_env"]), spec["default_limit"]))
@@ -355,7 +358,7 @@ def main() -> int:
         snapshot_sqlite_path=settings.snapshot_sqlite_path,
         component=args.component,
         limit=limit,
-        interval_seconds=args.interval,
+        interval_seconds=settings.signal_refresh_interval_seconds,
         settings=settings,
     )
     try:
@@ -365,8 +368,9 @@ def main() -> int:
             print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
             return 0
 
-        interval_seconds = max(15, int(args.interval or DEFAULT_INTERVAL_SECONDS))
+        interval_seconds = watcher.interval_seconds
         while True:
+            started = time.monotonic()
             try:
                 print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
             except KeyboardInterrupt:
@@ -375,12 +379,13 @@ def main() -> int:
                 watcher.store_seed_meta(
                     status="error",
                     record_count=0,
-                    error_summary=str(exc),
+                    error_summary=type(exc).__name__,
                     preserve_last_success=True,
                     metadata={"result": "exception", "component": args.component},
                 )
-                print(f"[signals] ERROR watch loop failed: {exc}", file=sys.stderr)
-            time.sleep(interval_seconds)
+                print(f"[signals] ERROR watch loop failed: {type(exc).__name__}", file=sys.stderr)
+            # Never catch up with a burst after a slow or failed refresh.
+            time.sleep(max(interval_seconds / 2, interval_seconds - (time.monotonic() - started)))
     finally:
         watcher.close()
 

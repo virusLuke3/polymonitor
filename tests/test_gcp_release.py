@@ -5,8 +5,77 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import json
+import pytest
 
 from scripts.deploy import gcp_release as release
+
+
+@pytest.mark.parametrize("failure", ["hash", "stage", "write", "interrupt", "crash"])
+def test_release_failure_restores_files_or_leaves_complete_recovery(tmp_path, monkeypatch, failure):
+    import io
+    import tarfile
+
+    root, backups = tmp_path / "root", tmp_path / "backups"
+    root.mkdir()
+    entries = []
+    payload = tmp_path / "payload.tar.gz"
+    with tarfile.open(payload, "w:gz") as archive:
+        for name in ("first.py", "second.py"):
+            (root / name).write_bytes(b"old")
+            item = tarfile.TarInfo(name)
+            item.size, item.mode = 3, 0o644
+            archive.addfile(item, io.BytesIO(b"new"))
+            entries.append({"path": name, "action": "upsert", "before_sha256": release._sha256(b"old"),
+                            "after_sha256": release._sha256(b"new"), "after_mode": "0644"})
+    if failure == "hash":
+        entries[-1]["after_sha256"] = "invalid"
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({"version": release.MANIFEST_VERSION, "base_sha": "old",
+                                    "target_sha": "new", "entries": entries}))
+    receipt = backups / "new" / "receipt.json"
+    if failure == "crash":
+        code = """
+import os, sys
+from pathlib import Path
+from scripts.deploy.gcp_release import apply_release
+replace = Path.replace
+def crash(source, target):
+    if source.name == '.second.py.polydata-new':
+        os._exit(9)
+    return replace(source, target)
+Path.replace = crash
+apply_release(*(Path(value) for value in sys.argv[1:]))
+"""
+        result = subprocess.run([sys.executable, "-B", "-c", code, str(root), str(manifest), str(payload), str(backups)])
+        assert result.returncode == 9
+        assert (root / "first.py").read_bytes() == b"new"
+        release.rollback_release(root, receipt)
+    else:
+        replace = Path.replace
+
+        def fail(source, target):
+            if source.name == ".second.py.polydata-new":
+                assert len(json.loads(receipt.read_text())["entries"]) == 2
+                raise KeyboardInterrupt() if failure == "interrupt" else OSError("injected failure")
+            return replace(source, target)
+
+        if failure == "stage":
+            copyfile = shutil.copyfile
+            def no_space(source, destination, **kwargs):
+                if Path(destination).name == ".second.py.polydata-new":
+                    assert (root / "first.py").read_bytes() == b"old"
+                    raise OSError("injected disk full")
+                return copyfile(source, destination, **kwargs)
+            monkeypatch.setattr(shutil, "copyfile", no_space)
+        elif failure != "hash":
+            monkeypatch.setattr(Path, "replace", fail)
+        with pytest.raises((RuntimeError, OSError, KeyboardInterrupt)):
+            release.apply_release(root, manifest, payload, backups)
+    assert all((root / name).read_bytes() == b"old" for name in ("first.py", "second.py"))
+    assert not list(root.glob(".*.polydata-*"))
+    if failure == "hash":
+        assert not backups.exists()
 
 
 def git(repo, *args):

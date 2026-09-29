@@ -15,10 +15,11 @@ class CacheState:
     resources: RuntimeResources
     application: Any
     snapshot_store: Any
-    redis_url: str = ""
+    redis_url: str = field(default="", repr=False)
     redis_prefix: str = "polydata:"
     redis_module: Any = None
     redis_client: Any = None
+    redis_retry_at: float = 0
     redis_lock: Any = field(default_factory=threading.Lock)
     runtime_cache: dict = field(default_factory=dict)
     runtime_lock: Any = field(default_factory=threading.Lock)
@@ -33,6 +34,8 @@ def get_redis_client(ctx: CacheState):
     if existing is not None:
         return existing
     with ctx.redis_lock:
+        if time.monotonic() < ctx.redis_retry_at:
+            return None
         existing = ctx.redis_client
         if existing is not None:
             return existing
@@ -47,8 +50,10 @@ def get_redis_client(ctx: CacheState):
             client.ping()
             ctx.redis_client = client
             return client
-        except Exception:
-            ctx.application.logger.exception("redis-init failed url=%s", ctx.redis_url)
+        except Exception as exc:
+            # URLs and exception messages may both contain credentials.
+            ctx.application.logger.warning("redis-init failed error_type=%s", type(exc).__name__)
+            ctx.redis_retry_at = time.monotonic() + 30
             ctx.redis_client = None
             return None
 
@@ -85,15 +90,15 @@ def get_cached_payload(ctx: CacheState, namespace: str, cache_key: str) -> Optio
         return None
     try:
         raw = client.get(_redis_key(ctx, namespace, cache_key))
-    except Exception:
-        ctx.application.logger.exception("redis-get failed namespace=%s key=%s", namespace, cache_key)
+    except Exception as exc:
+        ctx.application.logger.warning("redis-get failed error_type=%s", type(exc).__name__)
         return None
     if not raw:
         return None
     try:
         return json.loads(raw)
-    except Exception:
-        ctx.application.logger.exception("redis-json decode failed namespace=%s key=%s", namespace, cache_key)
+    except Exception as exc:
+        ctx.application.logger.warning("redis-json decode failed error_type=%s", type(exc).__name__)
         return None
 
 
@@ -105,10 +110,8 @@ def set_cached_payload(ctx: CacheState, namespace: str, cache_key: str, payload:
         client.setex(
             _redis_key(ctx, namespace, cache_key), ttl_seconds, json.dumps(payload, ensure_ascii=True, default=str)
         )
-    except Exception:
-        ctx.application.logger.exception(
-            "redis-set failed namespace=%s key=%s ttl=%s", namespace, cache_key, ttl_seconds
-        )
+    except Exception as exc:
+        ctx.application.logger.warning("redis-set failed error_type=%s", type(exc).__name__)
 
 
 def get_cached_json(ctx: CacheState, namespace: str, cache_key: str) -> Optional[Dict[str, Any]]:

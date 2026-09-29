@@ -135,29 +135,27 @@ if [[ "${DEPLOY_DRY_RUN}" == "1" ]]; then
   exit 0
 fi
 
-RECEIPT_PATH="$(
-  ssh "${SSH_OPTIONS[@]}" "${REMOTE}" \
-    "python3 '${REMOTE_RELEASE_DIR}/gcp_release.py' apply \
-      --root '${DEPLOY_PATH}' \
-      --manifest '${REMOTE_RELEASE_DIR}/manifest.json' \
-      --payload '${REMOTE_RELEASE_DIR}/payload.tar.gz' \
-      --backup-root '${DEPLOY_STATE_DIR}/backups'" \
-    | sed -n 's/^release-applied receipt=//p'
-)"
-if [[ -z "${RECEIPT_PATH}" ]]; then
-  echo "Remote apply did not return a receipt." >&2
-  exit 1
-fi
+RECEIPT_PATH="${DEPLOY_STATE_DIR}/backups/${TARGET_SHA}/receipt.json"
+# Never mistake a previous release's receipt for this invocation's recovery state.
+ssh "${SSH_OPTIONS[@]}" "${REMOTE}" "test ! -e '${DEPLOY_STATE_DIR}/backups/${TARGET_SHA}'"
 
 rollback() {
+  trap - ERR INT TERM
   echo "Deployment verification failed; rolling back ${TARGET_SHA:0:12}." >&2
   ssh "${SSH_OPTIONS[@]}" "${REMOTE}" \
-    "python3 '${REMOTE_RELEASE_DIR}/gcp_release.py' rollback --root '${DEPLOY_PATH}' --receipt '${RECEIPT_PATH}'" || true
+    "if test -f '${RECEIPT_PATH}'; then python3 '${REMOTE_RELEASE_DIR}/gcp_release.py' rollback --root '${DEPLOY_PATH}' --receipt '${RECEIPT_PATH}'; fi" || return 1
   for unit in "${RESTART_UNITS[@]}"; do
     ssh "${SSH_OPTIONS[@]}" "${REMOTE}" "systemctl --user restart '${unit}'" || true
   done
 }
 trap rollback ERR
+trap 'rollback; exit 130' INT
+trap 'rollback; exit 143' TERM
+
+ssh "${SSH_OPTIONS[@]}" "${REMOTE}" \
+  "python3 '${REMOTE_RELEASE_DIR}/gcp_release.py' apply \
+    --root '${DEPLOY_PATH}' --manifest '${REMOTE_RELEASE_DIR}/manifest.json' \
+    --payload '${REMOTE_RELEASE_DIR}/payload.tar.gz' --backup-root '${DEPLOY_STATE_DIR}/backups'"
 
 ssh "${SSH_OPTIONS[@]}" "${REMOTE}" \
   "python3 '${REMOTE_RELEASE_DIR}/gcp_release.py' sync-units --root '${DEPLOY_PATH}' --manifest '${REMOTE_RELEASE_DIR}/manifest.json' --receipt '${RECEIPT_PATH}'"
@@ -195,5 +193,5 @@ ssh "${SSH_OPTIONS[@]}" "${REMOTE}" "
   umask 077
   printf '%s\n' '${STATE_JSON}' > '${REMOTE_STATE_PATH}'
 "
-trap - ERR
+trap - ERR INT TERM
 echo "GCP backend release ${TARGET_SHA:0:12} deployed and verified."

@@ -417,20 +417,15 @@ class SignalSnapshotOptimizationTestCase(unittest.TestCase):
         *,
         snapshot_store: Optional[FakeSnapshotStore] = None,
     ) -> Dict[str, Any]:
-        runtime_cache: Dict[tuple[str, str], Any] = {}
         return {
             "SIGNAL_RUNTIME_TTL_SECONDS": 45,
             "SNAPSHOT_STORE": snapshot_store or FakeSnapshotStore(),
-            "get_cached_runtime_payload": lambda namespace, cache_key: runtime_cache.get((namespace, cache_key)),
-            "set_cached_runtime_payload": lambda namespace, cache_key, payload, ttl_seconds: runtime_cache.setdefault(
-                (namespace, cache_key), payload
-            ),
             "_resources": RuntimeResources(),
             "app": FakeApp(),
             "utc_now_iso": lambda: "2026-04-21T00:00:00Z",
         }
 
-    def test_alpha_snapshot_returns_stale_and_schedules_one_refresh(self):
+    def test_alpha_snapshot_returns_stale_without_scheduling_refresh(self):
         cache_key = json.dumps({"limit": 8}, sort_keys=True, ensure_ascii=True)
         stale_payload = {"items": [{"title": "stale alpha"}], "generatedAt": "stale"}
         ctx = self.make_signal_context(
@@ -451,21 +446,22 @@ class SignalSnapshotOptimizationTestCase(unittest.TestCase):
         self.assertEqual(first["items"], [])
         self.assertEqual(second["items"], [])
         self.assertEqual(first["generatedAt"], stale_payload["generatedAt"])
-        ctx["_resources"].start_thread.assert_called_once()
+        ctx["_resources"].start_thread.assert_not_called()
 
-    def test_alpha_snapshot_cold_miss_builds_and_stores_payload(self):
+    def test_alpha_snapshot_cold_miss_waits_for_watcher(self):
         cache_key = json.dumps({"limit": 8}, sort_keys=True, ensure_ascii=True)
         snapshot_store = FakeSnapshotStore()
         ctx = self.make_signal_context(snapshot_store=snapshot_store)
         payload = {"items": [{"title": "fresh alpha"}], "generatedAt": "fresh"}
 
-        with patch.object(signal_service, "_build_alpha_signal_payload", return_value=payload):
+        with patch.object(signal_service, "_build_alpha_signal_payload", return_value=payload) as builder:
             result = signal_service.get_alpha_signal_snapshot(ctx, limit=8)
 
         self.assertEqual(result["items"], [])
-        self.assertEqual("empty", result["status"])
-        self.assertEqual("live-build", result["cacheMode"])
-        self.assertEqual(snapshot_store.get(signal_service.SIGNAL_SNAPSHOT_NAMESPACE_ALPHA, cache_key)["items"], [])
+        self.assertEqual("warming", result["status"])
+        self.assertEqual("seeded", result["cacheMode"])
+        builder.assert_not_called()
+        self.assertIsNone(snapshot_store.get(signal_service.SIGNAL_SNAPSHOT_NAMESPACE_ALPHA, cache_key))
 
 
 def test_shared_snapshot_refresh_accepts_empty_results_and_marks_stale(tmp_path):

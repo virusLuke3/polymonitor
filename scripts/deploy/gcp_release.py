@@ -412,52 +412,88 @@ def apply_release(
     backup_dir = backup_root / release_id
     if backup_dir.exists():
         raise RuntimeError(f"backup already exists for release {release_id}")
-    backup_dir.mkdir(parents=True)
-
     with tempfile.TemporaryDirectory(prefix="polydata-release-") as temporary:
         payload_root = Path(temporary)
         _extract_payload(payload_path, payload_root, manifest)
-        receipt_entries: list[dict[str, Any]] = []
+        # Validate the entire payload before touching any serving file.
         for entry in manifest["entries"]:
-            relative = entry["path"]
-            destination = root / relative
-            existed = destination.exists()
-            previous_mode = _file_mode(destination)
-            if existed:
-                backup_path = backup_dir / "files" / relative
-                backup_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(destination, backup_path)
-            receipt_entries.append(
-                {
-                    "path": relative,
-                    "existed": existed,
-                    "previous_mode": previous_mode,
-                }
-            )
+            if entry["action"] == "upsert":
+                if _file_sha256(payload_root / entry["path"]) != entry["after_sha256"]:
+                    raise RuntimeError(f"payload hash mismatch for {entry['path']}")
+                int(entry["after_mode"], 8)
 
-            if entry["action"] == "delete":
-                if destination.exists():
-                    destination.unlink()
-                continue
+        backup_dir.mkdir(parents=True)
+        try:
+            receipt_entries: list[dict[str, Any]] = []
+            for entry in manifest["entries"]:
+                relative = entry["path"]
+                destination = root / relative
+                existed = destination.exists()
+                previous_mode = _file_mode(destination)
+                if existed:
+                    backup_path = backup_dir / "files" / relative
+                    backup_path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(destination, backup_path)
+                    with backup_path.open("rb") as saved:
+                        os.fsync(saved.fileno())
+                receipt_entries.append(
+                    {
+                        "path": relative,
+                        "existed": existed,
+                        "previous_mode": previous_mode,
+                    }
+                )
 
-            source = payload_root / relative
-            if _file_sha256(source) != entry["after_sha256"]:
-                raise RuntimeError(f"payload hash mismatch for {relative}")
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            temporary_destination = destination.with_name(f".{destination.name}.polydata-new")
-            shutil.copyfile(source, temporary_destination)
-            os.chmod(temporary_destination, int(entry["after_mode"], 8))
-            temporary_destination.replace(destination)
-
-    receipt = {
-        "version": MANIFEST_VERSION,
-        "base_sha": manifest["base_sha"],
-        "target_sha": manifest["target_sha"],
-        "entries": receipt_entries,
-    }
-    receipt_path = backup_dir / "receipt.json"
-    receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            receipt_path = backup_dir / "receipt.json"
+            _write_receipt(receipt_path, {
+                "version": MANIFEST_VERSION,
+                "base_sha": manifest["base_sha"],
+                "target_sha": manifest["target_sha"],
+                "entries": receipt_entries,
+            })
+        except BaseException:
+            shutil.rmtree(backup_dir)  # Preparation failed; serving files are still untouched.
+            raise
+        staged_files = {}
+        try:
+            try:
+                # Allocate all replacements first, so disk-full errors precede publication.
+                for entry in manifest["entries"]:
+                    if entry["action"] != "upsert":
+                        continue
+                    destination = root / entry["path"]
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    staged = destination.with_name(f".{destination.name}.polydata-new")
+                    staged_files[destination] = staged
+                    shutil.copyfile(payload_root / entry["path"], staged)
+                    os.chmod(staged, int(entry["after_mode"], 8))
+                for entry in manifest["entries"]:
+                    destination = root / entry["path"]
+                    if entry["action"] == "delete":
+                        destination.unlink(missing_ok=True)
+                    else:
+                        staged_files[destination].replace(destination)
+            finally:
+                for staged in staged_files.values():
+                    staged.unlink(missing_ok=True)
+        except BaseException:
+            rollback_release(root, receipt_path)
+            raise
     return receipt_path
+
+
+def _write_receipt(path: Path, receipt: dict[str, Any]) -> None:
+    staged = path.with_suffix(".tmp")
+    with staged.open("w", encoding="utf-8") as output:
+        json.dump(receipt, output, indent=2, sort_keys=True)
+        output.flush()
+        os.fsync(output.fileno())
+    staged.replace(path)
+    directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
 
 
 def _systemctl(*args: str, check: bool = True):
@@ -493,7 +529,7 @@ def sync_systemd_units(root: Path, manifest_path: Path, receipt_path: Path, unit
     if not states:
         return
     receipt["systemd_units"] = states
-    receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
+    _write_receipt(receipt_path, receipt)
     unit_dir.mkdir(parents=True, exist_ok=True)
     for state in states:
         source, installed = root / state["source"], Path(state["path"])
@@ -535,8 +571,11 @@ def rollback_release(root: Path, receipt_path: Path) -> None:
     backup_dir = receipt_path.parent
     for entry in reversed(receipt["entries"]):
         destination = root / _safe_relative_path(entry["path"])
+        destination.with_name(f".{destination.name}.polydata-new").unlink(missing_ok=True)
         if entry["existed"]:
             backup_path = backup_dir / "files" / entry["path"]
+            if _file_sha256(destination) == _file_sha256(backup_path) and _file_mode(destination) == entry["previous_mode"]:
+                continue
             destination.parent.mkdir(parents=True, exist_ok=True)
             temporary_destination = destination.with_name(f".{destination.name}.polydata-rollback")
             shutil.copyfile(backup_path, temporary_destination)

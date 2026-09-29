@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-from api.context import runtime_resources
-
 import json
-import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any, Callable, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from . import clickhouse_orderfilled_service, outcome_semantics_service
 
@@ -262,125 +259,14 @@ def _query_whale_rows(ctx: dict, *, limit: int) -> List[Dict[str, Any]]:
     return rows
 
 
-def _store_runtime_snapshot(
-    ctx: dict, namespace: str, cache_key: str, payload: Dict[str, Any], ttl_seconds: int
-) -> Dict[str, Any]:
-    ctx["SNAPSHOT_STORE"].set(namespace, cache_key, payload, ttl_seconds)
-    return ctx["set_cached_runtime_payload"](namespace, cache_key, payload, ttl_seconds)
-
-
-def _refresh_runtime_snapshot(
-    ctx: dict,
-    *,
-    namespace: str,
-    cache_key: str,
-    ttl_seconds: int,
-    builder: Callable[[], Dict[str, Any]],
-    refresh_state_key: str,
-    label: str,
-    reason: str,
-) -> Optional[Dict[str, Any]]:
-    resources = runtime_resources(ctx)
-    started_at = time.perf_counter()
-    ctx["app"].logger.info("%s refresh-start reason=%s", label, reason)
-    try:
-        payload = _sanitize_signal_payload(ctx, namespace, builder())
-        stored = _store_runtime_snapshot(ctx, namespace, cache_key, payload, ttl_seconds)
-        ctx["app"].logger.info(
-            "%s refresh-done reason=%s duration_ms=%.2f", label, reason, (time.perf_counter() - started_at) * 1000
-        )
-        return stored
-    except Exception:
-        ctx["app"].logger.exception("%s refresh-failed reason=%s", label, reason)
-        return None
-    finally:
-        with resources.signal_lock:
-            resources.signal_refreshing[refresh_state_key] = False
-
-
-def _schedule_runtime_snapshot_refresh(
-    ctx: dict,
-    *,
-    namespace: str,
-    cache_key: str,
-    ttl_seconds: int,
-    builder: Callable[[], Dict[str, Any]],
-    refresh_state_key: str,
-    label: str,
-    reason: str,
-) -> None:
-    resources = runtime_resources(ctx)
-    with resources.signal_lock:
-        if resources.signal_refreshing.get(refresh_state_key):
-            return
-        resources.signal_refreshing[refresh_state_key] = True
-    started = resources.start_thread(
-        target=lambda: _refresh_runtime_snapshot(
-            ctx,
-            namespace=namespace,
-            cache_key=cache_key,
-            ttl_seconds=ttl_seconds,
-            builder=builder,
-            refresh_state_key=refresh_state_key,
-            label=label,
-            reason=reason,
-        ),
-        name=f"{label}-refresh",
+def get_signal_snapshot(ctx: dict, *, namespace: str, cache_key: str, limit: int) -> Dict[str, Any]:
+    """Read the watcher-owned snapshot; requests never start signal builders."""
+    payload = _read_cached_signal_snapshot(
+        ctx, namespace=namespace, cache_key=cache_key, ttl_seconds=ctx["SIGNAL_RUNTIME_TTL_SECONDS"]
     )
-    if not started:
-        with resources.signal_lock:
-            resources.signal_refreshing[refresh_state_key] = False
-
-
-def _get_stale_first_runtime_snapshot(
-    ctx: dict,
-    *,
-    namespace: str,
-    cache_key: str,
-    ttl_seconds: int,
-    builder: Callable[[], Dict[str, Any]],
-    refresh_state_key: str,
-    label: str,
-) -> Dict[str, Any]:
-    resources = runtime_resources(ctx)
-    cached = _read_cached_signal_snapshot(
-        ctx,
-        namespace=namespace,
-        cache_key=cache_key,
-        ttl_seconds=ttl_seconds,
-    )
-    if cached is not None:
-        if cached.get("status") == "stale":
-            _schedule_runtime_snapshot_refresh(
-                ctx,
-                namespace=namespace,
-                cache_key=cache_key,
-                ttl_seconds=ttl_seconds,
-                builder=builder,
-                refresh_state_key=refresh_state_key,
-                label=label,
-                reason="stale-hit",
-            )
-        return cached
-
-    with resources.signal_lock:
-        if resources.signal_refreshing.get(refresh_state_key):
-            payload = {"items": [], "generatedAt": ctx["utc_now_iso"](), "status": "warming"}
-            return ctx["set_cached_runtime_payload"](namespace, cache_key, payload, min(5, ttl_seconds))
-        resources.signal_refreshing[refresh_state_key] = True
-    payload = _refresh_runtime_snapshot(
-        ctx,
-        namespace=namespace,
-        cache_key=cache_key,
-        ttl_seconds=ttl_seconds,
-        builder=builder,
-        refresh_state_key=refresh_state_key,
-        label=label,
-        reason="cold-miss",
-    )
-    if payload is not None:
-        return _sanitize_signal_payload(ctx, namespace, payload)
-    raise RuntimeError(f"{label} snapshot refresh failed")
+    if payload is None:
+        return {"items": [], "generatedAt": None, "status": "warming", "cacheMode": "seeded"}
+    return _limit_signal_payload(ctx, payload, limit=limit)
 
 
 def _sanitize_signal_payload(ctx: dict, namespace: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -433,12 +319,8 @@ def _sanitize_signal_payload(ctx: dict, namespace: str, payload: Dict[str, Any])
 def _read_cached_signal_snapshot(
     ctx: dict, *, namespace: str, cache_key: str, ttl_seconds: int
 ) -> Optional[Dict[str, Any]]:
-    payload = None
-    for name in ("get_cached_runtime_payload", "get_cached_json"):
-        reader = ctx.get(name)
-        payload = reader(namespace, cache_key) if callable(reader) else None
-        if isinstance(payload, dict):
-            break
+    reader = ctx.get("get_cached_json")
+    payload = reader(namespace, cache_key) if callable(reader) else None
     if not isinstance(payload, dict):
         store = ctx.get("SNAPSHOT_STORE")
         payload = store.get_stale(namespace, cache_key) if store is not None else None
@@ -512,18 +394,10 @@ def fetch_live_whale_trades_payload(ctx: dict, limit: int = 14) -> Dict[str, Any
 
 
 def get_whale_trades_snapshot(ctx: dict, limit: int = DEFAULT_WHALE_TRADES_LIMIT) -> Dict[str, Any]:
-    fetch_limit = max(DEFAULT_WHALE_TRADES_LIMIT, int(limit))
-    cache_key = build_whale_trades_cache_key(limit=fetch_limit)
-    payload = _get_stale_first_runtime_snapshot(
-        ctx,
-        namespace=SIGNAL_SNAPSHOT_NAMESPACE_WHALES,
-        cache_key=cache_key,
-        ttl_seconds=ctx["SIGNAL_RUNTIME_TTL_SECONDS"],
-        builder=lambda: fetch_live_whale_trades_payload(ctx, limit=fetch_limit),
-        refresh_state_key=f"whales:{cache_key}",
-        label="whales-snapshot",
+    return get_signal_snapshot(
+        ctx, namespace=SIGNAL_SNAPSHOT_NAMESPACE_WHALES,
+        cache_key=build_whale_trades_cache_key(), limit=limit,
     )
-    return _limit_signal_payload(ctx, payload, limit=limit)
 
 
 def _recent_oracle_candidates(ctx: dict, limit: int) -> List[Dict[str, Any]]:
@@ -550,18 +424,10 @@ def _recent_oracle_candidates(ctx: dict, limit: int) -> List[Dict[str, Any]]:
 
 
 def get_suspicious_trades_snapshot(ctx: dict, limit: int = DEFAULT_SUSPICIOUS_TRADES_LIMIT) -> Dict[str, Any]:
-    fetch_limit = max(DEFAULT_SUSPICIOUS_TRADES_LIMIT, int(limit))
-    cache_key = build_suspicious_trades_cache_key(limit=fetch_limit)
-    payload = _get_stale_first_runtime_snapshot(
-        ctx,
-        namespace=SIGNAL_SNAPSHOT_NAMESPACE_SUSPICIOUS,
-        cache_key=cache_key,
-        ttl_seconds=ctx["SIGNAL_RUNTIME_TTL_SECONDS"],
-        builder=lambda: fetch_live_suspicious_trades_payload(ctx, limit=fetch_limit),
-        refresh_state_key=f"suspicious:{cache_key}",
-        label="suspicious-snapshot",
+    return get_signal_snapshot(
+        ctx, namespace=SIGNAL_SNAPSHOT_NAMESPACE_SUSPICIOUS,
+        cache_key=build_suspicious_trades_cache_key(), limit=limit,
     )
-    return _limit_signal_payload(ctx, payload, limit=limit)
 
 
 def fetch_live_suspicious_trades_payload(ctx: dict, limit: int = 12) -> Dict[str, Any]:
@@ -770,22 +636,7 @@ def fetch_live_alpha_signal_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]
 
 
 def get_alpha_signal_snapshot(ctx: dict, limit: int = DEFAULT_ALPHA_SIGNAL_LIMIT) -> Dict[str, Any]:
-    cache_key = build_alpha_signal_cache_key(limit=limit)
-    if int(limit or 0) != DEFAULT_ALPHA_SIGNAL_LIMIT:
-        default_payload = _read_cached_signal_snapshot(
-            ctx,
-            namespace=SIGNAL_SNAPSHOT_NAMESPACE_ALPHA,
-            cache_key=build_alpha_signal_cache_key(limit=DEFAULT_ALPHA_SIGNAL_LIMIT),
-            ttl_seconds=ctx["SIGNAL_RUNTIME_TTL_SECONDS"],
-        )
-        if default_payload is not None:
-            return _limit_signal_payload(ctx, default_payload, limit=limit)
-    return _get_stale_first_runtime_snapshot(
-        ctx,
-        namespace=SIGNAL_SNAPSHOT_NAMESPACE_ALPHA,
-        cache_key=cache_key,
-        ttl_seconds=ctx["SIGNAL_RUNTIME_TTL_SECONDS"],
-        builder=lambda: fetch_live_alpha_signal_payload(ctx, limit=limit),
-        refresh_state_key=f"alpha:{cache_key}",
-        label="alpha-snapshot",
+    return get_signal_snapshot(
+        ctx, namespace=SIGNAL_SNAPSHOT_NAMESPACE_ALPHA,
+        cache_key=build_alpha_signal_cache_key(), limit=limit,
     )
