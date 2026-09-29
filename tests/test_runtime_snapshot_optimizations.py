@@ -505,3 +505,21 @@ def test_snapshot_read_does_not_extend_expiry_or_hide_refresh_failure(tmp_path):
         builder.assert_called_once()
         assert store.get("test", "key") is None
         assert store.get_stale("test", "key") == {"items": ["old"]}
+
+
+def test_expired_list_snapshot_never_returns_unmarked_old_rows(tmp_path):
+    from api.cache import CacheState, get_snapshot_payload
+    from runtime.snapshot_store import SnapshotStore
+    import pytest
+
+    store = SnapshotStore(str(tmp_path / "snapshots.sqlite3"))
+    resources = RuntimeResources()
+    ctx = CacheState(resources, FakeApp(), store)
+    with patch("runtime.snapshot_store.time.time", return_value=100):
+        store.set("trades", "key", [{"timestamp": "old"}], 10)
+    with patch("runtime.snapshot_store.time.time", return_value=111):
+        with pytest.raises(TimeoutError):
+            get_snapshot_payload(ctx, "trades", "key", Mock(side_effect=TimeoutError), ttl_seconds=10)
+        assert get_snapshot_payload(ctx, "trades", "key", lambda: [], ttl_seconds=10) == []
+        assert store.get("trades", "key") == []
+    resources.close()

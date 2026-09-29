@@ -165,17 +165,14 @@ def get_snapshot_payload(ctx: CacheState, namespace: str, cache_key: str, builde
         return sqlite_payload
 
     stale_payload = ctx.snapshot_store.get_stale(namespace, cache_key)
-    if stale_payload is not None:
+    if isinstance(stale_payload, dict):
         ctx.application.logger.info(
             "snapshot-cache stale-hit namespace=%s key=%s scheduling_refresh=true", namespace, cache_key
         )
         _refresh_snapshot_payload_async(ctx, namespace, cache_key, builder, ttl_seconds)
-        return (
-            {**stale_payload, "stale": True, "cacheStatus": "stale"}
-            if isinstance(stale_payload, dict)
-            else stale_payload
-        )
+        return {**stale_payload, "stale": True, "cacheStatus": "stale"}
 
+    # Bare lists cannot carry a stale marker; refresh before returning them.
     try:
         payload = builder()
     except Exception:
