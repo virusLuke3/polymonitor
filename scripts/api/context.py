@@ -49,10 +49,9 @@ class RuntimeResources:
     agent_refreshing: set[str] = field(default_factory=set)
     agent_rate_lock: Any = field(default_factory=threading.Lock)
     agent_rate_buckets: dict[str, list[float]] = field(default_factory=dict)
-    workspace_executor: ThreadPoolExecutor = field(
-        default_factory=lambda: ThreadPoolExecutor(
-            max_workers=max(1, min(int(os.environ.get("POLYDATA_MARKET_FOCUS_REFRESH_WORKERS", "2")), 12)),
-            thread_name_prefix="market-focus-refresh",
+    workspace_slots: Any = field(
+        default_factory=lambda: threading.BoundedSemaphore(
+            max(1, min(int(os.environ.get("POLYDATA_MARKET_FOCUS_REFRESH_WORKERS", "2")), 12)),
         )
     )
     hazard_locks: dict[str, Any] = field(default_factory=dict)
@@ -101,7 +100,7 @@ class RuntimeResources:
         for thread in threads:
             if thread is not threading.current_thread():
                 thread.join()
-        for executor in (self.workspace_executor, self.hazard_executor, self.zone_executor):
+        for executor in (self.hazard_executor, self.zone_executor):
             executor.shutdown(wait=True, cancel_futures=True)
         with self.http_lock:
             for session in self.http_sessions:

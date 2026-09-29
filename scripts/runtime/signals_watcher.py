@@ -25,7 +25,7 @@ try:
 except ImportError:
     redis = None
 
-from api.config import load_api_settings
+from api.config import ApiSettings, load_api_settings
 from api.services import polybeats_service, signal_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
 from runtime.snapshot_store import SnapshotStore
@@ -167,6 +167,7 @@ class SignalsWatcher:
         component: str,
         limit: int,
         interval_seconds: int,
+        settings: Optional[ApiSettings] = None,
     ) -> None:
         if redis is None:
             raise RuntimeError("redis package is required. Install scripts/requirements.txt")
@@ -175,6 +176,7 @@ class SignalsWatcher:
         if not str(redis_url or "").strip():
             raise RuntimeError("POLYDATA_REDIS_URL is required for signals watcher")
         self.component = component
+        self.settings = settings or load_api_settings()
         self.spec = COMPONENTS[component]
         self.limit = max(1, int(limit or self.spec["default_limit"]))
         self.interval_seconds = max(15, int(interval_seconds or DEFAULT_INTERVAL_SECONDS))
@@ -279,9 +281,11 @@ class SignalsWatcher:
         previous = self.load_previous_payload()
         try:
             payload = self.fetch_payload()
+            if payload.get("status") in {"error", "unavailable", "degraded"}:
+                raise RuntimeError("Signal sources unavailable")
         except Exception as exc:
             if previous:
-                preserved = {**previous, "cacheMode": "seeded", "status": previous.get("status") or "stale"}
+                preserved = {**previous, "cacheMode": "seeded", "status": "stale"}
                 self.store_payload(preserved)
                 stats = _payload_timestamp_stats(previous, stale_after_seconds=self.stale_after_seconds())
                 self.store_seed_meta(
@@ -303,20 +307,6 @@ class SignalsWatcher:
             return {"status": "error", "recordCount": 0, "error": str(exc)}
 
         record_count = _record_count(payload)
-        if previous and record_count <= 0:
-            preserved = {**previous, "cacheMode": "seeded", "status": previous.get("status") or "stale"}
-            self.store_payload(preserved)
-            stats = _payload_timestamp_stats(previous, stale_after_seconds=self.stale_after_seconds())
-            self.store_seed_meta(
-                status="preserved",
-                record_count=_record_count(previous),
-                error_summary=f"{self.component} returned empty payload",
-                preserve_last_success=True,
-                metadata={"result": "preserved-empty", "component": self.component, **stats},
-                payload_status=preserved.get("status") or "preserved",
-            )
-            return {"status": "preserved", "recordCount": _record_count(previous), "error": "empty payload"}
-
         stats = _payload_timestamp_stats(payload, stale_after_seconds=self.stale_after_seconds())
         payload_status = str(payload.get("status") or "").strip().lower()
         status = "ok" if record_count > 0 else "empty"
@@ -366,6 +356,7 @@ def main() -> int:
         component=args.component,
         limit=limit,
         interval_seconds=args.interval,
+        settings=settings,
     )
     try:
         watcher.redis_client.ping()

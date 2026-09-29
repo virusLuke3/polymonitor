@@ -17,10 +17,15 @@ def test_custom_table_does_not_assume_canonical_partition_scheme():
         assert service._latest_fact_block_sql() == "SELECT ifNull(max(block_number), 0) FROM custom_facts"
 
 
-def test_recent_trades_limits_rows_before_timestamp_join():
-    with patch.object(service, "_query_json_rows", return_value=[]) as query:
-        assert service.get_recent_trades({"normalize_trade": lambda row: row}, limit=3) == []
-    sql = query.call_args.args[1]
-    assert "FROM selected f" in sql
-    assert "block_number IN (SELECT block_number FROM selected)" in sql
-    assert "argMax(block_time, ingested_at)" in sql
+def test_recent_trades_limits_rows_before_timestamp_lookup():
+    with patch.object(service, "_query_json_rows", side_effect=[
+        [{"first_block": 100, "last_block": 200}],
+        [{"market_id": 1, "block_number": 180, "log_index": 1, "token_id": "1" * 64, "tx_hash": "a" * 64}],
+        [{"block_number": 180, "log_index": 1, "token_id": "0x" + "1" * 64, "tx_hash": "0x" + "a" * 64}],
+        [{"block_number": 180, "timestamp": "2026-09-29T01:00:00Z"}],
+    ]) as query:
+        rows = service.get_recent_trades({"normalize_trade": lambda row: row}, limit=3)
+    assert rows[0]["timestamp"] == "2026-09-29T01:00:00Z"
+    assert "LIMIT 3" in query.call_args_list[1].args[1]
+    assert "block_number IN (180)" in query.call_args.args[1]
+    assert "SELECT block_number FROM selected" not in query.call_args.args[1]

@@ -81,10 +81,6 @@ def test_application_factory_owns_configuration_caches_and_connections(tmp_path)
     assert a.api_db_context["get_connection"] is no_database
     assert first.test_client().get("/health").status_code == 200
     assert second.test_client().get("/health").status_code == 200
-    from api.services import clickhouse_orderfilled_service
-    with patch.object(clickhouse_orderfilled_service, "get_price_series", return_value=[{"timestamp": "t"}]) as read_prices:
-        assert a.get_trade_derived_market_price_series(9) == [{"timestamp": "t"}]
-        assert callable(read_prices.call_args.args[0]["query_all"])
     assert not list(tmp_path.iterdir())
     a.close()
     b.close()
@@ -266,3 +262,34 @@ def test_connection_pool_shutdown_during_connect_closes_new_connection():
     with pytest.raises(RuntimeError, match="closed"):
         pool.acquire()
     connection.close.assert_called_once()
+
+
+def test_db_helpers_release_lease_when_cursor_creation_fails():
+    import pytest
+    from unittest.mock import Mock
+    from api import db
+    connection = Mock()
+    connection.cursor.side_effect = RuntimeError("cursor unavailable")
+    ctx = {"get_connection": lambda _: connection, "DB_PATH": "test", "app": Mock()}
+    for query in (db.query_one, db.query_all, db.table_exists):
+        with pytest.raises(RuntimeError, match="cursor unavailable"):
+            query(ctx, "example")
+    assert connection.close.call_count == 3
+
+
+def test_pool_wait_timeout_identifies_connection_owner_and_recovery():
+    import pytest
+    from unittest.mock import Mock
+    from api.db_pool import ApiPostgresConnectionPool
+    pool = ApiPostgresConnectionPool(Mock(return_value=Mock()), max_size=1,
+        acquire_timeout_seconds=0.01, connect_attempts=1, connect_retry_delay_seconds=0)
+    lease = pool.acquire()
+    try:
+        with pytest.raises(TimeoutError, match="held_seconds_and_threads=.*MainThread"):
+            pool.acquire()
+        lease.close()
+        assert not pool._leases
+        pool.acquire().close()
+    finally:
+        lease.close()
+        pool.close()

@@ -21,3 +21,9 @@ building on the server.
 
 The private step-by-step setup for the current machine lives in
 `document/deploy.md`.
+
+### Recent trade panels
+
+Whale Tracker and Flow Watch read current ClickHouse facts over a wall-clock window; they do not require the wallet-history address index. Signal workers must receive the same `ApiSettings` used by their entrypoint. Successful empty results replace previous signals; failed refreshes preserve the original data timestamp and return `stale`. Market workspace flow freshness is reported separately from the response assembly time.
+
+When releasing these readers, restart `polydata-api.service`, `polydata-whale-trades-seed.service`, and `polydata-suspicious-trades-seed.service`. Verify both runtime signal endpoints and an active market workspace against canonical trade identities and timestamps, not HTTP status alone. Wallet-history migration is released separately after its index readiness check.

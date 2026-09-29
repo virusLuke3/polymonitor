@@ -4,7 +4,7 @@ from api.context import runtime_resources
 
 import json
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
@@ -19,11 +19,10 @@ SIGNAL_SNAPSHOT_NAMESPACE_SUSPICIOUS = "snapshot:signals:suspicious"
 DEFAULT_ALPHA_SIGNAL_LIMIT = 8
 DEFAULT_WHALE_TRADES_LIMIT = 14
 DEFAULT_SUSPICIOUS_TRADES_LIMIT = 12
-DEFAULT_WHALE_TRADES_LOOKBACK_DAYS = 7
 
 
-def build_whale_trades_cache_key(limit: int = 14, lookback_days: int = 7) -> str:
-    return json.dumps({"limit": limit, "lookbackDays": lookback_days}, sort_keys=True, ensure_ascii=True)
+def build_whale_trades_cache_key(limit: int = 14) -> str:
+    return json.dumps({"limit": limit, "v": 2}, sort_keys=True, ensure_ascii=True)
 
 
 def build_suspicious_trades_cache_key(limit: int = 12) -> str:
@@ -126,6 +125,7 @@ def _format_trade_item(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
         "marketTitle": row.get("market_title"),
         "timestamp": row.get("timestamp"),
         "txHash": row.get("tx_hash"),
+        "tokenId": row.get("token_id"),
         "outcome": row.get("outcome"),
         "logicalOutcome": row.get("logicalOutcome") or row.get("logical_outcome"),
         "sourceOutcomeLabel": row.get("sourceOutcomeLabel") or row.get("source_outcome_label"),
@@ -255,184 +255,11 @@ def _format_alpha_volume_signal(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any
     }
 
 
-def _query_whale_rows(ctx: dict, *, limit: int, lookback_days: int) -> List[Dict[str, Any]]:
-    if _clickhouse_signal_queries_available(ctx):
-        volume_rows = clickhouse_orderfilled_service.get_volume_whale_rows(ctx, limit=max(limit * 2, limit))
-        if volume_rows is not None:
-            return volume_rows
-
-    iso_days_before = ctx.get("iso_days_before")
-    if callable(iso_days_before):
-        threshold = iso_days_before(ctx["utc_now_iso"](), lookback_days) or ctx["utc_date_days_ago"](lookback_days)
-    else:
-        utc_date_days_ago = ctx.get("utc_date_days_ago")
-        if not callable(utc_date_days_ago):
-            return []
-        threshold = utc_date_days_ago(lookback_days)
-    threshold_dt = ctx["parse_iso_datetime"](threshold)
-    try:
-        recent_trades = ctx["get_recent_trades"](limit=max(160, limit * 24))
-    except Exception:
-        logger = getattr(ctx.get("app"), "logger", None)
-        if logger is not None:
-            logger.exception("whale rows trade source failed")
-        return _query_market_activity_rows(ctx, limit=limit, threshold_dt=threshold_dt)
-    rows: List[Dict[str, Any]] = []
-    for trade in recent_trades:
-        market_id = trade.get("marketId") or trade.get("market_id")
-        if market_id is None:
-            continue
-        timestamp = trade.get("timestamp")
-        timestamp_dt = ctx["parse_iso_datetime"](timestamp)
-        if threshold_dt is not None and timestamp_dt is not None and timestamp_dt < threshold_dt:
-            continue
-        price = ctx["_safe_decimal"](trade.get("price"))
-        size = ctx["_safe_decimal"](trade.get("size"))
-        notional = ctx["_safe_decimal"](trade.get("notional"))
-        if notional is None and price is not None and size is not None:
-            notional = price * size
-        rows.append(
-            {
-                "market_id": market_id,
-                "market_title": trade.get("marketTitle") or trade.get("market_title"),
-                "timestamp": timestamp,
-                "tx_hash": trade.get("txHash") or trade.get("tx_hash"),
-                "outcome": trade.get("outcome"),
-                "logical_outcome": trade.get("logicalOutcome") or trade.get("logical_outcome"),
-                "token_id": trade.get("tokenId") or trade.get("token_id"),
-                "side": trade.get("side"),
-                "price": price,
-                "size": size,
-                "notional": notional,
-                "maker": trade.get("maker"),
-                "taker": trade.get("taker"),
-                "source_mode": "live-trades",
-            }
-        )
-    rows.sort(key=lambda row: ctx["_safe_decimal"](row.get("notional")) or Decimal("0"), reverse=True)
-    if not rows:
-        rows = _query_market_activity_rows(ctx, limit=limit, threshold_dt=threshold_dt)
-    return outcome_semantics_service.annotate_raw_trade_rows(ctx, rows[: max(limit * 2, limit)])
-
-
-def _query_market_activity_rows(ctx: dict, *, limit: int, threshold_dt: Any = None) -> List[Dict[str, Any]]:
-    """Fallback when raw recent trades are unavailable over the remote DB tunnel."""
-    payload = _read_bootstrap_activity_payload(ctx)
-    if payload is None:
-        try:
-            payload = ctx["get_active_markets_snapshot"](page_size=max(12, limit * 2))
-        except Exception:
-            logger = getattr(ctx.get("app"), "logger", None)
-            if logger is not None:
-                logger.exception("whale rows active market fallback failed")
-            return []
-
-    rows: List[Dict[str, Any]] = []
-    for market in (payload or {}).get("items") or []:
-        if not isinstance(market, dict) or market.get("id") is None:
-            continue
-        notional = ctx["_safe_decimal"](market.get("volume24h")) or Decimal("0")
-        trade_count = int(market.get("tradeCount24h") or 0)
-        if notional <= 0 and trade_count <= 0:
-            continue
-        timestamp = market.get("lastTradeAt")
-        timestamp_dt = ctx["parse_iso_datetime"](timestamp)
-        if threshold_dt is not None and (timestamp_dt is None or timestamp_dt < threshold_dt):
-            continue
-        rows.append(
-            {
-                "market_id": market.get("id"),
-                "market_title": market.get("title"),
-                "timestamp": timestamp,
-                "tx_hash": None,
-                "outcome": None,
-                "side": "activity",
-                "price": ctx["_safe_decimal"](market.get("latestPrice")),
-                "size": None,
-                "notional": notional,
-                "maker": None,
-                "taker": None,
-                "source_mode": "market-activity-fallback",
-            }
-        )
-    if not rows:
-        rows.extend(_query_bootstrap_trade_rows(ctx, limit=limit, threshold_dt=threshold_dt))
-    rows.sort(key=lambda row: ctx["_safe_decimal"](row.get("notional")) or Decimal("0"), reverse=True)
-    return rows[: max(limit * 2, limit)]
-
-
-def _read_bootstrap_activity_payload(ctx: dict) -> Optional[Dict[str, Any]]:
-    payload: Optional[Dict[str, Any]] = None
-    reader = ctx.get("get_cached_json")
-    if callable(reader):
-        cached = reader("bootstrap", "workspace-default-v9")
-        if isinstance(cached, dict):
-            payload = cached
-    if payload is None:
-        snapshot_store = ctx.get("SNAPSHOT_STORE")
-        if snapshot_store is not None:
-            cached = snapshot_store.get_stale("snapshot:bootstrap", "workspace-default-v9")
-            if isinstance(cached, dict):
-                payload = cached
-    items = (payload or {}).get("activeMarketsPreview")
-    if isinstance(items, list):
-        return {"items": items}
-    return None
-
-
-def _query_bootstrap_trade_rows(ctx: dict, *, limit: int, threshold_dt: Any = None) -> List[Dict[str, Any]]:
-    payload = _read_bootstrap_payload(ctx)
-    trades = (payload or {}).get("globalTradesPreview")
-    if not isinstance(trades, list):
-        return []
-    rows: List[Dict[str, Any]] = []
-    for trade in trades:
-        if not isinstance(trade, dict):
-            continue
-        market_id = trade.get("marketId") or trade.get("market_id")
-        if market_id is None:
-            continue
-        timestamp = trade.get("timestamp")
-        timestamp_dt = ctx["parse_iso_datetime"](timestamp)
-        if threshold_dt is not None and (timestamp_dt is None or timestamp_dt < threshold_dt):
-            continue
-        price = ctx["_safe_decimal"](trade.get("price"))
-        size = ctx["_safe_decimal"](trade.get("size"))
-        notional = ctx["_safe_decimal"](trade.get("notional"))
-        if notional is None and price is not None and size is not None:
-            notional = price * size
-        rows.append(
-            {
-                "market_id": market_id,
-                "market_title": trade.get("marketTitle") or trade.get("market_title"),
-                "timestamp": timestamp,
-                "tx_hash": trade.get("txHash") or trade.get("tx_hash"),
-                "outcome": trade.get("outcome"),
-                "side": trade.get("side"),
-                "price": price,
-                "size": size,
-                "notional": notional,
-                "maker": trade.get("maker"),
-                "taker": trade.get("taker"),
-                "source_mode": "bootstrap-trades-fallback",
-            }
-        )
-    rows.sort(key=lambda row: ctx["_safe_decimal"](row.get("notional")) or Decimal("0"), reverse=True)
-    return rows[: max(limit * 2, limit)]
-
-
-def _read_bootstrap_payload(ctx: dict) -> Optional[Dict[str, Any]]:
-    reader = ctx.get("get_cached_json")
-    if callable(reader):
-        cached = reader("bootstrap", "workspace-default-v9")
-        if isinstance(cached, dict):
-            return cached
-    snapshot_store = ctx.get("SNAPSHOT_STORE")
-    if snapshot_store is not None:
-        cached = snapshot_store.get_stale("snapshot:bootstrap", "workspace-default-v9")
-        if isinstance(cached, dict):
-            return cached
-    return None
+def _query_whale_rows(ctx: dict, *, limit: int) -> List[Dict[str, Any]]:
+    rows = clickhouse_orderfilled_service.get_volume_whale_rows(ctx, limit=max(limit * 2, limit))
+    if rows is None:
+        raise TimeoutError("Recent whale trade source unavailable")
+    return rows
 
 
 def _store_runtime_snapshot(
@@ -514,66 +341,18 @@ def _get_stale_first_runtime_snapshot(
     builder: Callable[[], Dict[str, Any]],
     refresh_state_key: str,
     label: str,
-    cold_fallback: Optional[Callable[[], Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     resources = runtime_resources(ctx)
-    cached = ctx["get_cached_runtime_payload"](namespace, cache_key)
+    cached = _read_cached_signal_snapshot(
+        ctx, namespace=namespace, cache_key=cache_key, ttl_seconds=ttl_seconds,
+    )
     if cached is not None:
-        return _sanitize_signal_payload(ctx, namespace, cached)
-
-    redis_reader = ctx.get("get_cached_json")
-    if callable(redis_reader):
-        redis_payload = redis_reader(namespace, cache_key)
-        if isinstance(redis_payload, dict):
-            ctx["SNAPSHOT_STORE"].set(namespace, cache_key, redis_payload, ttl_seconds)
-            return _sanitize_signal_payload(
-                ctx,
-                namespace,
-                ctx["set_cached_runtime_payload"](namespace, cache_key, redis_payload, ttl_seconds),
+        if cached.get("status") == "stale":
+            _schedule_runtime_snapshot_refresh(
+                ctx, namespace=namespace, cache_key=cache_key, ttl_seconds=ttl_seconds,
+                builder=builder, refresh_state_key=refresh_state_key, label=label, reason="stale-hit",
             )
-
-    fresh_payload = ctx["SNAPSHOT_STORE"].get(namespace, cache_key)
-    if fresh_payload is not None:
-        return _sanitize_signal_payload(
-            ctx,
-            namespace,
-            ctx["set_cached_runtime_payload"](namespace, cache_key, fresh_payload, ttl_seconds),
-        )
-
-    stale_payload = ctx["SNAPSHOT_STORE"].get_stale(namespace, cache_key)
-    if stale_payload is not None:
-        ctx["app"].logger.info("%s stale-hit scheduling_refresh=true", label)
-        ctx["set_cached_runtime_payload"](namespace, cache_key, stale_payload, ttl_seconds)
-        _schedule_runtime_snapshot_refresh(
-            ctx,
-            namespace=namespace,
-            cache_key=cache_key,
-            ttl_seconds=ttl_seconds,
-            builder=builder,
-            refresh_state_key=refresh_state_key,
-            label=label,
-            reason="stale-hit",
-        )
-        return _sanitize_signal_payload(ctx, namespace, stale_payload)
-
-    if cold_fallback is not None:
-        ctx["app"].logger.info("%s cold-miss returning_fallback=true scheduling_refresh=true", label)
-        _schedule_runtime_snapshot_refresh(
-            ctx,
-            namespace=namespace,
-            cache_key=cache_key,
-            ttl_seconds=ttl_seconds,
-            builder=builder,
-            refresh_state_key=refresh_state_key,
-            label=label,
-            reason="cold-miss",
-        )
-        fallback_payload = cold_fallback()
-        return _sanitize_signal_payload(
-            ctx,
-            namespace,
-            ctx["set_cached_runtime_payload"](namespace, cache_key, fallback_payload, min(15, ttl_seconds)),
-        )
+        return cached
 
     with resources.signal_lock:
         if resources.signal_refreshing.get(refresh_state_key):
@@ -593,15 +372,6 @@ def _get_stale_first_runtime_snapshot(
     if payload is not None:
         return _sanitize_signal_payload(ctx, namespace, payload)
     raise RuntimeError(f"{label} snapshot refresh failed")
-
-
-def _set_runtime_payload_if_possible(
-    ctx: dict, namespace: str, cache_key: str, payload: Dict[str, Any], ttl_seconds: int
-) -> Dict[str, Any]:
-    setter = ctx.get("set_cached_runtime_payload")
-    if callable(setter):
-        return setter(namespace, cache_key, payload, ttl_seconds)
-    return payload
 
 
 def _sanitize_signal_payload(ctx: dict, namespace: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -654,47 +424,32 @@ def _sanitize_signal_payload(ctx: dict, namespace: str, payload: Dict[str, Any])
 def _read_cached_signal_snapshot(
     ctx: dict, *, namespace: str, cache_key: str, ttl_seconds: int
 ) -> Optional[Dict[str, Any]]:
-    runtime_reader = ctx.get("get_cached_runtime_payload")
-    if callable(runtime_reader):
-        cached = runtime_reader(namespace, cache_key)
-        if isinstance(cached, dict):
-            return _sanitize_signal_payload(ctx, namespace, cached)
-
-    redis_reader = ctx.get("get_cached_json")
-    if callable(redis_reader):
-        redis_payload = redis_reader(namespace, cache_key)
-        if isinstance(redis_payload, dict):
-            snapshot_store = ctx.get("SNAPSHOT_STORE")
-            if snapshot_store is not None:
-                snapshot_store.set(namespace, cache_key, redis_payload, ttl_seconds)
-            return _sanitize_signal_payload(
-                ctx,
-                namespace,
-                _set_runtime_payload_if_possible(ctx, namespace, cache_key, redis_payload, ttl_seconds),
-            )
-
-    snapshot_store = ctx.get("SNAPSHOT_STORE")
-    if snapshot_store is None:
+    payload = None
+    for name in ("get_cached_runtime_payload", "get_cached_json"):
+        reader = ctx.get(name)
+        payload = reader(namespace, cache_key) if callable(reader) else None
+        if isinstance(payload, dict):
+            break
+    if not isinstance(payload, dict):
+        store = ctx.get("SNAPSHOT_STORE")
+        payload = store.get_stale(namespace, cache_key) if store is not None else None
+    if not isinstance(payload, dict):
         return None
-    fresh_payload = snapshot_store.get(namespace, cache_key)
-    if isinstance(fresh_payload, dict):
-        return _sanitize_signal_payload(
-            ctx,
-            namespace,
-            _set_runtime_payload_if_possible(ctx, namespace, cache_key, fresh_payload, ttl_seconds),
-        )
-    stale_payload = snapshot_store.get_stale(namespace, cache_key)
-    if isinstance(stale_payload, dict):
-        return _sanitize_signal_payload(
-            ctx,
-            namespace,
-            _set_runtime_payload_if_possible(ctx, namespace, cache_key, stale_payload, min(15, ttl_seconds)),
-        )
-    return None
+    payload = _sanitize_signal_payload(ctx, namespace, payload)
+    try:
+        generated = datetime.fromisoformat(str(payload["generatedAt"]).replace("Z", "+00:00"))
+        now = datetime.fromisoformat(ctx["utc_now_iso"]().replace("Z", "+00:00"))
+        age = (now - generated.astimezone(timezone.utc)).total_seconds()
+        fresh = 0 <= age <= ttl_seconds
+    except (KeyError, TypeError, ValueError):
+        fresh = False
+    if not fresh:
+        payload["status"] = "stale"
+    return payload
 
 
-def _build_whale_trades_payload(ctx: dict, limit: int = 14, lookback_days: int = 7) -> Dict[str, Any]:
-    rows = _query_whale_rows(ctx, limit=max(limit * 2, limit), lookback_days=lookback_days)
+def _build_whale_trades_payload(ctx: dict, limit: int = 14) -> Dict[str, Any]:
+    rows = _query_whale_rows(ctx, limit=max(limit * 2, limit))
     items: List[Dict[str, Any]] = []
     seen_hashes: set[str] = set()
     seen_routes: set[tuple[str, str]] = set()
@@ -740,37 +495,25 @@ def _build_whale_trades_payload(ctx: dict, limit: int = 14, lookback_days: int =
     )
 
 
-def fetch_live_whale_trades_payload(ctx: dict, limit: int = 14, lookback_days: int = 7) -> Dict[str, Any]:
+def fetch_live_whale_trades_payload(ctx: dict, limit: int = 14) -> Dict[str, Any]:
     return normalize_signal_payload(
-        _build_whale_trades_payload(ctx, limit=limit, lookback_days=lookback_days),
+        _build_whale_trades_payload(ctx, limit=limit),
         generated_at=ctx["utc_now_iso"](),
     )
 
 
 def get_whale_trades_snapshot(
-    ctx: dict, limit: int = DEFAULT_WHALE_TRADES_LIMIT, lookback_days: int = DEFAULT_WHALE_TRADES_LOOKBACK_DAYS
+    ctx: dict, limit: int = DEFAULT_WHALE_TRADES_LIMIT
 ) -> Dict[str, Any]:
-    cache_key = build_whale_trades_cache_key(limit=limit, lookback_days=lookback_days)
-    if int(limit or 0) != DEFAULT_WHALE_TRADES_LIMIT and int(lookback_days or 0) == DEFAULT_WHALE_TRADES_LOOKBACK_DAYS:
-        default_payload = _read_cached_signal_snapshot(
-            ctx,
-            namespace=SIGNAL_SNAPSHOT_NAMESPACE_WHALES,
-            cache_key=build_whale_trades_cache_key(
-                limit=DEFAULT_WHALE_TRADES_LIMIT, lookback_days=DEFAULT_WHALE_TRADES_LOOKBACK_DAYS
-            ),
-            ttl_seconds=ctx["SIGNAL_RUNTIME_TTL_SECONDS"],
-        )
-        if default_payload is not None:
-            return _limit_signal_payload(ctx, default_payload, limit=limit)
-    return _get_stale_first_runtime_snapshot(
-        ctx,
-        namespace=SIGNAL_SNAPSHOT_NAMESPACE_WHALES,
-        cache_key=cache_key,
+    fetch_limit = max(DEFAULT_WHALE_TRADES_LIMIT, int(limit))
+    cache_key = build_whale_trades_cache_key(limit=fetch_limit)
+    payload = _get_stale_first_runtime_snapshot(
+        ctx, namespace=SIGNAL_SNAPSHOT_NAMESPACE_WHALES, cache_key=cache_key,
         ttl_seconds=ctx["SIGNAL_RUNTIME_TTL_SECONDS"],
-        builder=lambda: fetch_live_whale_trades_payload(ctx, limit=limit, lookback_days=lookback_days),
-        refresh_state_key=f"whales:{cache_key}",
-        label="whales-snapshot",
+        builder=lambda: fetch_live_whale_trades_payload(ctx, limit=fetch_limit),
+        refresh_state_key=f"whales:{cache_key}", label="whales-snapshot",
     )
+    return _limit_signal_payload(ctx, payload, limit=limit)
 
 
 def _recent_oracle_candidates(ctx: dict, limit: int) -> List[Dict[str, Any]]:
@@ -797,25 +540,15 @@ def _recent_oracle_candidates(ctx: dict, limit: int) -> List[Dict[str, Any]]:
 
 
 def get_suspicious_trades_snapshot(ctx: dict, limit: int = DEFAULT_SUSPICIOUS_TRADES_LIMIT) -> Dict[str, Any]:
-    cache_key = build_suspicious_trades_cache_key(limit=limit)
-    if int(limit or 0) != DEFAULT_SUSPICIOUS_TRADES_LIMIT:
-        default_payload = _read_cached_signal_snapshot(
-            ctx,
-            namespace=SIGNAL_SNAPSHOT_NAMESPACE_SUSPICIOUS,
-            cache_key=build_suspicious_trades_cache_key(limit=DEFAULT_SUSPICIOUS_TRADES_LIMIT),
-            ttl_seconds=ctx["SIGNAL_RUNTIME_TTL_SECONDS"],
-        )
-        if default_payload is not None:
-            return _limit_signal_payload(ctx, default_payload, limit=limit)
-    return _get_stale_first_runtime_snapshot(
-        ctx,
-        namespace=SIGNAL_SNAPSHOT_NAMESPACE_SUSPICIOUS,
-        cache_key=cache_key,
+    fetch_limit = max(DEFAULT_SUSPICIOUS_TRADES_LIMIT, int(limit))
+    cache_key = build_suspicious_trades_cache_key(limit=fetch_limit)
+    payload = _get_stale_first_runtime_snapshot(
+        ctx, namespace=SIGNAL_SNAPSHOT_NAMESPACE_SUSPICIOUS, cache_key=cache_key,
         ttl_seconds=ctx["SIGNAL_RUNTIME_TTL_SECONDS"],
-        builder=lambda: fetch_live_suspicious_trades_payload(ctx, limit=limit),
-        refresh_state_key=f"suspicious:{cache_key}",
-        label="suspicious-snapshot",
+        builder=lambda: fetch_live_suspicious_trades_payload(ctx, limit=fetch_limit),
+        refresh_state_key=f"suspicious:{cache_key}", label="suspicious-snapshot",
     )
+    return _limit_signal_payload(ctx, payload, limit=limit)
 
 
 def fetch_live_suspicious_trades_payload(ctx: dict, limit: int = 12) -> Dict[str, Any]:
@@ -827,23 +560,8 @@ def fetch_live_suspicious_trades_payload(ctx: dict, limit: int = 12) -> Dict[str
 
 def _build_suspicious_trade_items(ctx: dict, limit: int = 12) -> List[Dict[str, Any]]:
     oracle_events = _recent_oracle_candidates(ctx, limit)
-    try:
-        recent_trades = ctx["get_recent_trades"](limit=max(200, limit * 30))
-    except Exception:
-        logger = getattr(ctx.get("app"), "logger", None)
-        if logger is not None:
-            logger.exception("suspicious trade source failed")
-        recent_trades = []
+    recent_trades = ctx["get_recent_trades"](limit=max(200, limit * 30))
     recent_trades = outcome_semantics_service.annotate_raw_trade_rows(ctx, recent_trades)
-    if not oracle_events and not recent_trades:
-        return [
-            {
-                **_format_trade_item(ctx, row),
-                "eventStatus": "activity-fallback",
-                "summary": "Active market volume surfaced while trade/oracle sources are unavailable",
-            }
-            for row in _query_market_activity_rows(ctx, limit=limit)[:limit]
-        ]
     items: List[Dict[str, Any]] = []
     seen_hashes: set[str] = set()
     oracle_by_market: Dict[Any, List[Dict[str, Any]]] = {}
@@ -923,7 +641,7 @@ def _build_suspicious_trade_items(ctx: dict, limit: int = 12) -> List[Dict[str, 
         return items[:limit]
 
     fallback_items = []
-    for row in _query_whale_rows(ctx, limit=limit, lookback_days=1)[:limit]:
+    for row in _query_whale_rows(ctx, limit=limit)[:limit]:
         fallback_items.append(
             {
                 **_format_trade_item(ctx, row),
@@ -977,7 +695,11 @@ def _build_alpha_signal_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
     else:
         trade_source_status = "degraded"
 
-    whale_rows = _query_whale_rows(ctx, limit=6, lookback_days=7)[:6] if len(signals) < limit else []
+    try:
+        whale_rows = _query_whale_rows(ctx, limit=6)[:6] if len(signals) < limit else []
+    except TimeoutError:
+        whale_rows = []
+        trade_source_status = "degraded"
     if any(not _is_live_signal_source(str(row.get("source_mode") or "")) for row in whale_rows):
         trade_source_status = "degraded"
     whales = [
@@ -1023,75 +745,6 @@ def _build_alpha_signal_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
     )
 
 
-def _build_alpha_fallback_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
-    signals: List[Dict[str, Any]] = []
-    for row in _query_whale_rows(ctx, limit=min(6, limit), lookback_days=3):
-        if len(signals) >= limit:
-            break
-        if not outcome_semantics_service.directional_semantics_allowed(row):
-            continue
-        trade = _format_trade_item(ctx, row)
-        _append_signal(
-            signals,
-            kind="whale",
-            severity=trade.get("severity") or "watch",
-            title=trade.get("marketTitle") or "Whale flow",
-            summary=f"{str(trade.get('side') or 'trade').upper()} {trade.get('outcome') or '--'} at {trade.get('price') or '--'}, notional {trade.get('notional') or '--'}",
-            timestamp=trade.get("timestamp"),
-            contributors=["fast-fallback", "whale"],
-        )
-
-    get_active_markets_snapshot = ctx.get("get_active_markets_snapshot")
-    if len(signals) < limit and callable(get_active_markets_snapshot):
-        try:
-            fallback_markets = get_active_markets_snapshot(page_size=8).get("items", [])
-        except Exception:
-            logger = getattr(ctx.get("app"), "logger", None)
-            if logger is not None:
-                logger.exception("alpha fallback active markets source failed")
-            fallback_markets = []
-        fallback_markets = fallback_markets[:4]
-        semantic_probes = outcome_semantics_service.annotate_aggregate_rows(
-            ctx,
-            [{"marketId": market.get("id") or market.get("marketId"), "outcome": "YES"} for market in fallback_markets],
-        )
-        for market, semantic_probe in zip(fallback_markets, semantic_probes):
-            if len(signals) >= limit:
-                break
-            if not outcome_semantics_service.directional_semantics_allowed(semantic_probe):
-                continue
-            price = ctx["_safe_decimal"](market.get("latestPrice"))
-            change_24h = ctx["_safe_decimal"](market.get("change24h"))
-            _append_signal(
-                signals,
-                kind="momentum",
-                severity="elevated" if change_24h is not None and abs(change_24h) >= Decimal("0.08") else "watch",
-                title=market.get("title"),
-                summary=f"Fast fallback: live probability {ctx['format_trade_decimal'](price) or '--'} with 24h change {ctx['format_trade_decimal'](change_24h) or '--'}",
-                timestamp=ctx["utc_now_iso"](),
-                contributors=["fast-fallback", "market"],
-            )
-            signals[-1].update(
-                {
-                    "marketId": market.get("id") or market.get("marketId"),
-                    "outcome": semantic_probe.get("outcome"),
-                    "logicalOutcome": semantic_probe.get("logicalOutcome"),
-                    "sourceOutcomeLabel": semantic_probe.get("sourceOutcomeLabel"),
-                    "semanticMode": semantic_probe.get("semanticMode"),
-                    "outcomeSemanticsStatus": semantic_probe.get("outcomeSemanticsStatus"),
-                    "outcomeSemanticsValid": semantic_probe.get("outcomeSemanticsValid"),
-                    "supports_directional_semantics": True,
-                }
-            )
-    return {
-        **normalize_signal_payload(
-            {"items": signals[:limit], "generatedAt": ctx["utc_now_iso"]()}, generated_at=ctx["utc_now_iso"]()
-        ),
-        "status": "warming",
-        "sourceMode": "fast-fallback",
-    }
-
-
 def fetch_live_alpha_signal_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
     return _sanitize_signal_payload(
         ctx,
@@ -1122,5 +775,4 @@ def get_alpha_signal_snapshot(ctx: dict, limit: int = DEFAULT_ALPHA_SIGNAL_LIMIT
         builder=lambda: fetch_live_alpha_signal_payload(ctx, limit=limit),
         refresh_state_key=f"alpha:{cache_key}",
         label="alpha-snapshot",
-        cold_fallback=lambda: _build_alpha_fallback_payload(ctx, limit=limit),
     )

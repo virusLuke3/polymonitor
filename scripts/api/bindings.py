@@ -18,6 +18,7 @@ from api.services.natural_hazards.service import NaturalHazardDependencies
 from api.services import (
     address_service,
     bootstrap_service,
+    clickhouse_orderfilled_service,
     commodity_equity_transmission_service,
     cpi_release_calendar_service,
     energy_gasoline_shock_service,
@@ -57,7 +58,7 @@ try:
 except ImportError:
     xlrd = None
 from db import dict_from_row
-from db.trade_v2 import LEGACY_TRADES_TABLE, compat_maker_asset_id_sql, compat_taker_asset_id_sql
+from db.trade_v2 import LEGACY_TRADES_TABLE
 
 from api.serialization import (
     COMMODITY_SYMBOLS,
@@ -117,14 +118,12 @@ def bind_services(runtime: ServiceRuntime) -> dict:
     )
     capabilities = {
         "_resources": runtime.resources,
-        "DB_CONNECTION_EXIT_DISABLED": True,
         "get_runtime_lob_by_token_payload": lambda token_id, no_token_id="", market_title="", market_id=None: (
             lob_service.get_runtime_lob_by_token_payload(
                 token_id, no_token_id=no_token_id, market_title=market_title, market_id=market_id
             )
         ),
         "ADDRESS_CACHE_TTL_SECONDS": runtime.SETTINGS.address_cache_ttl_seconds,
-        "ADDRESS_HISTORY_SOURCE": runtime.ADDRESS_HISTORY_SOURCE,
         "BOOTSTRAP_CACHE_TTL_SECONDS": runtime.SETTINGS.bootstrap_cache_ttl_seconds,
         "BOOTSTRAP_COMPONENT_TTL_SECONDS": runtime.SETTINGS.bootstrap_component_ttl_seconds,
         "COMMODITY_SYMBOLS": COMMODITY_SYMBOLS,
@@ -158,8 +157,6 @@ def bind_services(runtime: ServiceRuntime) -> dict:
         "build_system_health_payload": lambda: system_service.build_system_health_payload(runtime.system_health),
         "build_seed_health_payload": lambda: system_service.build_seed_health_payload(runtime.seed_health),
         "build_market_status_case": build_market_status_case,
-        "compat_maker_asset_id_sql": compat_maker_asset_id_sql,
-        "compat_taker_asset_id_sql": compat_taker_asset_id_sql,
         "describe_db_target": runtime.SETTINGS.database.describe,
         "dict_from_row": dict_from_row,
         "enrich_market_rows_with_runtime_prices": lambda rows, max_updates=18, force_refresh=False: (
@@ -372,9 +369,6 @@ def bind_services(runtime: ServiceRuntime) -> dict:
         "get_market_oracle_payload": lambda market_id: market_service.get_market_oracle_payload(
             runtime.market_context, market_id
         ),
-        "get_market_price_summary": lambda market_id: market_service.get_market_price_summary(
-            runtime.market_context, market_id
-        ),
         "get_markets_payload_cached": runtime.get_markets_payload_cached,
         "get_markets_payload": lambda status="active", query="", page=1, page_size=20: (
             market_service.get_markets_payload(
@@ -447,13 +441,12 @@ def bind_services(runtime: ServiceRuntime) -> dict:
                 runtime.macro_cpi_panels_context, limit=limit
             )
         ),
-        "get_trade_derived_market_price_series": runtime.get_trade_derived_market_price_series,
         "get_trade_market_projection_sql": get_trade_market_projection_sql,
-        "get_trades_by_market_id": lambda market_id, limit=100, offset=0: market_service.get_trades_by_market_id(
-            runtime.market_context, market_id, limit=limit, offset=offset
+        "get_trades_by_market_id": lambda market_id, limit=100, offset=0, before=None: market_service.get_trades_by_market_id(
+            runtime.market_context, market_id, limit=limit, offset=offset, before=before
         ),
-        "get_whale_trades_snapshot": lambda limit=14, lookback_days=7: signal_service.get_whale_trades_snapshot(
-            runtime.signal_context, limit=limit, lookback_days=lookback_days
+        "get_whale_trades_snapshot": lambda limit=14: signal_service.get_whale_trades_snapshot(
+            runtime.signal_context, limit=limit
         ),
         "get_weather_news_snapshot": lambda limit=24: weather_news_service.get_weather_news_snapshot(
             runtime.weather_news, limit=limit
@@ -514,11 +507,11 @@ def bind_services(runtime: ServiceRuntime) -> dict:
         name: capabilities[name]
         for name in (
             "_resources",
+            "app",
+            "get_backend",
+            "get_cached_json",
+            "set_cached_json",
             "ADDRESS_CACHE_TTL_SECONDS",
-            "ADDRESS_HISTORY_SOURCE",
-            "TRADE_V2_CORE_TABLE",
-            "compat_maker_asset_id_sql",
-            "compat_taker_asset_id_sql",
             "get_markets_payload_cached",
             "normalize_address",
             "normalize_trade",
@@ -531,7 +524,6 @@ def bind_services(runtime: ServiceRuntime) -> dict:
         name: capabilities[name]
         for name in (
             "_resources",
-            "DB_CONNECTION_EXIT_DISABLED",
             "DB_PATH",
             "LEGACY_TRADES_TABLE",
             "TRADE_READ_SOURCE",
@@ -676,14 +668,12 @@ def bind_services(runtime: ServiceRuntime) -> dict:
             "_resources",
             "SETTINGS",
             "SNAPSHOT_STORE",
-            "TRADE_V2_CORE_TABLE",
-            "_identifier_name",
             "app",
             "build_market_status_case",
             "format_trade_decimal",
             "get_backend",
+            "get_cached_json",
             "get_cached_runtime_payload",
-            "get_existing_trade_read_source",
             "get_gamma_active_market_filter",
             "get_market_clob_price_series",
             "get_market_clob_price_snapshot",
@@ -693,11 +683,8 @@ def bind_services(runtime: ServiceRuntime) -> dict:
             "get_recent_trades",
             "get_runtime_lob_by_token_payload",
             "get_snapshot_payload",
-            "get_trade_derived_market_price_series",
-            "get_trade_market_projection_sql",
             "get_yahoo_market_snapshot",
             "http_json_get",
-            "iso_days_before",
             "normalize_market",
             "normalize_oracle_event",
             "normalize_trade",
@@ -708,7 +695,6 @@ def bind_services(runtime: ServiceRuntime) -> dict:
             "set_cached_json",
             "set_cached_runtime_payload",
             "table_exists",
-            "utc_date_days_ago",
             "utc_now_iso",
         )
     }
@@ -937,7 +923,7 @@ def bind_services(runtime: ServiceRuntime) -> dict:
         application=runtime.app,
         snapshot_store=runtime.SNAPSHOT_STORE,
         utc_now_iso=utc_now_iso,
-        build_detail=lambda market_id: market_service.get_market_workspace_payload(runtime.market_context, market_id),
+        build_detail=lambda market_id: market_service.get_market_detail_payload(runtime.market_context, market_id),
         build_chart=capabilities["get_market_chart_payload"],
         build_flow=capabilities["get_trades_by_market_id"],
         build_lob=capabilities["get_runtime_lob_payload"],
@@ -1171,7 +1157,6 @@ def build_blueprints(runtime: ServiceRuntime):
         "get_polymarket_macro_map_snapshot": runtime._bindings["get_polymarket_macro_map_snapshot"],
         "get_shelter_rent_oer_pressure_snapshot": runtime._bindings["get_shelter_rent_oer_pressure_snapshot"],
         "get_supply_tariff_import_watch_snapshot": runtime._bindings["get_supply_tariff_import_watch_snapshot"],
-        "get_market_price_summary": runtime._bindings["get_market_price_summary"],
         "get_nba_intel_snapshot": runtime._bindings["get_nba_intel_snapshot"],
         "get_nba_matchup_predictor_snapshot": runtime._bindings["get_nba_matchup_predictor_snapshot"],
         "get_nba_scoreboard_snapshot": runtime._bindings["get_nba_scoreboard_snapshot"],
@@ -1201,9 +1186,9 @@ def build_blueprints(runtime: ServiceRuntime):
             runtime.address_context, days, limit
         ),
         "get_weather_news_snapshot": runtime._bindings["get_weather_news_snapshot"],
-        "get_trades_by_market_id": lambda market_id, limit=100, offset=0: (
+        "get_trades_by_market_id": lambda market_id, limit=100, offset=0, before=None: (
             market_workspace_cache_service.get_market_flow_rows(
-                runtime.market_workspace_cache, market_id, limit=limit, offset=offset
+                runtime.market_workspace_cache, market_id, limit=limit, offset=offset, before=before
             )
         ),
     }

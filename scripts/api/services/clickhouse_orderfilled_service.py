@@ -5,7 +5,9 @@ import os
 import shutil
 import subprocess
 import threading
+import time
 import uuid
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -94,6 +96,23 @@ def _clickhouse_cmd(query: str) -> List[str]:
     ]
 
 
+def _parse_json_rows(output: str) -> Optional[List[Dict[str, Any]]]:
+    # A streaming response may contain rows followed by an execution error.
+    # Reject the entire response instead of publishing an incomplete page.
+    rows = []
+    for line in output.splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(row, dict):
+            return None
+        rows.append(row)
+    return rows
+
+
 def _query_json_rows_http(ctx: dict, query: str, *, timeout_seconds: float) -> Optional[List[Dict[str, Any]]]:
     settings = _settings()
     base_url = settings["http_url"]
@@ -105,6 +124,7 @@ def _query_json_rows_http(ctx: dict, query: str, *, timeout_seconds: float) -> O
             "user": settings["user"],
             "password": settings["password"],
             "query_id": f"polydata-api-{uuid.uuid4().hex}",
+            "readonly": "1",
             "max_threads": str(_int_env("POLYDATA_ORDERFILLED_CLICKHOUSE_MAX_THREADS", 2, maximum=8)),
             "max_execution_time": str(
                 min(
@@ -153,18 +173,7 @@ def _query_json_rows_http(ctx: dict, query: str, *, timeout_seconds: float) -> O
         return None
     finally:
         _HTTP_QUERY_SLOTS.release()
-    rows: List[Dict[str, Any]] = []
-    for line in output.splitlines():
-        text = line.strip()
-        if not text:
-            continue
-        try:
-            parsed = json.loads(text)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(parsed, dict):
-            rows.append(parsed)
-    return rows
+    return _parse_json_rows(output)
 
 
 def _query_json_rows(ctx: dict, query: str, *, timeout_seconds: float = 1.8) -> Optional[List[Dict[str, Any]]]:
@@ -172,9 +181,8 @@ def _query_json_rows(ctx: dict, query: str, *, timeout_seconds: float = 1.8) -> 
         return None
     if ctx.get("app") is None:
         return None
-    http_rows = _query_json_rows_http(ctx, query, timeout_seconds=timeout_seconds)
-    if http_rows is not None:
-        return http_rows
+    if _settings()["http_url"]:
+        return _query_json_rows_http(ctx, query, timeout_seconds=timeout_seconds)
     if shutil.which("docker") is None:
         return None
     try:
@@ -190,22 +198,16 @@ def _query_json_rows(ctx: dict, query: str, *, timeout_seconds: float = 1.8) -> 
         if logger is not None:
             logger.warning("ClickHouse OrderFilled read failed: %s", exc)
         return None
-    rows: List[Dict[str, Any]] = []
-    for line in completed.stdout.splitlines():
-        text = line.strip()
-        if not text:
-            continue
-        try:
-            parsed = json.loads(text)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(parsed, dict):
-            rows.append(parsed)
-    return rows
+    return _parse_json_rows(completed.stdout)
 
 
-def _orderfilled_projection_sql() -> str:
-    return """
+def _orderfilled_projection_sql(*, include_time: bool = True) -> str:
+    timestamp = """if(
+        ifNull(bt.block_time <= toDateTime('2000-01-01 00:00:00', 'UTC'), 1),
+        CAST(NULL, 'Nullable(String)'),
+        formatDateTime(bt.block_time, '%Y-%m-%dT%H:%i:%SZ', 'UTC')
+    )""" if include_time else "CAST(NULL, 'Nullable(String)')"
+    return f"""
         lower(f.tx_hash) AS tx_hash,
         f.log_index AS log_index,
         f.market_id AS market_id,
@@ -216,11 +218,7 @@ def _orderfilled_projection_sql() -> str:
         multiIf(f.side_code = 1, 'BUY', f.side_code = 2, 'SELL', 'UNKNOWN') AS side,
         multiIf(f.outcome_code = 1, 'YES', f.outcome_code = 2, 'NO', 'UNKNOWN') AS outcome,
         concat('0x', lower(f.token_id)) AS token_id,
-        if(
-            ifNull(bt.block_time <= toDateTime('2000-01-01 00:00:00', 'UTC'), 1),
-            CAST(NULL, 'Nullable(String)'),
-            formatDateTime(bt.block_time, '%Y-%m-%dT%H:%i:%SZ', 'UTC')
-        ) AS timestamp,
+        {timestamp} AS timestamp,
         f.block_number AS block_number,
         lower(f.order_hash) AS order_hash,
         multiIf(f.side_code = 1, repeat('0', 64), f.side_code = 2, lower(f.token_id), NULL) AS maker_asset_id,
@@ -474,81 +472,170 @@ def _canonical_market_tokens(ctx: dict, market_id: int) -> List[str]:
 
 
 def get_market_trades(
-    ctx: dict, market_id: int, *, limit: int = 100, offset: int = 0
+    ctx: dict, market_id: int, *, limit: int = 100, offset: int = 0,
+    before: Optional[tuple[int, int, str]] = None,
 ) -> Optional[List[Dict[str, Any]]]:
-    limit = min(max(int(limit), 1), 500)
-    offset = max(int(offset), 0)
-    canonical_tokens = _canonical_market_tokens(ctx, market_id)
-    if not canonical_tokens:
-        return []
-    selector = "token_id IN (" + ", ".join(f"'{token}'" for token in canonical_tokens) + ")"
-    rows = _query_json_rows(
-        ctx,
-        f"""
-        WITH
-            selected AS (
-                SELECT *
-                FROM {_table_sql()}
-                PREWHERE {selector}
-                ORDER BY block_number DESC, log_index DESC
-                LIMIT {int(offset)}, {int(limit)}
-            )
-        SELECT {_orderfilled_projection_sql()}
-        FROM selected f
-        LEFT JOIN (
-            SELECT
-                block_number,
-                argMax(block_time, ingested_at) AS block_time
-            FROM block_timestamps
-            WHERE block_number IN (SELECT block_number FROM selected)
-            GROUP BY block_number
-        ) bt ON bt.block_number = f.block_number
-        ORDER BY f.block_number DESC, f.log_index DESC
-        FORMAT JSONEachRow
-        SETTINGS join_use_nulls = 1
-        """,
-        timeout_seconds=5.0,
-    )
-    if rows is None:
+    """Read exact token identities in descending, bounded chain windows.
+
+    No market-id shortcut: historical facts may predate canonical identity repair.
+    An exhausted read budget is unavailable, never evidence of an empty history.
+    """
+    if not clickhouse_orderfilled_enabled():
         return None
-    token_set = set(canonical_tokens)
-    rows = [row for row in rows if _uint256_clickhouse_token(row.get("token_id")) in token_set]
-    for row in rows:
-        row["market_id"] = int(market_id)
-    normalized = [ctx["normalize_trade"](row) for row in rows]
-    return outcome_semantics_service.annotate_raw_trade_rows(ctx, normalized)
+    tokens = _canonical_market_tokens(ctx, market_id)
+    if not tokens:
+        raise TimeoutError("Market token identity is unavailable")
+    selector = "token_id IN (" + ", ".join(f"'{token}'" for token in tokens) + ")"
+    rows = _read_fact_trades(ctx, selector, limit=limit, offset=offset, before=before)
+    result = [ctx['normalize_trade'](dict(row, market_id=int(market_id))) for row in rows
+              if _uint256_clickhouse_token(row.get('token_id')) in tokens]
+    return outcome_semantics_service.annotate_raw_trade_rows(ctx, result)
+
+
+def _fetch_fact_rows(read, table, chosen):
+    if not chosen:
+        return []
+    identities = ', '.join(f"({int(r['market_id'])}, '{r['token_id']}', {int(r['block_number'])}, "
+                           f"{int(r['log_index'])}, '{r['tx_hash']}')" for r in chosen)
+    partitions = ', '.join(str(p) for p in sorted({int(r['block_number'])//1000000 for r in chosen}))
+    rows = read(f"""SELECT {_orderfilled_projection_sql(include_time=False)} FROM (
+        SELECT * FROM {table} PREWHERE intDiv(block_number, 1000000) IN ({partitions})
+        AND (market_id, token_id, block_number, log_index, tx_hash) IN ({identities})
+        ) f ORDER BY f.block_number DESC, f.log_index DESC, f.tx_hash DESC FORMAT JSONEachRow""")
+    if rows is None:
+        raise TimeoutError("Trade facts unavailable")
+    expected = {(int(r['block_number']), int(r['log_index']), r['tx_hash'].removeprefix('0x')) for r in chosen}
+    actual = {(int(r['block_number']), int(r['log_index']), r['tx_hash'].removeprefix('0x')) for r in rows}
+    if actual != expected or len(rows) != len(expected):
+        raise TimeoutError("Trade facts changed during indexed read; retry")
+    return rows
+
+
+def _read_fact_trades(ctx, selector, *, limit, offset=0, before=None):
+    """Bounded canonical reads and a single timestamp lookup for selected events."""
+    limit, offset = min(max(int(limit), 1), 500), max(int(offset), 0)
+    if offset > 5000:
+        raise ValueError("Use a trade cursor instead of an offset above 5000")
+    if before is not None:
+        block, log, tx = before
+        if block < 0 or log < 0 or len(tx) != 64 or any(c not in "0123456789abcdef" for c in tx):
+            raise ValueError("Invalid trade cursor")
+    deadline = time.monotonic() + 12.0
+
+    def read(sql):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("Trade read budget exhausted")
+        rows = _query_json_rows(ctx, sql, timeout_seconds=min(5.0, remaining))
+        if rows is None:
+            raise TimeoutError("Trade source unavailable")
+        return rows
+
+    settings = _settings()
+    cache_key = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{settings['http_url']}/{settings['database']}/{settings['table']}"))
+    cached = ctx.get("get_cached_json")
+    bounds = cached("orderfilled:read-bounds", cache_key) if callable(cached) else None
+    if not bounds:
+        rows = read(f"""
+            SELECT ({_latest_fact_block_sql()}) AS latest_block,
+                (SELECT min(toUInt64(partition)) * 1000000 FROM system.parts
+                 WHERE active AND database = '{settings['database']}' AND table = '{settings['table']}') AS first_block
+            FORMAT JSONEachRow
+        """)
+        if not rows:
+            raise TimeoutError("Market trade range unavailable")
+        bounds = rows[0]
+        cache = ctx.get("set_cached_json")
+        if callable(cache):
+            cache("orderfilled:read-bounds", cache_key, bounds, ttl_seconds=5)
+    upper, first = int(bounds['latest_block']), int(bounds['first_block'])
+    if before is not None:
+        upper = min(upper, before[0])
+    cursor = f"AND (block_number, log_index, tx_hash) < ({before[0]}, {before[1]}, '{before[2]}')" if before else ""
+    rows = []
+    # Limit both each scan and total request work; callers can page with the last
+    # returned event's block/log/hash. Never grow a request into a history backfill.
+    for step in range(8):
+        if upper < first or len(rows) >= offset + limit:
+            break
+        lower = max(first, upper - min(20000 * (2 ** step), 200000) + 1)
+        rows.extend(read(f"""
+            SELECT {_orderfilled_projection_sql(include_time=False)}
+            FROM (
+                SELECT tx_hash, log_index, market_id, maker, taker, price, size,
+                       side_code, outcome_code, token_id, block_number, order_hash,
+                       maker_amount, taker_amount, fee, contract
+                FROM {settings['table']}
+                PREWHERE intDiv(block_number, 1000000) BETWEEN {lower // 1000000} AND {upper // 1000000}
+                  AND block_number BETWEEN {lower} AND {upper}
+                  AND {selector}
+                WHERE 1 {cursor}
+                ORDER BY block_number DESC, log_index DESC, tx_hash DESC
+                LIMIT {offset + limit - len(rows)}
+            ) f
+            ORDER BY f.block_number DESC, f.log_index DESC, f.tx_hash DESC
+            FORMAT JSONEachRow
+        """))
+        upper = lower - 1
+    if upper >= first and len(rows) < offset + limit:
+        raise TimeoutError("Market trade history exceeds the bounded read window")
+    return _attach_trade_times(read, rows[offset:offset + limit])
+
+
+def _attach_trade_times(read, selected):
+    if not selected:
+        return []
+    # Read block time only for the chosen events. A CTE reused in the old join
+    # caused ClickHouse to repeat the expensive fact selection.
+    blocks = ", ".join(str(int(row['block_number'])) for row in selected)
+    times = read(f"""
+        SELECT block_number,
+            if(argMax(block_time, ingested_at) > toDateTime('2000-01-01 00:00:00', 'UTC'),
+               formatDateTime(argMax(block_time, ingested_at), '%Y-%m-%dT%H:%i:%SZ', 'UTC'), NULL) AS timestamp
+        FROM block_timestamps WHERE block_number IN ({blocks})
+        GROUP BY block_number FORMAT JSONEachRow
+    """)
+    if times is None:
+        raise TimeoutError("Trade timestamps unavailable")
+    by_block = {int(row['block_number']): row.get('timestamp') for row in times}
+    return [dict(row, timestamp=by_block.get(int(row['block_number']))) for row in selected]
+
+
+def _recent_block_range(ctx: dict, minutes: int) -> Optional[tuple[int, int]]:
+    """Resolve a wall-clock window once; do not rescan facts for each watermark."""
+    rows = _query_json_rows(ctx, f"""
+        SELECT min(block_number) AS first_block, max(block_number) AS last_block
+        FROM block_timestamps
+        WHERE block_time BETWEEN now() - INTERVAL {int(minutes)} MINUTE AND now()
+        FORMAT JSONEachRow
+    """, timeout_seconds=5.0)
+    if not rows or not int(rows[0]["last_block"]):
+        return None
+    return int(rows[0]["first_block"]), int(rows[0]["last_block"])
 
 
 def get_recent_trades(ctx: dict, *, limit: int = 24) -> Optional[List[Dict[str, Any]]]:
     limit = min(max(int(limit), 1), 200)
-    rows = _query_json_rows(
-        ctx,
-        f"""
-        WITH
-            ({_latest_fact_block_sql()}) AS max_fact_block,
-            selected AS (
-                SELECT * FROM {_table_sql()}
-                PREWHERE block_number >= max_fact_block - 20000
-                WHERE market_id != 0
-                ORDER BY block_number DESC, log_index DESC
-                LIMIT {int(limit)}
-            )
-        SELECT {_orderfilled_projection_sql()}
-        FROM selected f
-        LEFT JOIN (
-            SELECT block_number, argMax(block_time, ingested_at) AS block_time
-            FROM block_timestamps
-            WHERE block_number IN (SELECT block_number FROM selected)
-            GROUP BY block_number
-        ) bt ON bt.block_number = f.block_number
-        ORDER BY f.block_number DESC, f.log_index DESC
-        LIMIT {int(limit)}
+    bounds = _recent_block_range(ctx, 60)
+    if bounds is None:
+        return None
+    first, last = bounds
+    rows = _query_json_rows(ctx, f"""
+        SELECT market_id, token_id, block_number, log_index, tx_hash FROM (
+            SELECT market_id, token_id, block_number, log_index, tx_hash FROM {_table_sql()}
+            PREWHERE intDiv(block_number, 1000000) BETWEEN {first // 1000000} AND {last // 1000000}
+              AND block_number BETWEEN {first} AND {last}
+            WHERE market_id != 0
+            ORDER BY block_number DESC, log_index DESC, tx_hash DESC LIMIT {limit}
+        ) f ORDER BY f.block_number DESC, f.log_index DESC, f.tx_hash DESC
         FORMAT JSONEachRow
-        """,
-        timeout_seconds=5.0,
-    )
+    """, timeout_seconds=5.0)
     if rows is None:
         return None
+    def read(sql):
+        return _query_json_rows(ctx, sql, timeout_seconds=5.0)
+
+    rows = _attach_trade_times(read, _fetch_fact_rows(read, _table_sql(), rows))
     normalized = outcome_semantics_service.annotate_raw_trade_rows(
         ctx,
         [ctx["normalize_trade"](row) for row in rows],
@@ -579,7 +666,10 @@ def get_volume_whale_rows(
         minimum=5,
         maximum=24 * 60,
     )
-    window_blocks = max(60, int(window_minutes) * 30)
+    bounds = _recent_block_range(ctx, int(window_minutes))
+    if bounds is None:
+        return None
+    first, last = bounds
     min_watch = _float_env("POLYDATA_WHALE_MIN_NOTIONAL", 1000.0)
     min_elevated = _float_env("POLYDATA_WHALE_ELEVATED_NOTIONAL", 2500.0)
     min_critical = _float_env("POLYDATA_WHALE_CRITICAL_NOTIONAL", 10000.0)
@@ -587,74 +677,45 @@ def get_volume_whale_rows(
     relative_min = _float_env("POLYDATA_WHALE_RELATIVE_MIN_NOTIONAL", 500.0)
     min_price = _float_env("POLYDATA_SIGNAL_MIN_PRICE", DEFAULT_SIGNAL_MIN_PRICE, maximum=0.49)
     max_price = _float_env("POLYDATA_SIGNAL_MAX_PRICE", DEFAULT_SIGNAL_MAX_PRICE, minimum=0.51, maximum=1.0)
-    notional_expr = "toFloat64(f.price) * toFloat64(f.size)"
-    rows = _query_json_rows(
-        ctx,
-        f"""
-        WITH
-            ({_latest_fact_block_sql()}) AS max_fact_block,
-            {window_blocks} AS window_blocks,
-            (SELECT quantileTDigest(0.99)(toFloat64(price) * toFloat64(size)) FROM {_table_sql()} WHERE market_id != 0 AND outcome_code IN (1, 2) AND block_number >= max_fact_block - window_blocks) AS p99_notional,
-            (SELECT quantileTDigest(0.995)(toFloat64(price) * toFloat64(size)) FROM {_table_sql()} WHERE market_id != 0 AND outcome_code IN (1, 2) AND block_number >= max_fact_block - window_blocks) AS p995_notional,
-            (SELECT quantileTDigest(0.999)(toFloat64(price) * toFloat64(size)) FROM {_table_sql()} WHERE market_id != 0 AND outcome_code IN (1, 2) AND block_number >= max_fact_block - window_blocks) AS p999_notional
-        SELECT
-            {_orderfilled_projection_sql()},
-            toString({notional_expr}) AS notional,
-            toString(greatest({min_watch:.6f}, p99_notional)) AS threshold_notional,
-            toString(greatest({min_elevated:.6f}, p995_notional)) AS elevated_threshold_notional,
-            toString(greatest({min_critical:.6f}, p999_notional)) AS critical_threshold_notional,
-            toString(mv.market_window_notional) AS market_window_notional,
-            toString(if(mv.market_window_notional > 0, {notional_expr} / mv.market_window_notional, 0)) AS market_share,
-            toString(if(f.outcome_code = 2, 1 - f.price, f.price)) AS entry_yes_price,
-            multiIf(
-                {notional_expr} >= greatest({min_critical:.6f}, p999_notional), 'critical',
-                {notional_expr} >= greatest({min_elevated:.6f}, p995_notional), 'elevated',
-                'watch'
-            ) AS severity,
-            'single-trade' AS signal_type,
-            'clickhouse-volume-whales' AS source_mode
-        FROM {_table_sql()} f
-        LEFT JOIN (
-            SELECT block_number, argMax(block_time, ingested_at) AS block_time
-            FROM block_timestamps
-            WHERE block_number >= max_fact_block - window_blocks
-            GROUP BY block_number
-        ) bt ON bt.block_number = f.block_number
-        LEFT JOIN
-        (
-            SELECT market_id, sum(toFloat64(price) * toFloat64(size)) AS market_window_notional
+    rows = _query_json_rows(ctx, f"""
+        SELECT f.market_id, f.token_id, f.block_number, f.log_index, f.tx_hash,
+            toString(f.notional) AS notional,
+            toString(greatest({min_watch}, thresholds[1])) AS threshold_notional,
+            toString(greatest({min_elevated}, thresholds[2])) AS elevated_threshold_notional,
+            toString(greatest({min_critical}, thresholds[3])) AS critical_threshold_notional,
+            toString(f.market_window_notional) AS market_window_notional,
+            toString(f.notional / nullIf(f.market_window_notional, 0)) AS market_share,
+            multiIf(f.notional >= greatest({min_critical}, thresholds[3]), 'critical',
+                    f.notional >= greatest({min_elevated}, thresholds[2]), 'elevated', 'watch') AS severity,
+            'single-trade' AS signal_type, 'clickhouse-volume-whales' AS source_mode
+        FROM (
+            SELECT market_id, token_id, block_number, log_index, tx_hash, price, toFloat64(price) * toFloat64(size) AS notional,
+                quantilesTDigest(0.99, 0.995, 0.999)(notional) OVER () AS thresholds,
+                sum(notional) OVER (PARTITION BY market_id) AS market_window_notional
             FROM {_table_sql()}
+            PREWHERE intDiv(block_number, 1000000) BETWEEN {first // 1000000} AND {last // 1000000}
+              AND block_number BETWEEN {first} AND {last}
             WHERE market_id != 0
-              AND outcome_code IN (1, 2)
-              AND block_number >= max_fact_block - window_blocks
-            GROUP BY market_id
-        ) mv ON mv.market_id = f.market_id
-        WHERE f.market_id != 0
-          AND f.outcome_code IN (1, 2)
-          AND f.block_number >= max_fact_block - window_blocks
-          AND toFloat64(f.price) >= {min_price:.6f}
-          AND toFloat64(f.price) <= {max_price:.6f}
-          AND (
-              {notional_expr} >= greatest({min_watch:.6f}, p99_notional)
-              OR (
-                  mv.market_window_notional > 0
-                  AND {notional_expr} >= {relative_min:.6f}
-                  AND {notional_expr} / mv.market_window_notional >= {relative_share:.6f}
-              )
-          )
-        ORDER BY
-            multiIf(severity = 'critical', 3, severity = 'elevated', 2, 1) DESC,
-            {notional_expr} DESC,
-            market_share DESC,
-            f.block_number DESC,
-            f.log_index DESC
-        LIMIT {limit * 4}
-        FORMAT JSONEachRow
-        """,
-        timeout_seconds=2.5,
-    )
+        ) f
+        WHERE f.price BETWEEN {min_price} AND {max_price}
+          AND (f.notional >= greatest({min_watch}, thresholds[1])
+               OR (f.notional >= {relative_min} AND f.notional / nullIf(f.market_window_notional, 0) >= {relative_share}))
+        ORDER BY multiIf(severity='critical', 3, severity='elevated', 2, 1) DESC,
+            f.notional DESC, f.block_number DESC, f.log_index DESC
+        LIMIT {limit * 4} FORMAT JSONEachRow
+    """, timeout_seconds=5.0)
     if rows is None:
         return None
+    def read(sql):
+        return _query_json_rows(ctx, sql, timeout_seconds=5.0)
+
+    facts = _fetch_fact_rows(read, _table_sql(), rows)
+    by_key = {(int(r['block_number']), int(r['log_index']), r['tx_hash'].removeprefix('0x')): r for r in facts}
+    metrics = ('notional', 'threshold_notional', 'elevated_threshold_notional', 'critical_threshold_notional',
+               'market_window_notional', 'market_share', 'severity', 'signal_type', 'source_mode')
+    rows = [dict(by_key[(int(r['block_number']), int(r['log_index']), r['tx_hash'])],
+                 **{key: r[key] for key in metrics}) for r in rows]
+    rows = _attach_trade_times(read, rows)
     rows = outcome_semantics_service.annotate_raw_trade_rows(ctx, rows)
     rows = _attach_post_signal_metrics(ctx, rows)
     rows = _attach_market_titles(ctx, rows)

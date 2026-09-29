@@ -52,6 +52,10 @@ class MarketRouteDependencies:
 def create_markets_blueprint(dependencies: MarketRouteDependencies) -> Blueprint:
     bp = Blueprint("market_routes", __name__)
 
+    @bp.errorhandler(TimeoutError)
+    def unavailable(_error):
+        return jsonify({"status": "unavailable", "error": "Market data temporarily unavailable"}), 503
+
     def sanitize(payload: Any, *, market_id: int | None = None) -> Any:
         return dependencies.sanitize_payload(
             payload,
@@ -87,11 +91,25 @@ def create_markets_blueprint(dependencies: MarketRouteDependencies) -> Blueprint
 
     @bp.route("/markets/<int:market_id>/trades", methods=["GET"])
     def api_market_trades_by_id(market_id: int):
-        limit = min(int(request.args.get("limit", 100)), 500)
-        offset = max(0, int(request.args.get("offset", 0)))
+        try:
+            limit = min(max(int(request.args.get("limit", 100)), 1), 500)
+            offset = max(0, int(request.args.get("offset", 0)))
+            if offset > 5000:
+                raise ValueError("Use before=block:log:tx_hash for deeper pagination")
+            cursor = {}
+            if request.args.get("before"):
+                block, log, tx = request.args["before"].split(":")
+                block, log, tx = int(block), int(log), tx.lower().removeprefix("0x")
+                if block < 0 or log < 0 or len(tx) != 64 or any(c not in "0123456789abcdef" for c in tx):
+                    raise ValueError("Invalid trade cursor")
+                if offset:
+                    raise ValueError("Use either before or offset")
+                cursor["before"] = (block, log, tx)
+        except ValueError:
+            return jsonify({"error": "Invalid pagination; before must be block:log:tx_hash, offset at most 5000"}), 400
         return jsonify(
             sanitize(
-                dependencies.get_trades_by_market_id(market_id, limit=limit, offset=offset),
+                dependencies.get_trades_by_market_id(market_id, limit=limit, offset=offset, **cursor),
                 market_id=market_id,
             )
         )
@@ -184,17 +202,6 @@ def create_markets_blueprint(dependencies: MarketRouteDependencies) -> Blueprint
         market = dependencies.get_market_by_slug(slug)
         if not market:
             return jsonify({"error": "Market not found", "slug": slug}), 404
-        limit = min(int(request.args.get("limit", 100)), 500)
-        offset = max(0, int(request.args.get("offset", 0)))
-        return jsonify(
-            sanitize(
-                dependencies.get_trades_by_market_id(
-                    market["id"],
-                    limit=limit,
-                    offset=offset,
-                ),
-                market_id=int(market["id"]),
-            )
-        )
+        return api_market_trades_by_id(int(market["id"]))
 
     return bp

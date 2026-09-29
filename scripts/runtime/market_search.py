@@ -85,7 +85,6 @@ def build_market_search_context(settings: Any) -> Dict[str, Any]:
     return {
         "SETTINGS": settings,
         "DB_PATH": str(getattr(settings, "db_path", "") or ""),
-        "DB_CONNECTION_EXIT_DISABLED": True,
         "app": _AppAdapter(),
         "build_market_status_case": build_market_status_case,
         "dict_from_row": dict_from_row,
