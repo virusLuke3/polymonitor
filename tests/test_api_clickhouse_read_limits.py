@@ -85,6 +85,7 @@ def test_price_series_uses_market_pruned_selection() -> None:
     sql = query.call_args.args[1]
     assert "WHERE market_id = 42" in sql
     assert "FROM selected f" in sql
+    assert "SETTINGS join_use_nulls" not in sql
     assert "max(block_number), 0) FROM orderfilled_fact" not in sql
 
 

@@ -156,4 +156,4 @@ def test_api_server_context_satisfies_bootstrap_prewarm_contract():
     from api.runtime import ServiceRuntime
 
     with ServiceRuntime() as runtime:
-        assert callable(runtime.bootstrap_prewarm.get_market_focus_tile_payload)
+        assert callable(runtime.bootstrap_prewarm.get_active_markets_snapshot)

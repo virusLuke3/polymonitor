@@ -290,7 +290,8 @@ class BootstrapPhase1TestCase(unittest.TestCase):
             "get_market_group_snapshot": lambda symbols, kind="commodities": {"kind": kind, "items": []},
             "get_recent_oracle_snapshot": lambda limit=12: (_ for _ in ()).throw(RuntimeError("boom")) if limit == 12 else counters.__setitem__("oracle16", counters.get("oracle16", 0) + 1),
             "get_recent_trades_snapshot": lambda limit=18: counters.__setitem__(f"trades{limit}", counters.get(f"trades{limit}", 0) + 1),
-            "get_active_markets_snapshot": lambda page_size=40: {"items": []},
+            "get_active_markets_snapshot": lambda page_size=40: {"items": [{"id": 42}]},
+            "get_market_focus_tile_payload": Mock(),
             "get_bootstrap_payload_cached": lambda: counters.__setitem__("bootstrap", counters.get("bootstrap", 0) + 1),
             "get_whale_trades_snapshot": lambda limit=14: {"items": []},
             "get_suspicious_trades_snapshot": lambda limit=12: {"items": []},
@@ -312,6 +313,9 @@ class BootstrapPhase1TestCase(unittest.TestCase):
         self.assertEqual(counters.get("trades18"), 1)
         self.assertEqual(counters.get("trades24"), 1)
         self.assertEqual(counters.get("oracle16"), 1)
+        ctx["get_market_focus_tile_payload"].assert_not_called()
+        bootstrap_service.prewarm_critical_payloads(ctx)
+        ctx["get_market_focus_tile_payload"].assert_not_called()
 
     def test_bootstrap_route_returns_payload_without_lob_runtime(self):
         market = self.make_market_row(88, status="Active", yes_token_id="yes-88", no_token_id="no-88", volume_24h="50")

@@ -973,7 +973,6 @@ def get_price_series(ctx: dict, market_id: int, *, limit: int = 400) -> Optional
         ) bt ON bt.block_number = f.block_number
         ORDER BY f.block_number DESC, f.log_index DESC
         FORMAT JSONEachRow
-        SETTINGS join_use_nulls = 1
         """,
         timeout_seconds=5.0,
     )
