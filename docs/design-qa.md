@@ -46,7 +46,16 @@
 
 最终同镜头、产品视口、DPR 1/1.25/1.5/2、原生浏览器 125% 缩放、符号原生尺寸与 713/5000 成员/性能矩阵：`acceptance-final.log` **14/14 passed**。英文与中文的最终连续 trace 分别约 30.7 / 30.2 秒；密集数据还保留完整拖动、hover 采样、簇列表、详情、缩放和图层开关 trace。`performance-comparison.json` 为最终数值。
 
-发布：主体 `8889d03480c2c29030d8b478a0ab733fd0cac7fa` 已推送到 `codex/map-polish-round2`，从干净 checkout 构建并部署 GCP，保留线上 51 份独立文档/素材的原始哈希。GitHub run `36598045956` 的 frontend-build 与 python-quality 通过。第一轮真实页面检查见 `production-final/receipt.json`：主底图、真实雷达、字体、事件详情和移动端 Service Worker 通过；航班视口两次 HTTP 500，未将本次整体标为通过。GCP 日志定位为 API 线程耗尽（`RuntimeError: can't start new thread`）；16:38 UTC 服务由外部操作重启后，读请求再次返回真实 ADS-B 数据，本任务没有变更后端或执行该重启。线上截图另发现航空卡关闭按钮与展开地图按钮重叠，本轮补修已通过 `aviation-controls.log` 的真实点击/展开/退出及飞机详情测试，待补修版本再次发布后的独立验收。真实 iOS/Safari/Android 设备仍不在本地 Chrome 矩阵内。雷达沿用最新实际帧，没有新增历史雷达播放、假轨迹或推测覆盖范围。
+发布：主体 `8889d03480c2c29030d8b478a0ab733fd0cac7fa` 和控件补修 `980149aeb9edc09dca66ed79fa1c248aa579454d` 已推送到 `codex/map-polish-round2`，从干净 checkout 构建并部署 GCP，保留线上 51 份独立文档/素材的原始哈希。GitHub runs `36598045956`、`36599670162` 的 frontend-build 与 python-quality 通过。
+
+真实页面检查与失败分别保留：
+
+- `production-final/receipt.json`：首轮航班视口两次 HTTP 500；GCP 日志定位 API 线程耗尽（`RuntimeError: can't start new thread`）。16:38 UTC 服务由外部操作重启后恢复返回真实 ADS-B 数据，本任务没有变更后端或执行该重启。
+- `production-patch-final/receipt.json`：补修后 17 项检查中 16 项通过。主底图、雷达、字体、航空控件位置、真实事件/航班详情、主题更换和桌面/移动端 Service Worker 刷新均通过。航班返回 180 条 ADSB.lol 观测，状态 `partial`，不代表完整区域覆盖。唯一失败为来源健康组中的 FIRMS provider deadline，16:50 UTC 后只读探测恢复 `ok`。失败截图和日志保留。
+- `production-recovery-final/receipt.json`：恢复复验遇到桌面 `ERR_NETWORK_CHANGED`；移动端 trace 则发现 SVG 模块下载约 12.5 秒，原 12 秒期限永久作废了迟到模块。后者是明确的前端恢复缺口，已按“下载告警与挂载期限分开”补修：同一次下载完成可恢复，卸载或新渲染器代次仍使旧结果失效，不增加重试循环、不延长挂载期限。`frontend-startup.spec.ts` 补充慢下载恢复与退出后禁止迟到挂载的回归。
+- 发布脚本在替换控制文件前校验入口哈希、SW build ID、当前版本和已上传资产；一次误用 HTML 包含 SHA 的断言提前拦截了发布，未改变控制文件。该次提前运行的版本不匹配检查单列于 `production-patch-before-publish/`，不算页面功能失败或通过。
+
+慢下载与失败恢复专项 `slow-svg-regression.log` **5/5 passed**；待补修版本发布后再次验收。真实 iOS/Safari/Android 设备仍不在本地 Chrome 矩阵内。雷达沿用最新实际帧，没有新增历史雷达播放、假轨迹或推测覆盖范围。
 
 以下首轮记录依据用户提供的 `POLYMONITOR_MAP_ALIGNMENT_CODEX.md` 和两张原始参考图实施，描述当时的本地验证；发布及第二轮状态以本文最前面的更新为准。对照 WorldMonitor 本地 `4691d9213a74c25bc2190146a11ebeba02b8cc85`，并保留 Polymonitor 的数据事实、报告和已有 feature 边界。
 

@@ -129,6 +129,34 @@ test('a successfully replaced basemap remains primary beyond its loading deadlin
   await expect(host).toHaveAttribute('data-map-renderer-ready', 'webgl');
 });
 
+for (const leave of [false, true]) {
+  test(`a late SVG download ${leave ? 'cannot mount after leaving the map' : 'recovers after the download warning'}`, async ({ page }) => {
+    await installDashboard(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    let pending: Route | undefined;
+    await page.route(svgModule, route => { pending = route; });
+    await page.goto(mapURL);
+    await expect(page.locator('.wm-weather-deck-map [role="alert"]')).toContainText('still downloading', { timeout: 20_000 });
+    expect(pending).toBeDefined();
+    if (leave) await page.getByRole('tab', { name: '3D Globe', exact: true }).click();
+    await pending!.fallback();
+    if (leave) {
+      await page.waitForTimeout(800);
+      await expect(page.locator('.wm-world-event-svg-map')).toHaveCount(0);
+      await expect(page.locator('[data-map-renderer-ready]')).toHaveCount(0);
+    } else {
+      await readyFallback(page);
+      await expect(page.locator('.wm-weather-deck-map [role="alert"]')).toHaveCount(0);
+      await page.getByRole('button', { name: /^All events/i }).click();
+      await page.getByRole('button', { name: /M6.4 Test Ridge Earthquake/ }).click();
+      await expect(page.locator('.wm-event-inspector')).toBeVisible();
+    }
+    expect(errors).toEqual([]);
+  });
+}
+
 test('failed SVG download reports failure instead of an endless loading shell', async ({ page }) => {
   await installDashboard(page);
   await page.setViewportSize({ width: 390, height: 844 });

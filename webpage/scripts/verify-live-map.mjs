@@ -17,9 +17,16 @@ const browser = await chromium.launch({
   args: ['--disable-partial-raster', ...(process.env.POLYMONITOR_E2E_HARDWARE_WEBGL === '1'
     ? ['--use-angle=vulkan', '--enable-features=Vulkan'] : [])],
 });
-async function check(name, action) {
+async function check(name, action, { continueOnFailure = false } = {}) {
   try { await action(); receipt.checks.push({ name, status: 'passed' }); }
-  catch (error) { receipt.checks.push({ name, status: 'failed', error: error.message }); throw error; }
+  catch (error) {
+    receipt.checks.push({ name, status: 'failed', error: error.message });
+    if (!continueOnFailure) throw error;
+    // Source availability must fail acceptance without hiding independent UI,
+    // published-asset and service-worker checks later in the same run.
+    receipt.failure ||= error.message;
+    process.exitCode = 1;
+  }
 }
 async function capture(page, name) {
   await page.evaluate(() => document.fonts.ready);
@@ -77,7 +84,7 @@ try {
           await expect(badge).toHaveClass(/is-ok/, { timeout: 120_000 });
         }
         record.sourceHealth = await page.locator('.wm-map-source-statuses').innerText();
-      });
+      }, { continueOnFailure: true });
       await check(`${width}: map typography uses proportional map roles`, async () => {
         const fonts = await page.evaluate(() => {
           const family = selector => getComputedStyle(document.querySelector(selector)).fontFamily;
@@ -154,7 +161,7 @@ try {
           await page.locator('.wm-event-inspector-close').click();
         const closeList = page.locator('.wm-world-event-list-close'); if (await closeList.isVisible()) await closeList.click();
           page.off('response', responseListener);
-        });
+        }, { continueOnFailure: true });
       }
       await check(`${width}: service worker reload uses published assets`, async () => {
         await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller)), { timeout: 30_000 }).toBe(true);

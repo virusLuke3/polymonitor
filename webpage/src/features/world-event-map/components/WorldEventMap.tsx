@@ -254,8 +254,8 @@ export function WorldEventMap({
         if (kind === 'webgl') {
           void installRenderer('svg', failure);
         } else {
-          // Invalidate even a pending import/mount, so a late result cannot
-          // resurrect a renderer after its deadline or overwrite the fallback.
+          // A failed mount must not resurrect after its deadline or overwrite
+          // a newer renderer. Slow module downloads are handled separately.
           ++rendererGeneration;
           rendererRef.current?.destroy();
           rendererRef.current = null;
@@ -282,14 +282,25 @@ export function WorldEventMap({
         },
         onError: (error) => { if (isCurrent()) setRendererError(error.message); },
       };
-      // Bound actual initialization. A slow preferred-module download is
-      // handled separately, without permanently rejecting a capable desktop.
-      rendererDeadline = window.setTimeout(() => fail(new Error(
-        `${kind === 'webgl' ? 'WebGL' : 'SVG'} map renderer loading timed out.`,
-      )), 12_000);
       try {
+        if (!loadedRenderer) {
+          // Report a stalled SVG download, but let the same import recover.
+          // Download latency is not a failed renderer mount. Generation checks
+          // still prevent late installation after unmount or WebGL promotion.
+          rendererDeadline = window.setTimeout(() => {
+            if (!isCurrent()) return;
+            setBasemapState('failed');
+            setRendererError('The lightweight map is still downloading. It will appear when ready.');
+          }, 12_000);
+        }
         const Renderer = loadedRenderer ?? (await import('../renderer/SvgMapRenderer')).SvgMapRenderer;
         if (!isCurrent()) return;
+        clearRendererDeadline();
+        setRendererError(reason?.message ?? null);
+        // Keep the existing deadline for actual initialization.
+        rendererDeadline = window.setTimeout(() => fail(new Error(
+          `${kind === 'webgl' ? 'WebGL' : 'SVG'} map renderer loading timed out.`,
+        )), 12_000);
         const renderer: MapRenderer = new Renderer();
         rendererRef.current = renderer;
         renderer.setLanguage?.(languageRef.current);
