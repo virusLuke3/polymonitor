@@ -214,7 +214,7 @@ export function useWorldEventMapController({ runtimeData, getStatus: getPanelRun
       aviation: {
         ...transportPayload?.aviation,
         generatedAt: aviationViewport.payload?.generatedAt || transportPayload?.aviation?.generatedAt,
-        liveFlights: aviationViewport.payload?.aircraft || [],
+        liveFlights: aviationViewport.payload?.aircraft ?? transportPayload?.aviation?.liveFlights ?? [],
       },
     };
   }, [aviationViewport.payload, showAirRoutes, transportPayload]);

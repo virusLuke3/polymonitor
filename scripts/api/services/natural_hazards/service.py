@@ -187,6 +187,7 @@ def _source_specs(
             lambda: nhc.fetch(
                 dependencies.http_json_get,
                 http_bytes_get=dependencies.http_bytes_get,
+                resources=dependencies.resources,
                 limit=min(40, bounded_limit),
             ),
         ),
@@ -205,7 +206,7 @@ def _source_specs(
             ),
         ),
     }
-    if dependencies.firms_map_key and dependencies.http_text_get is not None:
+    if dependencies.http_text_get is not None:
         specs["firms"] = (
             900,
             lambda: firms.fetch(
@@ -214,6 +215,8 @@ def _source_specs(
                 base_url=dependencies.firms_base_url,
                 source=dependencies.firms_source,
                 limit=min(firms.MAX_AGGREGATES, bounded_limit),
+                snapshot_store=dependencies.snapshot_store,
+                resources=dependencies.resources,
             ),
         )
     return specs
@@ -235,7 +238,7 @@ def get_natural_hazard_source_result(
     bounded_limit = max(1, min(DEFAULT_EVENT_LIMIT, int(limit)))
     spec = _source_specs(dependencies, bounded_limit).get(key)
     if spec is None:
-        error_code = "configuration-required" if key == "firms" else f"{key}-source-unavailable"
+        error_code = "http-text-get-unavailable" if key == "firms" else f"{key}-source-unavailable"
         return {
             **unavailable_source(key, error_code),
             "status": "error",
@@ -293,7 +296,7 @@ def get_natural_hazards_snapshot(
         for result in (results[key] for key in source_specs)
     ]
     if "firms" not in results:
-        error_code = "configuration-required" if not dependencies.firms_map_key else "http-text-get-unavailable"
+        error_code = "http-text-get-unavailable"
         sources.append(unavailable_source("firms", error_code))
     failed_sources = [source for source in sources if source["status"] != "ok"]
     return {

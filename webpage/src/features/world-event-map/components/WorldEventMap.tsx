@@ -494,6 +494,7 @@ export function WorldEventMap({
             onLensChange={onAviationLensChange}
             onRiskSourceChange={onAviationRiskSourceChange}
             onClose={onAviationClose}
+            onZoomToAircraft={() => onCameraChange({ center: state.center, zoom: Math.max(2.5, state.zoom) })}
           />
         ) : null}
       {state.activeLayerIds.includes('weather-radar') ? <div className="wm-map-radar-status" role="status">

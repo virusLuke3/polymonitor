@@ -1,3 +1,4 @@
+import { useAviationViewport } from '../../src/features/world-event-map/data/useAviationViewport';
 import { render } from 'preact';
 import { useState } from 'preact/hooks';
 import { RUNTIME_PANEL_MODULES } from '../../src/panels/registry';
@@ -17,7 +18,7 @@ import { fixtureMarkets } from './dashboard';
 import { GENERATED_AT } from './world-event-map';
 
 const root = document.getElementById('root')!;
-type HarnessKind = 'runtime' | 'observed-runtime' | 'registered-runtime' | 'dashboard' | 'focus' | 'book' | 'workspace' | 'hazards' | 'dossier' | 'geometry';
+type HarnessKind = 'runtime' | 'observed-runtime' | 'registered-runtime' | 'dashboard' | 'focus' | 'book' | 'workspace' | 'hazards' | 'dossier' | 'geometry' | 'aviation';
 type HazardView = { layers: string[]; zoom: number; center: [number, number]; active: boolean };
 const noPanels: PanelModule[] = [];
 const translate = (key: string) => key;
@@ -37,6 +38,8 @@ const api = {
   dashboard: null as ReturnType<typeof useDashboardData> | null,
   focus: null as ReturnType<typeof useMarketFocus> | null,
   dossier: null as ReturnType<typeof useMarketDossier> | null,
+  aviation: null as ReturnType<typeof useAviationViewport> | null,
+  setAviationView: (_patch: Partial<HazardView>) => {},
   hazards: null as ReturnType<typeof useNaturalHazards> | null,
   geometry: null as ReturnType<typeof useCountryGeometry> | null,
   book: null as ReturnType<typeof useFocusedOrderBook> | null,
@@ -50,7 +53,7 @@ const api = {
   setGeometryEnabled: (_enabled: boolean) => {},
   mount: (kind: HarnessKind) => {
     render(kind === 'dashboard' ? <Dashboard /> : kind === 'observed-runtime' ? <Runtime observed /> : kind === 'registered-runtime' ? <Runtime registered /> : kind === 'runtime' ? <Runtime /> : kind === 'focus' ? <Focus /> : kind === 'book' ? <Book />
-      : kind === 'hazards' ? <Hazards /> : kind === 'dossier' ? <Dossier /> : kind === 'geometry' ? <Geometry /> : <Workspace />, root);
+      : kind === 'aviation' ? <Aviation /> : kind === 'hazards' ? <Hazards /> : kind === 'dossier' ? <Dossier /> : kind === 'geometry' ? <Geometry /> : <Workspace />, root);
   },
   unmount: () => render(null, root),
 };
@@ -82,6 +85,12 @@ function Dossier() {
   api.selectDossier = setId;
   api.dossier = useMarketDossier(id, translate);
   return <output>{api.dossier.bundle?.market?.id}</output>;
+}
+function Aviation() {
+  const [view, setView] = useState<HazardView>({ layers: [], zoom: 3, center: [-70, 43], active: true });
+  api.setAviationView = patch => setView(current => ({ ...current, ...patch }));
+  api.aviation = useAviationViewport(view.active, view.center, view.zoom);
+  return <output>{api.aviation.payload?.generatedAt}</output>;
 }
 function Hazards() {
   const [view, setView] = useState<HazardView>({ layers: ['earthquakes-volcanoes', 'wildfires'], zoom: 6, center: [-70, 43], active: true });

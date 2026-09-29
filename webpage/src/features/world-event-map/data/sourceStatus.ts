@@ -71,6 +71,13 @@ const HAZARD_SOURCE_LABELS: Record<string, string> = {
   'climate-anomaly': 'ANOMALY',
 };
 
+const HAZARD_PROVIDERS: Record<string, readonly string[]> = {
+  usgs: ['USGS'], 'usgs-volcano-cap': ['USGS Volcano Hazards Program HANS CAP'],
+  nhc: ['NOAA National Hurricane Center', 'NHC'], eonet: ['NASA EONET'],
+  gdacs: ['GDACS'], nws: ['NWS', 'NOAA National Weather Service'], firms: ['NASA FIRMS'],
+  'climate-anomaly': ['NOAA NCEI Climate at a Glance'],
+};
+
 export function sourceStatusesFromHazardResponse(
   response: HazardMapResponse | null,
   rejectedCount = 0,
@@ -88,9 +95,9 @@ export function sourceStatusesFromHazardResponse(
       : [];
   }
   return response.sources.map((source) => {
-    const providerKey = source.key.toLowerCase();
+    const names = HAZARD_PROVIDERS[source.key] || [source.key];
     const eventCount = response.events.filter((event) => event.sources.some(
-      (item) => item.provider.toLowerCase().includes(providerKey),
+      (item) => names.some(name => name.toLowerCase() === item.provider.toLowerCase()),
     )).length;
     const details = [
       source.coverage.label,

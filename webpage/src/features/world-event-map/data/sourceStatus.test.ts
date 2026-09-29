@@ -95,6 +95,14 @@ describe('map source status', () => {
     expect(retained[0]?.message).toContain('retaining the last successful snapshot');
   });
 
+  it('counts NHC by its official provider name instead of the acronym substring', () => {
+    const response = {
+      events: [{ id: 'tropical-cyclone:nhc:a', sources: [{ provider: 'NOAA National Hurricane Center' }] }],
+      sources: [{ key: 'nhc', status: 'ok', coverage: { label: 'NHC', gaps: [] } }],
+    } as unknown as HazardMapResponse;
+    expect(sourceStatusesFromHazardResponse(response)[0]).toMatchObject({ status: 'ok', eventCount: 1 });
+  });
+
   it('keeps provider identities visible when the initial aggregate request fails', () => {
     const initial = sourceStatusesFromHazardResponse(null, 0, true);
     const failed = sourceStatusesAfterHazardRefreshFailure(initial, 'API timeout', false);

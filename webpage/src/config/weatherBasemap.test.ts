@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   OPENFREEMAP_DARK_STYLE,
+  mapBasemapFonts,
   buildWorldEventPMTilesStyle,
   getWeatherMapFallbackStyle,
   getWeatherMapStyle,
@@ -54,7 +55,7 @@ describe('World Event Map vector basemap', () => {
   it('keeps readable country labels in the local GeoJSON fallback', () => {
     const style = getWeatherMapFallbackStyle('dark');
     const labels = style.layers.find((layer) => layer.id === 'wm-local-country-labels');
-    expect(style.glyphs).toContain('protomaps.github.io');
+    expect(style).not.toHaveProperty('glyphs');
     expect(labels).toMatchObject({
       type: 'symbol',
       source: 'wm-weather-country-boundaries',
@@ -80,7 +81,8 @@ describe('World Event Map vector basemap', () => {
     expect(style.layers.map(layer => layer.id)).toEqual(original.map(layer => layer.id));
     for (const [index, layer] of original.entries()) {
       const actual = style.layers[index] as any;
-      for (const key of ['layout', 'filter', 'minzoom', 'maxzoom']) expect(actual[key]).toEqual((layer as any)[key]);
+      expect(actual.layout).toEqual(layer.type === 'symbol' ? { ...layer.layout, 'text-font': mapBasemapFonts('en') } : (layer as any).layout);
+      for (const key of ['filter', 'minzoom', 'maxzoom']) expect(actual[key]).toEqual((layer as any)[key]);
     }
     expect(style.sources.basemap).toMatchObject({ url: 'pmtiles://https://maps.example.test/planet.pmtiles' });
     expect(style.layers.find(layer => layer.id === 'water')?.paint).toMatchObject({ 'fill-color': '#1b1b1d' });
@@ -101,6 +103,7 @@ describe('World Event Map vector basemap', () => {
     reinforceWorldEventBasemapLabels(map);
     expect(updates).toEqual([
       ['places_country', 'text-field', ['coalesce', ['get', 'name:en'], ['get', 'name']]],
+      ['places_country', 'text-font', mapBasemapFonts('en')],
     ]);
   });
 
@@ -108,6 +111,6 @@ describe('World Event Map vector basemap', () => {
     const { map, updates } = createLabelMap(1.25);
     reinforceWorldEventBasemapLabels(map);
     expect(updates.length).toBeGreaterThan(0);
-    expect(updates.every(([, property]) => property === 'text-field')).toBe(true);
+    expect(updates.every(([, property]) => property === 'text-field' || property === 'text-font')).toBe(true);
   });
 });

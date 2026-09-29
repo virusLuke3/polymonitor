@@ -380,7 +380,7 @@
   "atlas.layer.intelHotspots": "情报热点",
   "atlas.layer.countryRisk": "制裁与国家风险",
   "atlas.layer.ucdp": "冲突与动荡",
-  "atlas.layer.airRoutes": "航空路线",
+  "atlas.layer.airRoutes": "飞机与航空路线",
   "atlas.commandTitle": "市场指挥中心",
   "atlas.commandSearchTitle": "搜索市场",
   "atlas.commandPlaceholder": "搜索市场、代码、类别或面板…",

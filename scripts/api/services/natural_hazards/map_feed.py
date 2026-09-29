@@ -335,8 +335,8 @@ def get_natural_hazard_map_snapshot(
     bounded_limit = max(1, min(1200, int(limit)))
     if key == "firms" and zoom >= 5 and bbox is not None:
         dependencies = NaturalHazardDependencies.from_context(context)
-        if not dependencies.firms_map_key or dependencies.http_text_get is None:
-            result = _empty_source(key, "configuration-required")
+        if dependencies.http_text_get is None:
+            result = _empty_source(key, "http-text-get-unavailable")
         else:
             try:
                 viewport_result = firms.fetch_viewport(
@@ -346,8 +346,10 @@ def get_natural_hazard_map_snapshot(
                     base_url=dependencies.firms_base_url,
                     source=dependencies.firms_source,
                     limit=bounded_limit,
+                    snapshot_store=dependencies.snapshot_store,
+                    resources=dependencies.resources,
                 )
-                updated = viewport_result.get("data_updated_at") or _generated_at()
+                updated = viewport_result.get("data_updated_at")
                 result = {
                     "key": key,
                     "status": "ok",
@@ -356,7 +358,7 @@ def get_natural_hazard_map_snapshot(
                     "fetchedAt": _generated_at(),
                     "dataUpdatedAt": updated,
                     "staleAfter": None,
-                    "lastSuccessAt": updated,
+                    "lastSuccessAt": _generated_at(),
                     "errorCode": None,
                 }
             except Exception as exc:

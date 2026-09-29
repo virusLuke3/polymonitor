@@ -1,6 +1,6 @@
 import { mapPresentationCounts } from './eventDisclosure';
 import { selectionPanOffset } from './rendererVisibility';
-import { eventRepresentativePoint } from './layerFactories/shared';
+import { eventRepresentativePoint, mapLabelFontFamily } from './layerFactories/shared';
 import type { RadarFrame } from '../data/useWeatherRadar';
 import { coordinatePositions } from '../domain/countryGeometry';
 import { MapLibreOverlay } from '@deck.gl/maplibre';
@@ -718,7 +718,7 @@ export class DeckMapRenderer implements MapRenderer {
       const measureContext = typeof document === 'undefined' ? null : document.createElement('canvas').getContext('2d');
       const measureLabel = (text: string, size: number) => {
         if (!measureContext) return 220;
-        measureContext.font = `500 ${size}px "Noto Sans SC Variable", Arial, sans-serif`;
+        measureContext.font = `500 ${size}px ${mapLabelFontFamily()}`;
         return measureContext.measureText(text).width;
       };
       const host = map?.getContainer?.();
@@ -1349,7 +1349,7 @@ export class DeckMapRenderer implements MapRenderer {
       pickable: false,
       billboard: true,
       characterSet: 'auto',
-      fontFamily: 'DejaVu Sans Mono, monospace',
+      fontFamily: mapLabelFontFamily(),
       fontWeight: 700,
       sizeUnits: 'pixels',
       getPosition: (label) => label.coordinates,

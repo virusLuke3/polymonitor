@@ -49,7 +49,7 @@ npx playwright show-trace artifacts/map-alignment/P6/interaction-en.zip
 
 没有增加第二个地图、注册表或事件加载器。删除旧 cluster count atlas、旧 tooltip HTML 拼接、冲突的标签覆盖、装饰性的强度圈与无限灾害脉冲。保留 MapLibre、deck.gl、Protomaps、SVG fallback、3D、API、来源状态和报告链路。使用与现有 deck.gl 完全一致的 `@deck.gl/extensions@9.4.0` 绘制真实虚线路径，没有升级其他运行时依赖。
 
-阶段实际状态：**P0—P4 已实现并在指定本地 Chrome 环境验证；P5 已实现并验证真实数据链路，生产适用许可阻塞于外部确认；P6 已实现并完成下列本地矩阵，真实 iOS/Safari/Android 环境待验证。** 没有将这些不同状态合并为生产验收通过。
+阶段实际状态：**P0—P4 已实现并在指定本地 Chrome 环境验证；P5 已实现并验证真实数据链路，使用资格已于 2026-09-29 确认为非商业研究/小型社区用途；P6 已实现并完成下列本地矩阵，真实 iOS/Safari/Android 环境待验证。** 没有将这些不同状态合并为生产验收通过。
 
 宽而矮的单世界视口需要允许 underzoom，否则默认约束会把世界重新放大裁剪。采用 [MapLibre 官方 transformConstrain 扩展点](https://maplibre.org/maplibre-gl-js/docs/examples/customize-the-map-transform-constrain/)，仍将经纬度和缩放限制在现有地图状态边界内。没有重复世界或缩小 canvas 来掩盖问题。
 
@@ -59,7 +59,7 @@ npx playwright show-trace artifacts/map-alignment/P6/interaction-en.zip
 
 雷达与 7d 事件筛选互相独立，界面明确“最新雷达”和帧时间。当前产品没有绝对历史时刻回放，本次未添加历史雷达播放。覆盖瓦片不代表所有地区均有观测；无覆盖不等于无降水。关闭、SVG、hidden/离屏停止请求；清单错误保留最后成功帧并标 stale。
 
-**许可仍是外部未验收项。** 免费接口技术可用不代表 Polymonitor 的生产商用资格已获确认。因此 `VITE_WEATHER_RADAR_ENABLED` 默认关闭，只在明确设置为 `1` 的本地验收中启用。本次没有把这项外部条件写成通过，也没有发布生产雷达。
+**2026-09-29 使用资格更新：** 项目所有者明确确认为非商业研究/小型社区用途。雷达现对新地图状态默认开启；`VITE_WEATHER_RADAR_ENABLED=0` 可显式禁用。已保存的图层选择和分享 URL 仍然有效，用户关闭后不强行重新开启。署名、帧时间、覆盖和失败保留语义不变。
 
 ## 最终检查记录
 
@@ -123,4 +123,16 @@ RTX 5090、Chrome 149、真实 WebGL、DPR 1、同一参考夹具；独立运行
 
 同构图对照下，海面/陆地接近参考图的深灰/近黑层次，原先重复的大字号地名与厚 halo 已退出；保留 provider 的行政层级、碰撞和渐进显示。严重度小符号、单体聚合与真实灾害线面优先于背景；观测线、虚线预测和中性预测锥可以区分。没有用降低 DPR 或隐藏全部 info/watch 获得清爽画面。
 
-雷达纹理在 P5 实际帧截图中存在，时间来自真实清单，与事件 7d 窗口分开。默认本地预览不打开未确认使用资格的雷达。点击、聚合展开、报告切换、缩放与拖动有实际 trace 和响应断言；不能把静态截图当作自然动画的唯一证据。用户两张原图尺寸、相机与实时数据不同，因此不声称跨站逐像素相等。
+雷达纹理在 P5 实际帧截图中存在，时间来自真实清单，与事件 7d 窗口分开。雷达现默认开启（使用资格确认见上文）。点击、聚合展开、报告切换、缩放与拖动有实际 trace 和响应断言；不能把静态截图当作自然动画的唯一证据。用户两张原图尺寸、相机与实时数据不同，因此不声称跨站逐像素相等。
+
+
+## 2026-09-29 来源与字体修复
+
+- NWS `/alerts/active` 返回 400 的根因是发送了不支持的 `limit` 参数；取消上游参数，继续在规范化后限制数量。保留 CAP 更新/取消、受影响区域几何及失败快照。
+- FIRMS 未配置 key 时，复用同一个适配器读取 NASA 官方 NOAA-20 24h CSV；全局聚合与视口观测共享现有 SnapshotStore 的 15 分钟下载缓存。其他产品仍需 key；不把热异常当成确认火灾。
+- NHC 的观测/预测几何使用已有执行器并行获取，并限制总等待；来源计数使用实际 provider 身份，修正 NHC、火山与月度异常的缩写不匹配。
+- 国家风险按来源记录的实际国家字段归集；“ISRAEL / GAZA”仅作为主题摘要，不再当作国家边界标识。
+- 航空保持共享飞机观测，视口每 30 秒刷新；页面隐藏/卸载/切换时取消，失败保留旧数据。界面区分真实观测与参考航线，提供实际放大入口。
+- 地图 DOM 继承页面字体；deck.gl 读取页面字体；MapLibre 使用已有字体生成本地 SDF，保留 Protomaps 的层级、碰撞与尺寸。没有新字体包或 glyph CDN。
+
+本轮针对性证据位于 `webpage/artifacts/map-source-repair/`；固定条件真实矢量底图英文/中文对照位于 `webpage/artifacts/map-alignment/source-repair/`。对照测试现强制检查真实 PMTiles 的 206 响应，缺少配置不能以简化测试底图通过。生产验收运行 `webpage/scripts/verify-live-map.mjs`，记录 release-sha、真实来源响应、字体、雷达瓦片、飞机详情、移动端限制、Service Worker 和 browser trace；具体生产结果以本轮收据为准。

@@ -33,6 +33,7 @@ describe('World Event Map layer registry', () => {
       'air-routes',
       'ucdp',
       'sanctions-country-risk',
+      'weather-radar',
     ]);
   });
 

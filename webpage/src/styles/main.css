@@ -578,7 +578,7 @@ html[lang='zh-CN'] .wm-promo-copy {
   border: 1px solid var(--wm-border);
   background: rgba(23, 23, 23, 0.86);
   color: var(--wm-text);
-  font-family: "Noto Sans SC Variable", Arial, sans-serif;
+  font-family: var(--font-body);
   cursor: pointer;
 }
 
@@ -797,7 +797,7 @@ html[lang='zh-CN'] .wm-promo-copy {
   flex-direction: column;
   overflow: hidden;
   color: var(--wm-text);
-  font-family: "Noto Sans SC Variable", Arial, sans-serif;
+  font-family: var(--font-body);
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.42);
 }
 

@@ -50,13 +50,22 @@ export function resolveWorldEventPMTilesUrl(
   return new URL(url, origin).href;
 }
 
+export function mapBasemapFonts(language: 'en' | 'zh') {
+  return language === 'zh'
+    ? ['Noto Sans SC Variable', 'Polymonitor DejaVu Mono', 'monospace']
+    : ['Polymonitor DejaVu Mono', 'Noto Sans SC Variable', 'monospace'];
+}
+
 export async function buildWorldEventPMTilesStyle(url: string, language: 'en' | 'zh' = 'en', theme: WeatherMapTheme = 'dark'): Promise<StyleSpecification> {
   const { layers, namedFlavor } = await import('@protomaps/basemaps');
   const archiveUrl = resolveWorldEventPMTilesUrl(url);
   const rankedLayers = layers('basemap', namedFlavor(theme === 'positron' ? 'light' : 'black'), { lang: language }) as StyleSpecification['layers'];
   // Preserve provider order, rank, collision and zoom rules. Alignment changes
-  // paint only; localization below never introduces another label hierarchy.
-  const tunedLayers = rankedLayers.map((layer) => {
+  // paint and the bundled page font; provider label hierarchy is preserved.
+  const tunedLayers = rankedLayers.map((originalLayer) => {
+    const layer = originalLayer.type === 'symbol'
+      ? { ...originalLayer, layout: { ...originalLayer.layout, 'text-font': mapBasemapFonts(language) } }
+      : originalLayer;
     if (theme === 'positron') return layer;
     if (layer.id === 'background') return { ...layer, paint: { ...layer.paint, 'background-color': '#1b1b1d' } };
     if (layer.id === 'earth') return { ...layer, paint: { ...layer.paint, 'fill-color': '#0c0c0c' } };
@@ -74,7 +83,6 @@ export async function buildWorldEventPMTilesStyle(url: string, language: 'en' | 
   }) as StyleSpecification['layers'];
   return {
     version: 8,
-    glyphs: 'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf',
     sprite: `https://protomaps.github.io/basemaps-assets/sprites/v4/${theme === 'positron' ? 'light' : 'dark'}`,
     sources: {
       basemap: {
@@ -109,11 +117,13 @@ export async function getWeatherMapStyle(
 type LabelCapableMap = {
   getZoom: () => number;
   getStyle: () => {
+    glyphs?: string | null;
     sources?: Record<string, unknown>;
     layers?: Array<{ id: string; type?: string; source?: string; 'source-layer'?: string }>;
   };
+  setGlyphs?: (url: string | null) => unknown;
   getLayoutProperty: (layerId: string, name: 'text-field') => unknown;
-  setLayoutProperty: <K extends 'text-field' | 'text-size' | 'visibility'>(
+  setLayoutProperty: <K extends 'text-field' | 'text-size' | 'visibility' | 'text-font'>(
     layerId: string,
     name: K,
     value: NonNullable<SymbolLayerSpecification['layout']>[K],
@@ -161,11 +171,15 @@ function localizedNameExpression(language: 'en' | 'zh', protomaps: boolean): Exp
 /** Language changes leave provider rank, size, collision and styling intact. */
 export function reinforceWorldEventBasemapLabels(map: LabelCapableMap, language: 'en' | 'zh' = 'en') {
   const protomaps = usesProtomapsStyle(map);
+  // MapLibre 6 renders local SDF glyphs when glyphs is unset. This reuses
+  // the actual bundled page fonts, including CJK, without another font CDN.
+  if (map.getStyle().glyphs) map.setGlyphs?.(null);
   for (const layer of map.getStyle().layers || []) {
     if (layer.type !== 'symbol') continue;
     try {
       if (hasNameField(map.getLayoutProperty(layer.id, 'text-field'))) {
         map.setLayoutProperty(layer.id, 'text-field', localizedNameExpression(language, protomaps));
+        map.setLayoutProperty(layer.id, 'text-font', mapBasemapFonts(language));
       }
     } catch {
       // A style may replace the symbol layer during load.
@@ -181,7 +195,6 @@ export function getWeatherMapFallbackStyle(theme: WeatherMapTheme = 'dark') {
 
   return {
     version: 8,
-    glyphs: 'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf',
     sources: {
       'wm-weather-country-boundaries': {
         type: 'geojson',
@@ -216,7 +229,7 @@ export function getWeatherMapFallbackStyle(theme: WeatherMapTheme = 'dark') {
         source: 'wm-weather-country-boundaries',
         layout: {
           'text-field': ['coalesce', ['get', 'name:en'], ['get', 'name']],
-          'text-font': ['Noto Sans Medium'],
+          'text-font': mapBasemapFonts('en'),
           'text-size': ['interpolate', ['linear'], ['zoom'], 0, 13, 3, 15, 5, 17],
           'text-padding': 8,
           'text-max-width': 8,

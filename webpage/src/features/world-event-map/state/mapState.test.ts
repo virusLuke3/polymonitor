@@ -36,6 +36,7 @@ describe('World Event Map state', () => {
       'air-routes',
       'ucdp',
       'sanctions-country-risk',
+      'weather-radar',
     ]);
     expect(defaults.activeLayerIds).toContain('air-routes');
     expect(defaults.aviationLens).toBe('trunk');

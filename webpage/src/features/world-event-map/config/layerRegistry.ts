@@ -7,7 +7,7 @@ import type {
 } from '../domain/types';
 import type { MapSymbolKey } from './mapSymbols';
 
-export const WEATHER_RADAR_ENABLED = import.meta.env.VITE_WEATHER_RADAR_ENABLED === '1';
+export const WEATHER_RADAR_ENABLED = import.meta.env.VITE_WEATHER_RADAR_ENABLED !== '0';
 
 export type MapLayerDefinition = {
   id: string;
@@ -53,9 +53,9 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     id: 'weather-radar', label: 'Weather radar', legendLabel: 'Radar reflectivity', messageKey: 'atlas.layer.weatherRadar',
     panelEmoji: '📡', icon: 'storm', categories: [], sourceKeys: ['rainviewer'], requiredSources: [],
     supportedRenderers: ['webgl'], availability: WEATHER_RADAR_ENABLED ? 'ready' : 'unavailable',
-    availabilityReason: WEATHER_RADAR_ENABLED ? undefined : 'RainViewer use conditions must be confirmed before enabling this deployment.',
+    availabilityReason: WEATHER_RADAR_ENABLED ? undefined : 'Weather radar is disabled by deployment configuration.',
     isExecutable: () => WEATHER_RADAR_ENABLED, aliases: ['radar', 'rain', 'precipitation'], capabilities: ['raster'],
-    defaultEnabled: false, selectable: true, minZoom: 0, labelMinZoom: 0, cluster: false, clusterRadius: 0,
+    defaultEnabled: WEATHER_RADAR_ENABLED, selectable: true, minZoom: 0, labelMinZoom: 0, cluster: false, clusterRadius: 0,
     clusterMinPoints: 0, timeFilter: false, severities: [], legend: [{ label: 'Radar reflectivity', symbol: 'storm' }],
     explanation: {
       purpose: 'Latest available real radar composite, independently timestamped from the event window.',

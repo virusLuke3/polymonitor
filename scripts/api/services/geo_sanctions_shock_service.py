@@ -1350,6 +1350,27 @@ def _build_target_breakdown(items: List[Dict[str, Any]], target_scores: Dict[str
     return breakdown
 
 
+def _build_country_risk_breakdown(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    # Map evidence belongs to the provider's country, never a thematic target
+    # such as "ISRAEL / GAZA". Keep summary target scoring independent.
+    by_country: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for item in items:
+        country = str(item.get("country") or "").strip()
+        if country:
+            by_country[country].append(item)
+    return [
+        {
+            "label": country,
+            "count": len(records),
+            "latestHeadline": _text_or_none(latest.get("headline")),
+            "latestOccurredAt": _iso_or_none(latest.get("occurredAt")),
+            "latestSource": _text_or_none(latest.get("source")),
+        }
+        for country, records in sorted(by_country.items(), key=lambda row: (-len(row[1]), row[0]))
+        for latest in [max(records, key=lambda row: _parse_datetime(row.get("occurredAt")) or datetime.min.replace(tzinfo=timezone.utc))]
+    ]
+
+
 def _sort_shock_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sorted(
         items,
@@ -1496,10 +1517,7 @@ def build_geo_sanctions_shock_seed_payload(
                 sanctions_items,
                 sanctions_target_scores,
             ),
-            "countryRiskBreakdown": _build_target_breakdown(
-                conflict_items,
-                country_risk_scores,
-            ),
+            "countryRiskBreakdown": _build_country_risk_breakdown(conflict_items),
             "linkedMarkets": [],
             "ofacRecordCountTotal": record_total,
             "publishDates": ofac_snapshot.get("publishDates") or [],

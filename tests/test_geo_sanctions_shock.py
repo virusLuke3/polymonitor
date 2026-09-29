@@ -288,7 +288,7 @@ class GeoSanctionsShockSeedBuilderTestCase(unittest.TestCase):
         self.assertTrue(payload["targetBreakdown"])
         self.assertEqual("IRAN", payload["targetBreakdown"][0]["label"])
         self.assertEqual("IRAN", payload["sanctionsTargetBreakdown"][0]["label"])
-        self.assertEqual("IRAN", payload["countryRiskBreakdown"][0]["label"])
+        self.assertEqual("Iran", payload["countryRiskBreakdown"][0]["label"])
         self.assertTrue(any(item.get("source", "").startswith("OFAC") for item in payload["items"]))
         self.assertEqual([], payload["linkedMarkets"])
 
@@ -659,3 +659,15 @@ class GeoSanctionsShockWatcherTestCase(unittest.TestCase):
         self.assertEqual("preserved", result["status"])
         raw = watcher.redis_client.get(watcher.redis_key())
         self.assertEqual(previous["summary"]["targetSummary"], json.loads(str(raw))["summary"]["targetSummary"])
+
+
+def test_country_risk_uses_native_country_not_combined_topic():
+    rows = [
+        {"country": "Israel", "targetLabels": ["ISRAEL / GAZA"], "headline": "A", "occurredAt": "2026-09-29T01:00:00Z"},
+        {"country": "Palestine", "targetLabels": ["ISRAEL / GAZA"], "headline": "B", "occurredAt": "2026-09-29T02:00:00Z"},
+        {"country": "Israel", "targetLabels": ["ISRAEL / GAZA"], "headline": "C", "occurredAt": "2026-09-29T03:00:00Z"},
+        {"targetLabels": ["RUSSIA"]},
+    ]
+    result = geo_sanctions_shock_service._build_country_risk_breakdown(rows)
+    assert [(row["label"], row["count"]) for row in result] == [("Israel", 2), ("Palestine", 1)]
+    assert result[0]["latestHeadline"] == "C"

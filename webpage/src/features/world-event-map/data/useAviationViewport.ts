@@ -39,18 +39,45 @@ export function useAviationViewport(
       return undefined;
     }
     const cached = viewportCache.get(key);
-    if (cached && Date.now() - cached.storedAt <= CACHE_TTL_MS) setPayload(cached.payload);
-    const controller = new AbortController();
-    void fetchAviationViewport(bbox, zoom, controller.signal).then((next) => {
-      if (controller.signal.aborted || generation !== generationRef.current) return;
-      viewportCache.set(key, { storedAt: Date.now(), payload: next });
-      setPayload(next);
-      setError(null);
-    }).catch((reason) => {
-      if (controller.signal.aborted || generation !== generationRef.current) return;
-      setError(reason instanceof Error ? reason.message : String(reason));
-    });
-    return () => controller.abort();
+    setPayload(cached?.payload ?? null);
+    setError(null);
+    let controller: AbortController | null = null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let disposed = false;
+    const refresh = async () => {
+      if (disposed || document.hidden) return;
+      const request = new AbortController();
+      controller = request;
+      try {
+        const next = await fetchAviationViewport(bbox, zoom, request.signal);
+        if (disposed || request.signal.aborted || generation !== generationRef.current) return;
+        viewportCache.delete(key);
+        viewportCache.set(key, { storedAt: Date.now(), payload: next });
+        while (viewportCache.size > 16) viewportCache.delete(viewportCache.keys().next().value!);
+        setPayload(next);
+        setError(null);
+      } catch (reason) {
+        if (disposed || request.signal.aborted || generation !== generationRef.current) return;
+        setError(reason instanceof Error ? reason.message : String(reason));
+      } finally {
+        if (!disposed && !request.signal.aborted && !document.hidden) timer = setTimeout(refresh, CACHE_TTL_MS);
+      }
+    };
+    const visibilityChanged = () => {
+      clearTimeout(timer);
+      controller?.abort();
+      if (!document.hidden) void refresh();
+    };
+    document.addEventListener('visibilitychange', visibilityChanged);
+    const remaining = cached ? CACHE_TTL_MS - (Date.now() - cached.storedAt) : 0;
+    if (!document.hidden && remaining > 0) timer = setTimeout(refresh, remaining);
+    else void refresh();
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+      controller?.abort();
+      document.removeEventListener('visibilitychange', visibilityChanged);
+    };
   }, [enabled, key]);
 
   return { payload, error, bbox, loading: enabled && Boolean(bbox) && !payload && !error };

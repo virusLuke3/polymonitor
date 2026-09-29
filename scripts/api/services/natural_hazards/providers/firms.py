@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, Mapping
 from urllib.parse import quote
 
+from threading import Lock
+
 from ..contracts import ProviderResult, SEVERITY_MAPPING_VERSION
 from ..normalize import finite_number
 
@@ -176,6 +178,42 @@ def _cluster_rows(rows: Iterable[Mapping[str, str]], source: str, limit: int) ->
     return aggregates[: max(1, min(MAX_AGGREGATES, limit))]
 
 
+# NASA's documented public 24-hour download is the same NOAA-20 product.
+# Keep one download in the existing snapshot store for both map scales.
+PUBLIC_NOAA20_URL = "https://firms.modaps.eosdis.nasa.gov/data/active_fire/noaa-20-viirs-c2/csv/J1_VIIRS_C2_Global_24h.csv"
+
+
+def _rows(http_text_get, *, map_key, base_url, source, area, snapshot_store=None, resources=None):
+    if not map_key and source != DEFAULT_SOURCE:
+        raise ValueError("firms-map-key-required-for-product")
+    namespace = "snapshot:world:firms-csv"
+    def download():
+        if not map_key and snapshot_store is not None:
+            cached = snapshot_store.get(namespace, source)
+            if isinstance(cached, str):
+                return cached
+        url = (f"{base_url.rstrip('/')}/{quote(map_key, safe='')}/{quote(source, safe='')}/{area}/1"
+               if map_key else PUBLIC_NOAA20_URL)
+        text = str(http_text_get(url, timeout=12, headers={
+            "Accept": "text/csv",
+            "User-Agent": "polymonitor-world-event-map/1.0 (https://polymonitor.club)",
+        }) or "")
+        reader = csv.DictReader(io.StringIO(text))
+        if not reader.fieldnames or not {"latitude", "longitude", "acq_date", "acq_time"}.issubset(reader.fieldnames):
+            raise ValueError("firms-schema-columns")
+        if not map_key and snapshot_store is not None:
+            snapshot_store.set(namespace, source, text, 900)
+        return text
+    if not map_key and resources is not None:
+        with resources.hazard_lock_guard:
+            lock = resources.hazard_locks.setdefault("firms-csv", Lock())
+        with lock:
+            text = download()
+    else:
+        text = download()
+    return csv.DictReader(io.StringIO(text))
+
+
 def fetch(
     http_text_get,
     *,
@@ -183,24 +221,12 @@ def fetch(
     base_url: str = DEFAULT_BASE_URL,
     source: str = DEFAULT_SOURCE,
     limit: int = MAX_AGGREGATES,
+    snapshot_store=None,
+    resources=None,
 ) -> ProviderResult:
-    clean_key = str(map_key or "").strip()
-    if not clean_key:
-        raise ValueError("firms-map-key-required")
     clean_source = str(source or DEFAULT_SOURCE).strip()
-    url = f"{base_url.rstrip('/')}/{quote(clean_key, safe='')}/{quote(clean_source, safe='')}/world/1"
-    text = http_text_get(
-        url,
-        timeout=8,
-        headers={
-            "Accept": "text/csv",
-            "User-Agent": "polymonitor-world-event-map/1.0 (https://polymonitor.club)",
-        },
-    )
-    reader = csv.DictReader(io.StringIO(str(text or "")))
-    required = {"latitude", "longitude", "acq_date", "acq_time"}
-    if not reader.fieldnames or not required.issubset(set(reader.fieldnames)):
-        raise ValueError("firms-schema-columns")
+    reader = _rows(http_text_get, map_key=str(map_key or "").strip(), base_url=base_url,
+                   source=clean_source, area="world", snapshot_store=snapshot_store, resources=resources)
     events = _cluster_rows(reader, clean_source, limit)
     newest = max((event["updatedAt"] for event in events), default=None)
     return {"events": events, "data_updated_at": newest}
@@ -293,24 +319,22 @@ def fetch_viewport(
     base_url: str = DEFAULT_BASE_URL,
     source: str = DEFAULT_SOURCE,
     limit: int = MAX_VIEWPORT_DETECTIONS,
+    snapshot_store=None,
+    resources=None,
 ) -> ProviderResult:
-    clean_key = str(map_key or "").strip()
-    if not clean_key:
-        raise ValueError("firms-map-key-required")
     west, south, east, north = bbox
     if not (-180 <= west < east <= 180 and -90 <= south < north <= 90):
         raise ValueError("firms-invalid-viewport-bbox")
     clean_source = str(source or DEFAULT_SOURCE).strip()
     area = f"{west:.4f},{south:.4f},{east:.4f},{north:.4f}"
-    url = f"{base_url.rstrip('/')}/{quote(clean_key, safe='')}/{quote(clean_source, safe='')}/{area}/1"
-    text = http_text_get(url, timeout=8, headers={
-        "Accept": "text/csv",
-        "User-Agent": "polymonitor-world-event-map/1.0 (https://polymonitor.club)",
-    })
-    reader = csv.DictReader(io.StringIO(str(text or "")))
-    required = {"latitude", "longitude", "acq_date", "acq_time"}
-    if not reader.fieldnames or not required.issubset(set(reader.fieldnames)):
-        raise ValueError("firms-schema-columns")
+    reader = _rows(http_text_get, map_key=str(map_key or "").strip(), base_url=base_url,
+                   source=clean_source, area=area, snapshot_store=snapshot_store, resources=resources)
+    # Public downloads cover the world; only source coordinates inside the
+    # requested viewport may enter the detail response.
+    reader = (row for row in reader
+              if (lon := finite_number(row.get("longitude"))) is not None
+              and (lat := finite_number(row.get("latitude"))) is not None
+              and west <= lon <= east and south <= lat <= north)
     events = _raw_detection_events(reader, clean_source, limit)
     newest = max((event["updatedAt"] for event in events), default=None)
     return {"events": events, "data_updated_at": newest}

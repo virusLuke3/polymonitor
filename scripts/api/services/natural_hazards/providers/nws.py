@@ -214,7 +214,7 @@ def fetch(
     observed_now = now or datetime.now(timezone.utc)
     payload = http_json_get(
         url,
-        params={"status": "actual", "message_type": "alert,update,cancel", "limit": min(500, max(1, limit))},
+        params={"status": "actual", "message_type": "alert,update,cancel"},
         timeout=8,
         headers={
             "Accept": "application/geo+json",

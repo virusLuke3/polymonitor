@@ -63,10 +63,15 @@ def test_nhc_preserves_observed_forecast_and_cone_geometry() -> None:
         "trackCone": {"kmzFile": "https://www.nhc.noaa.gov/gis/fixture-cone.kmz"},
     }]}
 
-    result = nhc.fetch(
-        lambda *_args, **_kwargs: payload,
-        http_bytes_get=lambda url, **_kwargs: _cone_kmz() if "cone" in url else _line_kmz(),
-    )
+    resources = RuntimeResources()
+    try:
+        result = nhc.fetch(
+            lambda *_args, **_kwargs: payload,
+            http_bytes_get=lambda url, **_kwargs: _cone_kmz() if "cone" in url else _line_kmz(),
+            resources=resources,
+        )
+    finally:
+        resources.close()
     event = result["events"][0]
     assert event["revision"]["advisoryId"] == "12"
     assert event["metrics"]["maximumWind"] == {"value": 100, "unit": "kt"}

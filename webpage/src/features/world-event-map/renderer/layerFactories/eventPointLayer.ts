@@ -16,7 +16,7 @@ import { createEventObservationLayer } from './eventObservationLayer';
 import {
   eventLabel,
   eventRepresentativePoint,
-  MAP_LABEL_FONT_FAMILY,
+  mapLabelFontFamily,
   eventColor,
   markerSize,
   clusterMarkerSize,
@@ -66,7 +66,7 @@ export function createEventPointLayers({
       id: 'world-event-cluster-counts', data: clusters,
       getPosition: cluster => cluster.coordinates, getText: cluster => String(cluster.count),
       getSize: 12, getColor: [12, 15, 18, 255], getTextAnchor: 'middle', getAlignmentBaseline: 'center',
-      fontFamily: MAP_LABEL_FONT_FAMILY, fontWeight: 600, characterSet: 'auto', pickable: false,
+      fontFamily: mapLabelFontFamily(), fontWeight: 600, characterSet: 'auto', pickable: false,
     }));
   }
   if (singles.length) {
@@ -170,7 +170,7 @@ export function createEventPointLayers({
       getColor: [226, 231, 229, 220],
       getTextAnchor: event => placements.get(event.id)?.anchor ?? 'start',
       getAlignmentBaseline: event => placements.get(event.id)?.baseline ?? 'bottom',
-      fontFamily: MAP_LABEL_FONT_FAMILY,
+      fontFamily: mapLabelFontFamily(),
       fontWeight: 500,
       characterSet: 'auto',
       pickable: false,

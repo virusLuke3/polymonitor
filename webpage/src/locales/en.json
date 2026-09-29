@@ -380,7 +380,7 @@
   "atlas.layer.intelHotspots": "Intel Hotspots",
   "atlas.layer.countryRisk": "Sanctions & Country Risk",
   "atlas.layer.ucdp": "Conflict & Unrest",
-  "atlas.layer.airRoutes": "Air routes",
+  "atlas.layer.airRoutes": "Flights & air routes",
   "atlas.commandTitle": "Market Command Center",
   "atlas.commandSearchTitle": "Search markets",
   "atlas.commandPlaceholder": "Search markets, tickers, categories, or panels…",

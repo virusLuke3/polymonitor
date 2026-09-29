@@ -52,7 +52,10 @@ for (const language of ['en', 'zh']) {
     await page.clock.setFixedTime(new Date(GENERATED_AT));
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await installFixtures(page);
+    expect(process.env.VITE_PMTILES_URL, 'Alignment must load the real PMTiles style, not the intercepted fallback').toBeTruthy();
     const network = await installRealMapAssets(page);
+    const vectorResponses: number[] = [];
+    page.on('response', response => { if (response.url().includes('planet.pmtiles')) vectorResponses.push(response.status()); });
     const errors: string[] = [];
     page.on('pageerror', e => errors.push(e.message));
     try {
@@ -62,6 +65,7 @@ for (const language of ['en', 'zh']) {
       await page.addStyleTag({ content: framing });
       await page.locator('.wm-language-switch select').selectOption(language);
       await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-basemap-state', 'primary-ready');
+      await expect.poll(() => vectorResponses.filter(status => status === 206).length).toBeGreaterThan(0);
       await page.evaluate(() => document.fonts.ready); await page.mouse.move(0, 0); await page.waitForTimeout(2500);
       await page.locator('.wm-weather-deck-map').screenshot({ path: resolve(output, `basemap-${language}.png`) });
       await page.goto(`${cameraUrl}&layers=earthquakes-volcanoes,weather-alerts,wildfires,climate-anomalies`);

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from concurrent.futures import wait
+
 import io
 import zipfile
 from typing import Any, Dict
@@ -178,6 +180,7 @@ def fetch(
     http_json_get,
     *,
     http_bytes_get=None,
+    resources=None,
     url: str = DEFAULT_URL,
     limit: int = 40,
 ) -> ProviderResult:
@@ -192,6 +195,25 @@ def fetch(
     storms = payload.get("activeStorms") if isinstance(payload, dict) else None
     if not isinstance(storms, list):
         raise ValueError("nhc-schema-active-storms")
+    geometry_futures = {}
+    geometry_results = {}
+    if http_bytes_get is not None and resources is not None:
+        for storm in storms[:max(1, limit)]:
+            if not isinstance(storm, dict):
+                continue
+            for field, kind in (("bestTrackGIS", "line"), ("forecastTrack", "line"), ("trackCone", "polygon")):
+                descriptor = storm.get(field)
+                kmz_url = str(descriptor.get("kmzFile") or "").strip() if isinstance(descriptor, dict) else ""
+                if kmz_url and (kmz_url, kind) not in geometry_futures:
+                    geometry_futures[kmz_url, kind] = resources.submit(resources.zone_executor, _kmz_geometry, http_bytes_get, kmz_url, kind)
+        done, pending = wait(geometry_futures.values(), timeout=4.5)
+        for identity, future in geometry_futures.items():
+            try:
+                geometry_results[identity] = future.result() if future in done else None
+            except Exception:
+                geometry_results[identity] = None
+        for future in pending:
+            future.cancel()
     events: list[Dict[str, Any]] = []
     for storm in storms[: max(1, limit)]:
         if not isinstance(storm, dict):
@@ -222,7 +244,8 @@ def fetch(
                 if not kmz_url:
                     continue
                 try:
-                    geometry = _kmz_geometry(http_bytes_get, kmz_url, kind)
+                    geometry = (geometry_results.get((kmz_url, kind)) if resources is not None
+                                else _kmz_geometry(http_bytes_get, kmz_url, kind))
                 except Exception:
                     geometry = None
                 if geometry:

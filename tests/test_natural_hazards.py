@@ -375,13 +375,13 @@ def test_firms_provider_aggregates_pixels_without_upgrading_them_to_wildfires() 
     assert all(event["hazardKind"] != "wildfire" for event in events)
 
 
-def test_firms_provider_rejects_missing_map_key() -> None:
+def test_firms_provider_rejects_empty_public_csv() -> None:
     try:
         firms.fetch(lambda *_args, **_kwargs: "", map_key="")
     except ValueError as exc:
-        assert str(exc) == "firms-map-key-required"
+        assert str(exc) == "firms-schema-columns"
     else:
-        raise AssertionError("missing FIRMS MAP_KEY must fail closed")
+        raise AssertionError("invalid FIRMS public download must fail closed")
 
 
 def test_provider_snapshot_lock_prevents_same_process_cache_stampede() -> None:
@@ -780,3 +780,29 @@ def test_map_feed_fetches_only_the_requested_provider_on_cache_miss() -> None:
     assert calls == ["usgs"]
     assert (snapshots.SNAPSHOT_NAMESPACE, "usgs") in store.values
     assert (snapshots.SNAPSHOT_NAMESPACE, "eonet") not in store.values
+
+
+def test_nws_active_alerts_does_not_send_unsupported_limit():
+    def get(url, **kwargs):
+        assert "limit" not in kwargs.get("params", {})
+        return {"features": []}
+    assert nws.fetch(get, limit=12)["events"] == []
+
+
+def test_firms_public_download_is_shared_and_viewport_is_filtered():
+    store = FakeSnapshotStore()
+    calls = []
+    def get(url, **kwargs):
+        calls.append(url)
+        return "latitude,longitude,acq_date,acq_time,frp\n10,20,2026-09-29,0910,12\n40,-100,2026-09-29,0920,5\n"
+    global_result = firms.fetch(get, map_key="", snapshot_store=store)
+    local = firms.fetch_viewport(get, map_key="", bbox=(19,9,21,11), snapshot_store=store)
+    assert calls == [firms.PUBLIC_NOAA20_URL]
+    assert len(global_result["events"]) == 2
+    assert len(local["events"]) == 1
+    assert local["events"][0]["geometry"]["coordinates"] == [20,10]
+    assert local["data_updated_at"] == "2026-09-29T09:10:00Z"
+    # A custom product must never silently receive the NOAA20 download.
+    import pytest
+    with pytest.raises(ValueError, match="required-for-product"):
+        firms.fetch(get, map_key="", source="VIIRS_SNPP_NRT")
