@@ -29,8 +29,15 @@ try {
   for (const width of [1440, 390]) {
     const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 1000 }, locale: 'en-US' });
     const page = await context.newPage();
-    const record = { width, errors: [], responses: [], failedRequests: [], states: [], screenshots: [] };
+    const record = { width, errors: [], responses: [], failedRequests: [], protocols: [], states: [], screenshots: [] };
     receipt.browsers.push(record);
+    const network = await context.newCDPSession(page);
+    await network.send('Network.enable');
+    network.on('Network.responseReceived', ({ response, type }) => {
+      if (type === 'Document' || /\/assets\/.*\.js|planet\.pmtiles/.test(response.url)) {
+        record.protocols.push({ url: response.url, protocol: response.protocol, status: response.status });
+      }
+    });
     page.on('pageerror', error => record.errors.push(error.message));
     page.on('requestfailed', request => record.failedRequests.push({ url: request.url(), error: request.failure()?.errorText }));
     page.on('response', response => {
@@ -65,11 +72,11 @@ try {
       });
       // Allow real labels and event sources to finish their first paint.
       await page.waitForTimeout(2000);
-      await screenshot(`desktop-${width}-en`);
+      await screenshot(`${width === 390 ? 'mobile' : 'desktop'}-${width}-en`);
       record.states.push({ name: 'initial', url: page.url(), text: (await page.locator('body').innerText()).slice(0,4500) });
       await page.locator('.wm-language-switch select').selectOption('zh');
       await page.waitForTimeout(1500);
-      await screenshot(`desktop-${width}-zh`);
+      await screenshot(`${width === 390 ? 'mobile' : 'desktop'}-${width}-zh`);
       await check(`${width}: live event details`, async () => {
         await page.getByRole('button', { name: /ALL EVENTS/ }).click();
         await page.locator('.wm-world-event-list-scroll li button').first().click();

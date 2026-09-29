@@ -3,6 +3,29 @@
 This directory contains public Nginx templates for serving the built frontend
 as static files and proxying `/wm-api` to the local Tailscale-backed API.
 
+## Frontend release acceptance
+
+Production TLS must advertise HTTP/2. On Nginx 1.24, retain the Certbot
+certificate settings and use `listen 443 ssl http2;`. Validate with `nginx -t`
+before reloading. With HTTP/1.1, slow API requests can occupy the browser's
+connections and delay lazy map modules even while individual static downloads
+are fast. Confirm the negotiated protocol in the browser, not only the config.
+
+Build from the exact pushed commit and compare `release-sha` and artifact hashes
+with the public server. Deploy assets before the entry HTML and service worker;
+retain previous hashed assets and the old shell for active tabs and rollback.
+A frontend-only release must preserve public documentation, private files and
+backend services owned by other tasks.
+
+Run `webpage/scripts/verify-live-map.mjs` from `webpage/` with
+`POLYMONITOR_RELEASE_SHA` set to the full commit. Set
+`POLYMONITOR_E2E_HARDWARE_WEBGL=1` when headless Chrome requires Vulkan to reach
+real hardware. The verifier visits `https://polymonitor.club` with real APIs,
+tiles and service workers, records negotiated protocols, and captures desktop,
+mobile, language, event-detail, theme and reload screenshots. Source degradation
+and failed API requests remain in the receipt; passing renderer checks does not
+prove every provider is healthy.
+
 ## Included templates
 
 - `polydata-static.conf.example`
