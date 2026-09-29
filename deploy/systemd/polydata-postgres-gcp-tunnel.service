@@ -1,0 +1,18 @@
+[Unit]
+Description=Polymonitor PostgreSQL consumer tunnel to GCP
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/polydata/polydata.env
+ExecCondition=/bin/bash -lc 'test -n "$${POLYDATA_POSTGRES_GCP_SSH_TARGET:-$${POLYDATA_GCP_TUNNEL_SSH_TARGET:-$${POLYDATA_GCP_SSH_TARGET:-}}}"'
+ExecStart=/bin/bash -lc 'target="$${POLYDATA_POSTGRES_GCP_SSH_TARGET:-$${POLYDATA_GCP_TUNNEL_SSH_TARGET:-$${POLYDATA_GCP_SSH_TARGET:-}}}"; identity="$${POLYDATA_GCP_TUNNEL_SSH_IDENTITY_FILE:-}"; args=(-N -T -R "127.0.0.1:$${POLYDATA_CONSUMER_POSTGRES_REMOTE_PORT:-45434}:127.0.0.1:$${POLYDATA_CONSUMER_POSTGRES_LOCAL_PORT:-45432}" -o ControlMaster=no -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3); if [[ -n "$$identity" ]]; then args+=(-i "$$identity" -o IdentitiesOnly=yes); fi; if [[ -n "$${POLYDATA_POSTGRES_GCP_HOST_KEY_ALIAS:-}" ]]; then args+=(-o "HostKeyAlias=$$POLYDATA_POSTGRES_GCP_HOST_KEY_ALIAS"); fi; exec /usr/bin/ssh "$${args[@]}" "$$target"'
+Restart=always
+RestartSec=8
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

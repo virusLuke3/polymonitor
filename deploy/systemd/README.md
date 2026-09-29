@@ -43,6 +43,20 @@ registers HTTP routes and explicitly starts cache warmers. Previously
 installed `polydata-lob-*` and `polydata-worldcup-lob-guard.*` producer units
 must be disabled/removed as part of rollout; their templates are retired here.
 
+## PostgreSQL connection ownership
+
+Install `polydata-postgres-gcp-tunnel.service` on the database host when GCP
+reads the local canonical PostgreSQL instance. It forwards GCP loopback port
+45434 to local port 45432. Set `POLYDATA_POSTGRES_GCP_SSH_TARGET` and, if needed,
+`POLYDATA_POSTGRES_GCP_HOST_KEY_ALIAS` in the private environment or a unit drop-in.
+The optional ports are `POLYDATA_CONSUMER_POSTGRES_REMOTE_PORT` and
+`POLYDATA_CONSUMER_POSTGRES_LOCAL_PORT`. Set GCP consumers' `POLYDATA_POSTGRES_PORT`
+to the dedicated remote port only after a database query through it succeeds.
+The existing ClickHouse consumer tunnel remains separate.
+
+Do not borrow a collector or paper-trading tunnel for the API. This unit never
+kills listeners or reclaims another service's port: a collision fails startup.
+
 ## GCP/API install
 
 Use `scripts/deploy/setup_remote_readonly_api.sh` from the same commit being
