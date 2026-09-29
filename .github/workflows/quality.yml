@@ -58,7 +58,7 @@ jobs:
         run: ruff check agent quant scripts telegram tests
 
       - name: Run non-quarantined Python tests
-        run: python scripts/qa/run_pytest.py
+        run: PYTHONDONTWRITEBYTECODE=1 python -m pytest -q
 
   frontend-build:
     runs-on: ubuntu-22.04

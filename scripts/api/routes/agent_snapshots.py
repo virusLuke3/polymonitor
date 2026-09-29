@@ -6,23 +6,18 @@ from typing import Any
 
 from flask import Blueprint, jsonify, make_response
 
-from agent.market_wide.snapshot import normalize_lens, read_market_wide_quant_snapshot, read_market_wide_snapshot, snapshot_response
+from agent.market_wide.snapshot import (
+    normalize_lens,
+    read_market_wide_quant_snapshot,
+    read_market_wide_snapshot,
+    snapshot_response,
+)
 
 
 @dataclass(frozen=True)
 class AgentSnapshotRouteDependencies:
     source: Mapping[str, Any]
     snapshot_store: Any
-
-    @classmethod
-    def from_context(
-        cls,
-        context: Mapping[str, Any],
-    ) -> AgentSnapshotRouteDependencies:
-        return cls(
-            source={name: context[name] for name in ("app", "SNAPSHOT_STORE", "get_cached_json") if name in context},
-            snapshot_store=context.get("SNAPSHOT_STORE"),
-        )
 
 
 def create_agent_snapshot_blueprint(dependencies: AgentSnapshotRouteDependencies) -> Blueprint:

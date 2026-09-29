@@ -8,7 +8,7 @@ from flask import Flask
 
 
 from api.services import outcome_semantics_service
-from market import market_token_source_label_projection as projection_ledger
+from api.services import outcome_projection as projection_ledger
 
 
 EVIDENCE = "b" * 64
@@ -39,13 +39,11 @@ def _ledger(
                 "logical_outcome": logical,
                 "logical_outcome_index": index,
             }
-            for index, (logical, label, token) in enumerate(
-                zip(("YES", "NO"), labels, tokens)
-            )
+            for index, (logical, label, token) in enumerate(zip(("YES", "NO"), labels, tokens))
         ],
     }
     record = projection_ledger.normalize_projection_record(record)
-    projection_key = projection_ledger._projection_key(record)
+    projection_key = projection_ledger.projection_key(record)
     before_images = {
         "market": {"id": 7, "condition_id": CONDITION},
         "market_tokens": [],
@@ -55,17 +53,17 @@ def _ledger(
     core = {
         "schema_version": projection_ledger.PLAN_SCHEMA_VERSION,
         "projection_key": projection_key,
-        "record_sha256": projection_ledger._sha256(record),
+        "record_sha256": projection_ledger.record_digest(record),
         "record": deepcopy(record),
         "before_images": before_images,
         "expected": {
             "status": projection_ledger.PROJECTION_STATUS,
             "projected_token_count": 2,
-            "label_rows_without_plan_sha256": projection_ledger._expected_label_rows(record),
-            "immutability_contract": projection_ledger._immutability_contract(),
+            "label_rows_without_plan_sha256": projection_ledger.expected_labels(record),
+            "immutability_contract": projection_ledger.immutability_contract(),
         },
     }
-    plan = {**core, "plan_sha256": projection_ledger._sha256(core)}
+    plan = {**core, "plan_sha256": projection_ledger.record_digest(core)}
     return record, plan, projection_key, before_images
 
 
@@ -118,7 +116,7 @@ def _rows(
                 "sync_projected_token_count": 2,
                 "receipt_projection_key": projection_key,
                 "receipt_plan_sha256": plan["plan_sha256"],
-                "receipt_record_sha256": projection_ledger._sha256(record),
+                "receipt_record_sha256": projection_ledger.record_digest(record),
                 "receipt_market_id": 7,
                 "receipt_condition_id": CONDITION,
                 "receipt_evidence_origin": record["evidence_origin"],

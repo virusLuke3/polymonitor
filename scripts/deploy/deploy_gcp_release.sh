@@ -50,6 +50,10 @@ if [[ -n "${DEPLOY_SSH_KEY}" ]]; then
   SSH_OPTIONS+=(-i "${DEPLOY_SSH_KEY}")
   SCP_OPTIONS+=(-i "${DEPLOY_SSH_KEY}")
 fi
+if [[ -n "${DEPLOY_SSH_PROXY_COMMAND:-}" ]]; then
+  SSH_OPTIONS+=(-o "ProxyCommand=${DEPLOY_SSH_PROXY_COMMAND}")
+  SCP_OPTIONS+=(-o "ProxyCommand=${DEPLOY_SSH_PROXY_COMMAND}")
+fi
 REMOTE="${DEPLOY_USER}@${DEPLOY_HOST}"
 TARGET_SHA="$(git -C "${ROOT_DIR}" rev-parse "${DEPLOY_TARGET_SHA}^{commit}")"
 REMOTE_STATE_PATH="${DEPLOY_STATE_DIR}/current.json"
@@ -149,34 +153,14 @@ rollback() {
   echo "Deployment verification failed; rolling back ${TARGET_SHA:0:12}." >&2
   ssh "${SSH_OPTIONS[@]}" "${REMOTE}" \
     "python3 '${REMOTE_RELEASE_DIR}/gcp_release.py' rollback --root '${DEPLOY_PATH}' --receipt '${RECEIPT_PATH}'" || true
-  sync_systemd_units || true
   for unit in "${RESTART_UNITS[@]}"; do
     ssh "${SSH_OPTIONS[@]}" "${REMOTE}" "systemctl --user restart '${unit}'" || true
   done
 }
 trap rollback ERR
 
-SYSTEMD_PATHS="$(
-  python3 -c '
-import json, sys
-for entry in json.load(open(sys.argv[1]))["entries"]:
-    path = entry["path"]
-    if path.startswith("deploy/systemd/") and entry["action"] == "upsert":
-        print(path)
-' "${RELEASE_DIR}/release/manifest.json"
-)"
-sync_systemd_units() {
-  if [[ -z "${SYSTEMD_PATHS}" ]]; then
-    return
-  fi
-  while IFS= read -r path; do
-    unit="${path##*/}"
-    ssh "${SSH_OPTIONS[@]}" -n "${REMOTE}" \
-      "mkdir -p ~/.config/systemd/user; sed 's|/__POLYDATA_REPO_ROOT__|${DEPLOY_PATH}|g' '${DEPLOY_PATH}/${path}' > ~/.config/systemd/user/'${unit}'"
-  done <<< "${SYSTEMD_PATHS}"
-  ssh "${SSH_OPTIONS[@]}" "${REMOTE}" "systemctl --user daemon-reload"
-}
-sync_systemd_units
+ssh "${SSH_OPTIONS[@]}" "${REMOTE}" \
+  "python3 '${REMOTE_RELEASE_DIR}/gcp_release.py' sync-units --root '${DEPLOY_PATH}' --manifest '${REMOTE_RELEASE_DIR}/manifest.json' --receipt '${RECEIPT_PATH}'"
 
 if [[ "${DEPLOY_INSTALL_DEPENDENCIES}" == "1" ]] && python3 -c '
 import json, sys
@@ -194,17 +178,8 @@ done
 REMOTE_RESTART_UNITS="${RESTART_UNITS[*]}"
 ssh "${SSH_OPTIONS[@]}" "${REMOTE}" "
   set -eu
-  healthy=0
-  for attempt in \$(seq 1 30); do
-    if curl -fsS --max-time 10 http://127.0.0.1:18500/health >/dev/null \
-      && curl -fsS --max-time 15 'http://127.0.0.1:18500/content/latest?limit=1' >/dev/null \
-      && curl -fsS --max-time 10 http://127.0.0.1/wm-api/health >/dev/null; then
-      healthy=1
-      break
-    fi
-    sleep 2
-  done
-  test \"\$healthy\" = 1
+  python3 '${REMOTE_RELEASE_DIR}/gcp_release.py' verify --url http://127.0.0.1:18500
+  curl -fsS --max-time 10 http://127.0.0.1/wm-api/health >/dev/null
   for unit in ${REMOTE_RESTART_UNITS}; do
     systemctl --user is-active --quiet \"\$unit\"
   done

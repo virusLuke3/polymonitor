@@ -60,7 +60,7 @@ def test_http_sessions_are_owned_by_the_application_and_closed(monkeypatch):
     first, second = ServiceRuntime(), ServiceRuntime()
     try:
         for runtime in (first, second):
-            assert runtime._bindings["http_json_get"]("https://example.test/data") == {}
+            assert runtime.market_context["http_json_get"]("https://example.test/data") == {}
         assert len(requests_lib.sessions) == 2
         first.close()
         assert requests_lib.sessions[0].closed

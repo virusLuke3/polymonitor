@@ -94,11 +94,17 @@ def test_public_health_redacts_connection_details_and_reports_redis_failure():
     redis = Mock()
     redis.ping.return_value = True
     app = Flask(__name__)
-    app.register_blueprint(create_system_blueprint(SystemRouteDependencies(
-        authenticate_request=Mock(), build_system_health_payload=Mock(), build_seed_health_payload=Mock(),
-        describe_db_target=lambda: "postgres:private-user@private-host/private-db",
-        get_redis_client=lambda: redis,
-    )))
+    app.register_blueprint(
+        create_system_blueprint(
+            SystemRouteDependencies(
+                authenticate_request=Mock(),
+                build_system_health_payload=Mock(),
+                build_seed_health_payload=Mock(),
+                describe_db_target=lambda: "postgres:private-user@private-host/private-db",
+                get_redis_client=lambda: redis,
+            )
+        )
+    )
     client = app.test_client()
     assert client.get("/health").get_json() == {"status": "ok", "database": True, "redis": True}
     redis.ping.side_effect = ConnectionError("private connection details")
@@ -268,6 +274,7 @@ def test_db_helpers_release_lease_when_cursor_creation_fails():
     import pytest
     from unittest.mock import Mock
     from api import db
+
     connection = Mock()
     connection.cursor.side_effect = RuntimeError("cursor unavailable")
     ctx = {"get_connection": lambda _: connection, "DB_PATH": "test", "app": Mock()}
@@ -281,8 +288,14 @@ def test_pool_wait_timeout_identifies_connection_owner_and_recovery():
     import pytest
     from unittest.mock import Mock
     from api.db_pool import ApiPostgresConnectionPool
-    pool = ApiPostgresConnectionPool(Mock(return_value=Mock()), max_size=1,
-        acquire_timeout_seconds=0.01, connect_attempts=1, connect_retry_delay_seconds=0)
+
+    pool = ApiPostgresConnectionPool(
+        Mock(return_value=Mock()),
+        max_size=1,
+        acquire_timeout_seconds=0.01,
+        connect_attempts=1,
+        connect_retry_delay_seconds=0,
+    )
     lease = pool.acquire()
     try:
         with pytest.raises(TimeoutError, match="held_seconds_and_threads=.*MainThread"):
@@ -293,3 +306,24 @@ def test_pool_wait_timeout_identifies_connection_owner_and_recovery():
     finally:
         lease.close()
         pool.close()
+
+
+def test_clickhouse_configuration_and_capacity_are_owned_by_runtime(tmp_path, monkeypatch):
+    from dataclasses import replace
+    from api.runtime import ServiceRuntime
+    from api.services.clickhouse_orderfilled_service import _settings
+
+    base = replace(api_config.load_api_settings(), snapshot_sqlite_path=str(tmp_path / "snapshots.sqlite3"))
+    with (
+        ServiceRuntime(replace(base, clickhouse=api_config.ClickHouseSettings(database="first"))) as first,
+        ServiceRuntime(replace(base, clickhouse=api_config.ClickHouseSettings(database="second"))) as second,
+    ):
+        monkeypatch.setenv("POLYDATA_ORDERFILLED_CLICKHOUSE_DATABASE", "changed_later")
+        assert _settings(first.market_context).database == "first"
+        assert _settings(second.market_context).database == "second"
+        assert first.resources.clickhouse_slots.acquire(blocking=False)
+        assert not first.resources.clickhouse_slots.acquire(blocking=False)
+        assert second.resources.clickhouse_slots.acquire(blocking=False)
+        first.resources.clickhouse_slots.release()
+        second.resources.clickhouse_slots.release()
+        assert not hasattr(first, "_bindings")

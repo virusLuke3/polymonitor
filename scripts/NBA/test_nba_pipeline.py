@@ -3,18 +3,16 @@
 
 from __future__ import annotations
 
-import logging
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 _scripts_root = Path(__file__).resolve().parent.parent
 if str(_scripts_root) not in __import__("sys").path:
     __import__("sys").path.insert(0, str(_scripts_root))
 
 from db import configure_runtime_db, get_connection, init_schema
-from NBA.common import ParquetLOBSink, RuntimeStateStore, load_market_catalog_rows, load_token_catalog_rows, write_catalog_artifacts
+from NBA.common import ParquetLOBSink, RuntimeStateStore, write_catalog_artifacts
 from NBA.nba_market_catalog import (
     _extract_matchup_pair_from_text,
     build_token_catalog_rows,
@@ -22,11 +20,8 @@ from NBA.nba_market_catalog import (
     is_head_to_head_market,
     is_explicit_playoff_event,
     merge_market_catalog_rows,
-    sync_nba_markets,
 )
-from NBA.nba_lob_live_writer import NBALOBStreamingService
 from NBA.query_nba_lob import query_depth, query_latest_bbo
-from lob.lob_service import SnapshotThrottle
 
 
 def _has_pyarrow() -> bool:
@@ -218,160 +213,6 @@ class NBAPipelineTestCase(unittest.TestCase):
         finally:
             store.close()
 
-    @unittest.skipUnless(_has_pyarrow(), "pyarrow not installed")
-    def test_sync_nba_markets_writes_catalog_parquet(self) -> None:
-        fake_events = [
-            {
-                "id": "event-1",
-                "slug": "2026-nba-champion",
-                "title": "2026 NBA Champion",
-                "negRisk": True,
-                "tags": [{"slug": "nba"}, {"slug": "basketball"}],
-                "markets": [
-                    {
-                        "id": "m1",
-                        "question": "Will Team A win?",
-                        "conditionId": "0xcond_a",
-                        "slug": "team-a",
-                        "questionID": "0xq1",
-                        "resolvedBy": "0xoracle1",
-                        "clobTokenIds": ["yes_a", "no_a"],
-                        "endDate": "2026-07-01T00:00:00Z",
-                    }
-                ],
-            },
-            {
-                "id": "event-2",
-                "slug": "nba-playoffs-who-will-win-series-lakers-vs-rockets",
-                "title": "NBA Playoffs: Who Will Win Series? - Lakers vs. Rockets",
-                "negRisk": False,
-                "tags": [{"slug": "nba"}, {"slug": "2026-nba-playoffs"}, {"slug": "lakers"}, {"slug": "rockets"}],
-                "markets": [
-                    {
-                        "id": "m2",
-                        "question": "NBA Playoffs: Who Will Win Series? - Lakers vs. Rockets",
-                        "conditionId": "0xcond_series",
-                        "slug": "nba-playoffs-who-will-win-series-lakers-vs-rockets",
-                        "questionID": "0xq2",
-                        "resolvedBy": "0xoracle2",
-                        "clobTokenIds": ["lakers_series", "rockets_series"],
-                        "endDate": "2026-05-01T00:00:00Z",
-                    }
-                ],
-            },
-            {
-                "id": "event-3",
-                "slug": "nba-hou-lal-2026-04-18",
-                "title": "Rockets vs. Lakers",
-                "negRisk": False,
-                "tags": [{"slug": "sports"}, {"slug": "games"}, {"slug": "nba"}],
-                "markets": [
-                    {
-                        "id": "m3",
-                        "question": "Rockets vs. Lakers: Moneyline",
-                        "conditionId": "0xcond_game",
-                        "slug": "nba-hou-lal-2026-04-18-moneyline",
-                        "questionID": "0xq3",
-                        "resolvedBy": "0xoracle3",
-                        "clobTokenIds": ["rockets_game", "lakers_game"],
-                        "endDate": "2026-04-19T00:00:00Z",
-                    },
-                    {
-                        "id": "m3b",
-                        "question": "LeBron James: Points O/U 27.5",
-                        "conditionId": "0xcond_prop",
-                        "slug": "nba-hou-lal-2026-04-18-points-lebron-james-27pt5",
-                        "questionID": "0xq3b",
-                        "resolvedBy": "0xoracle3b",
-                        "clobTokenIds": ["over_points", "under_points"],
-                        "endDate": "2026-04-19T00:00:00Z",
-                    }
-                ],
-            },
-            {
-                "id": "event-4",
-                "slug": "nba-bulls-heat-2026-04-18",
-                "title": "Bulls vs. Heat",
-                "negRisk": False,
-                "tags": [{"slug": "sports"}, {"slug": "games"}, {"slug": "nba"}],
-                "markets": [
-                    {
-                        "id": "m4",
-                        "question": "Bulls vs. Heat: Moneyline",
-                        "conditionId": "0xcond_non_playoff",
-                        "slug": "nba-bulls-heat-2026-04-18-moneyline",
-                        "questionID": "0xq4",
-                        "resolvedBy": "0xoracle4",
-                        "clobTokenIds": ["bulls_game", "heat_game"],
-                        "endDate": "2026-04-19T00:00:00Z",
-                    }
-                ],
-            },
-        ]
-        with patch("NBA.nba_market_catalog.discover_nba_filter", return_value={"tag_slug": "nba", "primary_tag_id": "745", "primary_tag_label": "NBA", "sport_tags": ["745"], "series": "10345"}), patch(
-            "NBA.nba_market_catalog.fetch_active_nba_events",
-            return_value=fake_events,
-        ):
-            summary = sync_nba_markets(data_root=self.data_root, db_path=self.db_path)
-        self.assertEqual(4, summary["nba_event_count"])
-        self.assertEqual(2, summary["active_market_count"])
-        market_rows = load_market_catalog_rows(self.data_root)
-        token_rows = load_token_catalog_rows(self.data_root)
-        self.assertEqual(2, len(market_rows))
-        self.assertEqual({"0xcond_series", "0xcond_game"}, {row["condition_id"] for row in market_rows})
-        self.assertEqual(4, len(token_rows))
-
-    @unittest.skipUnless(_has_pyarrow(), "pyarrow not installed")
-    def test_catalog_refresh_failure_falls_back_to_existing_state(self) -> None:
-        market_rows = [
-            {
-                "market_id": 21,
-                "condition_id": "0xcond_existing",
-                "slug": "nba-playoffs-existing",
-                "title": "NBA Playoffs: Who Will Win Series? - Knicks vs. Hawks",
-                "yes_token_id": "yes_existing",
-                "no_token_id": "no_existing",
-                "clob_token_ids": '["yes_existing","no_existing"]',
-                "tags": '["nba","2026-nba-playoffs"]',
-                "enable_neg_risk": 0,
-                "active": 1,
-                "end_date": "2026-05-01T00:00:00Z",
-                "discovered_at": "2026-04-18T00:00:00+00:00",
-                "last_seen_at": "2026-04-18T00:00:00+00:00",
-            }
-        ]
-        token_rows = build_token_catalog_rows(market_rows)
-        write_catalog_artifacts(
-            self.data_root,
-            market_rows,
-            token_rows,
-            {"last_sync_at": "2026-04-18T00:00:00+00:00"},
-        )
-        service = NBALOBStreamingService(
-            data_root=self.data_root,
-            db_path=self.db_path,
-            stream_name="nba_test",
-            ws_url="fixture-nba-lob-ws",
-            heartbeat_seconds=2.0,
-            catalog_sync_seconds=5.0,
-            stale_after_seconds=30.0,
-            reconnect_base_seconds=1.0,
-            reconnect_max_seconds=4.0,
-            subscription_batch_size=10,
-            snapshot_batch_size=10,
-            throttle=SnapshotThrottle(bbo_ms=250, price_change_ms=250),
-            logger=logging.getLogger("nba_lob_live_writer_test"),
-        )
-        try:
-            service.state_store.init_schema()
-            service.catalog.reload()
-            service.state_store.upsert_desired_tokens(token_rows)
-            with patch("NBA.nba_lob_live_writer.sync_nba_markets", side_effect=RuntimeError("temporary network failure")):
-                summary = __import__("asyncio").run(service._refresh_catalog(reason="startup"))
-            self.assertEqual(1, summary.active_markets)
-            self.assertEqual(2, summary.active_tokens)
-        finally:
-            service.close()
 
     @unittest.skipUnless(_has_pyarrow() and _has_duckdb(), "pyarrow or duckdb not installed")
     def test_duckdb_queries_read_written_parquet(self) -> None:

@@ -6,22 +6,12 @@ from typing import Any
 
 from flask import Blueprint, jsonify, request
 
-from api.context import resolve_route_callable
-
 
 @dataclass(frozen=True)
 class BootstrapRouteDependencies:
     get_dashboard_payload_cached: Callable[[], Any]
     get_bootstrap_payload_cached: Callable[[], Any]
     search_markets: Callable[..., Any]
-
-    @classmethod
-    def from_context(cls, context: Mapping[str, Any]) -> BootstrapRouteDependencies:
-        return cls(
-            get_dashboard_payload_cached=resolve_route_callable(context, "get_dashboard_payload_cached"),
-            get_bootstrap_payload_cached=resolve_route_callable(context, "get_bootstrap_payload_cached"),
-            search_markets=resolve_route_callable(context, "search_markets"),
-        )
 
 
 def create_bootstrap_blueprint(dependencies: BootstrapRouteDependencies) -> Blueprint:

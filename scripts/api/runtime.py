@@ -43,7 +43,11 @@ class ServiceRuntime:
         self, settings: ApiSettings | None = None, *, application: ApplicationLog | None = None, connection_factory=None
     ):
         self.SETTINGS = settings or load_api_settings()
-        self.resources = RuntimeResources()
+        self.resources = RuntimeResources(
+            clickhouse=self.SETTINGS.clickhouse,
+            snapshot_workers=self.SETTINGS.snapshot_refresh_workers,
+            workspace_workers=self.SETTINGS.workspace_refresh_workers,
+        )
         self.app = application or SimpleNamespace(logger=logging.getLogger("polydata.services"))
         self.ALLOWED_ORIGINS = set(self.SETTINGS.allowed_origins)
         self._dashboard_cache_lock = threading.Lock()
@@ -64,7 +68,7 @@ class ServiceRuntime:
         self._snapshot_prewarm_owner_fd = None
         from api.bindings import bind_services
 
-        self._bindings = bind_services(self)
+        bind_services(self)
 
     def _runtime_coordination_dir(self) -> Path:
         candidate = Path(self.SETTINGS.snapshot_sqlite_path).expanduser()

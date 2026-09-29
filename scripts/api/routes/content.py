@@ -7,8 +7,6 @@ from typing import Any
 
 from flask import Blueprint, jsonify, request
 
-from api.context import resolve_route_callable
-
 
 @dataclass(frozen=True)
 class ContentRouteDependencies:
@@ -17,14 +15,6 @@ class ContentRouteDependencies:
     get_latest_content_payload: Callable[..., dict[str, Any]]
     get_runtime_content_latest: Callable[..., dict[str, Any]]
 
-    @classmethod
-    def from_context(cls, context: Mapping[str, Any]) -> ContentRouteDependencies:
-        return cls(
-            get_market_by_id=resolve_route_callable(context, "get_market_by_id"),
-            get_related_content_payload=resolve_route_callable(context, "get_related_content_payload"),
-            get_latest_content_payload=resolve_route_callable(context, "get_latest_content_payload"),
-            get_runtime_content_latest=resolve_route_callable(context, "get_runtime_content_latest"),
-        )
 
 def _publish_latest_content(payload: dict) -> None:
     if request.headers.get("X-PolyData-Telegram-Publisher") == "1":
@@ -58,7 +48,12 @@ def _runtime_content_fallback(
     dependencies: ContentRouteDependencies,
     market_id: int | None = None,
 ) -> dict:
-    enabled = str(os.environ.get("POLYDATA_CONTENT_API_REFRESH_ENABLED", "0")).strip().lower() in {"1", "true", "yes", "on"}
+    enabled = str(os.environ.get("POLYDATA_CONTENT_API_REFRESH_ENABLED", "0")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
     if not enabled:
         payload = {"items": [], "sourceMode": "database-empty", "degraded": True}
     else:

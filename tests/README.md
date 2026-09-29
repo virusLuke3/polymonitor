@@ -44,6 +44,21 @@ cover different database targets in two apps, health-cache and HTTP-session
 isolation, shutdown during connection acquisition, refresh capacity/deduplication,
 and environment precedence/opt-out without import-time loading.
 
+Market cache regressions check metadata-only detail reads, shared build limits,
+and lease release after errors. Trade reads keep token identity checks and a
+bounded scan budget; an incomplete scan is unavailable, not an empty history.
+The existing trades endpoint accepts `before=block_number:log_index:tx_hash`
+for stable descending pagination; offsets above 5000 are rejected. Block-range
+watermarks share a five-second cache. Source-label gaps remain explicit until
+the upstream semantic contract is available. Charts read ClickHouse once and
+use the outer workspace cache. Address trades seek through native maker/taker indexes across history,
+then read selected canonical facts. Dense ranges are estimated and split;
+sparse and empty histories are tested without a fixed lookback limit.
+An incomplete index or a changed event identity is unavailable. They do not fall back to legacy SQL or the old address cashflow table. Address
+pagination returns `beforeBlockNumber`, `beforeLogIndex`, and `beforeTxHash`;
+`beforeTs` can be null when the block timestamp is missing. Self-trades appear
+once with `addressRole=both`.
+
 World Cup fixtures fix the schedule clock; tests must not depend on today's
 date or workstation credentials. Optional NBA archive reader checks require
 pyarrow and duckdb and report a skip when absent. Unit tests and a successful

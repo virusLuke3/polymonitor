@@ -33,7 +33,7 @@ fi
   "${ROOT_DIR}/scripts" \
   "${ROOT_DIR}/telegram" \
   "${ROOT_DIR}/tests"
-"${PYTHON_BIN}" "${ROOT_DIR}/scripts/qa/run_pytest.py"
+PYTHONDONTWRITEBYTECODE=1 "${PYTHON_BIN}" -m pytest -q "${ROOT_DIR}/tests"
 npm --prefix "${ROOT_DIR}/webpage" audit --audit-level=high
 npm --prefix "${ROOT_DIR}/webpage" run build
 

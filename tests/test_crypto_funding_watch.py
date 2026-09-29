@@ -1,4 +1,6 @@
 from __future__ import annotations
+from conftest import missing_route_dependency
+from api.routes import runtime_panels as _route_runtime_panels
 
 from api.routes.runtime_panels import RuntimePanelRouteDependencies
 
@@ -26,7 +28,9 @@ class FakeApp:
 
 
 class CryptoFundingWatchTestCase(unittest.TestCase):
-    def make_context(self, *, bybit_fails: bool = False, binance_url: str = "fixture-binance", bybit_url: str = "fixture-bybit") -> Dict[str, Any]:
+    def make_context(
+        self, *, bybit_fails: bool = False, binance_url: str = "fixture-binance", bybit_url: str = "fixture-bybit"
+    ) -> Dict[str, Any]:
         settings = SimpleNamespace(
             crypto_funding_watch_api_url=binance_url,
             crypto_funding_watch_bybit_api_url=bybit_url,
@@ -77,7 +81,7 @@ class CryptoFundingWatchTestCase(unittest.TestCase):
                                 "markPrice": "3200.0",
                                 "indexPrice": "3199.0",
                                 "nextFundingTime": "1777363200000",
-                            }
+                            },
                         ]
                     }
                 }
@@ -156,7 +160,18 @@ class CryptoFundingWatchTestCase(unittest.TestCase):
             "get_suspicious_trades_snapshot": lambda limit=12: {"limit": limit},
             "get_new_market_signals_snapshot": lambda limit=12: {"limit": limit},
         }
-        app.register_blueprint(create_runtime_panels_blueprint(RuntimePanelRouteDependencies.from_context(helpers)))
+        app.register_blueprint(
+            create_runtime_panels_blueprint(
+                RuntimePanelRouteDependencies(
+                    panel_context=_route_runtime_panels.RuntimePanelContext.from_context(helpers),
+                    utc_now_iso=helpers.get("utc_now_iso", missing_route_dependency),
+                    natural_hazard_map_snapshot=helpers.get("get_natural_hazard_map_snapshot", None),
+                    natural_hazard_event_detail=helpers.get("get_natural_hazard_event_detail", None),
+                    natural_hazard_related_markets=helpers.get("get_natural_hazard_related_markets", None),
+                    aviation_viewport_snapshot=helpers.get("get_aviation_viewport_snapshot", None),
+                )
+            )
+        )
 
         with app.test_client() as client:
             invalid = client.get("/runtime/crypto/funding-watch?limit=nope")

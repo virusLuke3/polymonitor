@@ -316,17 +316,15 @@ def test_docker_probe_transport_keeps_password_out_of_argv(monkeypatch) -> None:
     monkeypatch.setattr(
         subject.clickhouse_orderfilled_service,
         "_settings",
-        lambda: {
-            "http_url": "",
-            "container": "clickhouse",
-            "database": "poly_orderfilled",
-            "user": "reader",
-            "password": "top-secret",
-            "table": "orderfilled_fact",
-        },
+        lambda ctx: __import__("api.config", fromlist=["ClickHouseSettings"]).ClickHouseSettings(
+            container="clickhouse",
+            database="poly_orderfilled",
+            user="reader",
+            password="top-secret",
+        ),
     )
 
-    rows = subject._query_json_rows_safe(
+    rows = subject.clickhouse_orderfilled_service._query_json_rows(
         {"app": object()},
         "SELECT 1 FORMAT JSONEachRow",
         timeout_seconds=0.5,

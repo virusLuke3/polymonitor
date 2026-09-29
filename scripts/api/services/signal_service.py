@@ -100,10 +100,10 @@ def _whale_route_key(row: Dict[str, Any]) -> Optional[tuple[str, str]]:
     return (market_id, route)
 
 
-def _clickhouse_source_states(status: str, *, rows: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+def _clickhouse_source_states(ctx: dict, status: str, *, rows: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     states: Dict[str, Any] = {
         "clickhouse": "ok" if status == "ok" else status,
-        "clickhouseMode": clickhouse_orderfilled_service.clickhouse_read_mode(),
+        "clickhouseMode": clickhouse_orderfilled_service.clickhouse_read_mode(ctx),
     }
     latest_block = None
     for row in rows or []:
@@ -344,13 +344,22 @@ def _get_stale_first_runtime_snapshot(
 ) -> Dict[str, Any]:
     resources = runtime_resources(ctx)
     cached = _read_cached_signal_snapshot(
-        ctx, namespace=namespace, cache_key=cache_key, ttl_seconds=ttl_seconds,
+        ctx,
+        namespace=namespace,
+        cache_key=cache_key,
+        ttl_seconds=ttl_seconds,
     )
     if cached is not None:
         if cached.get("status") == "stale":
             _schedule_runtime_snapshot_refresh(
-                ctx, namespace=namespace, cache_key=cache_key, ttl_seconds=ttl_seconds,
-                builder=builder, refresh_state_key=refresh_state_key, label=label, reason="stale-hit",
+                ctx,
+                namespace=namespace,
+                cache_key=cache_key,
+                ttl_seconds=ttl_seconds,
+                builder=builder,
+                refresh_state_key=refresh_state_key,
+                label=label,
+                reason="stale-hit",
             )
         return cached
 
@@ -489,7 +498,7 @@ def _build_whale_trades_payload(ctx: dict, limit: int = 14) -> Dict[str, Any]:
             "generatedAt": ctx["utc_now_iso"](),
             "status": status,
             "sourceMode": source_mode,
-            "sourceStates": _clickhouse_source_states("ok" if status == "ok" else status, rows=rows),
+            "sourceStates": _clickhouse_source_states(ctx, "ok" if status == "ok" else status, rows=rows),
         },
         generated_at=ctx["utc_now_iso"](),
     )
@@ -502,16 +511,17 @@ def fetch_live_whale_trades_payload(ctx: dict, limit: int = 14) -> Dict[str, Any
     )
 
 
-def get_whale_trades_snapshot(
-    ctx: dict, limit: int = DEFAULT_WHALE_TRADES_LIMIT
-) -> Dict[str, Any]:
+def get_whale_trades_snapshot(ctx: dict, limit: int = DEFAULT_WHALE_TRADES_LIMIT) -> Dict[str, Any]:
     fetch_limit = max(DEFAULT_WHALE_TRADES_LIMIT, int(limit))
     cache_key = build_whale_trades_cache_key(limit=fetch_limit)
     payload = _get_stale_first_runtime_snapshot(
-        ctx, namespace=SIGNAL_SNAPSHOT_NAMESPACE_WHALES, cache_key=cache_key,
+        ctx,
+        namespace=SIGNAL_SNAPSHOT_NAMESPACE_WHALES,
+        cache_key=cache_key,
         ttl_seconds=ctx["SIGNAL_RUNTIME_TTL_SECONDS"],
         builder=lambda: fetch_live_whale_trades_payload(ctx, limit=fetch_limit),
-        refresh_state_key=f"whales:{cache_key}", label="whales-snapshot",
+        refresh_state_key=f"whales:{cache_key}",
+        label="whales-snapshot",
     )
     return _limit_signal_payload(ctx, payload, limit=limit)
 
@@ -543,10 +553,13 @@ def get_suspicious_trades_snapshot(ctx: dict, limit: int = DEFAULT_SUSPICIOUS_TR
     fetch_limit = max(DEFAULT_SUSPICIOUS_TRADES_LIMIT, int(limit))
     cache_key = build_suspicious_trades_cache_key(limit=fetch_limit)
     payload = _get_stale_first_runtime_snapshot(
-        ctx, namespace=SIGNAL_SNAPSHOT_NAMESPACE_SUSPICIOUS, cache_key=cache_key,
+        ctx,
+        namespace=SIGNAL_SNAPSHOT_NAMESPACE_SUSPICIOUS,
+        cache_key=cache_key,
         ttl_seconds=ctx["SIGNAL_RUNTIME_TTL_SECONDS"],
         builder=lambda: fetch_live_suspicious_trades_payload(ctx, limit=fetch_limit),
-        refresh_state_key=f"suspicious:{cache_key}", label="suspicious-snapshot",
+        refresh_state_key=f"suspicious:{cache_key}",
+        label="suspicious-snapshot",
     )
     return _limit_signal_payload(ctx, payload, limit=limit)
 
@@ -739,7 +752,7 @@ def _build_alpha_signal_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
             "generatedAt": ctx["utc_now_iso"](),
             "status": status,
             "sourceMode": trade_source_status,
-            "sourceStates": _clickhouse_source_states(source_state_status, rows=source_rows),
+            "sourceStates": _clickhouse_source_states(ctx, source_state_status, rows=source_rows),
         },
         generated_at=ctx["utc_now_iso"](),
     )

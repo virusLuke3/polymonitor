@@ -1,4 +1,6 @@
 from __future__ import annotations
+from conftest import missing_route_dependency
+from api.routes import runtime_panels as _route_runtime_panels
 
 from api.routes.runtime_panels import RuntimePanelRouteDependencies
 
@@ -90,7 +92,9 @@ class FakeRequests:
         self.last_get_headers: Dict[str, str] | None = None
         self.last_get_url: str | None = None
 
-    def get(self, url: str, params: Dict[str, Any] | None = None, timeout: int = 20, headers: Dict[str, str] | None = None):
+    def get(
+        self, url: str, params: Dict[str, Any] | None = None, timeout: int = 20, headers: Dict[str, str] | None = None
+    ):
         self.last_get_url = url
         self.last_get_headers = headers
         if url == "sdn-url":
@@ -141,13 +145,19 @@ class FakeRequests:
             )
         raise RuntimeError(f"unexpected url {url}")
 
-    def post(self, url: str, data: Dict[str, Any] | None = None, timeout: int = 20, headers: Dict[str, str] | None = None):
+    def post(
+        self, url: str, data: Dict[str, Any] | None = None, timeout: int = 20, headers: Dict[str, str] | None = None
+    ):
         if url == "acled-token-url":
             grant_type = (data or {}).get("grant_type")
             if grant_type == "refresh_token":
                 return FakeResponse(
                     b'{"access_token":"refreshed-acled-token","refresh_token":"refresh-2","expires_in":86400}',
-                    json_data={"access_token": "refreshed-acled-token", "refresh_token": "refresh-2", "expires_in": 86400},
+                    json_data={
+                        "access_token": "refreshed-acled-token",
+                        "refresh_token": "refresh-2",
+                        "expires_in": 86400,
+                    },
                 )
             return FakeResponse(
                 b'{"access_token":"fake-acled-token","refresh_token":"refresh-1","expires_in":86400}',
@@ -390,7 +400,16 @@ class GeoSanctionsShockSeedBuilderTestCase(unittest.TestCase):
         self.assertEqual("refresh-2", stored["refresh_token"])
 
     def test_settings_accepts_worldmonitor_ucdp_alias(self):
-        previous = {key: os.environ.get(key) for key in ("POLYDATA_GEO_SHOCK_UCDP_ACCESS_TOKEN", "UCDP_API_TOKEN", "UCDP_API_Token", "UCDP_ACCESS_TOKEN", "UC_DP_KEY")}
+        previous = {
+            key: os.environ.get(key)
+            for key in (
+                "POLYDATA_GEO_SHOCK_UCDP_ACCESS_TOKEN",
+                "UCDP_API_TOKEN",
+                "UCDP_API_Token",
+                "UCDP_ACCESS_TOKEN",
+                "UC_DP_KEY",
+            )
+        }
         try:
             for key in previous:
                 os.environ.pop(key, None)
@@ -406,9 +425,10 @@ class GeoSanctionsShockSeedBuilderTestCase(unittest.TestCase):
                     os.environ[key] = value
 
 
-
 class GeoSanctionsShockSnapshotReadPathTestCase(unittest.TestCase):
-    def make_context(self, *, redis_payload: Dict[str, Any] | None = None, stale_payload: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    def make_context(
+        self, *, redis_payload: Dict[str, Any] | None = None, stale_payload: Dict[str, Any] | None = None
+    ) -> Dict[str, Any]:
         settings = SimpleNamespace(
             geo_shock_source_url="https://ofac.treasury.gov/sanctions-list-service",
             geo_shock_ttl_seconds=900,
@@ -425,13 +445,20 @@ class GeoSanctionsShockSnapshotReadPathTestCase(unittest.TestCase):
             )
         redis_cache: Dict[tuple[str, str], Dict[str, Any]] = {}
         if redis_payload is not None:
-            redis_cache[(geo_sanctions_shock_service.GEO_SHOCK_SNAPSHOT_NAMESPACE, geo_sanctions_shock_service.GEO_SHOCK_CACHE_KEY)] = redis_payload
+            redis_cache[
+                (
+                    geo_sanctions_shock_service.GEO_SHOCK_SNAPSHOT_NAMESPACE,
+                    geo_sanctions_shock_service.GEO_SHOCK_CACHE_KEY,
+                )
+            ] = redis_payload
         return {
             "SETTINGS": settings,
             "app": FakeApp(),
             "SNAPSHOT_STORE": store,
             "get_cached_json": lambda namespace, cache_key: redis_cache.get((namespace, cache_key)),
-            "set_cached_json": lambda namespace, cache_key, payload, ttl_seconds: redis_cache.__setitem__((namespace, cache_key), payload),
+            "set_cached_json": lambda namespace, cache_key, payload, ttl_seconds: redis_cache.__setitem__(
+                (namespace, cache_key), payload
+            ),
             "utc_now_iso": lambda: "2026-04-28T00:00:00Z",
         }
 
@@ -499,7 +526,18 @@ class GeoSanctionsShockSnapshotReadPathTestCase(unittest.TestCase):
             "get_suspicious_trades_snapshot": lambda limit=12: {"limit": limit},
             "get_new_market_signals_snapshot": lambda limit=12: {"limit": limit},
         }
-        app.register_blueprint(create_runtime_panels_blueprint(RuntimePanelRouteDependencies.from_context(helpers)))
+        app.register_blueprint(
+            create_runtime_panels_blueprint(
+                RuntimePanelRouteDependencies(
+                    panel_context=_route_runtime_panels.RuntimePanelContext.from_context(helpers),
+                    utc_now_iso=helpers.get("utc_now_iso", missing_route_dependency),
+                    natural_hazard_map_snapshot=helpers.get("get_natural_hazard_map_snapshot", None),
+                    natural_hazard_event_detail=helpers.get("get_natural_hazard_event_detail", None),
+                    natural_hazard_related_markets=helpers.get("get_natural_hazard_related_markets", None),
+                    aviation_viewport_snapshot=helpers.get("get_aviation_viewport_snapshot", None),
+                )
+            )
+        )
 
         with app.test_client() as client:
             invalid = client.get("/runtime/world/geo-sanctions-shock?limit=oops")
@@ -519,7 +557,9 @@ class GeoSanctionsShockWatcherTestCase(unittest.TestCase):
         snapshot_dir = tempfile.TemporaryDirectory()
         self.addCleanup(snapshot_dir.cleanup)
         watcher.snapshot_store = SnapshotStore(str(Path(snapshot_dir.name) / "watcher.sqlite3"))
-        watcher.seed_meta_store = SeedMetaStore(redis_client=watcher.redis_client, redis_prefix="polydata:", snapshot_store=watcher.snapshot_store)
+        watcher.seed_meta_store = SeedMetaStore(
+            redis_client=watcher.redis_client, redis_prefix="polydata:", snapshot_store=watcher.snapshot_store
+        )
         watcher.requests = FakeRequests()
         watcher._acled_auth_state = None
         watcher._http_json_get = lambda url, params=None, timeout=15, headers=None: {
@@ -584,7 +624,14 @@ class GeoSanctionsShockWatcherTestCase(unittest.TestCase):
         watcher = self.make_watcher()
         previous = {
             "status": "ok",
-            "summary": {"targetSummary": "IRAN / RUSSIA", "targetLabels": ["IRAN", "RUSSIA"], "newSanctionsCount": 2, "hotspotCount": 1, "nuclearRisk": "elevated", "militaryFeed": "active"},
+            "summary": {
+                "targetSummary": "IRAN / RUSSIA",
+                "targetLabels": ["IRAN", "RUSSIA"],
+                "newSanctionsCount": 2,
+                "hotspotCount": 1,
+                "nuclearRisk": "elevated",
+                "militaryFeed": "active",
+            },
             "items": [{"id": "seed-1"}],
             "targetBreakdown": [{"label": "IRAN", "count": 2}],
             "linkedMarkets": [],

@@ -6,7 +6,6 @@ from typing import Any
 
 from flask import Blueprint, jsonify, request
 
-from api.context import resolve_route_callable
 from api.services import outcome_semantics_service
 
 
@@ -25,28 +24,6 @@ class MarketRouteDependencies:
     get_market_workspace_payload: Callable[[int], dict[str, Any]]
     sanitize_payload: Callable[..., Any]
     get_market_focus_tile_payload: Callable[[int], dict[str, Any]]
-
-    @classmethod
-    def from_context(cls, context: Mapping[str, Any]) -> MarketRouteDependencies:
-        query_context = {
-            "query_all": context.get("query_all"),
-            "get_backend": context.get("get_backend"),
-        }
-        return cls(
-            sanitize_payload=lambda payload, **kw: outcome_semantics_service.sanitize_public_market_payload(query_context, payload, **kw),
-            get_markets_payload=resolve_route_callable(context, "get_markets_payload"),
-            get_market_by_id=resolve_route_callable(context, "get_market_by_id"),
-            get_market_by_slug=resolve_route_callable(context, "get_market_by_slug"),
-            normalize_market=resolve_route_callable(context, "normalize_market"),
-            get_trades_by_market_id=resolve_route_callable(context, "get_trades_by_market_id"),
-            get_recent_trades_snapshot=resolve_route_callable(context, "get_recent_trades_snapshot"),
-            get_market_oracle_payload=resolve_route_callable(context, "get_market_oracle_payload"),
-            get_recent_oracle_snapshot=resolve_route_callable(context, "get_recent_oracle_snapshot"),
-            get_market_detail_payload=resolve_route_callable(context, "get_market_detail_payload"),
-            get_market_chart_payload=resolve_route_callable(context, "get_market_chart_payload"),
-            get_market_workspace_payload=resolve_route_callable(context, "get_market_workspace_payload"),
-            get_market_focus_tile_payload=resolve_route_callable(context, "get_market_focus_tile_payload"),
-        )
 
 
 def create_markets_blueprint(dependencies: MarketRouteDependencies) -> Blueprint:
@@ -84,9 +61,7 @@ def create_markets_blueprint(dependencies: MarketRouteDependencies) -> Blueprint
         market = dependencies.get_market_by_id(market_id)
         if not market:
             return jsonify({"error": "Market not found", "marketId": market_id}), 404
-        normalized = outcome_semantics_service.bind_trusted_oracle_logical_fields(
-            dependencies.normalize_market(market)
-        )
+        normalized = outcome_semantics_service.bind_trusted_oracle_logical_fields(dependencies.normalize_market(market))
         return jsonify(sanitize(normalized, market_id=market_id))
 
     @bp.route("/markets/<int:market_id>/trades", methods=["GET"])
@@ -187,9 +162,7 @@ def create_markets_blueprint(dependencies: MarketRouteDependencies) -> Blueprint
             return jsonify({"error": "Market not found", "slug": slug}), 404
         return jsonify(
             sanitize(
-                outcome_semantics_service.bind_trusted_oracle_logical_fields(
-                    dependencies.normalize_market(market)
-                ),
+                outcome_semantics_service.bind_trusted_oracle_logical_fields(dependencies.normalize_market(market)),
                 market_id=int(market.get("id") or 0) or None,
             )
         )

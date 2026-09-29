@@ -1,4 +1,6 @@
 from __future__ import annotations
+from conftest import missing_route_dependency
+from api.routes import markets as _route_markets
 
 from unittest.mock import Mock, patch
 
@@ -43,7 +45,11 @@ def test_chart_reads_once_without_nested_cache_or_legacy_trade_fallback():
     for source_rows, status in (([], "missing"), (None, "unavailable")):
         with patch.object(clickhouse_orderfilled_service, "get_price_series", return_value=source_rows) as read:
             result = market_service._get_market_chart_payload(
-                deps, 7, market={"id": 7}, price={"volume24h": "1"}, include_runtime_series=False,
+                deps,
+                7,
+                market={"id": 7},
+                price={"volume24h": "1"},
+                include_runtime_series=False,
             )
         read.assert_called_once_with({}, 7, limit=400)
         assert result["points"] == [] and result["historyStatus"] == status
@@ -53,14 +59,27 @@ def test_workspace_evidence_preserves_missing_price_and_oracle_identity_mismatch
     identity = {"conditionId": "0xabc"}
     oracle = {"marketId": 8, "timeline": []}
     health = market_service._workspace_health(
-        market_id=7, identity=identity, price=None, chart=None,
-        oracle_payload=oracle, diagnostics=None, group=None,
-        selected_outcome=None, serving_source="postgres",
+        market_id=7,
+        identity=identity,
+        price=None,
+        chart=None,
+        oracle_payload=oracle,
+        diagnostics=None,
+        group=None,
+        selected_outcome=None,
+        serving_source="postgres",
     )
     evidence = market_service._workspace_evidence(
-        market_id=7, identity=identity, price=None, chart=None, trades=[],
-        oracle_payload=oracle, group=None, health=health,
-        serving_source="postgres", serving_updated_at=None,
+        market_id=7,
+        identity=identity,
+        price=None,
+        chart=None,
+        trades=[],
+        oracle_payload=oracle,
+        group=None,
+        health=health,
+        serving_source="postgres",
+        serving_updated_at=None,
         generated_at="2026-09-28T00:00:00Z",
     )
 
@@ -139,7 +158,10 @@ def test_closed_market_replaces_stale_orderbook_with_authoritative_empty_payload
     dependencies = market_workspace_cache_service.MarketWorkspaceCacheDependencies(
         resources=RuntimeResources(),
         cache=Mock(),
-        build_detail=Mock(), build_chart=Mock(), build_flow=Mock(), build_lob=Mock(),
+        build_detail=Mock(),
+        build_chart=Mock(),
+        build_flow=Mock(),
+        build_lob=Mock(),
         get_market_by_id=lambda market_id: {"id": market_id, "status": "Closed", "is_trading_closed": True},
         application=type("App", (), {"logger": _Logger()})(),
         snapshot_store=snapshot_store,
@@ -180,14 +202,26 @@ def test_closed_market_replaces_stale_orderbook_with_authoritative_empty_payload
 
 def test_detail_builder_does_not_read_chart_or_trades():
     deps = market_service.MarketDetailDependencies(
-        source={}, application=Mock(), lookup=Mock(), serving=Mock(), price=Mock(), oracle=Mock(),
-        normalize_market=lambda row: dict(row), utc_now_iso=lambda: "2026-09-28T00:00:00Z",
+        source={},
+        application=Mock(),
+        lookup=Mock(),
+        serving=Mock(),
+        price=Mock(),
+        oracle=Mock(),
+        normalize_market=lambda row: dict(row),
+        utc_now_iso=lambda: "2026-09-28T00:00:00Z",
     )
     with (
         patch.object(market_service, "_get_market_by_id", return_value={"id": 7, "condition_id": "c"}) as lookup,
-        patch.object(market_service, "_read_market_workspace_detail_payload", return_value={
-            "price": {"latestYesPrice": "0.4"}, "chart": {"points": ["stale"]}, "trades": ["stale"],
-        }),
+        patch.object(
+            market_service,
+            "_read_market_workspace_detail_payload",
+            return_value={
+                "price": {"latestYesPrice": "0.4"},
+                "chart": {"points": ["stale"]},
+                "trades": ["stale"],
+            },
+        ),
         patch.object(market_service, "_get_market_oracle_payload", return_value={"timeline": []}),
         patch.object(market_service, "_get_market_chart_payload", side_effect=AssertionError("unexpected chart read")),
         patch.object(market_service, "get_trades_by_market_id", side_effect=AssertionError("unexpected trade read")),
@@ -198,8 +232,10 @@ def test_detail_builder_does_not_read_chart_or_trades():
     assert payload["health"]["chartStatus"] == "not-loaded"
     assert next(c for c in payload["evidence"]["claims"] if c["id"] == "trades")["status"] == "not-loaded"
     combined = market_service.assemble_market_workspace(
-        payload, chart={"points": [], "historyStatus": "missing"},
-        flow={"items": [], "status": "unavailable"}, lob={"bookStatus": "live"},
+        payload,
+        chart={"points": [], "historyStatus": "missing"},
+        flow={"items": [], "status": "unavailable"},
+        lob={"bookStatus": "live"},
     )
     assert combined["health"]["lobStatus"] == "live"
     assert next(c for c in combined["evidence"]["claims"] if c["id"] == "trades")["status"] == "unavailable"
@@ -209,13 +245,20 @@ def test_cache_builds_share_admission_and_deduplicate_cold_and_background_reads(
     import threading
     from api.cache import CacheState
 
-    resources = RuntimeResources(workspace_slots=threading.BoundedSemaphore(1))
+    resources = RuntimeResources(workspace_workers=1)
     store = Mock()
     store.get.return_value = store.get_stale.return_value = None
     app = Mock()
     deps = market_workspace_cache_service.MarketWorkspaceCacheDependencies(
-        resources=resources, cache=CacheState(resources, app, store), application=app, snapshot_store=store,
-        build_detail=Mock(), build_chart=Mock(), build_flow=Mock(), build_lob=Mock(), get_market_by_id=Mock(),
+        resources=resources,
+        cache=CacheState(resources, app, store),
+        application=app,
+        snapshot_store=store,
+        build_detail=Mock(),
+        build_chart=Mock(),
+        build_flow=Mock(),
+        build_lob=Mock(),
+        get_market_by_id=Mock(),
         utc_now_iso=lambda: "now",
     )
     started, release = threading.Event(), threading.Event()
@@ -246,29 +289,46 @@ def test_failed_build_releases_local_and_redis_leases():
     import threading
     from api.cache import CacheState
 
-    resources = RuntimeResources(workspace_slots=threading.BoundedSemaphore(1))
+    resources = RuntimeResources(workspace_workers=1)
     store, app, redis = Mock(), Mock(), Mock()
     store.get.return_value = store.get_stale.return_value = None
     redis.get.return_value = None
     deps = market_workspace_cache_service.MarketWorkspaceCacheDependencies(
-        resources=resources, cache=CacheState(resources, app, store, redis_url="redis://test", redis_module=Mock(), redis_client=redis),
-        application=app, snapshot_store=store, build_detail=Mock(), build_chart=Mock(), build_flow=Mock(),
-        build_lob=Mock(), get_market_by_id=Mock(), utc_now_iso=lambda: "now",
+        resources=resources,
+        cache=CacheState(resources, app, store, redis_url="redis://test", redis_module=Mock(), redis_client=redis),
+        application=app,
+        snapshot_store=store,
+        build_detail=Mock(),
+        build_chart=Mock(),
+        build_flow=Mock(),
+        build_lob=Mock(),
+        get_market_by_id=Mock(),
+        utc_now_iso=lambda: "now",
     )
     try:
         result = market_workspace_cache_service._cached_layer(
-            deps, layer="flow", cache_key="7", ttl_seconds=8, builder=Mock(side_effect=TimeoutError),
+            deps,
+            layer="flow",
+            cache_key="7",
+            ttl_seconds=8,
+            builder=Mock(side_effect=TimeoutError),
         )
         assert result["payload"]["status"] == "unavailable"
         redis.lock.return_value.release.assert_called_once()
-        redis.lock.assert_called_once_with("polydata:build:snapshot:market-workspace:flow:7", timeout=180, thread_local=False)
+        redis.lock.assert_called_once_with(
+            "polydata:build:snapshot:market-workspace:flow:7", timeout=180, thread_local=False
+        )
         assert not resources.workspace_refreshing
         assert resources.workspace_slots.acquire(blocking=False)
         resources.workspace_slots.release()
         redis.lock.return_value.acquire.return_value = False
         builder = Mock()
         result = market_workspace_cache_service._cached_layer(
-            deps, layer="flow", cache_key="8", ttl_seconds=8, builder=builder,
+            deps,
+            layer="flow",
+            cache_key="8",
+            ttl_seconds=8,
+            builder=builder,
         )
         assert result["mode"] == "warming" and not resources.workspace_refreshing
         builder.assert_not_called()
@@ -294,12 +354,75 @@ def test_replaced_market_does_not_trigger_other_workspace_layers():
 def test_market_trade_route_cursor_validation_and_unavailable_status():
     from flask import Flask
     from api.routes.markets import MarketRouteDependencies, create_markets_blueprint
+
     read = Mock(return_value=[])
     app = Flask(__name__)
-    app.register_blueprint(create_markets_blueprint(MarketRouteDependencies.from_context({
-        "get_trades_by_market_id": read,
-        "get_market_by_slug": lambda slug: {"id": 7},
-    })))
+    app.register_blueprint(
+        create_markets_blueprint(
+            MarketRouteDependencies(
+                sanitize_payload=lambda payload, **kw: (
+                    _route_markets.outcome_semantics_service.sanitize_public_market_payload(
+                        {
+                            "query_all": {
+                                "get_trades_by_market_id": read,
+                                "get_market_by_slug": lambda slug: {"id": 7},
+                            }.get("query_all", None),
+                            "get_backend": {
+                                "get_trades_by_market_id": read,
+                                "get_market_by_slug": lambda slug: {"id": 7},
+                            }.get("get_backend", None),
+                        },
+                        payload,
+                        **kw,
+                    )
+                ),
+                get_markets_payload={"get_trades_by_market_id": read, "get_market_by_slug": lambda slug: {"id": 7}}.get(
+                    "get_markets_payload", missing_route_dependency
+                ),
+                get_market_by_id={"get_trades_by_market_id": read, "get_market_by_slug": lambda slug: {"id": 7}}.get(
+                    "get_market_by_id", missing_route_dependency
+                ),
+                get_market_by_slug={"get_trades_by_market_id": read, "get_market_by_slug": lambda slug: {"id": 7}}.get(
+                    "get_market_by_slug", missing_route_dependency
+                ),
+                normalize_market={"get_trades_by_market_id": read, "get_market_by_slug": lambda slug: {"id": 7}}.get(
+                    "normalize_market", missing_route_dependency
+                ),
+                get_trades_by_market_id={
+                    "get_trades_by_market_id": read,
+                    "get_market_by_slug": lambda slug: {"id": 7},
+                }.get("get_trades_by_market_id", missing_route_dependency),
+                get_recent_trades_snapshot={
+                    "get_trades_by_market_id": read,
+                    "get_market_by_slug": lambda slug: {"id": 7},
+                }.get("get_recent_trades_snapshot", missing_route_dependency),
+                get_market_oracle_payload={
+                    "get_trades_by_market_id": read,
+                    "get_market_by_slug": lambda slug: {"id": 7},
+                }.get("get_market_oracle_payload", missing_route_dependency),
+                get_recent_oracle_snapshot={
+                    "get_trades_by_market_id": read,
+                    "get_market_by_slug": lambda slug: {"id": 7},
+                }.get("get_recent_oracle_snapshot", missing_route_dependency),
+                get_market_detail_payload={
+                    "get_trades_by_market_id": read,
+                    "get_market_by_slug": lambda slug: {"id": 7},
+                }.get("get_market_detail_payload", missing_route_dependency),
+                get_market_chart_payload={
+                    "get_trades_by_market_id": read,
+                    "get_market_by_slug": lambda slug: {"id": 7},
+                }.get("get_market_chart_payload", missing_route_dependency),
+                get_market_workspace_payload={
+                    "get_trades_by_market_id": read,
+                    "get_market_by_slug": lambda slug: {"id": 7},
+                }.get("get_market_workspace_payload", missing_route_dependency),
+                get_market_focus_tile_payload={
+                    "get_trades_by_market_id": read,
+                    "get_market_by_slug": lambda slug: {"id": 7},
+                }.get("get_market_focus_tile_payload", missing_route_dependency),
+            )
+        )
+    )
     client = app.test_client()
     for market in ("7", "example-slug"):
         read.reset_mock()
@@ -321,8 +444,15 @@ def test_expired_flow_is_not_republished_as_fresh_while_refresh_is_busy():
     resources = RuntimeResources()
     try:
         deps = market_workspace_cache_service.MarketWorkspaceCacheDependencies(
-            resources=resources, cache=CacheState(resources, app, store), application=app, snapshot_store=store,
-            build_detail=Mock(), build_chart=Mock(), build_flow=Mock(), build_lob=Mock(), get_market_by_id=Mock(),
+            resources=resources,
+            cache=CacheState(resources, app, store),
+            application=app,
+            snapshot_store=store,
+            build_detail=Mock(),
+            build_chart=Mock(),
+            build_flow=Mock(),
+            build_lob=Mock(),
+            get_market_by_id=Mock(),
             utc_now_iso=lambda: "now",
         )
         with (
@@ -331,7 +461,11 @@ def test_expired_flow_is_not_republished_as_fresh_while_refresh_is_busy():
         ):
             for _ in range(2):
                 result = market_workspace_cache_service._cached_layer(
-                    deps, layer="flow", cache_key="7", ttl_seconds=8, builder=deps.build_flow,
+                    deps,
+                    layer="flow",
+                    cache_key="7",
+                    ttl_seconds=8,
+                    builder=deps.build_flow,
                 )
                 assert result["payload"]["status"] == "stale"
                 assert result["payload"]["marketWorkspaceCache"]["generatedAt"] == "2026-09-28T01:00:00Z"

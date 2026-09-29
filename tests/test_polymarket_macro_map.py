@@ -1,4 +1,6 @@
 from __future__ import annotations
+from conftest import missing_route_dependency
+from api.routes import runtime_panels as _route_runtime_panels
 
 from api.routes.runtime_panels import RuntimePanelRouteDependencies
 
@@ -189,7 +191,11 @@ def test_invalid_json_shape_returns_degraded_payload():
 
 
 def test_missing_fields_do_not_break_normalization():
-    ctx = make_context(http_json_get=lambda *args, **kwargs: {"events": [{"id": "evt-fed", "title": "Fed rate decision", "markets": [{}]}]})
+    ctx = make_context(
+        http_json_get=lambda *args, **kwargs: {
+            "events": [{"id": "evt-fed", "title": "Fed rate decision", "markets": [{}]}]
+        }
+    )
 
     payload = polymarket_macro_map_service.get_polymarket_macro_map_snapshot(ctx, limit=8)
 
@@ -253,8 +259,16 @@ def test_api_reads_seeded_sqlite_snapshot_without_live_fetch(tmp_path):
         "cacheMode": "seeded",
     }
     store = SnapshotStore(str(tmp_path / "snapshots.sqlite3"))
-    store.set(polymarket_macro_map_service.MACRO_MAP_SNAPSHOT_NAMESPACE, polymarket_macro_map_service.MACRO_MAP_CACHE_KEY, seeded, 300)
-    ctx = make_context(snapshot_store=store, http_json_get=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("live fetch should not run")))
+    store.set(
+        polymarket_macro_map_service.MACRO_MAP_SNAPSHOT_NAMESPACE,
+        polymarket_macro_map_service.MACRO_MAP_CACHE_KEY,
+        seeded,
+        300,
+    )
+    ctx = make_context(
+        snapshot_store=store,
+        http_json_get=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("live fetch should not run")),
+    )
 
     payload = polymarket_macro_map_service.get_polymarket_macro_map_snapshot(ctx, limit=8)
 
@@ -267,7 +281,10 @@ def make_watcher(tmp_path) -> tuple[polymarket_macro_map_watcher.PolymarketMacro
     settings = make_settings(str(tmp_path / "snapshots.sqlite3"))
     redis_module = SimpleNamespace(from_url=lambda *args, **kwargs: fake_redis)
     requests_module = SimpleNamespace(Session=lambda: SimpleNamespace(headers={}, get=lambda *args, **kwargs: None))
-    with patch.object(polymarket_macro_map_watcher, "redis", redis_module), patch.object(polymarket_macro_map_watcher, "requests", requests_module):
+    with (
+        patch.object(polymarket_macro_map_watcher, "redis", redis_module),
+        patch.object(polymarket_macro_map_watcher, "requests", requests_module),
+    ):
         watcher = polymarket_macro_map_watcher.PolymarketMacroMapWatcher(
             redis_url=settings.redis_url,
             redis_prefix=settings.redis_prefix,
@@ -294,7 +311,9 @@ def sample_payload(item_id: str = "macro-1") -> Dict[str, Any]:
 def test_watcher_stores_payload_snapshot_and_seed_meta(tmp_path):
     watcher, fake_redis = make_watcher(tmp_path)
 
-    with patch.object(polymarket_macro_map_service, "build_polymarket_macro_map_payload", return_value=sample_payload()):
+    with patch.object(
+        polymarket_macro_map_service, "build_polymarket_macro_map_payload", return_value=sample_payload()
+    ):
         result = watcher.run_once()
 
     assert result["status"] == "stored"
@@ -349,7 +368,18 @@ def test_runtime_route_clamps_limit_to_max():
         "get_whale_trades_snapshot": lambda limit=14: {"limit": limit},
         "get_suspicious_trades_snapshot": lambda limit=12: {"limit": limit},
     }
-    app.register_blueprint(create_runtime_panels_blueprint(RuntimePanelRouteDependencies.from_context(helpers)))
+    app.register_blueprint(
+        create_runtime_panels_blueprint(
+            RuntimePanelRouteDependencies(
+                panel_context=_route_runtime_panels.RuntimePanelContext.from_context(helpers),
+                utc_now_iso=helpers.get("utc_now_iso", missing_route_dependency),
+                natural_hazard_map_snapshot=helpers.get("get_natural_hazard_map_snapshot", None),
+                natural_hazard_event_detail=helpers.get("get_natural_hazard_event_detail", None),
+                natural_hazard_related_markets=helpers.get("get_natural_hazard_related_markets", None),
+                aviation_viewport_snapshot=helpers.get("get_aviation_viewport_snapshot", None),
+            )
+        )
+    )
 
     response = app.test_client().get("/runtime/macro/polymarket-map?limit=99")
 

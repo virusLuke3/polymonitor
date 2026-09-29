@@ -1,4 +1,6 @@
 from __future__ import annotations
+from conftest import missing_route_dependency
+from api.routes import runtime_panels as _route_runtime_panels
 
 from api.routes.runtime_panels import RuntimePanelRouteDependencies
 
@@ -196,7 +198,9 @@ def test_non_200_error_returns_renderable_payload():
 
 
 def test_invalid_empty_source_shape_does_not_crash():
-    payload = cpi_release_calendar_service.get_cpi_release_calendar_snapshot(make_context(http_text_get=lambda *args, **kwargs: "<html></html>"), limit=8)
+    payload = cpi_release_calendar_service.get_cpi_release_calendar_snapshot(
+        make_context(http_text_get=lambda *args, **kwargs: "<html></html>"), limit=8
+    )
 
     assert payload["status"] == "degraded"
     assert payload["sources"]["blsCpi"] == "fallback"
@@ -223,7 +227,9 @@ def test_stale_snapshot_can_be_returned_by_cache_layer():
         def set(self, *args, **kwargs):
             return None
 
-    payload = cpi_release_calendar_service.get_cpi_release_calendar_snapshot(make_context(snapshot_store=StaleOnlyStore()), limit=8)
+    payload = cpi_release_calendar_service.get_cpi_release_calendar_snapshot(
+        make_context(snapshot_store=StaleOnlyStore()), limit=8
+    )
 
     assert payload["cacheMode"] == "stale-seed"
     assert payload["items"][0]["id"] == "stale-cpi"
@@ -239,8 +245,16 @@ def test_api_reads_seeded_sqlite_snapshot_without_live_fetch(tmp_path):
         "items": [{"id": "seeded-cpi", "kind": "cpi", "releaseAt": "2026-05-12T12:30:00Z"}],
     }
     store = SnapshotStore(str(tmp_path / "snapshots.sqlite3"))
-    store.set(cpi_release_calendar_service.CPI_CALENDAR_SNAPSHOT_NAMESPACE, cpi_release_calendar_service.CPI_CALENDAR_CACHE_KEY, seeded, 300)
-    ctx = make_context(snapshot_store=store, http_text_get=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("live fetch should not run")))
+    store.set(
+        cpi_release_calendar_service.CPI_CALENDAR_SNAPSHOT_NAMESPACE,
+        cpi_release_calendar_service.CPI_CALENDAR_CACHE_KEY,
+        seeded,
+        300,
+    )
+    ctx = make_context(
+        snapshot_store=store,
+        http_text_get=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("live fetch should not run")),
+    )
 
     payload = cpi_release_calendar_service.get_cpi_release_calendar_snapshot(ctx, limit=8)
 
@@ -254,7 +268,10 @@ def make_watcher(tmp_path) -> tuple[cpi_release_calendar_watcher.CpiReleaseCalen
     redis_module = SimpleNamespace(from_url=lambda *args, **kwargs: fake_redis)
     session = SimpleNamespace(headers={}, get=lambda *args, **kwargs: None)
     requests_module = SimpleNamespace(Session=lambda: session)
-    with patch.object(cpi_release_calendar_watcher, "redis", redis_module), patch.object(cpi_release_calendar_watcher, "requests", requests_module):
+    with (
+        patch.object(cpi_release_calendar_watcher, "redis", redis_module),
+        patch.object(cpi_release_calendar_watcher, "requests", requests_module),
+    ):
         watcher = cpi_release_calendar_watcher.CpiReleaseCalendarWatcher(
             redis_url=settings.redis_url,
             redis_prefix=settings.redis_prefix,
@@ -281,7 +298,9 @@ def sample_payload(item_id: str = "cpi-1") -> Dict[str, Any]:
 def test_watcher_stores_payload_snapshot_and_seed_meta(tmp_path):
     watcher, fake_redis = make_watcher(tmp_path)
 
-    with patch.object(cpi_release_calendar_service, "build_cpi_release_calendar_payload", return_value=sample_payload()):
+    with patch.object(
+        cpi_release_calendar_service, "build_cpi_release_calendar_payload", return_value=sample_payload()
+    ):
         result = watcher.run_once()
 
     assert result["status"] == "stored"
@@ -300,7 +319,12 @@ def test_watcher_preserves_previous_snapshot_when_new_payload_is_empty(tmp_path)
     watcher, fake_redis = make_watcher(tmp_path)
     previous = {**sample_payload("old-cpi"), "cacheMode": "seeded"}
     watcher.store_payload(previous)
-    empty_payload = {**sample_payload("empty"), "status": "warming", "items": [], "summary": {"signal": "CALENDAR WARMING"}}
+    empty_payload = {
+        **sample_payload("empty"),
+        "status": "warming",
+        "items": [],
+        "summary": {"signal": "CALENDAR WARMING"},
+    }
 
     with patch.object(cpi_release_calendar_service, "build_cpi_release_calendar_payload", return_value=empty_payload):
         result = watcher.run_once()
@@ -336,7 +360,18 @@ def test_runtime_route_clamps_limit_to_max():
         "get_whale_trades_snapshot": lambda limit=14: {"limit": limit},
         "get_suspicious_trades_snapshot": lambda limit=12: {"limit": limit},
     }
-    app.register_blueprint(create_runtime_panels_blueprint(RuntimePanelRouteDependencies.from_context(helpers)))
+    app.register_blueprint(
+        create_runtime_panels_blueprint(
+            RuntimePanelRouteDependencies(
+                panel_context=_route_runtime_panels.RuntimePanelContext.from_context(helpers),
+                utc_now_iso=helpers.get("utc_now_iso", missing_route_dependency),
+                natural_hazard_map_snapshot=helpers.get("get_natural_hazard_map_snapshot", None),
+                natural_hazard_event_detail=helpers.get("get_natural_hazard_event_detail", None),
+                natural_hazard_related_markets=helpers.get("get_natural_hazard_related_markets", None),
+                aviation_viewport_snapshot=helpers.get("get_aviation_viewport_snapshot", None),
+            )
+        )
+    )
 
     response = app.test_client().get("/runtime/macro/cpi-release-calendar?limit=99")
 

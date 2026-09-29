@@ -1,4 +1,6 @@
 from __future__ import annotations
+from conftest import missing_route_dependency
+from api.routes import runtime_panels as _route_runtime_panels
 
 from api.routes.runtime_panels import RuntimePanelRouteDependencies
 
@@ -20,7 +22,11 @@ def test_runtime_panel_modules_have_unique_ids_and_routes():
     assert all(route.startswith("/runtime/") for route in routes)
 
 
-def test_runtime_panel_blueprint_registers_all_routes():
+def test_runtime_panel_blueprint_registers_all_routes(monkeypatch):
+    from telegram.topics import runtime_bridge
+
+    published = []
+    monkeypatch.setattr(runtime_bridge, "publish_panel_snapshot", lambda *args: published.append(args))
     app = Flask(__name__)
     helpers = {
         "COMMODITY_SYMBOLS": [],
@@ -87,7 +93,18 @@ def test_runtime_panel_blueprint_registers_all_routes():
         },
     }
 
-    app.register_blueprint(create_runtime_panels_blueprint(RuntimePanelRouteDependencies.from_context(helpers)))
+    app.register_blueprint(
+        create_runtime_panels_blueprint(
+            RuntimePanelRouteDependencies(
+                panel_context=_route_runtime_panels.RuntimePanelContext.from_context(helpers),
+                utc_now_iso=helpers.get("utc_now_iso", missing_route_dependency),
+                natural_hazard_map_snapshot=helpers.get("get_natural_hazard_map_snapshot", None),
+                natural_hazard_event_detail=helpers.get("get_natural_hazard_event_detail", None),
+                natural_hazard_related_markets=helpers.get("get_natural_hazard_related_markets", None),
+                aviation_viewport_snapshot=helpers.get("get_aviation_viewport_snapshot", None),
+            )
+        )
+    )
     registered_routes = {rule.rule for rule in app.url_map.iter_rules()}
 
     for panel in RUNTIME_PANEL_MODULES:
@@ -96,7 +113,6 @@ def test_runtime_panel_blueprint_registers_all_routes():
     client = app.test_client()
     commodity_response = client.get(
         "/runtime/finance/commodity-equity-transmission?limit=3",
-        headers={"X-PolyData-Telegram-Publisher": "1"},
     )
     assert commodity_response.status_code == 200
     assert commodity_response.get_json()["limit"] == 3
@@ -125,13 +141,17 @@ def test_runtime_panel_blueprint_registers_all_routes():
         headers={"If-None-Match": aviation_response.headers["ETag"]},
     )
     assert aviation_conditional.status_code == 304
-    assert client.get(
-        "/runtime/transport/aviation-viewport?bbox=75,39,-72,42&zoom=5",
-    ).status_code == 400
+    assert (
+        client.get(
+            "/runtime/transport/aviation-viewport?bbox=75,39,-72,42&zoom=5",
+        ).status_code
+        == 400
+    )
 
     detail_response = client.get("/runtime/world/natural-hazards/events/earthquake%3Ausgs%3Atest")
     assert detail_response.status_code == 200
     assert detail_response.get_json()["event"]["id"] == "earthquake:usgs:test"
+    assert published == []
 
 
 def test_default_workspace_panel_ids_include_runtime_and_static_panels():

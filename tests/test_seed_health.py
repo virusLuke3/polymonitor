@@ -1,4 +1,6 @@
 from __future__ import annotations
+from conftest import missing_route_dependency
+from api.routes import system as _route_system
 
 from api.routes.system import SystemRouteDependencies
 
@@ -157,7 +159,9 @@ class SeedHealthTestCase(unittest.TestCase):
                 "payloadStatus": "ok",
             },
         }
-        payload = system_service.build_seed_health_payload(system_service.SeedHealthDependencies.from_context(self.make_context(redis_payloads=redis_payloads)))
+        payload = system_service.build_seed_health_payload(
+            system_service.SeedHealthDependencies.from_context(self.make_context(redis_payloads=redis_payloads))
+        )
 
         self.assertEqual("error", payload["status"])
         self.assertEqual(len(system_service.SEED_META_SPECS), payload["summary"]["watcherCount"])
@@ -178,7 +182,9 @@ class SeedHealthTestCase(unittest.TestCase):
                 "recordCount": 4,
             }
         }
-        payload = system_service.build_seed_health_payload(system_service.SeedHealthDependencies.from_context(self.make_context(stale_payloads=stale_payloads)))
+        payload = system_service.build_seed_health_payload(
+            system_service.SeedHealthDependencies.from_context(self.make_context(stale_payloads=stale_payloads))
+        )
 
         geo = next(item for item in payload["items"] if item["panelId"] == "geo-sanctions-shock")
         self.assertEqual("degraded", geo["status"])
@@ -193,7 +199,17 @@ class SeedHealthTestCase(unittest.TestCase):
             "describe_db_target": lambda: "mysql:test",
             "get_redis_client": lambda: object(),
         }
-        app.register_blueprint(create_system_blueprint(SystemRouteDependencies.from_context(helpers)))
+        app.register_blueprint(
+            create_system_blueprint(
+                SystemRouteDependencies(
+                    authenticate_request=helpers.get("authenticate_request", missing_route_dependency),
+                    build_system_health_payload=helpers.get("build_system_health_payload", missing_route_dependency),
+                    build_seed_health_payload=helpers.get("build_seed_health_payload", missing_route_dependency),
+                    describe_db_target=helpers.get("describe_db_target", missing_route_dependency),
+                    get_redis_client=helpers.get("get_redis_client", missing_route_dependency),
+                )
+            )
+        )
 
         with app.test_client() as client:
             response = client.get("/runtime/system/seed-health")

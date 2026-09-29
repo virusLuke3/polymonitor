@@ -33,15 +33,9 @@ Regenerate the Python locks only under the pinned Python version:
   --output-file scripts/requirements-dev.lock.txt scripts/requirements-dev.in
 ```
 
-The first repository-wide pytest baseline exposed a small set of pre-existing
-contract-drift failures. Their exact node IDs are visible in
-`scripts/qa/pytest-quarantine.txt`. CI deselects only those IDs, reports the
-count, and continues to block every new failure. Run the full unfiltered suite
-with:
-
-```bash
-.venv/bin/python scripts/qa/run_pytest.py --include-quarantined
-```
+Run the complete backend suite with `make test` or
+`PYTHONDONTWRITEBYTECODE=1 python -m pytest -q`. There is no quarantine list or
+custom deselection runner; a failing maintained test blocks the backend gate.
 
 ## Frontend
 
@@ -78,19 +72,8 @@ curl http://127.0.0.1:18500/bootstrap
 
 Public systemd templates live in `deploy/systemd/`.
 
-The same codebase is used on the local collector host and on GCP. Select the
-role by target:
-
-- `polydata-local-collector.target`: local market/orderfilled/oracle collectors.
-- `polydata-gcp.target`: GCP API and seed-cache watchers.
-
-Local collector commands:
-
-```bash
-make services-install
-make services-start
-make services-status
-```
+Canonical collectors are installed from the separate `market-data` repository.
+Polymonitor's `polydata-gcp.target` owns the API and business-cache watchers.
 
 GCP manual target commands:
 

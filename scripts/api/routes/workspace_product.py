@@ -6,8 +6,6 @@ from typing import Any
 
 from flask import Blueprint, g, jsonify, request
 
-from api.context import resolve_route_callable
-
 
 @dataclass(frozen=True)
 class WorkspaceProductDependencies:
@@ -19,19 +17,6 @@ class WorkspaceProductDependencies:
     create_briefing: Callable[..., dict[str, Any]]
     revoke_briefing: Callable[..., None]
     get_public_briefing: Callable[..., dict[str, Any]]
-
-    @classmethod
-    def from_context(cls, context: Mapping[str, Any]) -> WorkspaceProductDependencies:
-        return cls(
-            authenticate=resolve_route_callable(context, "authenticate_user_request"),
-            request_metadata=resolve_route_callable(context, "auth_request_metadata"),
-            get_layout=resolve_route_callable(context, "get_workspace_layout"),
-            put_layout=resolve_route_callable(context, "put_workspace_layout"),
-            list_briefings=resolve_route_callable(context, "list_briefings"),
-            create_briefing=resolve_route_callable(context, "create_briefing"),
-            revoke_briefing=resolve_route_callable(context, "revoke_briefing"),
-            get_public_briefing=resolve_route_callable(context, "get_public_briefing"),
-        )
 
 
 def _payload() -> dict[str, Any]:

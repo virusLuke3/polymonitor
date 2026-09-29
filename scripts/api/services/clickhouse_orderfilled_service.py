@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from api.config import ClickHouseSettings
+from api.context import runtime_resources
+
 import json
 import os
 import shutil
 import subprocess
-import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -26,74 +28,22 @@ DEFAULT_SIGNAL_MIN_PRICE = 0.02
 DEFAULT_SIGNAL_MAX_PRICE = 0.98
 DEFAULT_ALPHA_MIN_NET_STRENGTH = 0.55
 DEFAULT_ALPHA_EDGE_FEE_PROBABILITY = 0.01
-_HTTP_QUERY_SLOTS = threading.BoundedSemaphore(
-    max(1, min(int(os.environ.get("POLYDATA_ORDERFILLED_CLICKHOUSE_HTTP_CONCURRENCY", "1")), 4))
-)
 
 
-def _env_flag(name: str, default: bool = True) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+def _settings(ctx: dict) -> ClickHouseSettings:
+    return runtime_resources(ctx).clickhouse
 
 
-def clickhouse_orderfilled_enabled() -> bool:
-    return _env_flag("POLYDATA_ORDERFILLED_CLICKHOUSE_READ_ENABLED", True)
+def clickhouse_orderfilled_enabled(ctx: dict) -> bool:
+    return _settings(ctx).enabled
 
 
-def clickhouse_read_mode() -> str:
-    if not clickhouse_orderfilled_enabled():
+def clickhouse_read_mode(ctx: dict) -> str:
+    if not clickhouse_orderfilled_enabled(ctx):
         return "disabled"
-    if os.environ.get("POLYDATA_ORDERFILLED_CLICKHOUSE_HTTP_URL", "").strip():
+    if _settings(ctx).http_url:
         return "http-tunnel"
-    if shutil.which("docker") is not None:
-        return "docker-exec"
-    return "unavailable"
-
-
-def _identifier(value: str, default: str) -> str:
-    text = str(value or "").strip()
-    if not text:
-        return default
-    if not all(ch.isalnum() or ch == "_" for ch in text):
-        raise ValueError(f"Unsafe ClickHouse identifier: {value!r}")
-    return text
-
-
-def _settings() -> Dict[str, str]:
-    return {
-        "http_url": os.environ.get("POLYDATA_ORDERFILLED_CLICKHOUSE_HTTP_URL", "").strip(),
-        "container": os.environ.get("POLYDATA_ORDERFILLED_CLICKHOUSE_CONTAINER", DEFAULT_CONTAINER),
-        "database": _identifier(
-            os.environ.get("POLYDATA_ORDERFILLED_CLICKHOUSE_DATABASE", DEFAULT_DATABASE), DEFAULT_DATABASE
-        ),
-        "user": os.environ.get("POLYDATA_ORDERFILLED_CLICKHOUSE_USER", DEFAULT_USER),
-        "password": (
-            os.environ.get("POLYDATA_ORDERFILLED_CLICKHOUSE_PASSWORD") or os.environ.get("CLICKHOUSE_PASSWORD") or ""
-        ),
-        "table": _identifier(
-            os.environ.get("POLYDATA_ORDERFILLED_CLICKHOUSE_READ_TABLE", DEFAULT_TABLE), DEFAULT_TABLE
-        ),
-    }
-
-
-def _clickhouse_cmd(query: str) -> List[str]:
-    settings = _settings()
-    return [
-        "docker",
-        "exec",
-        settings["container"],
-        "clickhouse-client",
-        "--user",
-        settings["user"],
-        "--password",
-        settings["password"],
-        "--database",
-        settings["database"],
-        "--query",
-        query,
-    ]
+    return "docker-exec" if shutil.which("docker") else "unavailable"
 
 
 def _parse_json_rows(output: str) -> Optional[List[Dict[str, Any]]]:
@@ -114,40 +64,26 @@ def _parse_json_rows(output: str) -> Optional[List[Dict[str, Any]]]:
 
 
 def _query_json_rows_http(ctx: dict, query: str, *, timeout_seconds: float) -> Optional[List[Dict[str, Any]]]:
-    settings = _settings()
-    base_url = settings["http_url"]
+    settings = _settings(ctx)
+    base_url = settings.http_url
     if not base_url:
         return None
     params = urlencode(
         {
-            "database": settings["database"],
-            "user": settings["user"],
-            "password": settings["password"],
+            "database": settings.database,
+            "user": settings.user,
+            "password": settings.password,
             "query_id": f"polydata-api-{uuid.uuid4().hex}",
             "readonly": "1",
-            "max_threads": str(_int_env("POLYDATA_ORDERFILLED_CLICKHOUSE_MAX_THREADS", 2, maximum=8)),
+            "max_threads": str(_settings(ctx).max_threads),
             "max_execution_time": str(
                 min(
-                    _int_env("POLYDATA_ORDERFILLED_CLICKHOUSE_MAX_EXECUTION_SECONDS", 6, maximum=30),
+                    _settings(ctx).max_execution_seconds,
                     int(max(1.0, timeout_seconds)) + 1,
                 )
             ),
-            "max_memory_usage": str(
-                _int_env(
-                    "POLYDATA_ORDERFILLED_CLICKHOUSE_MAX_MEMORY_BYTES",
-                    512 * 1024 * 1024,
-                    minimum=64 * 1024 * 1024,
-                    maximum=4 * 1024 * 1024 * 1024,
-                )
-            ),
-            "max_bytes_to_read": str(
-                _int_env(
-                    "POLYDATA_ORDERFILLED_CLICKHOUSE_MAX_BYTES_TO_READ",
-                    512 * 1024 * 1024,
-                    minimum=64 * 1024 * 1024,
-                    maximum=8 * 1024 * 1024 * 1024,
-                )
-            ),
+            "max_memory_usage": str(_settings(ctx).max_memory_bytes),
+            "max_bytes_to_read": str(_settings(ctx).max_bytes_to_read),
             "cancel_http_readonly_queries_on_client_close": "1",
         }
     )
@@ -158,7 +94,8 @@ def _query_json_rows_http(ctx: dict, query: str, *, timeout_seconds: float) -> O
         method="POST",
         headers={"Content-Type": "text/plain; charset=utf-8"},
     )
-    if not _HTTP_QUERY_SLOTS.acquire(blocking=False):
+    slots = runtime_resources(ctx).clickhouse_slots
+    if not slots.acquire(blocking=False):
         logger = ctx.get("app").logger if ctx.get("app") is not None else None
         if logger is not None:
             logger.warning("ClickHouse HTTP OrderFilled read deferred: capacity full")
@@ -172,22 +109,37 @@ def _query_json_rows_http(ctx: dict, query: str, *, timeout_seconds: float) -> O
             logger.warning("ClickHouse HTTP OrderFilled read failed: %s", exc)
         return None
     finally:
-        _HTTP_QUERY_SLOTS.release()
+        slots.release()
     return _parse_json_rows(output)
 
 
 def _query_json_rows(ctx: dict, query: str, *, timeout_seconds: float = 1.8) -> Optional[List[Dict[str, Any]]]:
-    if not clickhouse_orderfilled_enabled():
+    if not clickhouse_orderfilled_enabled(ctx):
         return None
     if ctx.get("app") is None:
         return None
-    if _settings()["http_url"]:
+    if _settings(ctx).http_url:
         return _query_json_rows_http(ctx, query, timeout_seconds=timeout_seconds)
     if shutil.which("docker") is None:
         return None
+    settings = _settings(ctx)
+    environment = os.environ.copy()
+    command = ["docker", "exec", "-i"]
+    if settings.password:
+        command.extend(["--env", "CLICKHOUSE_PASSWORD"])
+        environment["CLICKHOUSE_PASSWORD"] = settings.password
+    command.extend([
+        settings.container, "clickhouse-client", "--user", settings.user,
+        "--database", settings.database, "--readonly", "1",
+        "--max_threads", str(settings.max_threads),
+        "--max_execution_time", str(min(settings.max_execution_seconds, int(max(1, timeout_seconds)) + 1)),
+        "--max_bytes_to_read", str(settings.max_bytes_to_read),
+        "--max_memory_usage", str(settings.max_memory_bytes), "--query", query,
+    ])
     try:
         completed = subprocess.run(
-            _clickhouse_cmd(query),
+            command,
+            env=environment,
             check=True,
             text=True,
             capture_output=True,
@@ -202,11 +154,15 @@ def _query_json_rows(ctx: dict, query: str, *, timeout_seconds: float = 1.8) -> 
 
 
 def _orderfilled_projection_sql(*, include_time: bool = True) -> str:
-    timestamp = """if(
+    timestamp = (
+        """if(
         ifNull(bt.block_time <= toDateTime('2000-01-01 00:00:00', 'UTC'), 1),
         CAST(NULL, 'Nullable(String)'),
         formatDateTime(bt.block_time, '%Y-%m-%dT%H:%i:%SZ', 'UTC')
-    )""" if include_time else "CAST(NULL, 'Nullable(String)')"
+    )"""
+        if include_time
+        else "CAST(NULL, 'Nullable(String)')"
+    )
     return f"""
         lower(f.tx_hash) AS tx_hash,
         f.log_index AS log_index,
@@ -230,13 +186,13 @@ def _orderfilled_projection_sql(*, include_time: bool = True) -> str:
     """
 
 
-def _table_sql() -> str:
-    return _settings()["table"]
+def _table_sql(ctx: dict) -> str:
+    return _settings(ctx).table
 
 
-def _latest_fact_block_sql() -> str:
-    settings = _settings()
-    table = settings["table"]
+def _latest_fact_block_sql(ctx: dict) -> str:
+    settings = _settings(ctx)
+    table = settings.table
     if table != DEFAULT_TABLE:
         return f"SELECT ifNull(max(block_number), 0) FROM {table}"
     # The canonical fact table partitions by intDiv(block_number, 1000000).
@@ -244,24 +200,8 @@ def _latest_fact_block_sql() -> str:
     return f"""SELECT ifNull(max(block_number), 0) FROM {table}
         PREWHERE intDiv(block_number, 1000000) = (
             SELECT max(toUInt64(partition)) FROM system.parts
-            WHERE active AND database = '{settings['database']}' AND table = '{table}'
+            WHERE active AND database = '{settings.database}' AND table = '{table}'
         )"""
-
-
-def _int_env(name: str, default: int, *, minimum: int = 1, maximum: int = 1000000) -> int:
-    try:
-        value = int(str(os.environ.get(name, default)).strip())
-    except (TypeError, ValueError):
-        value = default
-    return min(max(value, minimum), maximum)
-
-
-def _float_env(name: str, default: float, *, minimum: float = 0.0, maximum: float = 1_000_000_000.0) -> float:
-    try:
-        value = float(str(os.environ.get(name, default)).strip())
-    except (TypeError, ValueError):
-        value = default
-    return min(max(value, minimum), maximum)
 
 
 def _float_or_none(value: Any) -> Optional[float]:
@@ -347,7 +287,7 @@ def _attach_post_signal_metrics(ctx: dict, rows: List[Dict[str, Any]]) -> List[D
             block_number,
             log_index,
             toString(if(outcome_code = 2, 1 - price, price)) AS yes_price
-        FROM {_table_sql()}
+        FROM {_table_sql(ctx)}
         WHERE market_id IN ({market_csv})
           AND outcome_code IN (1, 2)
           AND block_number >= {min_block}
@@ -372,7 +312,7 @@ def _attach_post_signal_metrics(ctx: dict, rows: List[Dict[str, Any]]) -> List[D
             continue
         by_market.setdefault(market_id, []).append({"block": block, "yes_price": price})
 
-    fee = _float_env("POLYDATA_ALPHA_EDGE_FEE_PROBABILITY", DEFAULT_ALPHA_EDGE_FEE_PROBABILITY, maximum=0.25)
+    fee = _settings(ctx).alpha_edge_fee_probability
     enhanced: List[Dict[str, Any]] = []
     for row in rows:
         block = _signal_block(row)
@@ -472,7 +412,11 @@ def _canonical_market_tokens(ctx: dict, market_id: int) -> List[str]:
 
 
 def get_market_trades(
-    ctx: dict, market_id: int, *, limit: int = 100, offset: int = 0,
+    ctx: dict,
+    market_id: int,
+    *,
+    limit: int = 100,
+    offset: int = 0,
     before: Optional[tuple[int, int, str]] = None,
 ) -> Optional[List[Dict[str, Any]]]:
     """Read exact token identities in descending, bounded chain windows.
@@ -480,32 +424,37 @@ def get_market_trades(
     No market-id shortcut: historical facts may predate canonical identity repair.
     An exhausted read budget is unavailable, never evidence of an empty history.
     """
-    if not clickhouse_orderfilled_enabled():
+    if not clickhouse_orderfilled_enabled(ctx):
         return None
     tokens = _canonical_market_tokens(ctx, market_id)
     if not tokens:
         raise TimeoutError("Market token identity is unavailable")
     selector = "token_id IN (" + ", ".join(f"'{token}'" for token in tokens) + ")"
     rows = _read_fact_trades(ctx, selector, limit=limit, offset=offset, before=before)
-    result = [ctx['normalize_trade'](dict(row, market_id=int(market_id))) for row in rows
-              if _uint256_clickhouse_token(row.get('token_id')) in tokens]
+    result = [
+        ctx["normalize_trade"](dict(row, market_id=int(market_id)))
+        for row in rows
+        if _uint256_clickhouse_token(row.get("token_id")) in tokens
+    ]
     return outcome_semantics_service.annotate_raw_trade_rows(ctx, result)
 
 
 def _fetch_fact_rows(read, table, chosen):
     if not chosen:
         return []
-    identities = ', '.join(f"({int(r['market_id'])}, '{r['token_id']}', {int(r['block_number'])}, "
-                           f"{int(r['log_index'])}, '{r['tx_hash']}')" for r in chosen)
-    partitions = ', '.join(str(p) for p in sorted({int(r['block_number'])//1000000 for r in chosen}))
+    identities = ", ".join(
+        f"({int(r['market_id'])}, '{r['token_id']}', {int(r['block_number'])}, {int(r['log_index'])}, '{r['tx_hash']}')"
+        for r in chosen
+    )
+    partitions = ", ".join(str(p) for p in sorted({int(r["block_number"]) // 1000000 for r in chosen}))
     rows = read(f"""SELECT {_orderfilled_projection_sql(include_time=False)} FROM (
         SELECT * FROM {table} PREWHERE intDiv(block_number, 1000000) IN ({partitions})
         AND (market_id, token_id, block_number, log_index, tx_hash) IN ({identities})
         ) f ORDER BY f.block_number DESC, f.log_index DESC, f.tx_hash DESC FORMAT JSONEachRow""")
     if rows is None:
         raise TimeoutError("Trade facts unavailable")
-    expected = {(int(r['block_number']), int(r['log_index']), r['tx_hash'].removeprefix('0x')) for r in chosen}
-    actual = {(int(r['block_number']), int(r['log_index']), r['tx_hash'].removeprefix('0x')) for r in rows}
+    expected = {(int(r["block_number"]), int(r["log_index"]), r["tx_hash"].removeprefix("0x")) for r in chosen}
+    actual = {(int(r["block_number"]), int(r["log_index"]), r["tx_hash"].removeprefix("0x")) for r in rows}
     if actual != expected or len(rows) != len(expected):
         raise TimeoutError("Trade facts changed during indexed read; retry")
     return rows
@@ -531,15 +480,15 @@ def _read_fact_trades(ctx, selector, *, limit, offset=0, before=None):
             raise TimeoutError("Trade source unavailable")
         return rows
 
-    settings = _settings()
-    cache_key = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{settings['http_url']}/{settings['database']}/{settings['table']}"))
+    settings = _settings(ctx)
+    cache_key = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{settings.http_url}/{settings.database}/{settings.table}"))
     cached = ctx.get("get_cached_json")
     bounds = cached("orderfilled:read-bounds", cache_key) if callable(cached) else None
     if not bounds:
         rows = read(f"""
-            SELECT ({_latest_fact_block_sql()}) AS latest_block,
+            SELECT ({_latest_fact_block_sql(ctx)}) AS latest_block,
                 (SELECT min(toUInt64(partition)) * 1000000 FROM system.parts
-                 WHERE active AND database = '{settings['database']}' AND table = '{settings['table']}') AS first_block
+                 WHERE active AND database = '{settings.database}' AND table = '{settings.table}') AS first_block
             FORMAT JSONEachRow
         """)
         if not rows:
@@ -548,7 +497,7 @@ def _read_fact_trades(ctx, selector, *, limit, offset=0, before=None):
         cache = ctx.get("set_cached_json")
         if callable(cache):
             cache("orderfilled:read-bounds", cache_key, bounds, ttl_seconds=5)
-    upper, first = int(bounds['latest_block']), int(bounds['first_block'])
+    upper, first = int(bounds["latest_block"]), int(bounds["first_block"])
     if before is not None:
         upper = min(upper, before[0])
     cursor = f"AND (block_number, log_index, tx_hash) < ({before[0]}, {before[1]}, '{before[2]}')" if before else ""
@@ -558,14 +507,15 @@ def _read_fact_trades(ctx, selector, *, limit, offset=0, before=None):
     for step in range(8):
         if upper < first or len(rows) >= offset + limit:
             break
-        lower = max(first, upper - min(20000 * (2 ** step), 200000) + 1)
-        rows.extend(read(f"""
+        lower = max(first, upper - min(20000 * (2**step), 200000) + 1)
+        rows.extend(
+            read(f"""
             SELECT {_orderfilled_projection_sql(include_time=False)}
             FROM (
                 SELECT tx_hash, log_index, market_id, maker, taker, price, size,
                        side_code, outcome_code, token_id, block_number, order_hash,
                        maker_amount, taker_amount, fee, contract
-                FROM {settings['table']}
+                FROM {settings.table}
                 PREWHERE intDiv(block_number, 1000000) BETWEEN {lower // 1000000} AND {upper // 1000000}
                   AND block_number BETWEEN {lower} AND {upper}
                   AND {selector}
@@ -575,11 +525,12 @@ def _read_fact_trades(ctx, selector, *, limit, offset=0, before=None):
             ) f
             ORDER BY f.block_number DESC, f.log_index DESC, f.tx_hash DESC
             FORMAT JSONEachRow
-        """))
+        """)
+        )
         upper = lower - 1
     if upper >= first and len(rows) < offset + limit:
         raise TimeoutError("Market trade history exceeds the bounded read window")
-    return _attach_trade_times(read, rows[offset:offset + limit])
+    return _attach_trade_times(read, rows[offset : offset + limit])
 
 
 def _attach_trade_times(read, selected):
@@ -587,7 +538,7 @@ def _attach_trade_times(read, selected):
         return []
     # Read block time only for the chosen events. A CTE reused in the old join
     # caused ClickHouse to repeat the expensive fact selection.
-    blocks = ", ".join(str(int(row['block_number'])) for row in selected)
+    blocks = ", ".join(str(int(row["block_number"])) for row in selected)
     times = read(f"""
         SELECT block_number,
             if(argMax(block_time, ingested_at) > toDateTime('2000-01-01 00:00:00', 'UTC'),
@@ -597,18 +548,22 @@ def _attach_trade_times(read, selected):
     """)
     if times is None:
         raise TimeoutError("Trade timestamps unavailable")
-    by_block = {int(row['block_number']): row.get('timestamp') for row in times}
-    return [dict(row, timestamp=by_block.get(int(row['block_number']))) for row in selected]
+    by_block = {int(row["block_number"]): row.get("timestamp") for row in times}
+    return [dict(row, timestamp=by_block.get(int(row["block_number"]))) for row in selected]
 
 
 def _recent_block_range(ctx: dict, minutes: int) -> Optional[tuple[int, int]]:
     """Resolve a wall-clock window once; do not rescan facts for each watermark."""
-    rows = _query_json_rows(ctx, f"""
+    rows = _query_json_rows(
+        ctx,
+        f"""
         SELECT min(block_number) AS first_block, max(block_number) AS last_block
         FROM block_timestamps
         WHERE block_time BETWEEN now() - INTERVAL {int(minutes)} MINUTE AND now()
         FORMAT JSONEachRow
-    """, timeout_seconds=5.0)
+    """,
+        timeout_seconds=5.0,
+    )
     if not rows or not int(rows[0]["last_block"]):
         return None
     return int(rows[0]["first_block"]), int(rows[0]["last_block"])
@@ -620,22 +575,27 @@ def get_recent_trades(ctx: dict, *, limit: int = 24) -> Optional[List[Dict[str, 
     if bounds is None:
         return None
     first, last = bounds
-    rows = _query_json_rows(ctx, f"""
+    rows = _query_json_rows(
+        ctx,
+        f"""
         SELECT market_id, token_id, block_number, log_index, tx_hash FROM (
-            SELECT market_id, token_id, block_number, log_index, tx_hash FROM {_table_sql()}
+            SELECT market_id, token_id, block_number, log_index, tx_hash FROM {_table_sql(ctx)}
             PREWHERE intDiv(block_number, 1000000) BETWEEN {first // 1000000} AND {last // 1000000}
               AND block_number BETWEEN {first} AND {last}
             WHERE market_id != 0
             ORDER BY block_number DESC, log_index DESC, tx_hash DESC LIMIT {limit}
         ) f ORDER BY f.block_number DESC, f.log_index DESC, f.tx_hash DESC
         FORMAT JSONEachRow
-    """, timeout_seconds=5.0)
+    """,
+        timeout_seconds=5.0,
+    )
     if rows is None:
         return None
+
     def read(sql):
         return _query_json_rows(ctx, sql, timeout_seconds=5.0)
 
-    rows = _attach_trade_times(read, _fetch_fact_rows(read, _table_sql(), rows))
+    rows = _attach_trade_times(read, _fetch_fact_rows(read, _table_sql(ctx), rows))
     normalized = outcome_semantics_service.annotate_raw_trade_rows(
         ctx,
         [ctx["normalize_trade"](row) for row in rows],
@@ -660,24 +620,21 @@ def get_volume_whale_rows(
     ctx: dict, *, limit: int = 14, window_minutes: Optional[int] = None
 ) -> Optional[List[Dict[str, Any]]]:
     limit = min(max(int(limit), 1), 100)
-    window_minutes = window_minutes or _int_env(
-        "POLYDATA_WHALE_VOLUME_WINDOW_MINUTES",
-        DEFAULT_WHALE_VOLUME_WINDOW_MINUTES,
-        minimum=5,
-        maximum=24 * 60,
-    )
+    window_minutes = window_minutes or _settings(ctx).whale_volume_window_minutes
     bounds = _recent_block_range(ctx, int(window_minutes))
     if bounds is None:
         return None
     first, last = bounds
-    min_watch = _float_env("POLYDATA_WHALE_MIN_NOTIONAL", 1000.0)
-    min_elevated = _float_env("POLYDATA_WHALE_ELEVATED_NOTIONAL", 2500.0)
-    min_critical = _float_env("POLYDATA_WHALE_CRITICAL_NOTIONAL", 10000.0)
-    relative_share = _float_env("POLYDATA_WHALE_MARKET_SHARE_THRESHOLD", 0.10, maximum=1.0)
-    relative_min = _float_env("POLYDATA_WHALE_RELATIVE_MIN_NOTIONAL", 500.0)
-    min_price = _float_env("POLYDATA_SIGNAL_MIN_PRICE", DEFAULT_SIGNAL_MIN_PRICE, maximum=0.49)
-    max_price = _float_env("POLYDATA_SIGNAL_MAX_PRICE", DEFAULT_SIGNAL_MAX_PRICE, minimum=0.51, maximum=1.0)
-    rows = _query_json_rows(ctx, f"""
+    min_watch = _settings(ctx).whale_min_notional
+    min_elevated = _settings(ctx).whale_elevated_notional
+    min_critical = _settings(ctx).whale_critical_notional
+    relative_share = _settings(ctx).whale_market_share_threshold
+    relative_min = _settings(ctx).whale_relative_min_notional
+    min_price = _settings(ctx).signal_min_price
+    max_price = _settings(ctx).signal_max_price
+    rows = _query_json_rows(
+        ctx,
+        f"""
         SELECT f.market_id, f.token_id, f.block_number, f.log_index, f.tx_hash,
             toString(f.notional) AS notional,
             toString(greatest({min_watch}, thresholds[1])) AS threshold_notional,
@@ -692,7 +649,7 @@ def get_volume_whale_rows(
             SELECT market_id, token_id, block_number, log_index, tx_hash, price, toFloat64(price) * toFloat64(size) AS notional,
                 quantilesTDigest(0.99, 0.995, 0.999)(notional) OVER () AS thresholds,
                 sum(notional) OVER (PARTITION BY market_id) AS market_window_notional
-            FROM {_table_sql()}
+            FROM {_table_sql(ctx)}
             PREWHERE intDiv(block_number, 1000000) BETWEEN {first // 1000000} AND {last // 1000000}
               AND block_number BETWEEN {first} AND {last}
             WHERE market_id != 0
@@ -703,18 +660,32 @@ def get_volume_whale_rows(
         ORDER BY multiIf(severity='critical', 3, severity='elevated', 2, 1) DESC,
             f.notional DESC, f.block_number DESC, f.log_index DESC
         LIMIT {limit * 4} FORMAT JSONEachRow
-    """, timeout_seconds=5.0)
+    """,
+        timeout_seconds=5.0,
+    )
     if rows is None:
         return None
+
     def read(sql):
         return _query_json_rows(ctx, sql, timeout_seconds=5.0)
 
-    facts = _fetch_fact_rows(read, _table_sql(), rows)
-    by_key = {(int(r['block_number']), int(r['log_index']), r['tx_hash'].removeprefix('0x')): r for r in facts}
-    metrics = ('notional', 'threshold_notional', 'elevated_threshold_notional', 'critical_threshold_notional',
-               'market_window_notional', 'market_share', 'severity', 'signal_type', 'source_mode')
-    rows = [dict(by_key[(int(r['block_number']), int(r['log_index']), r['tx_hash'])],
-                 **{key: r[key] for key in metrics}) for r in rows]
+    facts = _fetch_fact_rows(read, _table_sql(ctx), rows)
+    by_key = {(int(r["block_number"]), int(r["log_index"]), r["tx_hash"].removeprefix("0x")): r for r in facts}
+    metrics = (
+        "notional",
+        "threshold_notional",
+        "elevated_threshold_notional",
+        "critical_threshold_notional",
+        "market_window_notional",
+        "market_share",
+        "severity",
+        "signal_type",
+        "source_mode",
+    )
+    rows = [
+        dict(by_key[(int(r["block_number"]), int(r["log_index"]), r["tx_hash"])], **{key: r[key] for key in metrics})
+        for r in rows
+    ]
     rows = _attach_trade_times(read, rows)
     rows = outcome_semantics_service.annotate_raw_trade_rows(ctx, rows)
     rows = _attach_post_signal_metrics(ctx, rows)
@@ -724,27 +695,17 @@ def get_volume_whale_rows(
 
 def get_alpha_volume_signal_rows(ctx: dict, *, limit: int = 8) -> Optional[List[Dict[str, Any]]]:
     limit = min(max(int(limit), 1), 50)
-    window_minutes = _int_env(
-        "POLYDATA_ALPHA_VOLUME_WINDOW_MINUTES",
-        DEFAULT_ALPHA_VOLUME_WINDOW_MINUTES,
-        minimum=5,
-        maximum=6 * 60,
-    )
-    baseline_minutes = _int_env(
-        "POLYDATA_ALPHA_MARKET_BASELINE_MINUTES",
-        DEFAULT_ALPHA_MARKET_BASELINE_MINUTES,
-        minimum=15,
-        maximum=24 * 60,
-    )
+    window_minutes = _settings(ctx).alpha_volume_window_minutes
+    baseline_minutes = _settings(ctx).alpha_market_baseline_minutes
     window_blocks = max(60, window_minutes * 30)
     baseline_blocks = max(window_blocks, baseline_minutes * 30)
-    min_flow = _float_env("POLYDATA_ALPHA_MIN_FLOW_NOTIONAL", 1000.0)
-    min_single = _float_env("POLYDATA_ALPHA_MIN_SINGLE_TRADE_NOTIONAL", 2500.0)
-    relative_flow = _float_env("POLYDATA_ALPHA_RELATIVE_MIN_FLOW_NOTIONAL", 500.0)
-    relative_share = _float_env("POLYDATA_ALPHA_MARKET_SHARE_THRESHOLD", 0.12, maximum=1.0)
-    min_price = _float_env("POLYDATA_SIGNAL_MIN_PRICE", DEFAULT_SIGNAL_MIN_PRICE, maximum=0.49)
-    max_price = _float_env("POLYDATA_SIGNAL_MAX_PRICE", DEFAULT_SIGNAL_MAX_PRICE, minimum=0.51, maximum=1.0)
-    min_net_strength = _float_env("POLYDATA_ALPHA_MIN_NET_STRENGTH", DEFAULT_ALPHA_MIN_NET_STRENGTH, maximum=1.0)
+    min_flow = _settings(ctx).alpha_min_flow_notional
+    min_single = _settings(ctx).alpha_min_single_trade_notional
+    relative_flow = _settings(ctx).alpha_relative_min_flow_notional
+    relative_share = _settings(ctx).alpha_market_share_threshold
+    min_price = _settings(ctx).signal_min_price
+    max_price = _settings(ctx).signal_max_price
+    min_net_strength = _settings(ctx).alpha_min_net_strength
     price_health_expr = (
         f"greatest(0, least(1, 1 - abs(entry_yes_price - 0.5) / greatest(0.5 - {min_price:.6f}, 0.001)))"
     )
@@ -752,7 +713,7 @@ def get_alpha_volume_signal_rows(ctx: dict, *, limit: int = 8) -> Optional[List[
         ctx,
         f"""
         WITH
-            ({_latest_fact_block_sql()}) AS max_fact_block,
+            ({_latest_fact_block_sql(ctx)}) AS max_fact_block,
             {window_blocks} AS window_blocks,
             {baseline_blocks} AS baseline_blocks,
             (
@@ -760,7 +721,7 @@ def get_alpha_volume_signal_rows(ctx: dict, *, limit: int = 8) -> Optional[List[
                 FROM
                 (
                     SELECT sum(toFloat64(price) * toFloat64(size)) AS flow_notional
-                    FROM {_table_sql()}
+                    FROM {_table_sql(ctx)}
                     WHERE market_id != 0
                       AND outcome_code IN (1, 2)
                       AND block_number >= max_fact_block - window_blocks
@@ -866,7 +827,7 @@ def get_alpha_volume_signal_rows(ctx: dict, *, limit: int = 8) -> Optional[List[
             max_fact_block AS source_through_block,
             'net-directional-flow' AS signal_type,
             'clickhouse-volume-alpha' AS source_mode
-        FROM {_table_sql()} f
+        FROM {_table_sql(ctx)} f
         LEFT JOIN
         (
             SELECT block_number, argMax(block_time, ingested_at) AS block_time
@@ -877,7 +838,7 @@ def get_alpha_volume_signal_rows(ctx: dict, *, limit: int = 8) -> Optional[List[
         LEFT JOIN
         (
             SELECT market_id, sum(toFloat64(price) * toFloat64(size)) AS market_baseline_notional
-            FROM {_table_sql()}
+            FROM {_table_sql(ctx)}
             WHERE market_id != 0
               AND outcome_code IN (1, 2)
               AND block_number >= max_fact_block - baseline_blocks
@@ -945,7 +906,7 @@ def get_price_series(ctx: dict, market_id: int, *, limit: int = 400) -> Optional
         WITH
             selected AS (
                 SELECT outcome_code, token_id, price, block_number, log_index
-                FROM {_table_sql()}
+                FROM {_table_sql(ctx)}
                 WHERE market_id = {int(market_id)}
                 ORDER BY block_number DESC, log_index DESC
                 LIMIT {int(limit)}
@@ -1024,7 +985,7 @@ def get_market_stats(ctx: dict, market_ids: Iterable[int], *, hours: int = 24) -
     rows = _query_json_rows(
         ctx,
         f"""
-        WITH ({_latest_fact_block_sql()}) AS max_fact_block
+        WITH ({_latest_fact_block_sql(ctx)}) AS max_fact_block
         SELECT
             f.market_id AS market_id,
             count() AS trade_count_24h,
@@ -1033,7 +994,7 @@ def get_market_stats(ctx: dict, market_ids: Iterable[int], *, hours: int = 24) -
             argMax(concat('0x', lower(f.token_id)), tuple(f.block_number, f.log_index)) AS token_id,
             argMax(multiIf(f.outcome_code = 1, 'YES', f.outcome_code = 2, 'NO', 'UNKNOWN'), tuple(f.block_number, f.log_index)) AS outcome,
             max(f.block_number) AS latest_trade_block
-        FROM {_table_sql()} f
+        FROM {_table_sql(ctx)} f
         WHERE f.market_id IN ({id_csv})
           AND f.block_number >= max_fact_block - {block_window}
         GROUP BY f.market_id
@@ -1074,7 +1035,7 @@ def get_recent_market_activity(ctx: dict, *, limit: int = 1000, hours: int = 24)
         ctx,
         f"""
         WITH
-            ({_latest_fact_block_sql()}) AS max_fact_block
+            ({_latest_fact_block_sql(ctx)}) AS max_fact_block
         SELECT
             f.market_id AS market_id,
             count() AS trade_count_24h,
@@ -1088,7 +1049,7 @@ def get_recent_market_activity(ctx: dict, *, limit: int = 1000, hours: int = 24)
                 CAST(NULL, 'Nullable(String)'),
                 formatDateTime(argMax(bt.block_time, tuple(f.block_number, f.log_index)), '%Y-%m-%dT%H:%i:%SZ', 'UTC')
             ) AS latest_trade_at
-        FROM {_table_sql()} f
+        FROM {_table_sql(ctx)} f
         LEFT JOIN
         (
             SELECT block_number, argMax(block_time, ingested_at) AS block_time

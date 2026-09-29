@@ -10,7 +10,6 @@ from flask import Blueprint, jsonify, request
 class LobRouteDependencies:
     get_runtime_lob_payload: Callable[..., dict[str, Any]]
     get_runtime_lob_by_token_payload: Callable[..., dict[str, Any]]
-    get_lob_snapshots_by_token_payload: Callable[..., dict[str, Any]]
 
 
 def create_lob_blueprint(dependencies: LobRouteDependencies) -> Blueprint:
@@ -40,12 +39,14 @@ def create_lob_blueprint(dependencies: LobRouteDependencies) -> Blueprint:
 
     @bp.route("/runtime/lob/token/<token_id>/snapshots", methods=["GET"])
     def api_runtime_lob_snapshots_by_token(token_id: str):
-        payload = dependencies.get_lob_snapshots_by_token_payload(
-            token_id,
-            side=request.args.get("side") or "",
-            limit=request.args.get("limit") or 48,
-        )
-        status_code = int(payload.pop("_status", 200))
-        return jsonify(payload), status_code
+        return jsonify(
+            {
+                "status": "unavailable",
+                "code": "lob_history_retired",
+                "error": "Historical LOB snapshots are owned by market-data archives",
+                "items": [],
+                "tokenId": token_id,
+            }
+        ), 410
 
     return bp

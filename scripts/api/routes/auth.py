@@ -6,8 +6,6 @@ from typing import Any
 
 from flask import Blueprint, g, jsonify, make_response, request
 
-from api.context import resolve_route_callable
-
 
 @dataclass(frozen=True)
 class AuthRouteDependencies:
@@ -26,26 +24,6 @@ class AuthRouteDependencies:
     session_ttl_seconds: Callable[[], int]
     cookie_secure: Callable[[], bool]
     allowed_scopes: tuple[str, ...]
-
-    @classmethod
-    def from_context(cls, context: Mapping[str, Any]) -> AuthRouteDependencies:
-        return cls(
-            auth_enabled=resolve_route_callable(context, "auth_enabled"),
-            authenticate_request=resolve_route_callable(context, "authenticate_request"),
-            change_password=resolve_route_callable(context, "change_password"),
-            create_api_key=resolve_route_callable(context, "create_api_key"),
-            list_api_keys=resolve_route_callable(context, "list_api_keys"),
-            list_audit_log=resolve_route_callable(context, "list_audit_log"),
-            login=resolve_route_callable(context, "auth_login"),
-            logout=resolve_route_callable(context, "auth_logout"),
-            request_metadata=resolve_route_callable(context, "auth_request_metadata"),
-            revoke_api_key=resolve_route_callable(context, "revoke_api_key"),
-            session_cookie_name=resolve_route_callable(context, "session_cookie_name"),
-            session_snapshot=resolve_route_callable(context, "session_snapshot"),
-            session_ttl_seconds=resolve_route_callable(context, "session_ttl_seconds"),
-            cookie_secure=resolve_route_callable(context, "auth_cookie_secure"),
-            allowed_scopes=tuple(context.get("AUTH_ALLOWED_SCOPES", ())),
-        )
 
 
 def _payload() -> dict[str, Any]:
@@ -141,7 +119,9 @@ def create_auth_blueprint(dependencies: AuthRouteDependencies) -> Blueprint:
     @bp.route("/auth/api-keys", methods=["GET"])
     def auth_api_keys():
         principal = dependencies.authenticate_request(request, required_role="admin")
-        return jsonify({"items": dependencies.list_api_keys(principal), "allowedScopes": list(dependencies.allowed_scopes)})
+        return jsonify(
+            {"items": dependencies.list_api_keys(principal), "allowedScopes": list(dependencies.allowed_scopes)}
+        )
 
     @bp.route("/auth/api-keys", methods=["POST"])
     def auth_create_api_key():

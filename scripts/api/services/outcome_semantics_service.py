@@ -15,7 +15,7 @@ import re
 from copy import deepcopy
 from typing import Any, Dict, Iterable, List, Literal, Mapping, Optional
 
-from market import market_token_source_label_projection as projection_ledger
+from api.services import outcome_projection as projection_ledger
 
 
 SEMANTIC_MODES = {"yes_no_labels", "up_down_labels", "source_first_second"}
@@ -313,9 +313,7 @@ def _normalize_fact_identity_aliases(
         else:
             market_values.add(parsed)
     token_values = {
-        value
-        for field in _TOKEN_IDENTITY_FIELDS
-        if field in row and (value := _normalize_token_id(row.get(field)))
+        value for field in _TOKEN_IDENTITY_FIELDS if field in row and (value := _normalize_token_id(row.get(field)))
     }
     if market_alias_invalid or len(market_values) > 1:
         for field in _MARKET_IDENTITY_FIELDS:
@@ -540,10 +538,10 @@ def _validate_content_bound_ledger(
 
     try:
         normalized_record = projection_ledger.normalize_projection_record(record_json)
-        validated_plan = projection_ledger._validate_plan(plan_json)
-        record_sha256 = projection_ledger._sha256(normalized_record)
-        projection_key = projection_ledger._projection_key(normalized_record)
-        expected_labels = projection_ledger._expected_label_rows(
+        validated_plan = projection_ledger.validate_plan(plan_json)
+        record_sha256 = projection_ledger.record_digest(normalized_record)
+        projection_key = projection_ledger.projection_key(normalized_record)
+        expected_labels = projection_ledger.expected_labels(
             normalized_record,
             validated_plan["plan_sha256"],
         )
@@ -1106,8 +1104,7 @@ def _validate_orderfilled_mutation_proof(
         or str(coverage.get("sourceTable") or "").strip() != "orderfilled_fact"
         or source_version_sha != _receipt_source_version_sha256(receipt, receipt_sha)
         or str(coverage.get("rowSha256") or "").strip().lower() != row_sha256
-        or str(coverage.get("rebuiltFromReceiptSha256") or "").strip().lower()
-        != receipt_sha
+        or str(coverage.get("rebuiltFromReceiptSha256") or "").strip().lower() != receipt_sha
         or coverage.get("zeroResidual") is not True
         or residual_rows != 0
     ):
@@ -1163,11 +1160,7 @@ def _aggregate_row_sha256(row: Mapping[str, Any]) -> Optional[str]:
         or source_through_block is None
     ):
         return None
-    semantic_fields = {
-        key: row.get(key)
-        for key in _AGGREGATE_SEMANTIC_BINDING_FIELDS
-        if key in row
-    }
+    semantic_fields = {key: row.get(key) for key in _AGGREGATE_SEMANTIC_BINDING_FIELDS if key in row}
     return _payload_sha256(
         {
             "schemaVersion": "orderfilled-aggregate-price-row-binding-v1",
@@ -1253,11 +1246,17 @@ def _projection_capabilities(
     semantics_valid = bool(semantics.get("valid"))
     yes_no = bool(semantics_valid and semantics.get("supportsYesNoWording"))
     directional = bool(semantics_valid and semantics.get("supportsDirectionalSemantics"))
-    price_reason = None if not price_applicable else (
+    price_reason = (
         None
-        if price_valid
+        if not price_applicable
         else (
-            "price_fact_identity_unproven" if semantics_valid else str(semantics.get("status") or "projection_missing")
+            None
+            if price_valid
+            else (
+                "price_fact_identity_unproven"
+                if semantics_valid
+                else str(semantics.get("status") or "projection_missing")
+            )
         )
     )
     return {
@@ -1347,11 +1346,7 @@ def _project_annotated_price_fact(
         )
     outcome_prices.sort(key=lambda item: int(item.get("sourceIndex") or 0))
     primary_outcome_price = next(
-        (
-            item["price"]
-            for item in outcome_prices
-            if int(item.get("sourceIndex") or 0) == 0
-        ),
+        (item["price"] for item in outcome_prices if int(item.get("sourceIndex") or 0) == 0),
         None,
     )
     result.update(
@@ -1509,8 +1504,7 @@ def project_token_price_series(
             (
                 _failed_semantics(str(row.get("outcomeSemanticsStatus")))
                 if str(row.get("outcomeSemanticsStatus") or "").endswith("_alias_conflict")
-                else semantics_by_market.get(_market_id(row) or 0)
-                or _failed_semantics("market_identity_missing")
+                else semantics_by_market.get(_market_id(row) or 0) or _failed_semantics("market_identity_missing")
             ),
             proof_kind="canonical_token",
         )
@@ -1624,25 +1618,19 @@ def _project_public_oracle_fields(
             candidate
             for candidate in logical_slots.values()
             if isinstance(candidate, Mapping)
-            and outcome_text.casefold()
-            == str(candidate.get("sourceLabel") or "").strip().casefold()
+            and outcome_text.casefold() == str(candidate.get("sourceLabel") or "").strip().casefold()
         ]
         source_match_logical = (
-            str(source_matches[0].get("logicalOutcome") or "").strip().upper()
-            if len(source_matches) == 1
-            else None
+            str(source_matches[0].get("logicalOutcome") or "").strip().upper() if len(source_matches) == 1 else None
         )
         literal_logical = logical if logical in {"YES", "NO"} else None
         if claimed_logical in {"YES", "NO"}:
             claimed_slot = logical_slots.get(claimed_logical)
             claimed_label = (
-                str(claimed_slot.get("sourceLabel") or "").strip()
-                if isinstance(claimed_slot, Mapping)
-                else ""
+                str(claimed_slot.get("sourceLabel") or "").strip() if isinstance(claimed_slot, Mapping) else ""
             )
             if not claimed_label or not (
-                literal_logical == claimed_logical
-                or outcome_text.casefold() == claimed_label.casefold()
+                literal_logical == claimed_logical or outcome_text.casefold() == claimed_label.casefold()
             ):
                 row[field] = None
                 projection_valid = False
@@ -1691,9 +1679,10 @@ def _project_public_oracle_fields(
                 row.pop(_ORACLE_OUTCOME_FIELDS[field], None)
     for alias_group in _ORACLE_RAW_ALIAS_GROUPS:
         present_aliases = [field for field in alias_group if field in row]
-        if len(present_aliases) >= 2 and len(
-            {_oracle_raw_fingerprint(row.get(field)) for field in present_aliases}
-        ) != 1:
+        if (
+            len(present_aliases) >= 2
+            and len({_oracle_raw_fingerprint(row.get(field)) for field in present_aliases}) != 1
+        ):
             projection_valid = False
             rejection_reason = "oracle_raw_alias_conflict"
             for field in alias_group:
@@ -1753,9 +1742,7 @@ def sanitize_public_market_payload(
         if not isinstance(value, Mapping):
             return
         normalized, identity_error = _normalize_fact_identity_aliases(value)
-        current_market_id = (
-            _market_id(normalized) if identity_error is None else None
-        ) or inherited_market_id
+        current_market_id = (_market_id(normalized) if identity_error is None else None) or inherited_market_id
         if current_market_id is not None:
             requested_market_ids.add(current_market_id)
         for item in value.values():
@@ -1772,14 +1759,12 @@ def sanitize_public_market_payload(
             return value
         row, identity_error = _normalize_fact_identity_aliases(value)
         declared_fact_price = any(
-            field in value and not isinstance(value.get(field), Mapping)
-            for field in _FACT_PRICE_FIELDS
+            field in value and not isinstance(value.get(field), Mapping) for field in _FACT_PRICE_FIELDS
         )
         declared_token_alias = any(field in value for field in _TOKEN_IDENTITY_FIELDS)
         semantic_field_present = bool(_PUBLIC_SEMANTIC_FIELDS & set(row))
         should_validate_fact_price = bool(
-            declared_fact_price
-            and (root or declared_token_alias or semantic_field_present)
+            declared_fact_price and (root or declared_token_alias or semantic_field_present)
         )
         if identity_error is None and should_validate_fact_price:
             row, identity_error = _normalize_fact_price_aliases(row)
@@ -1792,12 +1777,7 @@ def sanitize_public_market_payload(
             own_market_id = None
         current_market_id = own_market_id or inherited_market_id
         has_token_price_shape = bool(declared_fact_price and declared_token_alias)
-        is_semantic_payload = (
-            root
-            or identity_error is not None
-            or has_token_price_shape
-            or semantic_field_present
-        )
+        is_semantic_payload = root or identity_error is not None or has_token_price_shape or semantic_field_present
         inherited_oracle_rejection = any(
             _strict_bool(row.get(field)) is False
             for field in ("oracleOutcomeSemanticsValid", "oracle_outcome_semantics_valid")
@@ -1818,9 +1798,7 @@ def sanitize_public_market_payload(
                     "market_or_projection_missing"
                 )
             price_applicable = has_token_price_shape or _public_price_projection_applicable(row)
-            has_exact_fact = bool(
-                identity_error is None and _token_id(row) and _fact_price(row) is not None
-            )
+            has_exact_fact = bool(identity_error is None and _token_id(row) and _fact_price(row) is not None)
             proof_row = dict(row)
             if current_market_id is not None and _market_id(proof_row) is None:
                 proof_row["marketId"] = current_market_id
@@ -1890,9 +1868,7 @@ def sanitize_public_market_payload(
             if reason is None and not semantics.get("valid"):
                 reason = str(semantics.get("status") or "projection_missing")
             effective_semantics_status = (
-                projection.get("outcomeSemanticsStatus")
-                if projection is not None
-                else semantics.get("status")
+                projection.get("outcomeSemanticsStatus") if projection is not None else semantics.get("status")
             )
             effective_semantics_valid = (
                 bool(projection.get("outcomeSemanticsValid"))
@@ -1909,9 +1885,7 @@ def sanitize_public_market_payload(
                     "supportsYesNoWording": capabilities["supportsYesNoWording"],
                     "supportsDirectionalSemantics": capabilities["supportsDirectionalSemantics"],
                     "priceProjectionStatus": (
-                        "projected"
-                        if price_valid
-                        else capabilities["priceProjectionReason"] or "not_applicable"
+                        "projected" if price_valid else capabilities["priceProjectionReason"] or "not_applicable"
                     ),
                     "priceProjectionValid": price_valid,
                     "priceProjectionProof": (

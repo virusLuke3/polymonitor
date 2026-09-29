@@ -6,22 +6,12 @@ from typing import Any
 
 from flask import Blueprint, jsonify, request
 
-from api.context import resolve_route_callable
-
 
 @dataclass(frozen=True)
 class MarketGroupRouteDependencies:
     get_market_groups_payload: Callable[..., dict[str, Any]]
     get_market_group_detail_payload: Callable[[str], dict[str, Any] | None]
     get_market_group_chart_payload: Callable[..., dict[str, Any] | None]
-
-    @classmethod
-    def from_context(cls, context: Mapping[str, Any]) -> MarketGroupRouteDependencies:
-        return cls(
-            get_market_groups_payload=resolve_route_callable(context, "get_market_groups_payload"),
-            get_market_group_detail_payload=resolve_route_callable(context, "get_market_group_detail_payload"),
-            get_market_group_chart_payload=resolve_route_callable(context, "get_market_group_chart_payload"),
-        )
 
 
 def create_market_groups_blueprint(dependencies: MarketGroupRouteDependencies) -> Blueprint:

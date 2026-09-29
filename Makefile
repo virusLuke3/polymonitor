@@ -1,22 +1,33 @@
-.PHONY: bootstrap quality test dev api web-build status services-install services-start services-start-data services-restart services-restart-data services-stop services-status services-logs services-doctor
+.PHONY: bootstrap quality test clean dev api web web-build status services-start services-restart services-stop services-status services-logs services-log-policy services-doctor
 
 API_HOST ?= 127.0.0.1
 API_PORT ?= 18500
+VENV_DIR ?= $(if $(POLYMONITOR_VENV_DIR),$(POLYMONITOR_VENV_DIR),$(CURDIR)/.venv)
+PYTHON ?= $(VENV_DIR)/bin/python
+SERVICE ?= polydata-api.service
+PYTEST_ARGS ?=
 
 bootstrap:
-	bash scripts/dev/bootstrap.sh
+	POLYMONITOR_VENV_DIR="$(VENV_DIR)" bash scripts/dev/bootstrap.sh
 
 quality:
-	bash scripts/qa/verify_clean_checkout.sh
+	POLYMONITOR_VENV_DIR="$(VENV_DIR)" bash scripts/qa/verify_clean_checkout.sh
 
 test:
-	.venv/bin/python scripts/qa/run_pytest.py
+	PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q $(PYTEST_ARGS)
+
+clean:
+	rm -rf -- artifacts test-results webpage/artifacts webpage/test-results webpage/playwright-report webpage/dist webpage/.next webpage/.vite webpage/node_modules/.vite .pytest_cache .ruff_cache __pycache__
+	find agent scripts telegram tests -type d -name __pycache__ -prune -exec rm -rf -- {} +
 
 dev:
-	bash scripts/start_dashboard.sh
+	POLYDATA_PYTHON_BIN="$(PYTHON)" bash scripts/start_dashboard.sh
 
 api:
-	bash scripts/start_dashboard.sh
+	POLYDATA_PYTHON_BIN="$(PYTHON)" bash scripts/start_dashboard.sh
+
+web:
+	npm --prefix webpage run dev
 
 web-build:
 	cd webpage && npm run build
@@ -29,29 +40,26 @@ status:
 	@curl -fsS "http://$(API_HOST):$(API_PORT)/system/health"
 	@echo
 
-services-install:
-	bash scripts/ops/polydata_services.sh install
-
 services-start:
-	bash scripts/ops/polydata_services.sh start
-
-services-start-data:
-	bash scripts/ops/polydata_services.sh start-data
+	systemctl --user start "$(SERVICE)"
 
 services-restart:
-	bash scripts/ops/polydata_services.sh restart
-
-services-restart-data:
-	bash scripts/ops/polydata_services.sh restart-data
+	systemctl --user restart "$(SERVICE)"
 
 services-stop:
-	bash scripts/ops/polydata_services.sh stop
+	systemctl --user stop "$(SERVICE)"
 
 services-status:
-	bash scripts/ops/polydata_services.sh status
+	systemctl --user --no-pager status "$(SERVICE)"
 
 services-logs:
-	bash scripts/ops/polydata_services.sh logs $(SERVICE)
+	journalctl --user-unit="$(SERVICE)" --since today -n 200 -f
+
+# Host-wide journal policy; run explicitly on the production host.
+services-log-policy:
+	sudo install -D -m 644 deploy/journald/60-polymonitor.conf /etc/systemd/journald.conf.d/60-polymonitor.conf
+	sudo systemctl restart systemd-journald.service
 
 services-doctor:
-	bash scripts/ops/polydata_services.sh doctor
+	"$(PYTHON)" scripts/qa/check_systemd_units.py
+	bash scripts/qa/verify_systemd_units.sh

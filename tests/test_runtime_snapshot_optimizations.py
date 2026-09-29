@@ -27,7 +27,9 @@ class FakeApp:
 
 
 class FakeSnapshotStore:
-    def __init__(self, fresh: Optional[Dict[tuple[str, str], Any]] = None, stale: Optional[Dict[tuple[str, str], Any]] = None):
+    def __init__(
+        self, fresh: Optional[Dict[tuple[str, str], Any]] = None, stale: Optional[Dict[tuple[str, str], Any]] = None
+    ):
         self.fresh = dict(fresh or {})
         self.stale = dict(stale or {})
 
@@ -48,7 +50,10 @@ class MarketFastPathTestCase(unittest.TestCase):
             "utc_now_iso": lambda: "2026-04-21T00:00:00Z",
             "utc_date_days_ago": lambda days: "2026-04-20",
         }
-        expected = {"items": [{"id": 1}], "pagination": {"page": 1, "pageSize": 160, "total": 1, "totalPages": 1, "hasMore": False}}
+        expected = {
+            "items": [{"id": 1}],
+            "pagination": {"page": 1, "pageSize": 160, "total": 1, "totalPages": 1, "hasMore": False},
+        }
 
         with patch.object(market_service, "get_active_markets_snapshot", return_value=expected) as snapshot_mock:
             payload = market_service.get_markets_payload(ctx, status="active", query="", page=1, page_size=160)
@@ -110,8 +115,16 @@ class MarketFastPathTestCase(unittest.TestCase):
             "format_trade_decimal": lambda value: value,
         }
 
-        with patch.object(market_service, "enrich_market_rows_with_runtime_prices", side_effect=AssertionError("runtime enrichment should be skipped")), \
-             patch.object(market_service, "enrich_market_rows_with_24h_change", side_effect=lambda inner_ctx, rows: rows):
+        with (
+            patch.object(
+                market_service,
+                "enrich_market_rows_with_runtime_prices",
+                side_effect=AssertionError("runtime enrichment should be skipped"),
+            ),
+            patch.object(
+                market_service, "enrich_market_rows_with_24h_change", side_effect=lambda inner_ctx, rows: rows
+            ),
+        ):
             payload = market_service.build_active_markets_payload(ctx, page_size=1, include_runtime_prices=False)
 
         self.assertEqual(payload["items"][0]["id"], 11)
@@ -211,8 +224,16 @@ class MarketFastPathTestCase(unittest.TestCase):
             "get_gamma_active_market_filter": lambda: {"conditionIds": ["condition-11"], "slugs": []},
         }
 
-        with patch.object(market_service, "enrich_market_rows_with_runtime_prices", side_effect=AssertionError("runtime enrichment should be skipped")), \
-             patch.object(market_service, "enrich_market_rows_with_24h_change", side_effect=lambda inner_ctx, rows: rows):
+        with (
+            patch.object(
+                market_service,
+                "enrich_market_rows_with_runtime_prices",
+                side_effect=AssertionError("runtime enrichment should be skipped"),
+            ),
+            patch.object(
+                market_service, "enrich_market_rows_with_24h_change", side_effect=lambda inner_ctx, rows: rows
+            ),
+        ):
             payload = market_service.build_active_markets_payload(ctx, page_size=2, include_runtime_prices=False)
 
         self.assertEqual([item["id"] for item in payload["items"]], [11])
@@ -306,8 +327,16 @@ class MarketFastPathTestCase(unittest.TestCase):
             "get_gamma_active_market_filter": lambda: {"conditionIds": [], "slugs": []},
         }
 
-        with patch.object(market_service, "enrich_market_rows_with_runtime_prices", side_effect=AssertionError("runtime enrichment should be skipped")), \
-             patch.object(market_service, "enrich_market_rows_with_24h_change", side_effect=lambda inner_ctx, rows: rows):
+        with (
+            patch.object(
+                market_service,
+                "enrich_market_rows_with_runtime_prices",
+                side_effect=AssertionError("runtime enrichment should be skipped"),
+            ),
+            patch.object(
+                market_service, "enrich_market_rows_with_24h_change", side_effect=lambda inner_ctx, rows: rows
+            ),
+        ):
             payload = market_service.build_active_markets_payload(ctx, page_size=2, include_runtime_prices=False)
 
         self.assertEqual([item["id"] for item in payload["items"]], [12, 11])
@@ -362,9 +391,17 @@ class MarketFastPathTestCase(unittest.TestCase):
             }
         }
 
-        with patch.object(market_service, "_get_market_detail_rows_by_ids", return_value=detail_map), \
-             patch.object(market_service, "enrich_market_rows_with_runtime_prices", side_effect=lambda inner_ctx, rows, max_updates=18: rows), \
-             patch.object(market_service, "enrich_market_rows_with_24h_change", side_effect=lambda inner_ctx, rows: rows):
+        with (
+            patch.object(market_service, "_get_market_detail_rows_by_ids", return_value=detail_map),
+            patch.object(
+                market_service,
+                "enrich_market_rows_with_runtime_prices",
+                side_effect=lambda inner_ctx, rows, max_updates=18: rows,
+            ),
+            patch.object(
+                market_service, "enrich_market_rows_with_24h_change", side_effect=lambda inner_ctx, rows: rows
+            ),
+        ):
             payload = market_service.get_markets_payload(ctx, status="active", query="macro", page=2, page_size=1)
 
         self.assertEqual(payload["items"][0]["id"], 21)
@@ -385,7 +422,9 @@ class SignalSnapshotOptimizationTestCase(unittest.TestCase):
             "SIGNAL_RUNTIME_TTL_SECONDS": 45,
             "SNAPSHOT_STORE": snapshot_store or FakeSnapshotStore(),
             "get_cached_runtime_payload": lambda namespace, cache_key: runtime_cache.get((namespace, cache_key)),
-            "set_cached_runtime_payload": lambda namespace, cache_key, payload, ttl_seconds: runtime_cache.setdefault((namespace, cache_key), payload),
+            "set_cached_runtime_payload": lambda namespace, cache_key, payload, ttl_seconds: runtime_cache.setdefault(
+                (namespace, cache_key), payload
+            ),
             "_resources": RuntimeResources(),
             "app": FakeApp(),
             "utc_now_iso": lambda: "2026-04-21T00:00:00Z",
@@ -395,11 +434,17 @@ class SignalSnapshotOptimizationTestCase(unittest.TestCase):
         cache_key = json.dumps({"limit": 8}, sort_keys=True, ensure_ascii=True)
         stale_payload = {"items": [{"title": "stale alpha"}], "generatedAt": "stale"}
         ctx = self.make_signal_context(
-            snapshot_store=FakeSnapshotStore(stale={(signal_service.SIGNAL_SNAPSHOT_NAMESPACE_ALPHA, cache_key): stale_payload}),
+            snapshot_store=FakeSnapshotStore(
+                stale={(signal_service.SIGNAL_SNAPSHOT_NAMESPACE_ALPHA, cache_key): stale_payload}
+            ),
         )
 
         ctx["_resources"].start_thread = Mock(return_value=True)
-        with patch.object(signal_service, "_build_alpha_signal_payload", return_value={"items": [{"title": "fresh"}], "generatedAt": "fresh"}):
+        with patch.object(
+            signal_service,
+            "_build_alpha_signal_payload",
+            return_value={"items": [{"title": "fresh"}], "generatedAt": "fresh"},
+        ):
             first = signal_service.get_alpha_signal_snapshot(ctx, limit=8)
             second = signal_service.get_alpha_signal_snapshot(ctx, limit=8)
 
@@ -421,3 +466,42 @@ class SignalSnapshotOptimizationTestCase(unittest.TestCase):
         self.assertEqual("empty", result["status"])
         self.assertEqual("live-build", result["cacheMode"])
         self.assertEqual(snapshot_store.get(signal_service.SIGNAL_SNAPSHOT_NAMESPACE_ALPHA, cache_key)["items"], [])
+
+
+def test_shared_snapshot_refresh_accepts_empty_results_and_marks_stale(tmp_path):
+    from api.cache import CacheState, get_snapshot_payload
+    from runtime.snapshot_store import SnapshotStore
+
+    store = SnapshotStore(str(tmp_path / "snapshots.sqlite3"))
+    resources = RuntimeResources()
+    ctx = CacheState(resources, FakeApp(), store)
+    with patch("runtime.snapshot_store.time.time", return_value=100):
+        store.set("test", "key", {"items": ["old"]}, 10)
+    with patch("runtime.snapshot_store.time.time", return_value=111):
+        result = get_snapshot_payload(ctx, "test", "key", lambda: {"items": []}, ttl_seconds=10)
+        assert result["stale"] is True
+        resources.close()
+        assert store.get("test", "key") == {"items": []}
+
+
+def test_snapshot_read_does_not_extend_expiry_or_hide_refresh_failure(tmp_path):
+    from api.cache import CacheState, get_snapshot_payload
+    from runtime.snapshot_store import SnapshotStore
+
+    store = SnapshotStore(str(tmp_path / "snapshots.sqlite3"))
+    resources = RuntimeResources()
+    ctx = CacheState(resources, FakeApp(), store)
+    with patch("runtime.snapshot_store.time.time", return_value=100):
+        store.set("test", "key", {"items": ["old"]}, 10)
+    with patch("runtime.snapshot_store.time.time", return_value=109):
+        assert get_snapshot_payload(ctx, "test", "key", Mock(side_effect=AssertionError), ttl_seconds=10) == {
+            "items": ["old"]
+        }
+    with patch("runtime.snapshot_store.time.time", return_value=111):
+        builder = Mock(return_value={"status": "unavailable", "items": []})
+        result = get_snapshot_payload(ctx, "test", "key", builder, ttl_seconds=10)
+        resources.close()
+        assert result["cacheStatus"] == "stale"
+        builder.assert_called_once()
+        assert store.get("test", "key") is None
+        assert store.get_stale("test", "key") == {"items": ["old"]}
