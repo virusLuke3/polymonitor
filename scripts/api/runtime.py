@@ -47,6 +47,7 @@ class ServiceRuntime:
             clickhouse=self.SETTINGS.clickhouse,
             snapshot_workers=self.SETTINGS.snapshot_refresh_workers,
             workspace_workers=self.SETTINGS.workspace_refresh_workers,
+            shutdown_timeout_seconds=self.SETTINGS.shutdown_timeout_seconds,
         )
         self.app = application or SimpleNamespace(logger=logging.getLogger("polydata.services"))
         self.ALLOWED_ORIGINS = set(self.SETTINGS.allowed_origins)

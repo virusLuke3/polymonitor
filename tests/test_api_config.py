@@ -177,7 +177,7 @@ def test_apps_keep_database_configuration_and_health_cache_isolated(monkeypatch)
 
     monkeypatch.setenv("POLYDATA_API_POSTGRES_POOL_SIZE", "0")
     monkeypatch.setenv("POLYDATA_REDIS_URL", "")
-    monkeypatch.setattr(db, "get_postgres_connection", lambda settings: settings["database"])
+    monkeypatch.setattr(db, "get_postgres_connection", lambda settings, **kwargs: settings["database"])
     monkeypatch.setenv("POLYDATA_POSTGRES_DATABASE", "first")
     first = create_app().extensions["polydata_runtime"]
     monkeypatch.setenv("POLYDATA_POSTGRES_DATABASE", "second")
@@ -237,8 +237,6 @@ def test_connection_pool_closes_idle_and_returned_leases():
         Mock(side_effect=connections),
         max_size=2,
         acquire_timeout_seconds=0.1,
-        connect_attempts=1,
-        connect_retry_delay_seconds=0,
     )
     first, second = pool.acquire(), pool.acquire()
     first.close()
@@ -258,12 +256,12 @@ def test_connection_pool_shutdown_during_connect_closes_new_connection():
 
     connection = Mock()
 
-    def connect():
+    def connect(**kwargs):
         pool.close()
         return connection
 
     pool = ApiPostgresConnectionPool(
-        connect, max_size=1, acquire_timeout_seconds=0.1, connect_attempts=1, connect_retry_delay_seconds=0
+        connect, max_size=1, acquire_timeout_seconds=0.1
     )
     with pytest.raises(RuntimeError, match="closed"):
         pool.acquire()
@@ -293,8 +291,6 @@ def test_pool_wait_timeout_identifies_connection_owner_and_recovery():
         Mock(return_value=Mock()),
         max_size=1,
         acquire_timeout_seconds=0.01,
-        connect_attempts=1,
-        connect_retry_delay_seconds=0,
     )
     lease = pool.acquire()
     try:
@@ -306,6 +302,97 @@ def test_pool_wait_timeout_identifies_connection_owner_and_recovery():
     finally:
         lease.close()
         pool.close()
+
+
+def test_postgres_timeouts_are_session_scoped_and_validated(monkeypatch):
+    import pytest
+    from unittest.mock import MagicMock
+    from db import db
+
+    driver = MagicMock()
+    monkeypatch.setattr(db, "psycopg", driver)
+    monkeypatch.setenv("POLYDATA_POSTGRES_STATEMENT_TIMEOUT_MS", "7000")
+    settings = db.get_postgres_settings()
+    db.get_postgres_connection(settings, connect_timeout=2).close()
+    options = driver.connect.call_args.kwargs
+    assert options["connect_timeout"] == 2
+    assert options["tcp_user_timeout"] == 20000
+    assert "statement_timeout=7000" in options["options"]
+    assert "lock_timeout=3000" in options["options"]
+    monkeypatch.setenv("POLYDATA_POSTGRES_STATEMENT_TIMEOUT_MS", "0")
+    with pytest.raises(ValueError, match="must be positive"):
+        db.get_postgres_settings()
+
+
+def test_pool_rejects_late_connection_without_retry_or_capacity_leak(monkeypatch):
+    import pytest
+    from unittest.mock import Mock
+    from api import db_pool
+
+    clock, connection = [0.0], Mock()
+    def connect(**kwargs):
+        clock[0] = 2
+        return connection
+    factory = Mock(side_effect=connect)
+    pool = db_pool.ApiPostgresConnectionPool(factory, max_size=1, acquire_timeout_seconds=1)
+    monkeypatch.setattr(db_pool.time, "monotonic", lambda: clock[0])
+    with pytest.raises(TimeoutError, match="deadline"):
+        pool.acquire()
+    factory.assert_called_once_with(connect_timeout=1)
+    connection.close.assert_called_once()
+    assert pool._connection_count == 0
+    pool.close()
+
+
+def test_runtime_shutdown_has_one_budget_and_cancels_queued_tasks():
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+    from api.context import RuntimeResources
+
+    resources = RuntimeResources(shutdown_timeout_seconds=0.05, hazard_executor=ThreadPoolExecutor(max_workers=1))
+    release, entered = threading.Event(), threading.Event()
+    def work():
+        entered.set()
+        release.wait(2)
+    future = resources.submit(resources.hazard_executor, work)
+    assert entered.wait(1)
+    queued = resources.submit(resources.hazard_executor, lambda: None)
+    try:
+        started = time.monotonic()
+        resources.close()
+        assert time.monotonic() - started < 0.5
+        assert queued.cancelled()
+        assert resources.stopped.is_set()
+    finally:
+        release.set()
+        future.result(timeout=1)
+
+
+def test_redis_failures_do_not_log_credentials_or_retry_on_every_request(caplog):
+    import logging
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from api.cache import CacheState, get_redis_client, get_cached_payload, set_cached_payload
+
+    secret = "dummy-private-password"
+    driver = Mock()
+    driver.from_url.side_effect = ConnectionError(secret)
+    ctx = CacheState(None, SimpleNamespace(logger=logging.getLogger("redis-test")), None,
+                     redis_url=f"redis://user:{secret}@localhost:6379/0", redis_module=driver)
+    with caplog.at_level(logging.WARNING):
+        for _ in range(10):
+            assert get_redis_client(ctx) is None
+        client = Mock()
+        client.get.side_effect = ConnectionError(secret)
+        client.setex.side_effect = ConnectionError(secret)
+        ctx.redis_client = client
+        get_cached_payload(ctx, "test", secret)
+        set_cached_payload(ctx, "test", secret, {}, 30)
+    assert secret not in caplog.text
+    assert "redis://" not in caplog.text
+    assert "ConnectionError" in caplog.text
+    driver.from_url.assert_called_once()
 
 
 def test_clickhouse_configuration_and_capacity_are_owned_by_runtime(tmp_path, monkeypatch):

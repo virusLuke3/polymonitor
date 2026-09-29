@@ -463,19 +463,6 @@ def fetch_live_polybeats_payload(ctx: dict, limit: int = DEFAULT_LIMIT) -> Dict[
 
 
 def get_polybeats_snapshot(ctx: dict, limit: int = DEFAULT_LIMIT) -> Dict[str, Any]:
-    cache_key = build_polybeats_cache_key(limit=limit)
+    from .signal_service import get_signal_snapshot
 
-    def builder() -> Dict[str, Any]:
-        return fetch_live_polybeats_payload(ctx, limit=limit)
-
-    payload = ctx["get_snapshot_payload"](
-        SNAPSHOT_NAMESPACE,
-        cache_key,
-        builder,
-        ttl_seconds=ctx["SIGNAL_RUNTIME_TTL_SECONDS"],
-    )
-    if isinstance(payload, dict):
-        payload.setdefault("generatedAt", ctx["utc_now_iso"]())
-        payload.setdefault("status", "ok" if payload.get("items") else "empty")
-        payload.setdefault("source", "polyData polybeats flow builder")
-    return payload
+    return get_signal_snapshot(ctx, namespace=SNAPSHOT_NAMESPACE, cache_key=build_polybeats_cache_key(), limit=limit)

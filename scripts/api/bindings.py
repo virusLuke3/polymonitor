@@ -454,6 +454,8 @@ def bind_services(runtime: ServiceRuntime) -> None:
     runtime.polybeats_context = {
         "_resources": runtime.resources,
         "SIGNAL_RUNTIME_TTL_SECONDS": runtime.SETTINGS.signal_runtime_ttl_seconds,
+        "SNAPSHOT_STORE": runtime.SNAPSHOT_STORE,
+        "get_cached_json": get_cached_json,
         "_safe_decimal": _safe_decimal,
         "app": runtime.app,
         "format_trade_decimal": format_trade_decimal,
@@ -461,7 +463,6 @@ def bind_services(runtime: ServiceRuntime) -> None:
         "get_orderfilled_outcome_mutation_proof": get_orderfilled_outcome_mutation_proof,
         "get_recent_trades": get_recent_trades,
         "get_related_content_by_market_id": get_related_content_by_market_id,
-        "get_snapshot_payload": get_snapshot_payload,
         "normalize_address": normalize_address,
         "parse_iso_datetime": parse_iso_datetime,
         "query_all": query_all,
@@ -520,7 +521,6 @@ def bind_services(runtime: ServiceRuntime) -> None:
         "get_active_markets_snapshot": get_active_markets_snapshot,
         "get_backend": get_backend,
         "get_cached_json": get_cached_json,
-        "get_cached_runtime_payload": get_cached_runtime_payload,
         "get_orderfilled_outcome_mutation_proof": get_orderfilled_outcome_mutation_proof,
         "get_recent_oracle_events": get_recent_oracle_events,
         "get_recent_trades": get_recent_trades,
@@ -528,7 +528,6 @@ def bind_services(runtime: ServiceRuntime) -> None:
         "normalize_trade": normalize_trade,
         "parse_iso_datetime": parse_iso_datetime,
         "query_all": query_all,
-        "set_cached_runtime_payload": runtime.set_cached_runtime_payload,
         "utc_date_days_ago": utc_date_days_ago,
         "utc_now_iso": utc_now_iso,
     }

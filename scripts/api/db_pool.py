@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import logging
+import math
 import threading
 import time
 from collections import deque
@@ -51,14 +52,10 @@ class ApiPostgresConnectionPool:
         *,
         max_size: int,
         acquire_timeout_seconds: float,
-        connect_attempts: int,
-        connect_retry_delay_seconds: float,
     ) -> None:
         self._connection_factory = connection_factory
         self._max_size = max(1, max_size)
         self._acquire_timeout_seconds = max(0.1, acquire_timeout_seconds)
-        self._connect_attempts = max(1, connect_attempts)
-        self._connect_retry_delay_seconds = max(0.0, connect_retry_delay_seconds)
         self._condition = threading.Condition()
         self._idle: deque[Any] = deque()
         self._connection_count = 0
@@ -93,27 +90,23 @@ class ApiPostgresConnectionPool:
                 self._condition.wait(timeout=remaining)
 
         if create_connection:
-            for attempt in range(1, self._connect_attempts + 1):
+            try:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("API PostgreSQL connection deadline exceeded")
+                connection = self._connection_factory(*args, **kwargs, connect_timeout=max(1, math.ceil(remaining)))
+                connection.commit()  # Preserve the session search_path across lease rollbacks.
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("API PostgreSQL connection deadline exceeded")
+            except BaseException:
                 try:
-                    connection = self._connection_factory(*args, **kwargs)
-                    # The shared DB factory configures PostgreSQL search_path in
-                    # its initial transaction. Commit that session setup before
-                    # leases start using rollback for transaction cleanup.
-                    connection.commit()
-                    break
-                except Exception:
                     if connection is not None:
-                        try:
-                            connection.close()
-                        except Exception:
-                            pass
-                    connection = None
-                    if attempt >= self._connect_attempts or time.monotonic() >= deadline:
-                        with self._condition:
-                            self._connection_count -= 1
-                            self._condition.notify()
-                        raise
-                    time.sleep(self._connect_retry_delay_seconds * attempt)
+                        connection.close()
+                finally:
+                    with self._condition:
+                        self._connection_count -= 1
+                        self._condition.notify()
+                raise
         with self._condition:
             if self._closed:
                 self._connection_count -= 1
@@ -172,17 +165,7 @@ def build_api_connection_factory(
         max_size=pool_size,
         acquire_timeout_seconds=_env_float(
             "POLYDATA_API_POSTGRES_POOL_ACQUIRE_TIMEOUT_SECONDS",
-            45.0,
-        ),
-        connect_attempts=_env_int(
-            "POLYDATA_API_POSTGRES_POOL_CONNECT_ATTEMPTS",
-            6,
-            minimum=1,
-        ),
-        connect_retry_delay_seconds=_env_float(
-            "POLYDATA_API_POSTGRES_POOL_CONNECT_RETRY_DELAY_SECONDS",
-            0.5,
-            minimum=0.0,
+            5.0,
         ),
     )
 

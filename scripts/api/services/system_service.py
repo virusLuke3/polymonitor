@@ -400,7 +400,7 @@ SEED_META_SPECS = [
         "cacheKey": "alpha-signal",
         "serviceName": "polydata-alpha-signal-seed.service",
         "intervalEnv": "POLYDATA_SIGNAL_WATCH_INTERVAL_SECONDS",
-        "defaultIntervalSeconds": 45,
+        "defaultIntervalSeconds": 120,
     },
     {
         "panelId": "polybeats-feed",
@@ -408,7 +408,7 @@ SEED_META_SPECS = [
         "cacheKey": "polybeats-feed",
         "serviceName": "polydata-polybeats-feed-seed.service",
         "intervalEnv": "POLYDATA_SIGNAL_WATCH_INTERVAL_SECONDS",
-        "defaultIntervalSeconds": 45,
+        "defaultIntervalSeconds": 120,
     },
     {
         "panelId": "whale-trades",
@@ -416,7 +416,7 @@ SEED_META_SPECS = [
         "cacheKey": "whale-trades",
         "serviceName": "polydata-whale-trades-seed.service",
         "intervalEnv": "POLYDATA_SIGNAL_WATCH_INTERVAL_SECONDS",
-        "defaultIntervalSeconds": 45,
+        "defaultIntervalSeconds": 120,
     },
     {
         "panelId": "suspicious-trades",
@@ -424,7 +424,7 @@ SEED_META_SPECS = [
         "cacheKey": "suspicious-trades",
         "serviceName": "polydata-suspicious-trades-seed.service",
         "intervalEnv": "POLYDATA_SIGNAL_WATCH_INTERVAL_SECONDS",
-        "defaultIntervalSeconds": 45,
+        "defaultIntervalSeconds": 120,
     },
     {
         "panelId": "bootstrap",
