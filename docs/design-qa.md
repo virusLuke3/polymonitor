@@ -64,7 +64,7 @@ A—E 的前端实现、固定条件对照及针对性回归已完成；**最新
 
 未关闭的两项：来源健康组在 NWS `nws-provider-deadline-exceeded` 上失败，截图中 USGS/GDACS/FIRMS 也有降级；航班视口收到 HTTP 502，未获得可验收的新观测。此时 GCP API 状态为 `activating`，日志记录 worker 被 SIGKILL、PostgreSQL 连接超时、ClickHouse OrderFilled 读取不可用。日志提示可能内存不足，但本任务没有完成该根因证明，也没有修改、重启后端或改变数据状态以通过前端验收。证据：`production-current-api.log`。上一版本的 17/17 记录仅表示当时状态，不能替代这一轮的失败。
 
-最终截图及生产 trace 保存在 `production-mobile-final/`；阶段 A—E 固定夹具的 before/after、30 秒交互 trace、713/5000 的成员一致性与性能数据继续保留。`map-polish-round2/index.html` 汇总入口，`release.json` 记录构建版本与发布证据。51 份线上独立文档/素材未被此次静态部署覆盖；原始未提交文件按任务开始哈希核对保持不变。临时基线与发布 worktree 在证据保存后移除。
+最终截图及生产 trace 保存在 `production-mobile-final/`；阶段 A—E 固定夹具的 before/after、30 秒交互 trace、713/5000 的成员一致性与性能数据继续保留。`map-polish-round2/index.html` 汇总入口，`release.json` 记录构建版本与发布证据。51 份线上独立文档/素材未被此次静态部署覆盖；本轮提交仅包含任务所有的文件/修改。验收期间多次哈希核对 176 份原有修改均相同；收尾又观察到独立文档 SVG `webpage/public/docs-assets/images/paperbanana/polymarket-market-lifecycle-overview.svg` 缺失，本任务没有操作、恢复、提交或部署这一并行变化。临时基线与发布 worktree 在证据保存后移除。
 
 以下首轮记录依据用户提供的 `POLYMONITOR_MAP_ALIGNMENT_CODEX.md` 和两张原始参考图实施，描述当时的本地验证；发布及第二轮状态以本文最前面的更新为准。对照 WorldMonitor 本地 `4691d9213a74c25bc2190146a11ebeba02b8cc85`，并保留 Polymonitor 的数据事实、报告和已有 feature 边界。
 
