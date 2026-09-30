@@ -55,7 +55,16 @@
 - `production-recovery-final/receipt.json`：恢复复验遇到桌面 `ERR_NETWORK_CHANGED`；移动端 trace 则发现 SVG 模块下载约 12.5 秒，原 12 秒期限永久作废了迟到模块。后者是明确的前端恢复缺口，已按“下载告警与挂载期限分开”补修：同一次下载完成可恢复，卸载或新渲染器代次仍使旧结果失效，不增加重试循环、不延长挂载期限。`frontend-startup.spec.ts` 补充慢下载恢复与退出后禁止迟到挂载的回归。
 - 发布脚本在替换控制文件前校验入口哈希、SW build ID、当前版本和已上传资产；一次误用 HTML 包含 SHA 的断言提前拦截了发布，未改变控制文件。该次提前运行的版本不匹配检查单列于 `production-patch-before-publish/`，不算页面功能失败或通过。
 
-慢下载与失败恢复专项 `slow-svg-regression.log` **5/5 passed**。补修 `e7025c07b644022767c80c5b9ab46f0b55abeef2` 已推送并从干净 checkout 发布，GitHub run `36602570421` 通过；`production-svg-final/receipt.json` 的真实站点 **17/17 passed**，包括 NHC/NWS/FIRMS/国家风险健康检查。实际 ADSB.lol 响应为 `ok`、180 条观测，但依旧是有范围和数量上限的采样。移动端人工检查另外发现航空卡与缩放/列表/底部入口重叠，补修只调整既有移动端定位和可滚动最大高度；`mobile-aviation-controls.log` **2/2 passed**，覆盖 watch 卡和实际控件点击，待最终版上线复验。真实 iOS/Safari/Android 设备仍不在本地 Chrome 矩阵内。雷达沿用最新实际帧，没有新增历史雷达播放、假轨迹或推测覆盖范围。
+慢下载与失败恢复专项 `slow-svg-regression.log` **5/5 passed**。补修 `e7025c07b644022767c80c5b9ab46f0b55abeef2` 已推送并从干净 checkout 发布，GitHub run `36602570421` 通过；`production-svg-final/receipt.json` 的真实站点 **17/17 passed**，包括 NHC/NWS/FIRMS/国家风险健康检查。实际 ADSB.lol 响应为 `ok`、180 条观测，但依旧是有范围和数量上限的采样。移动端人工检查另外发现航空卡与缩放/列表/底部入口重叠，补修只调整既有移动端定位和可滚动最大高度；`mobile-aviation-controls.log` **2/2 passed**，覆盖 watch 卡和实际控件点击，最终补修 `eab2ea40fbb8fae195841331731d69208e3f333f` 已推送、从干净 checkout 构建并部署 GCP；GitHub run `36663693396` 通过。真实 iOS/Safari/Android 设备仍不在本地 Chrome 矩阵内。雷达沿用最新实际帧，没有新增历史雷达播放、假轨迹或推测覆盖范围。
+
+
+### 2026-09-30 最终交付状态
+
+A—E 的前端实现、固定条件对照及针对性回归已完成；**最新整体验收仍受后端故障阻塞，不能写成全部通过**。最终代码版本 `eab2ea40` 的真实页面检查见 `map-polish-round2/production-mobile-final/receipt.json`：**18 项中 16 项通过、2 项失败**。实际检查了桌面主底图、移动端 SVG、真实雷达瓦片、比例字体、中英文详情、深浅主题、航空卡与导航/事件入口不重叠、Service Worker 重载及发布 SHA；无页面脚本错误或静态资源 HTTP 错误。市场目录的刷新失败没有纳入地图通过项。
+
+未关闭的两项：来源健康组在 NWS `nws-provider-deadline-exceeded` 上失败，截图中 USGS/GDACS/FIRMS 也有降级；航班视口收到 HTTP 502，未获得可验收的新观测。此时 GCP API 状态为 `activating`，日志记录 worker 被 SIGKILL、PostgreSQL 连接超时、ClickHouse OrderFilled 读取不可用。日志提示可能内存不足，但本任务没有完成该根因证明，也没有修改、重启后端或改变数据状态以通过前端验收。证据：`production-current-api.log`。上一版本的 17/17 记录仅表示当时状态，不能替代这一轮的失败。
+
+最终截图及生产 trace 保存在 `production-mobile-final/`；阶段 A—E 固定夹具的 before/after、30 秒交互 trace、713/5000 的成员一致性与性能数据继续保留。`map-polish-round2/index.html` 汇总入口，`release.json` 记录构建版本与发布证据。51 份线上独立文档/素材未被此次静态部署覆盖；原始未提交文件按任务开始哈希核对保持不变。临时基线与发布 worktree 在证据保存后移除。
 
 以下首轮记录依据用户提供的 `POLYMONITOR_MAP_ALIGNMENT_CODEX.md` 和两张原始参考图实施，描述当时的本地验证；发布及第二轮状态以本文最前面的更新为准。对照 WorldMonitor 本地 `4691d9213a74c25bc2190146a11ebeba02b8cc85`，并保留 Polymonitor 的数据事实、报告和已有 feature 边界。
 
