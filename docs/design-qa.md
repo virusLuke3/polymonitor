@@ -55,7 +55,7 @@
 - `production-recovery-final/receipt.json`：恢复复验遇到桌面 `ERR_NETWORK_CHANGED`；移动端 trace 则发现 SVG 模块下载约 12.5 秒，原 12 秒期限永久作废了迟到模块。后者是明确的前端恢复缺口，已按“下载告警与挂载期限分开”补修：同一次下载完成可恢复，卸载或新渲染器代次仍使旧结果失效，不增加重试循环、不延长挂载期限。`frontend-startup.spec.ts` 补充慢下载恢复与退出后禁止迟到挂载的回归。
 - 发布脚本在替换控制文件前校验入口哈希、SW build ID、当前版本和已上传资产；一次误用 HTML 包含 SHA 的断言提前拦截了发布，未改变控制文件。该次提前运行的版本不匹配检查单列于 `production-patch-before-publish/`，不算页面功能失败或通过。
 
-慢下载与失败恢复专项 `slow-svg-regression.log` **5/5 passed**；待补修版本发布后再次验收。真实 iOS/Safari/Android 设备仍不在本地 Chrome 矩阵内。雷达沿用最新实际帧，没有新增历史雷达播放、假轨迹或推测覆盖范围。
+慢下载与失败恢复专项 `slow-svg-regression.log` **5/5 passed**。补修 `e7025c07b644022767c80c5b9ab46f0b55abeef2` 已推送并从干净 checkout 发布，GitHub run `36602570421` 通过；`production-svg-final/receipt.json` 的真实站点 **17/17 passed**，包括 NHC/NWS/FIRMS/国家风险健康检查。实际 ADSB.lol 响应为 `ok`、180 条观测，但依旧是有范围和数量上限的采样。移动端人工检查另外发现航空卡与缩放/列表/底部入口重叠，补修只调整既有移动端定位和可滚动最大高度；`mobile-aviation-controls.log` **2/2 passed**，覆盖 watch 卡和实际控件点击，待最终版上线复验。真实 iOS/Safari/Android 设备仍不在本地 Chrome 矩阵内。雷达沿用最新实际帧，没有新增历史雷达播放、假轨迹或推测覆盖范围。
 
 以下首轮记录依据用户提供的 `POLYMONITOR_MAP_ALIGNMENT_CODEX.md` 和两张原始参考图实施，描述当时的本地验证；发布及第二轮状态以本文最前面的更新为准。对照 WorldMonitor 本地 `4691d9213a74c25bc2190146a11ebeba02b8cc85`，并保留 Polymonitor 的数据事实、报告和已有 feature 边界。
 

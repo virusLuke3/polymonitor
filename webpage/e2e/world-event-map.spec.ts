@@ -274,6 +274,23 @@ test('WebGL country hover, click, fit, context menu and filter remain connected'
   await expect(page).toHaveURL(/country=US/);
 });
 
+test('mobile aviation keeps the map controls and event list unobstructed', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await gotoMap(page, 'layers=air-routes&air=watch&zoom=1.5');
+  const lens = (await page.locator('.wm-aviation-lens').boundingBox())!;
+  for (const selector of ['.wm-map-controls', '.wm-map-focus-toggle', '.wm-world-event-list-toggle', '.wm-map-radar-status', '.wm-map-legend-toggle']) {
+    const control = (await page.locator(selector).boundingBox())!;
+    const overlap = Math.min(lens.x + lens.width, control.x + control.width) > Math.max(lens.x, control.x)
+      && Math.min(lens.y + lens.height, control.y + control.height) > Math.max(lens.y, control.y);
+    expect(overlap, selector).toBe(false);
+  }
+  await page.locator('.wm-world-event-list-toggle').click();
+  await expect(page.locator('.wm-world-event-list.is-open')).toBeVisible();
+  await page.locator('.wm-world-event-list-close').click();
+  await page.getByRole('button', { name: 'Hide aviation layer', exact: true }).click();
+  await expect(page.locator('.wm-aviation-lens')).toHaveCount(0);
+});
+
 test('live aircraft supports viewport loading, hover, click and inspector details', async ({ page }) => {
   await gotoMap(page, 'center=-70,43&zoom=5&layers=air-routes&air=all');
   await expect(page.getByText('ALL AVIATION')).toBeVisible();

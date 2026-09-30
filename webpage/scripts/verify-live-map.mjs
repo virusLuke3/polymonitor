@@ -106,6 +106,16 @@ try {
         const expand = await page.locator('.wm-map-focus-toggle').boundingBox();
         if (lens) assert(lens.x + lens.width <= expand.x);
       });
+      if (width === 390) await check('mobile: aviation leaves navigation and event controls accessible', async () => {
+        const lens = await page.locator('.wm-aviation-lens').boundingBox();
+        if (!lens) return;
+        for (const selector of ['.wm-map-controls', '.wm-map-focus-toggle', '.wm-world-event-list-toggle', '.wm-map-radar-status', '.wm-map-legend-toggle']) {
+          const control = await page.locator(selector).boundingBox();
+          assert(control, selector);
+          assert(!(Math.min(lens.x + lens.width, control.x + control.width) > Math.max(lens.x, control.x)
+            && Math.min(lens.y + lens.height, control.y + control.height) > Math.max(lens.y, control.y)), selector);
+        }
+      });
       // Allow real labels and event sources to finish their first paint.
       await page.waitForTimeout(2000);
       await screenshot(`${width === 390 ? 'mobile' : 'desktop'}-${width}-en`);

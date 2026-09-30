@@ -552,11 +552,14 @@
 @media (max-width: 900px) {
   .wm-aviation-lens {
     top: auto;
-    right: 10px;
-    bottom: 64px;
+    right: 70px;
+    bottom: 136px;
     left: 10px;
     width: auto;
     min-width: 0;
+    max-height: calc(100% - 212px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 }
 
