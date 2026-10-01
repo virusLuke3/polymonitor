@@ -277,3 +277,13 @@ def test_nhc_timestamp_urls_and_summary_do_not_duplicate_advisories(storage):
     row = storage.query_one("SELECT url,raw_payload FROM content_items")
     assert row["url"] == json.loads(row["raw_payload"])["url"] == second[0]["url"]
     assert len(storage.query_all("SELECT * FROM content_versions")) == 2
+
+
+def test_batch_persistence_keeps_identity_and_304_counts_are_current(storage, source):
+    items = [article(source, event_id=str(i), url=f"https://www.federalreserve.gov/fixture/{i}") for i in range(401)]
+    assert store.persist(storage, source, items, "2026-10-01T00:00:00Z")["new"] == 401
+    assert store.persist(storage, source, items, "2026-10-01T00:01:00Z")["duplicate"] == 401
+    assert len(storage.query_all("SELECT * FROM content_items")) == 401
+    with patch.object(collector, "fetch", return_value=(b"", {"http_status": 304, "final_url": source["feed_url"]})):
+        state = collector.collect_one(storage, None, source, {"new": 401, "public": 401, "parsed_count": 401})
+    assert state["new"] == state["public"] == state["parsed_count"] == 0

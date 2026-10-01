@@ -67,7 +67,17 @@ def retry_delay(value, now):
 def collect_one(storage, snapshot_store, source, old, *, probe=False, conditional=True):
     now = datetime.now(timezone.utc)
     stamp = now.isoformat().replace("+00:00", "Z")
-    state = {**old, "source_id": source["source_id"], "checked_at": stamp}
+    state = {
+        **old,
+        "source_id": source["source_id"],
+        "checked_at": stamp,
+        "parsed_count": 0,
+        "new": 0,
+        "updated": 0,
+        "duplicate": 0,
+        "excluded": 0,
+        "public": 0,
+    }
     try:
         with requests.Session() as session:
             if source["transport"] == "snapshot" and not probe:
@@ -179,7 +189,8 @@ def collect_one(storage, snapshot_store, source, old, *, probe=False, conditiona
             state.update(meta)
             state.update(parsed_count=len(items), error=None, failure_count=0)
             if not probe:
-                state.update(persist(storage, source, items, stamp))
+                counts = persist(storage, source, items, stamp)
+                state.update(counts, last_ingest_counts=counts, last_ingested_at=stamp)
             else:
                 state["public"] = sum(permission(source, item)[0] for item in items)
             age = re.search(r"(?:^|,)\s*max-age=(\d+)", meta.get("cache_control") or "")

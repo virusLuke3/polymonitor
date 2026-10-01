@@ -127,3 +127,5 @@ Market / Global 为显式选择，市场标题可见；未选市场可默认 Glo
 首轮发布默认全站验收失败并自动回滚：ClickHouse OrderFilled 不可用，最近交易 500，Whale Tracker/Flow Watch 过期。相关问题不作为资讯验收通过，也不修改无关交易模块。最终资讯范围部署及真实页面状态见交付验收。
 
 NHC feed 的 summary/full advisory 同 URL 只保留更完整的 feed 节选；同一风暴产品跨公告更新保存版本，数据库 URL 同步原文最新地址。初轮本任务形成的旧 URL 身份保留历史、按未核验事件身份隔离。Dossier 同样提供 7/30 天显式范围、来源优先于内部 provider、作者、许可入口、节选与关联原因。
+
+生产发现跨地区数据库逐条写入事件的往返耗时过长；已复用原数据库封装的批量查询/写入，保留同一事务、内容身份、版本及发现入口。304 本轮 parsed/new/public 为 0，不沿用上一轮计数；最近实际入库计数另保留 last_ingest_counts / last_ingested_at。

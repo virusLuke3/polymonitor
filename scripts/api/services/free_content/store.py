@@ -45,14 +45,25 @@ def save_state(storage, source_id, state):
 
 def persist(storage, source, items, now):
     counts = {"new": 0, "updated": 0, "duplicate": 0, "excluded": 0, "public": 0}
+    if not source.get("storage_allowed"):
+        return {**counts, "excluded": len(items)}
+    if not items:
+        return counts
     conn = storage.get_connection(storage.database_path)
     try:
-        for item in items:
-            if not source.get("storage_allowed"):
-                counts["excluded"] += 1
-                continue
+        ids = list(dict.fromkeys(identity(source, item) for item in items))
+        existing = {}
+        for offset in range(0, len(ids), 400):
+            batch = ids[offset : offset + 400]
+            placeholders = ",".join("?" for _ in batch)
+            rows = conn.execute(
+                f"SELECT id,raw_payload FROM content_items WHERE id IN ({placeholders})", tuple(batch)
+            ).fetchall()
+            existing.update({row["id"]: json.loads(row["raw_payload"]) for row in rows})
+        revisions, changes, discoveries = [], [], []
+        for raw_item in items:
             item = {
-                **item,
+                **raw_item,
                 "publisher_id": source["publisher_id"],
                 "source_id": source["source_id"],
                 "permission_basis": source["permission_basis"],
@@ -61,13 +72,9 @@ def persist(storage, source, items, now):
             item.update(display_allowed=allowed, permission_reason=reason)
             item.pop("rights_text", None)
             content_id = identity(source, item)
-            prior = conn.execute(
-                "SELECT raw_payload,created_at FROM content_items WHERE id=?", (content_id,)
-            ).fetchone()
-            old = json.loads(prior["raw_payload"]) if prior else {}
+            old = existing.get(content_id, {})
             item["source_id"] = old.get("source_id") or item["source_id"]
             item["topics"] = sorted(set(old.get("topics", []) + item.get("topics", [])))
-            # Entry sources are discovery provenance, not article revisions.
             version_data = {
                 k: v
                 for k, v in item.items()
@@ -77,7 +84,7 @@ def persist(storage, source, items, now):
             if old.get("content_version") == version:
                 counts["duplicate"] += 1
             else:
-                counts["updated" if prior else "new"] += 1
+                counts["updated" if old else "new"] += 1
                 item.update(
                     first_seen_at=old.get("first_seen_at") or now,
                     fetched_at=now,
@@ -85,19 +92,17 @@ def persist(storage, source, items, now):
                     version_first_fetched_at=now,
                 )
                 raw = json.dumps(item, ensure_ascii=False)
-                conn.execute(
-                    "INSERT INTO content_versions(content_id,version,payload,first_fetched_at) VALUES (?,?,?,?) ON CONFLICT(content_id,version) DO NOTHING",
-                    (content_id, version, raw, now),
-                )
-                conn.execute(
-                    "INSERT INTO content_items(id,content_type,provider,source,category,topic_id,title,url,published_at,summary,raw_payload,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET topic_id=excluded.topic_id,title=excluded.title,url=excluded.url,summary=excluded.summary,published_at=excluded.published_at,raw_payload=excluded.raw_payload,updated_at=excluded.updated_at",
+                revisions.append((content_id, version, raw, now))
+                changes.append(
                     (
                         content_id,
                         "news",
                         "free-public",
                         source["publisher_name"],
                         source["source_kind"],
-                        "free:" + source["publisher_id"] + (":" + item["event_id"] if source['publisher_id']=='nhc' else ""),
+                        "free:"
+                        + source["publisher_id"]
+                        + (":" + item["event_id"] if source["publisher_id"] == "nhc" else ""),
                         item["title"],
                         item["url"],
                         item.get("published_at"),
@@ -105,13 +110,26 @@ def persist(storage, source, items, now):
                         raw,
                         item["first_seen_at"],
                         now,
-                    ),
+                    )
                 )
-            conn.execute(
-                "INSERT INTO content_discoveries(content_id,source_id,first_seen_at,last_seen_at) VALUES (?,?,?,?) ON CONFLICT(content_id,source_id) DO UPDATE SET last_seen_at=excluded.last_seen_at",
-                (content_id, source["source_id"], now, now),
-            )
+                existing[content_id] = item
+            discoveries.append((content_id, source["source_id"], now, now))
             counts["public" if allowed else "excluded"] += 1
+        # Existing SQLite/PostgreSQL wrapper batches writes, including psycopg
+        # pipelining; do not pay a network round trip for every event field.
+        if revisions:
+            conn.executemany(
+                "INSERT INTO content_versions(content_id,version,payload,first_fetched_at) VALUES (?,?,?,?) ON CONFLICT(content_id,version) DO NOTHING",
+                revisions,
+            )
+            conn.executemany(
+                "INSERT INTO content_items(id,content_type,provider,source,category,topic_id,title,url,published_at,summary,raw_payload,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET topic_id=excluded.topic_id,title=excluded.title,url=excluded.url,summary=excluded.summary,published_at=excluded.published_at,raw_payload=excluded.raw_payload,updated_at=excluded.updated_at",
+                changes,
+            )
+        conn.executemany(
+            "INSERT INTO content_discoveries(content_id,source_id,first_seen_at,last_seen_at) VALUES (?,?,?,?) ON CONFLICT(content_id,source_id) DO UPDATE SET last_seen_at=excluded.last_seen_at",
+            discoveries,
+        )
         conn.commit()
     finally:
         conn.close()
