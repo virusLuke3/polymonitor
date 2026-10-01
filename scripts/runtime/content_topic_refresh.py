@@ -14,6 +14,21 @@ CYCLE_BUDGET_SECONDS = 90
 SEED_HEARTBEAT_SECONDS = 30
 
 
+def content_runtime():
+    """Worker connection setup has its own bound inside the 90s cycle budget."""
+    from api.config import load_api_settings
+    from api.db_pool import ApiPostgresConnectionPool
+    from api.runtime import ServiceRuntime
+    settings = load_api_settings()
+    if settings.database.backend not in {'postgres', 'postgresql'}:
+        return ServiceRuntime(settings=settings)
+    pool = ApiPostgresConnectionPool(settings.database.connect, max_size=1, acquire_timeout_seconds=20)
+    def connect(*args, **kwargs):
+        return pool.acquire(*args, **kwargs)
+    connect.close = pool.close
+    return ServiceRuntime(settings=settings, connection_factory=connect)
+
+
 def publish_seed(runtime, storage, interval, cycle_error=None):
     """Seed failure is observable and never stops the existing watch loop."""
     from api.cache import get_redis_client
@@ -59,11 +74,10 @@ def publish_seed(runtime, storage, interval, cycle_error=None):
 
 def _cycle_process(events, options):
     """Fresh runtime/connections: never inherit the parent worker's DB lock/session."""
-    from api.runtime import ServiceRuntime
     from api.services.query_service import ContentStorageDependencies
     from api.services.free_content.collector import cycle
     try:
-        with ServiceRuntime() as runtime:
+        with content_runtime() as runtime:
             storage = ContentStorageDependencies.from_context(runtime.query_context)
             cycle(storage, runtime.SNAPSHOT_STORE, **options,
                   on_result=lambda state: events.put({"result": state}))
@@ -157,7 +171,6 @@ def main():
     parser.add_argument("--limit-per-topic", type=int, default=24, help=argparse.SUPPRESS)
     parser.add_argument("--list-topics", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
-    from api.runtime import ServiceRuntime
     from api.services.query_service import ContentStorageDependencies
     from api.services.free_content.store import source_states, ensure_schema
     from api.services.free_content.registry import sources
@@ -165,7 +178,7 @@ def main():
     if args.list_topics:
         print(json.dumps(sources(), ensure_ascii=False))
         return 0
-    with ServiceRuntime() as runtime:
+    with content_runtime() as runtime:
         storage = ContentStorageDependencies.from_context(runtime.query_context)
         if args.status:
             print(json.dumps(source_states(storage), ensure_ascii=False, indent=2, default=str))

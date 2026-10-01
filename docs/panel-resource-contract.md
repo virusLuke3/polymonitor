@@ -84,7 +84,9 @@ IDs, preserving per-article rights checks while avoiding a remote DB round trip
 per card and the connection deadline that it can exhaust.
 
 The existing collector executes in a spawned process with fresh service runtime
-and connections. The parent retains the single worker/advisory lock. A 90-second
+and connections. The parent retains the single worker/advisory lock. Worker-only PostgreSQL
+connection setup/lease acquisition has a 20-second bound and one connection,
+inside the unchanged cycle budget; HTTP API connection policy is unchanged. A 90-second
 cycle budget terminates a blocked child, marks unfinished due sources as failed,
 and preserves completed records/last-success evidence. Source HTTP/rights work
 shares a 45-second budget; the process boundary also bounds blocked DNS or reads.

@@ -44,3 +44,33 @@ def test_completed_sources_are_not_marked_failed(monkeypatch):
     assert not writes
     assert len(seeds) >= 2
     assert not multiprocessing.active_children()
+
+
+def test_worker_connection_setup_can_exceed_http_budget_but_remains_bounded(monkeypatch):
+    from api import config, db_pool, runtime as api_runtime
+    import pytest
+    clock = [0.0]
+    monkeypatch.setattr(db_pool, 'time', SimpleNamespace(monotonic=lambda: clock[0]))
+    class Connection:
+        closed = False
+        def commit(self): pass
+        def rollback(self): pass
+        def close(self): self.closed = True
+    delay = [6.0]
+    connection = Connection()
+    def connect(*args, **kwargs):
+        clock[0] += delay[0]  # includes session initialization after TCP connects
+        return connection
+    settings = SimpleNamespace(database=SimpleNamespace(backend='postgres', connect=connect))
+    monkeypatch.setattr(config, 'load_api_settings', lambda: settings)
+    monkeypatch.setattr(api_runtime, 'ServiceRuntime', lambda **kwargs: SimpleNamespace(**kwargs))
+    runtime = worker.content_runtime()
+    lease = runtime.connection_factory()
+    lease.close()
+    runtime.connection_factory.close()
+    assert connection.closed
+    delay[0] = 21.0
+    runtime = worker.content_runtime()
+    with pytest.raises(TimeoutError, match='connection deadline exceeded'):
+        runtime.connection_factory()
+    runtime.connection_factory.close()
