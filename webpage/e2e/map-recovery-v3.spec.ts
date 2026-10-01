@@ -207,6 +207,11 @@ test('date-line halves, corner aircraft, late responses and off/empty/partial/fa
     await page.locator('#wm-event-list-search').fill('');
     await page.locator('.wm-world-event-list-close').click();await host.screenshot({path:resolve(root,'aviation-dateline-corners.png')});
     mode='partial';await resume();await expect(page.locator('[data-aviation-phase]')).toHaveAttribute('data-aviation-phase','PARTIAL');
+    const beforeZoom=Number(new URL(page.url()).searchParams.get('zoom')),beforeRequests=requests.length;
+    await page.getByRole('button',{name:'Zoom in to reduce query coverage gaps'}).click();
+    await expect.poll(()=>Number(new URL(page.url()).searchParams.get('zoom'))).toBeGreaterThan(beforeZoom);
+    await expect.poll(()=>requests.length).toBeGreaterThan(beforeRequests);
+
     mode='hemisphere';await resume();await expect(page.locator('[data-aviation-phase]')).toHaveAttribute('data-aviation-phase','PARTIAL');
     await expect(page.locator('.wm-aviation-lens')).toContainText('4 / 4');
     mode='failure';await resume();await expect(page.locator('[data-aviation-phase]')).toHaveAttribute('data-aviation-phase','STALE');await expect(host).toHaveAttribute('data-map-renderer-ready','webgl');

@@ -14,7 +14,7 @@ DEPLOY_SSH_KEY="${DEPLOY_SSH_KEY:-}"
 DEPLOY_INSTALL_DEPENDENCIES="${DEPLOY_INSTALL_DEPENDENCIES:-1}"
 DEPLOY_VERIFY_SCOPE="${DEPLOY_VERIFY_SCOPE:-default}"
 case "${DEPLOY_VERIFY_SCOPE}" in
-  default|related-intelligence) ;;
+  default|related-intelligence|world-event-map) ;;
   *) echo "Invalid release verification scope: ${DEPLOY_VERIFY_SCOPE}" >&2; exit 1 ;;
 esac
 
@@ -182,6 +182,7 @@ REMOTE_RESTART_UNITS="${RESTART_UNITS[*]}"
 ssh "${SSH_OPTIONS[@]}" "${REMOTE}" "
   set -eu
   python3 '${REMOTE_RELEASE_DIR}/gcp_release.py' verify --url http://127.0.0.1:18500 --scope '${DEPLOY_VERIFY_SCOPE}'
+  curl -fsS --max-time 15 'http://127.0.0.1:18500/analytics/addresses/0xffffffffffffffffffffffffffffffffffffffff/trades?limit=1' >/dev/null
   curl -fsS --max-time 10 http://127.0.0.1/wm-api/health >/dev/null
   for unit in ${REMOTE_RESTART_UNITS}; do
     systemctl --user is-active --quiet \"\$unit\"

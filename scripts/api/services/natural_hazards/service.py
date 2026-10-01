@@ -143,7 +143,8 @@ def _fetch_provider_results(
             "events": [],
         }
     if "nws" in results:
-        results["nws"]["events"] = nws.enrich_cached_events(results["nws"].get("events", []), dependencies.resources, snapshot_store=dependencies.snapshot_store)
+        results["nws"]["events"] = nws.enrich_cached_events(results["nws"].get("events", []), dependencies.resources,
+            snapshot_store=dependencies.snapshot_store, http_json_get=dependencies.http_json_get)
     return results
 
 

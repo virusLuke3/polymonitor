@@ -1135,3 +1135,84 @@ def test_nws_expired_absolute_deadline_does_not_start_new_http_work():
     else:
         raise AssertionError('Expired queued work must fail before acquisition')
     assert calls == []
+
+
+def test_native_nws_polygons_do_not_report_missing_alternate_zone_boundaries():
+    from api.context import RuntimeResources
+    geometry = {'type': 'Polygon', 'coordinates': [[[-100,35],[-99,35],[-99,36],[-100,35]]]}
+    zone = 'https://api.weather.gov/zones/forecast/TEST001'
+    resources = RuntimeResources(); calls = []
+    def get(url, **_kwargs):
+        calls.append(url)
+        return {'features': [{'geometry': geometry, 'properties': {
+            'id': 'native-polygon', 'event': 'Flood Warning', 'affectedZones': [zone]}}]}
+    try:
+        event = nws.fetch(get, resources=resources)['events'][0]
+        assert event['geometry'] == geometry
+        assert event['properties']['unresolvedZoneCount'] == 0
+        assert event['properties']['affectedZones'] == [zone]
+        previous = {**event, 'properties': {**event['properties'], 'unresolvedZoneCount': 1}}
+        assert nws.enrich_cached_events([previous], resources, http_json_get=get)[0]['properties']['unresolvedZoneCount'] == 0
+        assert calls == [nws.DEFAULT_URL]
+    finally: resources.close()
+
+
+def test_cached_nws_catalog_progresses_past_failed_zones_without_refetching_cap(monkeypatch):
+    from api.context import RuntimeResources
+    resources = RuntimeResources(); store = FakeSnapshotStore(); calls = []
+    total = nws.MAX_ZONE_FETCHES_PER_REFRESH + 2
+    geometry = {'type': 'Polygon', 'coordinates': [[[-100,35],[-99,35],[-99,36],[-100,35]]]}
+    features = [{'geometry': None, 'properties': {
+        'id': f'alert-{i}', 'event': 'Flood Warning',
+        'affectedZones': [f'https://api.weather.gov/zones/forecast/T{i:03}']}} for i in range(total)]
+    blocked = {f'https://api.weather.gov/zones/forecast/T{i:03}' for i in range(total-2)}
+    def get(url, **_kwargs):
+        calls.append(url)
+        if url == nws.DEFAULT_URL: return {'features': features}
+        if url in blocked: raise TimeoutError('controlled zone outage')
+        return {'geometry': geometry}
+    def settled():
+        deadline = time.monotonic() + 2
+        while resources.zone_pending and time.monotonic() < deadline: time.sleep(.005)
+        assert not resources.zone_pending
+    try:
+        events = nws.fetch(get, resources=resources, snapshot_store=store)['events']; settled()
+        # No new CAP request: the cached read alone advances optional work.
+        for _ in range(2):
+            events = nws.enrich_cached_events(events, resources, snapshot_store=store, http_json_get=get); settled()
+        events = nws.enrich_cached_events(events, resources, snapshot_store=store)
+        assert all(event['geometry'] == geometry for event in events[-2:])
+        assert all(calls.count(url) == 1 for url in blocked)
+        assert calls.count(nws.DEFAULT_URL) == 1
+        # End the negative-cache cooldown, resolve the original failure, and
+        # retain canonical event IDs/revisions/times throughout recovery.
+        blocked.clear()
+        with resources.zone_cache_lock:
+            for url, (stamp, value) in list(resources.zone_cache.items()):
+                if value is None: resources.zone_cache[url] = (stamp-nws.ZONE_RETRY_SECONDS-1, None)
+        nws.enrich_cached_events(events, resources, snapshot_store=store, http_json_get=get); settled()
+        recovered = nws.enrich_cached_events(events, resources, snapshot_store=store)
+        assert all(event['geometry'] == geometry and event['properties']['unresolvedZoneCount'] == 0 for event in recovered)
+        assert [(e['id'],e['revision'],e['updatedAt']) for e in recovered] == [(e['id'],e['revision'],e['updatedAt']) for e in events]
+    finally: resources.close()
+
+
+def test_nws_optional_work_has_independent_budget_and_ignores_inactive_alerts():
+    from api.context import RuntimeResources
+    resources = RuntimeResources(); calls = []; now = datetime(2026,10,1,tzinfo=timezone.utc)
+    features = [{'geometry': None, 'properties': {'id': str(i), 'event': 'Flood Warning',
+        'messageType': 'Cancel' if i == 0 else 'Alert',
+        'expires': '2026-09-01T00:00:00Z' if i == 1 else '2026-10-02T00:00:00Z',
+        'affectedZones': [f'https://api.weather.gov/zones/forecast/T{i:03}']}} for i in range(3)]
+    def get(url, **kwargs):
+        if url == nws.DEFAULT_URL:
+            time.sleep(.12); return {'features': features}
+        calls.append((url, kwargs['timeout'].total)); return {'geometry': None}
+    try:
+        events = nws.fetch(get, resources=resources, deadline=time.monotonic()+.2, now=now)['events']
+        deadline = time.monotonic()+1
+        while resources.zone_pending and time.monotonic() < deadline: time.sleep(.005)
+        assert len(events) == 3
+        assert len(calls) == 1 and calls[0][0].endswith('T002')
+        assert .5 < calls[0][1] <= nws.ZONE_FETCH_BUDGET_SECONDS
+    finally: resources.close()
