@@ -163,3 +163,18 @@ test('expired card disappears while a new card still waits for acceptance', asyn
   await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
   await expect(page.locator('.wm-free-intel-card')).toContainText('Fixture new');
 });
+
+test('source disclosure remains clickable above workspace resize handles', async ({ page }) => {
+  await installDashboard(page, 'en', ['related-news']);
+  await page.route('**/wm-api/content/**', route => {
+    const market = route.request().url().match(/\/market\/(\d+)/);
+    return route.fulfill({ json: market ? payload(Number(market[1])) : payload(null, Array.from({ length: 20 }, (_, i) => `card-${i}`)) });
+  });
+  await page.goto('/');
+  const panel = page.locator('[data-workspace-panel-id="related-news"]');
+  await panel.scrollIntoViewIfNeeded();
+  await panel.getByRole('button', { name: 'Global', exact: true }).click();
+  await expect(panel.locator('.wm-free-intel-card')).toHaveCount(20);
+  await panel.locator('.wm-intel-sources summary').click();
+  await expect(panel.locator('.wm-intel-sources')).toHaveAttribute('open', '');
+});

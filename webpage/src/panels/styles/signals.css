@@ -2351,22 +2351,3 @@ a.wm-orderfilled-row {
   margin-top: 2px;
 }
 }
-
-.wm-free-intel-panel .wm-intel-scope { display: flex; flex-wrap: wrap; gap: 6px; }
-.wm-free-intel-panel .wm-intel-scope button,
-.wm-free-intel-panel .wm-intel-scope select,
-.wm-free-intel-panel .wm-intel-new { border: 1px solid #465765; background: #17212a; color: var(--wm-text); padding: 5px 7px; font: inherit; cursor: pointer; }
-.wm-free-intel-panel .wm-intel-scope button[aria-pressed="true"] { color: #7edcff; border-color: #7edcff; }
-.wm-free-intel-panel .wm-free-intel-market-caption { font-size: 11px; overflow-wrap: anywhere; color: var(--wm-text-dim); margin: 4px 0; }
-.wm-free-intel-panel .wm-free-intel-card { padding: 12px 0; border-bottom: 1px solid #303943; display: grid; gap: 7px; overflow-wrap: anywhere; }
-.wm-free-intel-panel .wm-free-intel-card p { margin: 0; font-size: 12px; }
-.wm-free-intel-panel .wm-free-intel-meta { display: flex; flex-wrap: wrap; gap: 8px; font-size: 11px; color: #7edcff; }
-.wm-free-intel-panel .wm-free-intel-meta span { color: #b9c5cf; }
-.wm-free-intel-panel .wm-intel-clamped { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
-.wm-free-intel-panel .wm-intel-expand { justify-self: start; border: 0; background: none; color: #7edcff; font: inherit; font-size: 11px; cursor: pointer; padding: 3px 0; }
-.wm-free-intel-panel .wm-intel-relation { color: #c3ceac; }
-.wm-free-intel-panel .wm-intel-license { font-size: 10px; color: #7edcff; }
-.wm-free-intel-panel .wm-news-meta { display: flex; gap: 10px; flex-wrap: wrap; }
-.wm-free-intel-panel .wm-intel-sources { font-size: 11px; margin-top: 10px; }
-.wm-free-intel-panel .wm-intel-sources p { overflow-wrap: anywhere; }
-.wm-free-intel-panel .wm-intel-empty { font-size: 12px; color: #c4cdd5; }

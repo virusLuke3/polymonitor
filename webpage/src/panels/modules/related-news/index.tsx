@@ -4,6 +4,7 @@ import { Panel } from '@/components/Panel';
 import { panelFromRenderer } from '@/panels/definePanel';
 import { useI18n } from '@/services/i18n';
 import { useIntelFeed } from './useIntelFeed';
+import './styles.css';
 import { Component, type ComponentChildren } from 'preact';
 import { resourceId, type IntelResource } from './model';
 
