@@ -1,9 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiTimeoutError, fetchAllActiveMarkets, fetchMarketWideAiSnapshot, fetchRuntimeGlobalTemperatureMonitor, fetchWorkspaceBundle } from './api';
+import { ApiTimeoutError, fetchAllActiveMarkets, fetchMarketWideAiSnapshot, fetchRuntimeGlobalTemperatureMonitor, fetchSystemHealth, fetchWorkspaceBundle } from './api';
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('HTTP lifecycle', () => {
+  it('uses redacted public health for anonymous consumers and preserves degraded status', async () => {
+    vi.stubGlobal('window', globalThis);
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({
+      status: 'degraded', database: true, redis: false,
+    }) })));
+    expect(await fetchSystemHealth()).toEqual({ apiStatus: 'degraded', redis: false });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(String(vi.mocked(fetch).mock.calls[0]?.[0])).toMatch(/\/health$/);
+    expect(String(vi.mocked(fetch).mock.calls[0]?.[0])).not.toContain('/system/');
+  });
   it('publishes the first market page before continuing and starts no next page after cancellation', async () => {
     vi.stubGlobal('window', globalThis);
     const controller = new AbortController();

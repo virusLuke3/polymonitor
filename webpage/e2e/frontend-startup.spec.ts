@@ -18,6 +18,24 @@ test.afterEach(async ({ page }) => {
   await page.unrouteAll({ behavior: 'wait' });
 });
 
+test('anonymous dashboard uses public health and never polls administrator operations', async ({ page }) => {
+  await installDashboard(page);
+  const privateRequests: string[] = []; let publicRequests = 0;
+  page.on('request', request => {
+    if (request.url().includes('/wm-api/system/health')) privateRequests.push(request.url());
+  });
+  await page.route('**/wm-api/auth/session', route => route.fulfill({ json: { enabled: true, authenticated: false, user: null } }));
+  await page.route('**/wm-api/health', route => {
+    publicRequests++; return route.fulfill({ json: { status: 'degraded', database: true, redis: false } });
+  });
+  await page.goto(mapURL);
+  await expect.poll(() => publicRequests).toBeGreaterThan(0);
+  await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', /webgl|svg/);
+  await page.waitForTimeout(21_000);
+  await expect.poll(() => publicRequests).toBeGreaterThan(1);
+  expect(privateRequests).toEqual([]);
+});
+
 test('slow bootstrap and one stalled catalog source do not block map or market selection', async ({ page }) => {
   await installDashboard(page);
   let bootstrap: Route | undefined;

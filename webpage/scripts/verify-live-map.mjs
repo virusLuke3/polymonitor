@@ -246,6 +246,14 @@ try {
           await screenshot('desktop-aircraft-detail');
           await page.locator('.wm-event-inspector-close').click();
         const closeList = page.locator('.wm-world-event-list-close'); if (await closeList.isVisible()) await closeList.click();
+          const regional = await context.request.get(`${base}/wm-api/runtime/transport/aviation-viewport?bbox=-75,39,-72,42&zoom=5&limit=360`);
+          assert.equal(regional.status(), 200);
+          record.regionalAviation = await regional.json();
+          assert.equal(record.regionalAviation.coverage?.complete, true, JSON.stringify(record.regionalAviation.errors));
+          assert.deepEqual(record.regionalAviation.errors, []);
+          assert(record.regionalAviation.aircraftCount > 0);
+          // Query coverage does not assert worldwide receiver coverage or that
+          // the OpenSky authorization path is reachable from this GCP host.
           page.off('response', responseListener);
         }, { continueOnFailure: true });
       }
@@ -266,6 +274,22 @@ try {
         })));
         assert(record.states.at(-1).worker?.includes(expectedSha));
         await screenshot(`reload-${width}`);
+      });
+      await check(`${width}: anonymous public health and classified recent-trade availability`, async () => {
+        const session = await context.request.get(`${base}/wm-api/auth/session`);
+        assert.equal((await session.json()).authenticated, false);
+        assert.deepEqual(record.responses.filter(r => r.url.includes('/wm-api/system/health')), []);
+        const publicHealth = await context.request.get(`${base}/wm-api/health`);
+        assert.equal(publicHealth.status(), 200);
+        const privateHealth = await context.request.get(`${base}/wm-api/system/health`);
+        assert.equal(privateHealth.status(), 401); // The admin contract stays protected.
+        const trades = await context.request.get(`${base}/wm-api/trades/recent?limit=3`);
+        const payload = await trades.json();
+        assert([200, 503].includes(trades.status()), `Unexpected trade response: ${trades.status()}`);
+        if (trades.status() === 503) assert.equal(payload.status, 'unavailable');
+        else assert(Array.isArray(payload));
+        record.dashboardSources = { publicHealth: await publicHealth.json(), protectedHealth: privateHealth.status(),
+          trades: { http: trades.status(), payload, availability: trades.status() === 503 ? 'UNAVAILABLE' : payload.length ? 'RECORDS_RETURNED' : 'EMPTY' } };
       });
       await check(`${width}: browser and asset errors`, async () => {
         assert.deepEqual(record.errors, []);

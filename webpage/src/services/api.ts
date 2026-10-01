@@ -197,8 +197,10 @@ export function fetchMarketGroupChart(
   );
 }
 
-export function fetchSystemHealth(signal?: AbortSignal) {
-  return apiGet<SystemHealth>('/system/health', signal);
+export async function fetchSystemHealth(signal?: AbortSignal): Promise<SystemHealth> {
+  // The public dashboard never requests the operations-only admin endpoint.
+  const health = await apiGet<{ status: string; database: boolean; redis: boolean }>('/health', signal);
+  return { apiStatus: health.status, redis: health.redis };
 }
 
 export function fetchMarketDataQuality(signal?: AbortSignal) {

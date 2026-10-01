@@ -591,6 +591,16 @@ def get_recent_trades(ctx: dict, *, limit: int = 24) -> Optional[List[Dict[str, 
     )
     if rows is None:
         return None
+    if not rows:
+        # A quiet window is valid only when the fact projection reaches it.
+        # A fresh timestamp index alongside an old fact table is a source gap,
+        # not proof that no trades occurred during the current hour.
+        watermark = _query_json_rows(ctx,
+            f"SELECT ({_latest_fact_block_sql(ctx)}) AS latest_block FORMAT JSONEachRow",
+            timeout_seconds=5.0)
+        if not watermark or int(watermark[0].get("latest_block") or 0) < first:
+            return None
+        return []
 
     def read(sql):
         return _query_json_rows(ctx, sql, timeout_seconds=5.0)

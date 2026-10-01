@@ -392,3 +392,77 @@ def test_large_aviation_viewport_samples_adsb_sectors_concurrently(monkeypatch: 
     assert result["status"] == "ok"
     assert result["aircraftCount"] == 4
     assert result["coverage"] == {"mode": "sampled-sectors", "sectorCount": 4, "complete": False}
+
+
+@pytest.mark.parametrize('bbox', [(-78, 38, -70, 46), (172, -44, 180, -36), (10, 68, 26, 76)])
+def test_adsb_regional_queries_cover_corners_without_exceeding_public_radius(bbox):
+    sectors = transport._adsb_viewport_samples(bbox)
+    assert 1 < len(sectors) <= 4
+    assert all(sector['coversCell'] for sector in sectors)
+    west, south, east, north = bbox
+    # Include the interior and edges, rather than only testing the planner's
+    # chosen corners. Dateline and high-latitude viewports use the same budget.
+    for y in range(21):
+        for x in range(21):
+            lat, lon = south + (north-south)*y/20, west + (east-west)*x/20
+            assert any(transport._distance_nm(lat, lon, sector['lat'], sector['lon']) <= sector['radiusNm'] for sector in sectors)
+    assert all(sector['radiusNm'] <= 250 for sector in sectors)
+
+
+def test_aviation_regional_sector_failure_recovers_without_false_complete(monkeypatch):
+    monkeypatch.setattr(transport, '_opensky_access_token', lambda _ctx: (None, {'status': 'auth-error'}))
+    failure = False
+    requests = []
+
+    def fetch(_ctx, url, **kwargs):
+        requests.append(url)
+        parts = url.split('/')
+        lat, lon = float(parts[-3]), float(parts[-2])
+        if failure and lat > 41:
+            raise TimeoutError('sector temporarily unavailable')
+        return {'ac': [{'hex': f'{lat}:{lon}', 'lat': lat, 'lon': lon, 'flight': 'OBSERVED'}]}
+
+    monkeypatch.setattr(transport, '_http_json_get', fetch)
+    resources = RuntimeResources()
+    try:
+        ctx = {'_resources': resources, 'utc_now_iso': lambda: '2026-10-01T08:00:00Z'}
+        def query():
+            return transport.get_aviation_viewport_snapshot(ctx, bbox=(-80,36,-70,46), zoom=5, limit=180)
+        normal = query()
+        assert normal['coverage'] == {'mode': 'covering-sectors', 'sectorCount': 4, 'complete': True}
+        assert normal['status'] == 'ok' and normal['aircraftCount'] == 4
+        failure = True
+        degraded = query()
+        assert degraded['status'] == 'partial'
+        assert degraded['coverage']['complete'] is False
+        assert degraded['aircraftCount'] == 2 and len(degraded['errors']) == 2
+        failure = False
+        recovered = query()
+        assert recovered['coverage']['complete'] is True
+        assert recovered['errors'] == []
+        assert recovered['aircraft'] == normal['aircraft']
+        assert len(requests) == 12
+    finally:
+        resources.close()
+
+
+def test_aviation_fallback_inherits_budget_already_spent_on_authentication(monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr(transport, 'monotonic', lambda: clock[0])
+    def authenticate(_ctx):
+        clock[0] += 3.0
+        return None, {'status': 'auth-error'}
+    monkeypatch.setattr(transport, '_opensky_access_token', authenticate)
+    budgets = []
+    def fetch(_ctx, _url, **kwargs):
+        budgets.append(kwargs['timeout'].total)
+        return {'ac': []}
+    monkeypatch.setattr(transport, '_http_json_get', fetch)
+    resources = RuntimeResources()
+    try:
+        result = transport.get_aviation_viewport_snapshot({'_resources': resources}, bbox=(-75,39,-72,42),zoom=5)
+        assert result['status'] == 'empty'
+        assert result['coverage']['complete'] is True
+        assert len(budgets) == 1 and 0 < budgets[0] <= 5.5
+    finally:
+        resources.close()

@@ -1074,7 +1074,7 @@ def _opensky_access_token(ctx: dict) -> tuple[Optional[str], Dict[str, Any]]:
             ctx,
             OPENSKY_AUTH_URL,
             data=data,
-            timeout=_env_int("POLYDATA_OPENSKY_AUTH_TIMEOUT_SECONDS", 5, minimum=2, maximum=15),
+            timeout=Timeout(total=_env_int("POLYDATA_OPENSKY_AUTH_TIMEOUT_SECONDS", 5, minimum=2, maximum=15), connect=2, read=3),
             headers={"Content-Type": "application/x-www-form-urlencoded", "User-Agent": "polydata-global-transport/1.0"},
         )
     except Exception as exc:
@@ -1158,29 +1158,47 @@ def _adsb_base_url() -> str:
     return str(os.environ.get("POLYDATA_ADSB_BASE_URL") or ADSB_LOL_BASE_URL).rstrip("/")
 
 
+def _distance_nm(lat: float, lon: float, other_lat: float, other_lon: float) -> float:
+    """Great-circle distance, including longitude wrapping at the dateline."""
+    phi, other_phi = math.radians(lat), math.radians(other_lat)
+    delta_phi = other_phi - phi
+    delta_lon = math.radians(other_lon - lon)
+    haversine = math.sin(delta_phi / 2) ** 2 + math.cos(phi) * math.cos(other_phi) * math.sin(delta_lon / 2) ** 2
+    return 3440.065 * 2 * math.asin(math.sqrt(min(1.0, max(0.0, haversine))))
+
+
 def _adsb_viewport_samples(
     bbox: tuple[float, float, float, float],
-) -> List[Dict[str, float]]:
-    """Translate a viewport into at most four honest ADSB radius queries."""
+) -> List[Dict[str, Any]]:
+    """Cover a regional viewport within four public 250 NM queries if possible.
 
+    Large viewports retain a bounded, explicitly incomplete sample. Surveillance
+    completeness is never implied by geographical query coverage.
+    """
     west, south, east, north = bbox
-    mid_lat = (south + north) / 2
-    mid_lon = (west + east) / 2
-    height_nm = abs(north - south) * 60
-    width_nm = abs(east - west) * 60 * max(0.15, abs(math.cos(math.radians(mid_lat))))
-    diagonal_nm = math.hypot(width_nm, height_nm)
-    if diagonal_nm <= 460:
-        return [{
-            "lat": mid_lat,
-            "lon": mid_lon,
-            "radiusNm": float(max(20, min(250, math.ceil(diagonal_nm / 2) + 12))),
-        }]
-    radius_nm = float(max(80, min(250, math.ceil(diagonal_nm / 4) + 20)))
-    return [
-        {"lat": lat, "lon": lon, "radiusNm": radius_nm}
-        for lat in (south + (north - south) * 0.25, south + (north - south) * 0.75)
-        for lon in (west + (east - west) * 0.25, west + (east - west) * 0.75)
-    ]
+
+    def grid(rows: int, columns: int) -> List[Dict[str, Any]]:
+        sectors = []
+        for row in range(rows):
+            cell_south = south + (north - south) * row / rows
+            cell_north = south + (north - south) * (row + 1) / rows
+            for column in range(columns):
+                cell_west = west + (east - west) * column / columns
+                cell_east = west + (east - west) * (column + 1) / columns
+                lat, lon = (cell_south + cell_north) / 2, (cell_west + cell_east) / 2
+                radius = max(_distance_nm(lat, lon, corner_lat, corner_lon)
+                             for corner_lat in (cell_south, cell_north)
+                             for corner_lon in (cell_west, cell_east))
+                radius = max(20, math.ceil(radius) + 12)
+                sectors.append({"lat": lat, "lon": lon, "radiusNm": min(250, radius),
+                                "coversCell": radius <= 250})
+        return sectors
+
+    for rows, columns in ((1, 1), (1, 2), (2, 1), (2, 2)):
+        sectors = grid(rows, columns)
+        if all(sector["coversCell"] for sector in sectors):
+            return sectors
+    return grid(2, 2)
 
 
 def _adsb_number(value: Any) -> Optional[float]:
@@ -1253,6 +1271,7 @@ def _adsb_viewport_snapshot(
     cache_key: str,
     sampled_at: str,
     fallback_reason: str,
+    deadline: float | None = None,
 ) -> Dict[str, Any]:
     if not _env_bool("POLYDATA_ADSB_FALLBACK_ENABLED", True):
         return {
@@ -1276,10 +1295,10 @@ def _adsb_viewport_snapshot(
     errors: List[Dict[str, str]] = []
     sectors = _adsb_viewport_samples(bbox)
     resources = _dependencies(ctx).resources
-    deadline = monotonic() + 7.5
+    deadline = min(deadline, monotonic() + 7.5) if deadline is not None else monotonic() + 7.5
     seen: set[str] = set()
 
-    def fetch_sector(index: int, sector: Dict[str, float]) -> tuple[int, Dict[str, Any], List[Any]]:
+    def fetch_sector(index: int, sector: Dict[str, Any]) -> tuple[int, Dict[str, Any], List[Any]]:
         if deadline - monotonic() <= 0.1:
             raise TimeoutError("aviation-sector-deadline")
         hub = {"id": f"viewport-{index + 1}", "iata": None, "icao": None}
@@ -1347,14 +1366,18 @@ def _adsb_viewport_snapshot(
         "sourceUrl": ADSB_LOL_DOC_URL,
         "fallbackFrom": {"source": "OpenSky", "reason": fallback_reason},
         "coverage": {
-            "mode": "covering-sector" if len(sectors) == 1 else "sampled-sectors",
+            "mode": ("covering-sector" if len(sectors) == 1 else "covering-sectors")
+                if all(sector["coversCell"] for sector in sectors) else "sampled-sectors",
             "sectorCount": len(sectors),
-            "complete": len(sectors) == 1 and not errors,
+            "complete": all(sector["coversCell"] for sector in sectors) and not errors,
         },
         "errors": errors,
         "limitations": [
             "Aircraft positions are real ADSB observations; surveillance coverage and update delay vary.",
-            *(["Large viewports are sampled with bounded sectors and are not complete global coverage."] if len(sectors) > 1 else []),
+            *(["Large viewports are sampled with bounded sectors and are not complete global coverage."]
+              if not all(sector["coversCell"] for sector in sectors) else []),
+            *(["Some query sectors failed; their aircraft observations are unavailable."] if errors else []),
+            *([f"The response limit returned {len(picked)} of {len(aircraft)} observations."] if len(picked) < len(aircraft) else []),
         ],
     }
     _store_cached_payload(ctx, ADSB_SNAPSHOT_NAMESPACE, cache_key, result, ttl_seconds=30)
@@ -1536,7 +1559,7 @@ def get_aviation_viewport_snapshot(ctx: GlobalTransportShippingContext, *, bbox,
             shared_lock = getattr(_dependencies(ctx).snapshot_store, "fetch_lock", None)
             try:
                 with (shared_lock(ADSB_SNAPSHOT_NAMESPACE, str(scope), timeout=max(0, 8 - (monotonic() - started))) if shared_lock else nullcontext()):
-                    return _get_aviation_viewport_snapshot(ctx, bbox=bbox, zoom=zoom, limit=limit)
+                    return _get_aviation_viewport_snapshot(ctx, bbox=bbox, zoom=zoom, limit=limit, deadline=started + 8.5)
             except TimeoutError:
                 acquired_result = {"schemaVersion": AVIATION_VIEWPORT_SCHEMA_VERSION, "generatedAt": _utc_now_iso(ctx),
                     "status": "unavailable", "bbox": list(bbox), "zoom": zoom, "aircraft": [], "aircraftCount": 0,
@@ -1558,6 +1581,7 @@ def _get_aviation_viewport_snapshot(
     bbox: tuple[float, float, float, float],
     zoom: float,
     limit: int = 180,
+    deadline: float | None = None,
 ) -> Dict[str, Any]:
     """Return live aircraft only for a bounded visible map viewport.
 
@@ -1565,6 +1589,7 @@ def _get_aviation_viewport_snapshot(
     provider credentials and sampling policy off the browser, caches a
     quantized viewport briefly, and never falls back to fabricated flights.
     """
+    deadline = deadline if deadline is not None else monotonic() + 8.5
     west, south, east, north = bbox
     if not (-180 <= west < east <= 180 and -90 <= south < north <= 90):
         raise ValueError("invalid-aviation-bbox")
@@ -1586,7 +1611,7 @@ def _get_aviation_viewport_snapshot(
     quantum = max(0.25, 8 / (2 ** max(0, int(bounded_zoom) - 2)))
     quantized = (max(-180, math.floor(west / quantum) * quantum), max(-90, math.floor(south / quantum) * quantum),
                  min(180, math.ceil(east / quantum) * quantum), min(90, math.ceil(north / quantum) * quantum))
-    cache_key = f"viewport-v2:{bounded_limit}:" + ":".join(f"{value:.4f}" for value in quantized)
+    cache_key = f"viewport-v3:{bounded_limit}:" + ":".join(f"{value:.4f}" for value in quantized)
     bbox = quantized
     west, south, east, north = bbox
     cached = _read_cached_payload(ctx, OPENSKY_SNAPSHOT_NAMESPACE, cache_key, max_age_seconds=30)
@@ -1608,6 +1633,7 @@ def _get_aviation_viewport_snapshot(
             cache_key=cache_key,
             sampled_at=sampled_at,
             fallback_reason=str(token_state.get("status") or "opensky-credentials-unavailable"),
+            deadline=deadline,
         )
     region = {"id": cache_key, "label": "Current map viewport"}
     try:
@@ -1615,7 +1641,9 @@ def _get_aviation_viewport_snapshot(
             ctx,
             OPENSKY_STATES_URL,
             params={"lamin": south, "lomin": west, "lamax": north, "lomax": east},
-            timeout=_env_int("POLYDATA_OPENSKY_VIEWPORT_TIMEOUT_SECONDS", 5, minimum=2, maximum=14),
+            timeout=Timeout(total=max(.1, min(deadline - monotonic(),
+                _env_int("POLYDATA_OPENSKY_VIEWPORT_TIMEOUT_SECONDS", 5, minimum=2, maximum=14))),
+                connect=min(2, max(.1, deadline - monotonic())), read=min(3, max(.1, deadline - monotonic()))),
             headers={"Authorization": f"Bearer {token}", "User-Agent": "polydata-global-transport/1.0"},
         )
     except Exception as exc:
@@ -1627,6 +1655,7 @@ def _get_aviation_viewport_snapshot(
             cache_key=cache_key,
             sampled_at=sampled_at,
             fallback_reason=f"states-{exc.__class__.__name__}",
+            deadline=deadline,
         )
     rows = payload.get("states") if isinstance(payload, dict) else []
     normalized = [

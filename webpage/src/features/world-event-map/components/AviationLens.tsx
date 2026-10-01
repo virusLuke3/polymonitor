@@ -71,7 +71,7 @@ export function AviationLens({
           <em>/{stats.liveAircraft} {zh ? '观测飞机' : 'observed aircraft'}</em>
         </span>
       </div>
-      <p>{zh ? '返回 / 有效 / 视口内' : 'Returned / valid / in view'}: {status?.payload?.counts ? `${status.payload.counts.returned} / ${status.payload.counts.valid} / ${status.payload.counts.inView}` : '—'} · {zh ? '匹配并有地图或记录入口' : 'Matched, with map or record access'}: {stats.visibleLiveAircraft}. {status?.payload?.coverage?.complete === false ? (zh ? '来源采样，非完整覆盖。' : 'Source sampled; coverage is incomplete.') : ''}</p>
+      <p>{zh ? '返回 / 有效 / 视口内' : 'Returned / valid / in view'}: {status?.payload?.counts ? `${status.payload.counts.returned} / ${status.payload.counts.valid} / ${status.payload.counts.inView}` : '—'} · {zh ? '匹配并有地图或记录入口' : 'Matched, with map or record access'}: {stats.visibleLiveAircraft}. {status?.payload?.coverage?.complete === false ? (zh ? '当前查询未覆盖完整区域。' : 'The query does not cover the entire area.') : ''}</p>
       <div className="wm-aviation-lens-tabs" role="group" aria-label="Aviation route mode">
         {AVIATION_LENS_MODES.map((lens) => (
           <button
@@ -101,8 +101,9 @@ export function AviationLens({
           ))}
         </div>
       ) : null}
-      {state.zoom < 2 ? <button type="button" className="wm-map-aviation-zoom" onClick={onZoomToAircraft}>
-        {zh ? '放大以加载当前区域飞机' : 'Zoom in for aircraft in this region'}
+      {(state.zoom < 2 || (state.zoom < 12 && status?.payload?.coverage?.complete === false)) ? <button type="button" className="wm-map-aviation-zoom" onClick={onZoomToAircraft}>
+        {state.zoom < 2 ? (zh ? '放大以加载当前区域飞机' : 'Zoom in for aircraft in this region')
+          : (zh ? '放大以缩小查询覆盖缺口' : 'Zoom in to reduce query coverage gaps')}
       </button> : null}
       <p>{zh ? '飞机位置来自 ADS-B 观测；航线动画仅为拓扑示意，不代表航班运行。' : 'Aircraft positions are ADS-B observations. Route animation illustrates topology, not operating flights.'}</p>
 

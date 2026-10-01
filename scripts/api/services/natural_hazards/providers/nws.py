@@ -18,9 +18,11 @@ DEFAULT_URL = "https://api.weather.gov/alerts"
 SOURCE_URL = "https://www.weather.gov/documentation/services-web-alerts"
 ZONE_SNAPSHOT_NAMESPACE = "snapshot:world:nws-zones"
 ZONE_CACHE_TTL_SECONDS = 6 * 60 * 60
-# Optional zone enrichment must finish inside the compact feed's 6.5s
-# provider deadline, including time already spent fetching the CAP catalog.
+# CAP acquisition has its own deadline. Detached, bounded zone work must not
+# inherit an almost exhausted catalog budget or hold up that catalog.
 PROVIDER_FETCH_BUDGET_SECONDS = 5.5
+ZONE_FETCH_BUDGET_SECONDS = 3.0
+ZONE_RETRY_SECONDS = 60
 MAX_ZONE_FETCHES_PER_REFRESH = 12
 ZONE_FETCH_WORKERS = 6
 MAX_RING_POINTS = 240
@@ -122,6 +124,7 @@ def _generalized_geometry(raw: Any) -> Dict[str, Any] | None:
 
 
 def _zone_geometry(resources, http_json_get, url: str, deadline: float, snapshot_store=None) -> Dict[str, Any] | None:
+    geometry = None
     try:
         shared_lock = getattr(snapshot_store, "fetch_lock", None)
         with (shared_lock(ZONE_SNAPSHOT_NAMESPACE, url, timeout=max(0, min(.5, deadline - monotonic()))) if shared_lock else nullcontext()):
@@ -137,10 +140,15 @@ def _zone_geometry(resources, http_json_get, url: str, deadline: float, snapshot
             if geometry is not None:
                 with resources.zone_cache_lock: resources.zone_cache[url] = (monotonic(), geometry)
             return geometry
-    except TimeoutError:
+    except Exception:
+        # Negative caching lets later zones make progress instead of allowing
+        # the first failing batch to monopolize every bounded refresh.
         return None
     finally:
-        with resources.zone_cache_lock: resources.zone_pending.pop(url, None)
+        with resources.zone_cache_lock:
+            if geometry is None:
+                resources.zone_cache[url] = (monotonic(), None)
+            resources.zone_pending.pop(url, None)
 
 
 def _resolve_zone_geometries(resources, http_json_get, zone_urls: list[str], *, deadline: float, snapshot_store=None) -> dict[str, Dict[str, Any]]:
@@ -154,7 +162,8 @@ def _resolve_zone_geometries(resources, http_json_get, zone_urls: list[str], *, 
     with resources.zone_cache_lock:
         for url in dict.fromkeys(zone_urls):
             cached = resources.zone_cache.get(url)
-            if cached and now - cached[0] <= ZONE_CACHE_TTL_SECONDS:
+            ttl = ZONE_CACHE_TTL_SECONDS if cached and cached[1] is not None else ZONE_RETRY_SECONDS
+            if cached and now - cached[0] <= ttl:
                 if cached[1] is not None:
                     resolved[url] = cached[1]
                 continue
@@ -172,18 +181,27 @@ def _resolve_zone_geometries(resources, http_json_get, zone_urls: list[str], *, 
     return resolved
 
 
-def enrich_cached_events(events: list[Dict[str, Any]], resources, *, now: datetime | None = None, snapshot_store=None) -> list[Dict[str, Any]]:
+def enrich_cached_events(events: list[Dict[str, Any]], resources, *, now: datetime | None = None, snapshot_store=None, http_json_get=None) -> list[Dict[str, Any]]:
     """Merge completed official zones into the SAME CAP revision, no new times."""
     result = []
+    pending_features = []
     shared_read_deadline = monotonic() + .25
     for event in events:
         properties = event.get("properties") or {}
-        zones = properties.get("affectedZones") or []
+        zones = list(dict.fromkeys(zone for value in properties.get("affectedZones") or []
+            if (zone := _trusted_zone_url(value)) is not None))
         expires = iso_timestamp(event.get("expiresAt"))
         expired = bool(expires and datetime.fromisoformat(expires.replace("Z", "+00:00")) <= (now or datetime.now(timezone.utc)))
-        if (event.get("revision") or {}).get("cancelled") or event.get("lifecycle") == "ended" or expired or not zones \
-            or properties.get("geometrySource") == "nws-alert-polygon":
+        if properties.get("geometrySource") == "nws-alert-polygon" and event.get("geometry"):
+            # Native CAP polygons already define the complete warning area;
+            # affectedZones are an alternate reference, not missing polygons.
+            result.append({**event, "properties": {**properties, "unresolvedZoneCount": 0}})
+            continue
+        if (event.get("revision") or {}).get("cancelled") or event.get("lifecycle") == "ended" or expired or not zones:
             result.append(event); continue
+        pending_features.append({"geometry": None, "properties": {
+            "event": "Storm Warning", "severity": {"critical": "Extreme", "warning": "Severe", "watch": "Moderate"}.get(event.get("severity")),
+            "affectedZones": zones}})
         geometries = []
         with resources.zone_cache_lock:
             for url in zones:
@@ -199,6 +217,9 @@ def enrich_cached_events(events: list[Dict[str, Any]], resources, *, now: dateti
         result.append({**event, "geometry": _merge_zone_geometries(geometries), "locationPrecision": "region",
             "properties": {**properties, "geometrySource": "nws-affected-zones", "resolvedZoneCount": len(geometries),
                 "unresolvedZoneCount": max(0, len(zones) - len(geometries))}})
+    if http_json_get is not None:
+        _resolve_zone_geometries(resources, http_json_get, _prioritized_zone_urls(pending_features),
+            deadline=monotonic() + ZONE_FETCH_BUDGET_SECONDS, snapshot_store=snapshot_store)
     return result
 
 
@@ -216,7 +237,7 @@ def _merge_zone_geometries(geometries: list[Dict[str, Any]]) -> Dict[str, Any] |
     return {"type": "MultiPolygon", "coordinates": polygons}
 
 
-def _prioritized_zone_urls(features: list[Any]) -> list[str]:
+def _prioritized_zone_urls(features: list[Any], *, now: datetime | None = None) -> list[str]:
     """Round-robin zones so every alert gets a renderable area before detail fills in."""
     zones_by_alert: list[list[str]] = []
     for feature in sorted(features, key=lambda f: -({"Extreme": 3, "Severe": 2, "Moderate": 1}.get(
@@ -224,6 +245,11 @@ def _prioritized_zone_urls(features: list[Any]) -> list[str]:
         if not isinstance(feature, dict) or _geometry(feature.get("geometry")) is not None:
             continue
         properties = feature.get("properties") if isinstance(feature.get("properties"), dict) else {}
+        if str(properties.get("messageType") or "").lower() == "cancel":
+            continue
+        expires = iso_timestamp(properties.get("expires"))
+        if expires and datetime.fromisoformat(expires.replace("Z", "+00:00")) <= (now or datetime.now(timezone.utc)):
+            continue
         raw_zones = properties.get("affectedZones") if isinstance(properties.get("affectedZones"), list) else []
         trusted = [zone for value in raw_zones if (zone := _trusted_zone_url(value)) is not None]
         if trusted:
@@ -269,8 +295,12 @@ def fetch(
         raise ValueError("nws-schema-alerts")
     catalog_partial = bool((payload.get("pagination") or {}).get("next")) or len(features) > max(1, limit)
     bounded_features = features[: max(1, limit)]
-    zone_urls = _prioritized_zone_urls(bounded_features)
-    resolved_zones = _resolve_zone_geometries(resources, http_json_get, zone_urls, deadline=deadline, snapshot_store=snapshot_store)
+    zone_urls = _prioritized_zone_urls([feature for feature in bounded_features
+        if isinstance(feature, dict) and isinstance(feature.get("properties"), dict)
+        and _hazard_kind(str(feature["properties"].get("event") or ""))], now=observed_now)
+    resolved_zones = _resolve_zone_geometries(resources, http_json_get, zone_urls,
+        deadline=monotonic() + ZONE_FETCH_BUDGET_SECONDS if monotonic() < deadline else deadline,
+        snapshot_store=snapshot_store)
     previous_by_id = {
         str(event.get("id")): event
         for event in (previous_events or [])
@@ -313,11 +343,12 @@ def fetch(
             except ValueError:
                 expired = False
         geometry = _generalized_geometry(feature.get("geometry"))
-        affected_zones = [
+        native_geometry = geometry is not None
+        affected_zones = list(dict.fromkeys([
             trusted
             for zone in (properties.get("affectedZones") or [])
             if (trusted := _trusted_zone_url(zone)) is not None
-        ] if isinstance(properties.get("affectedZones"), list) else []
+        ])) if isinstance(properties.get("affectedZones"), list) else []
         resolved_zone_count = sum(1 for zone in affected_zones if zone in resolved_zones)
         if geometry is None and resolved_zone_count:
             geometry = _merge_zone_geometries([resolved_zones[zone] for zone in affected_zones if zone in resolved_zones])
@@ -333,7 +364,7 @@ def fetch(
         same_revision = (previous.get("revision") or {}).get("nativeEventId") == native_id
         same_zones = set(previous_properties.get("affectedZones") or []) == set(affected_zones)
         if (not cancelled and not expired and same_revision and same_zones
-            and feature.get("geometry") is None and previous_geometry is not None
+            and not native_geometry and previous_geometry is not None
             and previous_zone_count > resolved_zone_count):
             geometry = previous_geometry
             resolved_zone_count = previous_zone_count
@@ -385,9 +416,9 @@ def fetch(
                     "mapEntity": "hazard-event",
                     "senderName": properties.get("senderName"),
                     "affectedZones": affected_zones,
-                    "geometrySource": "nws-affected-zones" if resolved_zone_count else "nws-alert-polygon" if geometry else None,
+                    "geometrySource": "nws-alert-polygon" if native_geometry else "nws-affected-zones" if geometry else None,
                     "resolvedZoneCount": resolved_zone_count,
-                    "unresolvedZoneCount": max(0, len(affected_zones) - resolved_zone_count),
+                    "unresolvedZoneCount": max(0, len(affected_zones) - resolved_zone_count) if not native_geometry else 0,
                     "geometryReusedFromSnapshot": geometry_reused,
                     "response": properties.get("response"),
                     "canonicalEventId": f"{hazard_kind}:nws:{canonical_native_id}",

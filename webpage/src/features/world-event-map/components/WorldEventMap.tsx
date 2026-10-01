@@ -637,7 +637,7 @@ export function WorldEventMap({
             onLensChange={onAviationLensChange}
             onRiskSourceChange={onAviationRiskSourceChange}
             onClose={onAviationClose}
-            onZoomToAircraft={() => onCameraChange({ center: state.center, zoom: Math.max(2.5, state.zoom) })}
+            onZoomToAircraft={() => onCameraChange({ center: state.center, zoom: Math.min(12, Math.max(2.5, state.zoom + 1)) })}
           />
         ) : null}
       <details className="wm-map-radar-status">

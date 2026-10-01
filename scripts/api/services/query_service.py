@@ -504,7 +504,7 @@ def get_recent_trades(
     clickhouse_rows = clickhouse_orderfilled_service.get_recent_trades(ctx, limit=limit)
     if clickhouse_rows is not None:
         return clickhouse_rows
-    raise RuntimeError("ClickHouse OrderFilled read is enabled but unavailable")
+    raise TimeoutError("ClickHouse OrderFilled read is enabled but unavailable")
 
 
 def get_recent_oracle_events(
