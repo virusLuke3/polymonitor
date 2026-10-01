@@ -25,7 +25,7 @@ SECRET_PATTERNS = {
 HOME_PATH_PATTERN = re.compile(r"/(?:home|Users)/([A-Za-z0-9._-]+)(?:/|$)")
 REMOTE_HOME_PATTERN = re.compile(r"\b([A-Za-z0-9._-]+)@[A-Za-z0-9._-]+:~/")
 GENERIC_HOME_NAMES = {"example", "runner", "user", "username"}
-# Official feed directory: its /home/html/ URL is not a local home directory.
+# The official ECB feed directory resembles a local home-directory path.
 PUBLIC_HOME_URLS = ("https://www.ecb.europa.eu/home/html/rss.en.html",)
 
 
