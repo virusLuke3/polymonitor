@@ -11,6 +11,9 @@ reader behavior. Its memoized `PanelResource<T>` declares a key containing **all
 parameters, `fetch`, `parse`, `updatedAt`, refresh policy and a maximum snapshot age.
 Key the resource-owning component by that identity. No panel imports a sibling's
 implementation. App and the explicit registry retain composition ownership.
+Keep scope/window controls outside the loading region so users can change or
+cancel a slow cold request. Show a loader only in the data region, and distinguish
+an unknown pending count from a successfully checked empty result.
 
 `usePanelResource` adapts this declaration to `usePanelRuntime` using `batch:false`.
 The existing runtime owns scheduling, request deduplication, cancellation, bounded

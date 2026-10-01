@@ -267,3 +267,26 @@ test('page hiding pauses checks and returning resumes without losing readable co
   await expect.poll(() => attempts).toBeGreaterThan(before);
   await expect(page.getByText('Auto check every 30 seconds.', { exact: false })).toBeVisible();
 });
+
+test('scope controls stay usable during a slow cold market request', async ({ page }) => {
+  await installDashboard(page);
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  let started = false;
+  await page.route('**/wm-api/content/**', async route => {
+    if (route.request().url().includes('/market/1')) {
+      started = true;
+      await held;
+      return route.fulfill({ json: payload(1, ['old-market']) }).catch(() => {});
+    }
+    return route.fulfill({ json: payload(null, ['fast-global']) });
+  });
+  await mount(page);
+  await expect.poll(() => started).toBeTruthy();
+  await expect(page.locator('.wm-panel-loading')).toBeVisible();
+  await page.getByRole('button', { name: 'Global', exact: true }).click();
+  await expect(page.locator('.wm-free-intel-card')).toContainText('Fixture fast-global');
+  release();
+  await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
+  await expect(page.getByText('Fixture old-market', { exact: false })).toHaveCount(0);
+});

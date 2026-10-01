@@ -1,6 +1,6 @@
 import { useState } from 'preact/hooks';
 import type { PanelInputs, PanelRenderMap } from '../../types';
-import { Panel } from '@/components/Panel';
+import { Panel, PanelLoading } from '@/components/Panel';
 import { panelFromRenderer } from '@/panels/definePanel';
 import { useI18n } from '@/services/i18n';
 import { useIntelFeed } from './useIntelFeed';
@@ -37,7 +37,7 @@ function IntelView({ ctx, scope, days, setDays, setGlobal }: {
   const labels = { all: copy('All', '全部'), news_report: copy('Reports', '报道'), official_release: copy('Official', '公告'), event: copy('Events', '事件') };
   const kindLabel = (value?: string) => value === 'alert' ? copy('Weather alert', '天气警报') : value === 'observation' ? copy('Observation', '观测更新') : value === 'official_release' ? labels.official_release : labels.news_report;
   const filtered = (filter: typeof kinds[number]) => items.filter((item) => filter === 'all' || (filter === 'event' ? ['alert', 'observation'].includes(item.sourceKind || '') : item.sourceKind === filter));
-  return <Panel title={scope === 'global' ? copy('Global Updates', '全局资讯') : copy('Related Intelligence', '关联情报')} count={items.length} className="wm-related-intel-panel wm-free-intel-panel" loading={feed.loading}>
+  return <Panel title={scope === 'global' ? copy('Global Updates', '全局资讯') : copy('Related Intelligence', '关联情报')} count={feed.loading ? '…' : items.length} className="wm-related-intel-panel wm-free-intel-panel">
     <div className="wm-intel-scope">
       <button type="button" aria-pressed={scope === 'market'} disabled={ctx.selectedMarketId == null} onClick={() => setGlobal(false)}>{copy('Market', '市场')}</button>
       <button type="button" aria-pressed={scope === 'global'} onClick={() => setGlobal(true)}>{copy('Global', '全局')}</button>
@@ -46,6 +46,7 @@ function IntelView({ ctx, scope, days, setDays, setGlobal }: {
     </div>
     {scope === 'market' && <p className="wm-free-intel-market-caption">{(ctx.selectedMarket?.id === ctx.selectedMarketId ? ctx.selectedMarket.title : null) || data?.marketTitle || `Market ${ctx.selectedMarketId}`}</p>}
     <div className="wm-intel-filter-tabs" role="tablist" aria-label={copy('Content types', '内容类型')}>{kinds.map((value) => <button type="button" role="tab" aria-selected={kind === value} className={kind === value ? 'active' : ''} onClick={() => setKind(value)} key={value}><span>{labels[value]}</span><b>{filtered(value).length}</b></button>)}</div>
+    {feed.loading && <PanelLoading />}
     {feed.pending && <button type="button" className="wm-intel-new" onClick={feed.accept}>{copy('New content available · show', '有新内容 · 点击查看')}</button>}
     {(feed.error || data?.status === 'unavailable') && <p role="status">{copy('Content service unavailable.', '资讯服务暂不可用。')} {!!items.length && copy('Showing previously verified content.', '显示此前已核验的内容。')}</p>}
     {!feed.error && data?.status !== 'unavailable' && (data?.status === 'partial') && <p role="status">{copy('Some sources are unavailable or overdue. Available content is shown below.', '部分来源不可用或超过检查时间，下方展示仍可用的内容。')}</p>}
