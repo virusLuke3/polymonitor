@@ -69,6 +69,27 @@ def jurisdictions(value):
     return {code for code, pattern in patterns.items() if re.search(pattern, value)}
 
 
+def market_coverage(market, sources, items):
+    """Coverage declaration is separate from conservative article matching."""
+    if items:
+        return {"status": "available", "topic": None,
+                "sourceIds": sorted({item["sourceId"] for item in items})}
+    market = market or {}
+    tags = market.get("tags") or []
+    if isinstance(tags, str):
+        try:
+            tags = json.loads(tags)
+        except ValueError:
+            tags = []
+    category = text(str(market.get("category") or "") + " " + " ".join(map(str, tags)))
+    question = text(market.get("title"))
+    topic = "sports" if re.search(r"\bsports?\b|\bnfl\b|\bnba\b|football|soccer|basketball|baseball|tennis|esports", category) else (
+        "crypto" if re.search(r"\bcrypto\b|bitcoin|ethereum", category + " " + question) else None)
+    source_ids = [source["source_id"] for source in sources if source.get("enabled") and topic in source.get("topics", [])]
+    return {"status": "unsupported" if topic and not source_ids else "unknown",
+            "topic": topic, "sourceIds": source_ids}
+
+
 def relate(market, item):
     tags = market.get("tags") or []
     if isinstance(tags, str):

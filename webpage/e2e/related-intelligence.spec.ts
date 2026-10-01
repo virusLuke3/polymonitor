@@ -7,10 +7,53 @@ test.use({ baseURL: `http://127.0.0.1:${process.env.POLYMONITOR_E2E_PORT || 4174
 const item = (id: string) => ({ id, contentType: 'news', content_version: id, source: 'Global Voices', sourceId: 'global-voices', sourceKind: 'news_report', author: 'Fixture author', title: `Fixture ${id} could <script>appear</script>`, summary: 'Fixture feed excerpt', excerptFull: 'Fixture full feed excerpt, never published.', excerptOrigin: 'feed', url: 'https://globalvoices.org/fixture/', licenseUrl: 'https://creativecommons.org/licenses/by/3.0/', relation: 'context', relationReason: 'Fixture shared event; contract conditions unverified.', publishedAt: null });
 const payload = (id: number | null, ids: string[] = []) => ({ scope: id == null ? 'global' : 'market', marketId: id, market_id: id, items: ids.map(item), count: ids.length, status: 'partial', generatedAt: GENERATED_AT, window: { days: 7 }, sources: [{ source_id: 'fixture-unavailable', status: 'error', error: 'Fixture timeout' }] });
 async function mount(page: import('@playwright/test').Page, id: number | null = 1) {
+  // These existing cases explicitly exercise strict Market mode.
+  await page.addInitScript(() => localStorage.setItem('polymonitor:intel-scope:v1', 'market'));
   await page.goto('/e2e/panels.html');
   await page.waitForFunction(() => window.panelHarness);
   await page.evaluate(data => window.panelHarness.mount('related-news', {}, data), { selectedMarketId: id, selectedMarket: id == null ? null : fixtureMarkets[id - 1] });
 }
+
+test('fresh opening displays explicit global updates and remembers the user scope choice', async ({ page }) => {
+  await installDashboard(page);
+  await page.route('**/wm-api/content/**', route => route.fulfill({ json: route.request().url().includes('/latest')
+    ? { ...payload(null, ['global']), status: 'ready', sources: [] }
+    : { ...payload(1), status: 'ready', sources: [], empty_reason: 'market_not_covered',
+        marketCoverage: { status: 'unsupported', topic: 'sports', sourceIds: [] } } }));
+  await page.goto('/e2e/panels.html');
+  await page.waitForFunction(() => window.panelHarness);
+  await page.evaluate(data => window.panelHarness.mount('related-news', {}, data), { selectedMarketId: 1, selectedMarket: fixtureMarkets[0] });
+  await expect(page.getByRole('button', { name: 'Global', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Market', exact: true }).click();
+  await expect(page.getByText('Sports coverage is not connected yet.')).toBeVisible();
+  await expect(page.locator('.wm-intel-filter-tabs')).toHaveCount(0);
+  await expect(page.locator('.wm-free-intel-card')).toHaveCount(0);
+  await page.evaluate(() => window.panelHarness.mount('related-news', {}, { selectedMarketId: 1, selectedMarket: null }));
+  await expect(page.getByRole('button', { name: 'Market', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: 'View global updates', exact: true }).click();
+  await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
+});
+
+test('workspace distinguishes an unsupported market from degraded acquisition', async ({ page }) => {
+  await installDashboard(page, 'en', ['related-news']);
+  await page.addInitScript(() => localStorage.setItem('polymonitor:intel-scope:v1', 'market'));
+  await page.route('**/wm-api/content/**', route => {
+    const market = route.request().url().match(/\/market\/(\d+)/);
+    return route.fulfill({ json: market
+      ? { ...payload(Number(market[1])), status: 'ready', marketCoverage: { status: 'unsupported', topic: 'sports', sourceIds: [] } }
+      : { ...payload(null, ['global']), status: 'ready', sources: [] } });
+  });
+  await page.goto('/');
+  const panel = page.locator('[data-workspace-panel-id="related-news"]');
+  await panel.scrollIntoViewIfNeeded();
+  await expect(panel.getByText('NO COVERAGE', { exact: true })).toBeVisible();
+  await expect(panel.getByText('DEGRADED', { exact: true })).toHaveCount(0);
+  await expect(panel.locator('.wm-intel-filter-tabs')).toHaveCount(0);
+  await panel.getByRole('button', { name: 'View global updates', exact: true }).click();
+  await expect(panel.locator('.wm-free-intel-card')).toHaveCount(1);
+  await expect(panel.getByText('NO COVERAGE', { exact: true })).toHaveCount(0);
+});
 
 test('market empty stays empty; global is explicit; text, author, license and failure status are visible', async ({ page }) => {
   await installDashboard(page);

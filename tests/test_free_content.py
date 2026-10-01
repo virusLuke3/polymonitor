@@ -78,6 +78,22 @@ def test_feed_author_summary_time_and_unknown(source, atom):
     assert normalize.utc("2026-09-01") is None
 
 
+def test_rss_html_doctype_inside_cdata_is_not_an_xml_entity(source):
+    body = b'<rss><channel><item><title>Valid feed</title><link>https://www.federalreserve.gov/a</link><description><![CDATA[<!DOCTYPE html PUBLIC "fixture"><p>Public excerpt</p>]]></description></item></channel></rss>'
+    assert normalize.parse_feed(body, source)[0]['summary'] == 'Public excerpt'
+    for prefix in (b'<!-- harmless comment -->', b''):
+        with pytest.raises(ValueError, match='xml-entities-forbidden'):
+            normalize.parse_feed(prefix + b'<!DOCTYPE rss [<!ENTITY a "dangerous">]><rss/>', source)
+
+
+def test_failed_source_fetches_body_again_instead_of_accepting_an_old_etag(storage, source):
+    old = {'status': 'error', 'etag': 'unvalidated-etag', 'last_success_at': '2026-09-30T00:00:00Z'}
+    with patch.object(collector, 'fetch', return_value=(b'<rss><channel/></rss>', {'http_status': 200, 'final_url': source['feed_url']})) as fetch:
+        state = collector.collect_one(storage, None, source, old)
+    assert fetch.call_args.args[3] == {}
+    assert state['status'] == 'healthy_empty' and state['error'] is None
+
+
 def test_unsafe_xml_html_and_links(source):
     with pytest.raises(ValueError):
         normalize.parse_feed(b'<!DOCTYPE rss [<!ENTITY a SYSTEM "file:///etc/passwd">]><rss/>', source)
@@ -546,10 +562,53 @@ def test_source_balanced_candidates_do_not_hide_low_frequency_release(storage, s
         store.save_state(storage, sid, {"status": "ok", "last_success_at": "2026-10-01T13:00:00Z"})
     result = public.payload(storage, now=now)
     assert [item["sourceId"] for item in result["items"]] == ["fed-monetary"]
-    assert result["coverage"]["truncated"] is True
-    assert result["status"] == "partial"
-    assert result["coverage"]["candidatesScanned"] == public.CANDIDATES_PER_PUBLISHER + 1
-    assert result["coverage"]["filteredByReason"]["low_magnitude"] == public.CANDIDATES_PER_PUBLISHER
+    assert result["coverage"]["truncated"] is False
+    assert result["status"] == "ready"
+    assert result["coverage"]["candidatesScanned"] == 1
+    assert result["coverage"]["rawCandidatesScanned"] == 2001
+    assert result["coverage"]["filteredByReason"]["low_magnitude"] == 2000
+
+
+def test_actual_eligible_quota_still_reports_partial(storage, source):
+    now = datetime(2026, 10, 1, 14, tzinfo=timezone.utc)
+    records = [article(source, url=f"https://www.federalreserve.gov/newsevents/pressreleases/monetary{i}.htm",
+                       published_at="2026-10-01T12:00:00Z") for i in range(257)]
+    store.persist(storage, source, records, "2026-10-01T13:00:00Z")
+    for sid in source_map():
+        store.save_state(storage, sid, {"status": "ok"})
+    result = public.payload(storage, now=now)
+    assert result["coverage"]["truncated"] and result["status"] == "partial"
+    assert result["coverage"]["candidateTotals"][source["publisher_name"]] == 257
+    assert result["coverage"]["candidatesScanned"] == 256
+
+
+def test_raw_scan_ceiling_is_explicit_and_does_not_hide_other_publisher(storage, source):
+    now = datetime(2026, 10, 1, 14, tzinfo=timezone.utc)
+    usgs = source_map()["usgs"]
+    records = [article(usgs, url=f"https://earthquake.usgs.gov/earthquakes/eventpage/bound{i}",
+                       published_at="2026-10-01T12:00:00Z", magnitude=1)
+               for i in range(public.RAW_CANDIDATES_PER_PUBLISHER + 1)]
+    store.persist(storage, usgs, records, "2026-10-01T13:00:00Z")
+    store.persist(storage, source, [article(source, published_at="2026-09-30T18:00:00Z")], "2026-10-01T13:00:00Z")
+    for sid in source_map():
+        store.save_state(storage, sid, {"status": "ok"})
+    result = public.payload(storage, now=now)
+    assert result["items"][0]["sourceId"] == source["source_id"]
+    assert result["coverage"]["truncated"] and result["status"] == "partial"
+
+
+def test_sports_gap_is_not_a_broken_feed_or_global_fallback(storage, source):
+    now = datetime(2026, 10, 1, 14, tzinfo=timezone.utc)
+    store.persist(storage, source, [article(source, published_at="2026-09-30T18:00:00Z")], "2026-10-01T13:00:00Z")
+    for sid in source_map():
+        store.save_state(storage, sid, {"status": "ok"})
+    store.save_state(storage, "nws", {"status": "stale", "snapshot_stale": True})
+    result = public.payload(storage, market={"title": "Eagles vs. Bears: O/U 57.5", "category": "sports", "tags": ["NFL"]},
+                            market_id=99, now=now)
+    assert result["items"] == [] and result["count"] == 0
+    assert result["status"] == "ready" and result["empty_reason"] == "market_not_covered"
+    assert result["marketCoverage"] == {"status": "unsupported", "topic": "sports", "sourceIds": []}
+    assert len(public.payload(storage, now=now)["items"]) == 1
 
 
 def test_one_bad_source_state_is_isolated(storage, source):

@@ -12,7 +12,7 @@ import logging
 from .public import payload, read_records
 
 NAMESPACE = "snapshot:content:free-public"
-CACHE_KEY = "candidates-v2"
+CACHE_KEY = "candidates-v3"
 TTL_SECONDS = 90
 MAX_STALE_SECONDS = 300
 logger = logging.getLogger(__name__)
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 def _age(snapshot, now):
     if not isinstance(snapshot, dict) or snapshot.get("schemaVersion") != 1 or not isinstance(snapshot.get("records"), list):
         return float("inf")
-    if not all(isinstance(row, dict) and row.get("record_kind") in {"source", "item"}
+    if not all(isinstance(row, dict) and row.get("record_kind") in {"source", "item", "coverage"}
                and isinstance(row.get("payload"), str) for row in snapshot["records"]):
         return float("inf")
     try:

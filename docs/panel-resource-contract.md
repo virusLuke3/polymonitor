@@ -50,7 +50,7 @@ unvalidated bootstrap preview into the complete resource.
   display without replacing a complete recovery snapshot. Invalid/stale data
   never becomes the new saved snapshot. This does not exempt displayed content
   from current permission, window and expiry rules.
-- Persistence is only for reviewed public data. Schema version 2, complete keys,
+- Persistence is only for reviewed public data. Schema version 3, complete keys,
   revalidation, eight entries and 256,000 characters per entry bound this cache.
   Storage failure does not fail a panel or remove other application storage.
 - New entries wait for acceptance while the current page remains readable. If a
@@ -58,6 +58,20 @@ unvalidated bootstrap preview into the complete resource.
   avoiding a blank area containing only a pending button. Absence from top-N is
   not labelled a withdrawal. Revisions, permission changes and expiry apply
   without reader confirmation. Pending count is explicit.
+
+## Scope and coverage
+
+First opening selects explicit Global Updates, including when a market is selected.
+The user's subsequent Market/Global choice is saved separately from article cache.
+Market responses remain strict and never silently acquire global articles. A known
+sports/crypto market without any reviewed dedicated feed declares `marketCoverage`
+unsupported, hides meaningless zero category tabs and offers an explicit Global
+button. A healthy no-match result, missing dedicated coverage, bounded candidates,
+source partial failure and runtime request failure have distinct status labels.
+Underlying source states remain available even for an unsupported market; total
+acquisition failure still returns unavailable rather than a healthy coverage gap.
+The generic resource binding accepts a panel-owned status label; the runtime still
+owns scheduling, failures, retries and cancellation.
 
 ## Candidate seed and acquisition
 
@@ -74,9 +88,11 @@ The parent publishes a validated seed before acquisition, every 30 seconds while
 acquisition runs, and afterward. Watch sleeps 30–60 seconds. Failed publication
 or acquisition is reported and does not permanently stop watch mode.
 
-The indexed candidate query reserves 256 records per publisher, using explicit
-NULL ordering and stable ID ties. It returns candidate totals/truncation and
-projection drop reasons. A high-frequency provider cannot consume another
+The indexed candidate query reads up to 2,048 raw records per publisher, using
+explicit NULL ordering and stable ID ties. Permission, expiry, malformed data and
+low-magnitude earthquake filters run before reserving 256 eligible candidate
+slots per publisher. Raw and eligible denominators, both bounds and projection
+drop reasons remain visible; hitting either bound is still explicitly partial. A high-frequency provider cannot consume another
 publisher's quota; quota overflow is explicitly partial, never comprehensive
 recall. Direct statistical relations require positive jurisdiction and matching
 metric/reference period/basis; unknown jurisdiction is at most context.

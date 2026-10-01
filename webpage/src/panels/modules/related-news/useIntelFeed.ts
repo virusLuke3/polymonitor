@@ -3,7 +3,7 @@ import { fetchLatestContent, fetchMarketContent } from '@/services/api';
 import { usePanelResource, type PanelResource } from '@/panels/usePanelResource';
 import {
   activePayload, intelSnapshot, INTEL_REFRESH_MS, INTEL_STALE_MS, parseIntelPayload,
-  reconcileReader, resourceId, type IntelPayload, type IntelSnapshot,
+  reconcileReader, resourceId, intelStatusLabel, type IntelPayload, type IntelSnapshot,
 } from './model';
 
 export { validScope } from './model';
@@ -12,7 +12,7 @@ export { validScope } from './model';
 export function useIntelResource(marketId: number | null, scope: 'market' | 'global', days: number, active?: boolean) {
   const key = resourceId({ marketId, scope, days });
   const contract = useMemo<PanelResource<IntelSnapshot>>(() => ({
-    key, title: 'Related Intelligence', maxAgeMs: 5 * 60_000, cache: { version: 2 },
+    key, title: 'Related Intelligence', maxAgeMs: 5 * 60_000, cache: { version: 3 },
     refreshPolicy: { tier: 'fast', intervalMs: INTEL_REFRESH_MS, staleAfterMs: INTEL_STALE_MS },
     fetch: async context => scope === 'market'
         ? await fetchMarketContent(marketId!, 20, 8000, context?.signal, days)
@@ -26,6 +26,7 @@ export function useIntelResource(marketId: number | null, scope: 'market' | 'glo
       return intelSnapshot(content);
     },
     updatedAt: value => value.generatedAt ? Date.parse(value.generatedAt) : null,
+    statusLabel: intelStatusLabel,
     shouldPersist: (next, previous) => !next.content.rejectedItemCount && !next.content.stale
       && (!previous || next.content.status === 'ready' || previous.content.status !== 'ready'),
   }), [key, marketId, scope, days]);

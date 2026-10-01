@@ -127,7 +127,10 @@ def permission(source, item):
 
 
 def parse_feed(body, source):
-    if re.search(rb"<!\s*(DOCTYPE|ENTITY)", body, re.I):
+    # RSS HTML can contain declaration-like text inside CDATA/comments. Those
+    # are not XML declarations; reject only markup that the XML parser sees.
+    markup = re.sub(rb"<!\[CDATA\[.*?\]\]>|<!--.*?-->", b"", body, flags=re.S)
+    if re.search(rb"<!\s*(DOCTYPE|ENTITY)", markup, re.I):
         raise ValueError("xml-entities-forbidden")
     root = ET.fromstring(body)
     local = lambda tag: tag.rsplit("}", 1)[-1]

@@ -1,6 +1,6 @@
 import { createContext, createElement, type ComponentChildren } from 'preact';
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
-import type { PanelFetchContext, PanelModule, PanelRefreshConfig } from './types';
+import type { PanelFetchContext, PanelModule, PanelRefreshConfig, PanelRuntimeStatus } from './types';
 import { usePanelRuntime } from './usePanelRuntime';
 import { readResourceCache, resourceIsCurrent, writeResourceCache, type ResourceCacheContract } from './resource-cache';
 
@@ -9,6 +9,7 @@ export interface PanelResource<T> extends ResourceCacheContract<T> {
   fetch: (context?: PanelFetchContext) => Promise<unknown>;
   refreshPolicy: PanelRefreshConfig;
   shouldPersist?: (next: T, previous: T | null) => boolean;
+  statusLabel?: (value: T, status: PanelRuntimeStatus) => string | undefined;
 }
 
 type Consumer = { contract: PanelResource<unknown>; active: boolean; panelId: string | null };
@@ -25,8 +26,11 @@ export const PanelResourceView = createContext<string | null>(null);
 export function usePanelResourceBinding(panelId: string) {
   const owner = useContext(ResourceOwner);
   const consumer = owner && [...owner.consumers.values()].reverse().find(value => value.panelId === panelId);
-  return owner && consumer ? { status: owner.runtime.getStatus(consumer.contract.key),
-    refresh: () => owner.runtime.refreshIds([consumer.contract.key], { reason: 'manual', force: true }) } : null;
+  if (!owner || !consumer) return null;
+  const status = owner.runtime.getStatus(consumer.contract.key);
+  const value = owner.runtime.getData(consumer.contract.key);
+  return { status: { ...status, label: value == null ? undefined : consumer.contract.statusLabel?.(value, status) },
+    refresh: () => owner.runtime.refreshIds([consumer.contract.key], { reason: 'manual', force: true }) };
 }
 
 /** One owner for parameterized resources; the existing runtime remains the scheduler. */

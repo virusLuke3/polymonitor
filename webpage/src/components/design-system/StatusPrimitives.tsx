@@ -26,7 +26,7 @@ type MetricCardProps = {
 };
 
 const POSITIVE_STATES = new Set(['ok', 'ready', 'live', 'fresh', 'online', 'active', 'healthy', 'synced']);
-const WARNING_STATES = new Set(['warming', 'aging', 'stale', 'degraded', 'partial', 'preserved', 'suspended']);
+const WARNING_STATES = new Set(['warming', 'aging', 'stale', 'degraded', 'partial', 'limited', 'preserved', 'suspended']);
 const CRITICAL_STATES = new Set(['error', 'failed', 'missing', 'offline', 'off', 'unavailable', 'critical']);
 
 export function operationalTone(value?: string | null): OperationalTone {
@@ -69,7 +69,7 @@ export function StatusBadge({
 export function RuntimeStatusBadge({ status, compact = false }: RuntimeStatusBadgeProps) {
   const phase = status.phase || 'idle';
   const freshness = String(status.freshness || '').trim().toLowerCase();
-  const label = freshness && phase === 'ready' ? freshness : phase;
+  const label = status.label || (freshness && phase === 'ready' ? freshness : phase);
   const age = status.ageSeconds ?? (
     status.updatedAt ? Math.max(0, Math.round((Date.now() - status.updatedAt) / 1_000)) : null
   );
@@ -82,7 +82,7 @@ export function RuntimeStatusBadge({ status, compact = false }: RuntimeStatusBad
     <StatusBadge
       compact={compact}
       label={label.toUpperCase()}
-      tone={operationalTone(phase === 'ready' ? freshness || 'ready' : phase)}
+      tone={operationalTone(status.label || (phase === 'ready' ? freshness || 'ready' : phase))}
       detail={detail}
     />
   );

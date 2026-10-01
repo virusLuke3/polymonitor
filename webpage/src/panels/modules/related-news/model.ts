@@ -1,4 +1,5 @@
 import type { ContentItem, ContentPayload } from '@/types';
+import type { PanelRuntimeStatus } from '@/panels/types';
 
 export const INTEL_REFRESH_MS = 30_000;
 export const INTEL_STALE_MS = 3 * 60_000;
@@ -13,6 +14,7 @@ export type IntelPayload = Omit<ContentPayload, 'items'> & {
   cacheMode?: string;
   stale?: boolean;
   rejectedItemCount?: number;
+  marketCoverage?: { status: 'available' | 'unsupported' | 'unknown'; topic: string | null; sourceIds: string[] } | null;
   coverage?: { candidatesScanned: number; candidateLimit: number; truncated: boolean; filteredByReason?: Record<string, number> };
   items: PublicIntelItem[];
 };
@@ -47,6 +49,10 @@ export function parseIntelPayload(value: unknown, resource: IntelResource): Inte
     || !record(value.window) || value.window.days !== resource.days
     || typeof value.generatedAt !== 'string' || !Number.isFinite(Date.parse(value.generatedAt))
     || (value.stale != null && typeof value.stale !== 'boolean')
+    || (value.marketCoverage != null && (!record(value.marketCoverage)
+      || !['available', 'unsupported', 'unknown'].includes(String(value.marketCoverage.status))
+      || !optionalText(value.marketCoverage.topic) || !Array.isArray(value.marketCoverage.sourceIds)
+      || !value.marketCoverage.sourceIds.every(id => typeof id === 'string')))
     || (value.coverage != null && (!record(value.coverage) || typeof value.coverage.truncated !== 'boolean'
       || !['candidatesScanned', 'candidateLimit'].every(key => typeof (value.coverage as Record<string, unknown>)[key] === 'number'
         && Number.isFinite((value.coverage as Record<string, number>)[key]) && (value.coverage as Record<string, number>)[key]! >= 0)))
@@ -102,4 +108,21 @@ export function reconcileReader(previous: ReaderState, key: string, payload: Int
 export function intelSnapshot(content: IntelPayload): IntelSnapshot {
   return { content, items: content.items, generatedAt: content.generatedAt,
     status: content.status === 'unavailable' ? 'error' : content.status === 'partial' || content.stale ? 'degraded' : 'ready' };
+}
+
+/** Empty results, limited coverage and failed acquisition are different states. */
+export function intelStatusLabel(snapshot: IntelSnapshot, status: PanelRuntimeStatus): string | undefined {
+  const content = snapshot.content;
+  if (status.error || ['error', 'stale', 'suspended'].includes(status.phase) || content.stale) return undefined;
+  if (content.marketCoverage?.status === 'unsupported') return 'NO COVERAGE';
+  if (!content.items.length && content.status === 'ready') return 'NO MATCH';
+  if (content.status === 'partial') return content.sources?.some(source => source.stale
+    || !['ok', 'unchanged', 'healthy_empty'].includes(source.status)) ? 'PARTIAL' : 'LIMITED';
+  return undefined;
+}
+
+export const INTEL_SCOPE_STORAGE_KEY = 'polymonitor:intel-scope:v1';
+export function initialIntelScope(storage: Pick<Storage, 'getItem'> | null): 'market' | 'global' {
+  try { return storage?.getItem(INTEL_SCOPE_STORAGE_KEY) === 'market' ? 'market' : 'global'; }
+  catch { return 'global'; }
 }

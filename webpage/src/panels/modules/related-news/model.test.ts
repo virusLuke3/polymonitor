@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { activePayload, intelSnapshot, parseIntelPayload, reconcileReader, resourceId } from './model';
+import { activePayload, intelSnapshot, parseIntelPayload, reconcileReader, resourceId, initialIntelScope, intelStatusLabel } from './model';
+import type { PanelRuntimeStatus } from '@/panels/types';
 
 const resource = { marketId: 1, scope: 'market' as const, days: 7 };
 const item = (id: string) => ({ id, source: 'Fixture', title: id, sourceKind: 'news_report',
@@ -8,6 +9,24 @@ const payload = (ids = ['first']) => parseIntelPayload({ scope: 'market', market
   status: 'ready', generatedAt: '2026-10-01T00:00:00Z', items: ids.map(item), window: { days: 7 } }, resource);
 
 describe('Related Intelligence resource contract', () => {
+  it('defaults to explicit global scope and remembers an explicit market preference', () => {
+    expect(initialIntelScope(null)).toBe('global');
+    expect(initialIntelScope({ getItem: () => 'market' })).toBe('market');
+    expect(initialIntelScope({ getItem: () => { throw new Error('blocked storage'); } })).toBe('global');
+  });
+  it('separates no coverage, healthy empty, limited candidates and real request failures', () => {
+    const status: PanelRuntimeStatus = { phase: 'ready', updatedAt: 1, lastAttemptAt: 1, failureCount: 0, error: null };
+    const empty = payload([]);
+    expect(intelStatusLabel(intelSnapshot(empty), status)).toBe('NO MATCH');
+    empty.marketCoverage = { status: 'unsupported', topic: 'sports', sourceIds: [] };
+    expect(intelStatusLabel(intelSnapshot(empty), status)).toBe('NO COVERAGE');
+    expect(intelStatusLabel(intelSnapshot(empty), { ...status, phase: 'error', error: '503' })).toBeUndefined();
+    const limited = payload(); limited.status = 'partial';
+    expect(intelStatusLabel(intelSnapshot(limited), status)).toBe('LIMITED');
+    limited.sources = [{ source_id: 'nws', publisher_name: 'NWS', status: 'stale', stale: true }];
+    expect(intelStatusLabel(intelSnapshot(limited), status)).toBe('PARTIAL');
+    expect(intelStatusLabel(intelSnapshot(limited), { ...status, phase: 'stale' })).toBeUndefined();
+  });
   it('separates market, scope and window and rejects mismatched identities', () => {
     const data = payload();
     for (const other of [{ ...resource, marketId: 2 }, { ...resource, days: 30 }, { ...resource, scope: 'global' as const }]) {

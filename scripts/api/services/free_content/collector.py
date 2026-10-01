@@ -87,7 +87,10 @@ def collect_one(storage, snapshot_store, source, old, *, probe=False, conditiona
                 state["last_success_at"] = snapshot["fetchedAt"]
                 state["snapshot_stale"] = bool(snapshot.get("staleAfter") and snapshot["staleAfter"] < stamp)
             else:
-                body, meta = fetch(session, source["feed_url"], source, {} if probe or not conditional else old, deadline=deadline)
+                # A failed parse/ingest must retry the body, not accept a 304 for
+                # content that was never successfully validated and persisted.
+                request_state = {} if probe or not conditional or old.get("status") == "error" else old
+                body, meta = fetch(session, source["feed_url"], source, request_state, deadline=deadline)
                 state.update(meta)
                 if meta["http_status"] == 429:
                     state.update(

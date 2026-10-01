@@ -42,6 +42,8 @@ export type PanelFetchData = (context?: PanelFetchContext) => Promise<unknown>;
 
 export type PanelRuntimeStatus = {
   phase: PanelRuntimePhase;
+  /** Optional domain label; request failure/age still belong to the runtime. */
+  label?: string;
   updatedAt: number | null;
   lastAttemptAt: number | null;
   /** Successful HTTP/validation completion, distinct from the source timestamp. */
