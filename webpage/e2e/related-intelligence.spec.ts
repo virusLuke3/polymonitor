@@ -5,10 +5,10 @@ test.use({ baseURL: `http://127.0.0.1:${process.env.POLYMONITOR_E2E_PORT || 4174
 // Isolated fixtures: production acceptance uses the real URL and real feeds.
 const item = (id: string) => ({ id, contentType: 'news', content_version: id, source: 'Global Voices', sourceId: 'global-voices', sourceKind: 'news_report', author: 'Fixture author', title: `Fixture ${id} could <script>appear</script>`, summary: 'Fixture feed excerpt', excerptFull: 'Fixture full feed excerpt, never published.', excerptOrigin: 'feed', url: 'https://globalvoices.org/fixture/', licenseUrl: 'https://creativecommons.org/licenses/by/3.0/', relation: 'context', relationReason: 'Fixture shared event; contract conditions unverified.', publishedAt: null });
 const payload = (id: number | null, ids: string[] = []) => ({ scope: id == null ? 'global' : 'market', marketId: id, market_id: id, items: ids.map(item), count: ids.length, status: 'partial', window: { days: 7 }, sources: [{ source_id: 'fixture-unavailable', status: 'error', error: 'Fixture timeout' }] });
-async function mount(page: import('@playwright/test').Page, id = 1) {
+async function mount(page: import('@playwright/test').Page, id: number | null = 1) {
   await page.goto('/e2e/panels.html');
   await page.waitForFunction(() => window.panelHarness);
-  await page.evaluate(data => window.panelHarness.mount('related-news', {}, data), { selectedMarketId: id, selectedMarket: fixtureMarkets[id - 1] });
+  await page.evaluate(data => window.panelHarness.mount('related-news', {}, data), { selectedMarketId: id, selectedMarket: id == null ? null : fixtureMarkets[id - 1] });
 }
 
 test('market empty stays empty; global is explicit; text, author, license and failure status are visible', async ({ page }) => {
@@ -265,7 +265,7 @@ test('page hiding pauses checks and returning resumes without losing readable co
     document.dispatchEvent(new Event('visibilitychange'));
   });
   await expect.poll(() => attempts).toBeGreaterThan(before);
-  await expect(page.getByText('Auto check every 30 seconds.', { exact: false })).toBeVisible();
+  await expect(page.getByText('Auto 30s', { exact: true })).toBeVisible();
 });
 
 test('scope controls stay usable during a slow cold market request', async ({ page }) => {
@@ -289,4 +289,27 @@ test('scope controls stay usable during a slow cold market request', async ({ pa
   release();
   await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
   await expect(page.getByText('Fixture old-market', { exact: false })).toHaveCount(0);
+});
+
+test('compact desktop panel shows its first headline without scrolling through status messages', async ({ page }) => {
+  await installDashboard(page);
+  const generatedAt = await page.evaluate(() => new Date().toISOString());
+  await page.route('**/wm-api/content/**', route => route.fulfill({ json: {
+    ...payload(null, ['visible-headline']), generatedAt,
+  } }));
+  await mount(page, null);
+  await page.locator('[data-workspace-panel-id="related-news"]').evaluate(element => {
+    element.style.width = '355px'; element.style.height = '270px';
+  });
+  const headline = page.locator('.wm-free-intel-card .wm-news-title');
+  await expect(headline).toBeVisible();
+  const bounds = await headline.evaluate(element => {
+    const body = element.closest('.wm-panel-body')!;
+    const text = element.getBoundingClientRect();
+    const viewport = body.getBoundingClientRect();
+    const slot = element.closest('[data-workspace-panel-id]')!.getBoundingClientRect();
+    return { top: text.top, bottom: Math.min(viewport.bottom, slot.bottom), scroll: body.scrollTop };
+  });
+  expect(bounds.scroll).toBe(0);
+  expect(bounds.top).toBeLessThan(bounds.bottom - 10);
 });

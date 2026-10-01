@@ -57,4 +57,11 @@ describe('public panel snapshot recovery', () => {
     expect(readResourceCache(contract, blocked, now)).toBeNull();
     expect(() => writeResourceCache(contract, payload, blocked, now)).not.toThrow();
   });
+  it('preserves the last persisted snapshot if a replacement exceeds storage quota', () => {
+    const cache = storage();
+    writeResourceCache(contract, payload, cache, now);
+    const quota = { ...cache, setItem: () => { throw new Error('quota exceeded'); } };
+    writeResourceCache(contract, { ...payload, generatedAt: new Date(now + 10_000).toISOString() }, quota, now + 10_000);
+    expect(readResourceCache(contract, cache, now + 10_000)?.generatedAt).toBe(payload.generatedAt);
+  });
 });

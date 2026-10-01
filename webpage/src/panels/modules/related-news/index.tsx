@@ -31,7 +31,7 @@ function IntelView({ ctx, scope, days, setDays, setGlobal }: {
   const data = feed.data;
   const checkTime = feed.status.checkedAt == null ? null : new Date(feed.status.checkedAt).toISOString();
   const formatCheck = (value: string) => new Intl.DateTimeFormat(i18n.locale, {
-    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
   }).format(new Date(value));
   const items = data?.items || [];
   const labels = { all: copy('All', '全部'), news_report: copy('Reports', '报道'), official_release: copy('Official', '公告'), event: copy('Events', '事件') };
@@ -42,17 +42,20 @@ function IntelView({ ctx, scope, days, setDays, setGlobal }: {
       <button type="button" aria-pressed={scope === 'market'} disabled={ctx.selectedMarketId == null} onClick={() => setGlobal(false)}>{copy('Market', '市场')}</button>
       <button type="button" aria-pressed={scope === 'global'} onClick={() => setGlobal(true)}>{copy('Global', '全局')}</button>
       <select aria-label={copy('Content time range', '资讯时间范围')} value={days} onChange={(event) => setDays(Number(event.currentTarget.value))}><option value={7}>{copy('Past 7 days', '过去 7 天')}</option><option value={30}>{copy('Past 30 days · history', '过去 30 天 · 历史')}</option></select>
-      <button type="button" disabled={feed.status.fetching} onClick={() => void feed.refresh()}>{feed.status.fetching ? copy('Refreshing…', '刷新中…') : feed.error ? copy('Retry', '重试') : copy('Refresh', '刷新')}</button>
+      <button type="button" title={copy('Auto check every 30 seconds.', '每 30 秒自动检查。')} disabled={feed.status.fetching} onClick={() => void feed.refresh()}>{feed.status.fetching ? copy('Refreshing…', '刷新中…') : feed.error ? copy('Retry', '重试') : copy('Refresh', '刷新')}</button>
     </div>
     {scope === 'market' && <p className="wm-free-intel-market-caption">{(ctx.selectedMarket?.id === ctx.selectedMarketId ? ctx.selectedMarket.title : null) || data?.marketTitle || `Market ${ctx.selectedMarketId}`}</p>}
     <div className="wm-intel-filter-tabs" role="tablist" aria-label={copy('Content types', '内容类型')}>{kinds.map((value) => <button type="button" role="tab" aria-selected={kind === value} className={kind === value ? 'active' : ''} onClick={() => setKind(value)} key={value}><span>{labels[value]}</span><b>{filtered(value).length}</b></button>)}</div>
     {feed.loading && <PanelLoading />}
     {feed.pending && <button type="button" className="wm-intel-new" onClick={feed.accept}>{copy('New content available · show', '有新内容 · 点击查看')}</button>}
     {(feed.error || data?.status === 'unavailable') && <p role="status">{copy('Content service unavailable.', '资讯服务暂不可用。')} {!!items.length && copy('Showing previously verified content.', '显示此前已核验的内容。')}</p>}
-    {!feed.error && data?.status !== 'unavailable' && (data?.status === 'partial') && <p role="status">{copy('Some sources are unavailable or overdue. Available content is shown below.', '部分来源不可用或超过检查时间，下方展示仍可用的内容。')}</p>}
-    {feed.fromCache && <p role="status">{copy('Showing a saved snapshot while checking for updates.', '先显示已保存的快照，正在检查更新。')}</p>}
-    <p className="wm-news-meta wm-intel-refresh-status">{feed.suspended ? copy('Auto refresh paused while the page is hidden.', '页面隐藏时暂停自动刷新。') : copy('Auto check every 30 seconds.', '每 30 秒自动检查。')}{checkTime && <><br />{copy('Last checked', '最近检查')}：<time data-intel-checked-at dateTime={checkTime}>{formatCheck(checkTime)}</time></>}</p>
-    {data?.generatedAt && <p className="wm-news-meta">{copy('Data updated', '数据更新时间')}：<time data-intel-updated-at dateTime={data.generatedAt}>{formatCheck(data.generatedAt)}</time>{data.stale || feed.stale && data.status !== 'partial' ? copy(' · saved snapshot is overdue', ' · 快照已超过刷新期限') : ''}</p>}
+    {!feed.error && data?.status !== 'unavailable' && (data?.status === 'partial') && <p role="status" className="wm-intel-health">{copy('Some sources unavailable or overdue.', '部分来源不可用或超过检查时间。')}</p>}
+    {feed.fromCache && <p role="status" className="wm-intel-health">{copy('Showing a saved snapshot · checking updates.', '显示已保存的快照 · 检查更新中。')}</p>}
+    <p className="wm-news-meta wm-intel-refresh-status">
+      {feed.suspended ? <span>{copy('Auto refresh paused while the page is hidden.', '页面隐藏时暂停自动刷新。')}</span> : <span title={copy('Auto check every 30 seconds.', '每 30 秒自动检查。')}>{copy('Auto 30s', '自动 30秒')}</span>}
+      {checkTime && <span>{copy('Checked', '检查')} <time data-intel-checked-at dateTime={checkTime} title={i18n.formatDateTime(checkTime)}>{formatCheck(checkTime)}</time></span>}
+      {data?.generatedAt && <span>{copy('Updated', '更新')} <time data-intel-updated-at dateTime={data.generatedAt} title={i18n.formatDateTime(data.generatedAt)}>{formatCheck(data.generatedAt)}</time>{data.stale || feed.stale && data.status !== 'partial' ? copy(' · overdue', ' · 超时') : ''}</span>}
+    </p>
     {!feed.error && data && data.status !== 'unavailable' && !feed.pending && !filtered(kind).length && <p className="wm-intel-empty">{scope === 'market' ? copy('No content meeting this market’s conditions was found in the current free sources.', '当前免费来源中，暂未找到符合本市场条件的内容。') : copy('No public content in this type and time range.', '此类型和时间范围内暂无可公开展示的内容。')}</p>}
     <div className="wm-intel-list">{filtered(kind).map((item) => {
       const id = String(item.id);

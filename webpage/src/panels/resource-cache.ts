@@ -42,7 +42,6 @@ export function writeResourceCache<T>(contract: ResourceCacheContract<T>, raw: u
     if (encoded.length > MAX_CHARS) return;
     const key = storageKey(contract.key);
     // Bound this cache without touching other application storage.
-    storage.removeItem(key);
     storage.setItem(key, encoded);
     const keys = Array.from({ length: storage.length }, (_, i) => storage.key(i))
       .filter((entry): entry is string => Boolean(entry?.startsWith(PREFIX)));
