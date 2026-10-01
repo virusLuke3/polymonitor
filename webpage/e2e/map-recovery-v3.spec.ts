@@ -435,9 +435,9 @@ test('fresh NWS catalog with delayed geometry keeps the same record and recovers
     const response=mapResponse(key,key==='nws'?[event]:[]);if(key==='nws')bodies.push(response);await route.fulfill({json:response});});
   try{
     await page.goto('/?view=2d&mapPerf=1&basemap=pmtiles&center=-98,32&zoom=4&time=all&layers=weather-alerts');const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready');await expect(page.locator('.wm-world-event-list-toggle strong')).toHaveText('1');
-    const badge=page.locator('.wm-map-source-status').filter({has:page.locator('b',{hasText:/^NWS$/})});await expect(badge).toHaveClass(/is-ok/);await expect(badge).toContainText('PARTIAL');
+    const badge=page.locator('.wm-map-source-status').filter({has:page.locator('b',{hasText:/^NWS$/})});await expect(badge).toHaveClass(/is-partial/);await expect(badge).toContainText('PARTIAL');
     await page.locator('.wm-world-event-list-toggle').click();await expect(page.locator('.wm-world-event-list-scroll')).toContainText('Controlled NWS');await host.screenshot({path:resolve(root,'nws-core-partial.png')});await page.locator('.wm-world-event-list-close').click();
-    complete=true;await page.evaluate(()=>window.dispatchEvent(new Event('online')));await expect(badge).toContainText('FRESH');await expect(page.locator('.wm-world-event-list-toggle strong')).toHaveText('1');
+    complete=true;await page.evaluate(()=>window.dispatchEvent(new Event('online')));await expect(badge).toHaveClass(/is-ok/);await expect(badge).toContainText('FRESH');await expect(page.locator('.wm-world-event-list-toggle strong')).toHaveText('1');
     const audit=await host.evaluate((el:any)=>el.__polymonitorMapPresentation(true));expect(audit.membership['flood:nws:v3-cap']).toMatch(/^single/);
     const before=bodies[0].events[0],after=bodies.at(-1).events[0];expect(after.id).toBe(before.id);expect(after.updatedAt).toBe(before.updatedAt);expect(after.revision).toEqual(before.revision);
     await host.screenshot({path:resolve(root,'nws-geometry-recovered.png')});writeFileSync(resolve(root,'nws-geometry-cycle.json'),JSON.stringify({bodies,audit,sameRevision:true,sequence:['core ready','optional geometry partial / record accessible','same native ID / footprint recovered']},null,2));
