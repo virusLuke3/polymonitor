@@ -362,6 +362,10 @@ export function WorldEventMap({
         staging.style.visibility = ''; staging.style.pointerEvents = '';
         setRendererKind(kind); callbackRef.current.onRendererKindChange?.(kind);
         renderer.setState(stateRef.current); renderer.setEvents(eventsRef.current);
+        // Manifest updates can arrive while this candidate is still staging.
+        // Effects only target the committed renderer; hydrate the latest frame
+        // at handover just as we do for camera and events.
+        renderer.setRadar?.(radarRef.current.status === 'off' ? null : radarRef.current.frame);
         if (kind === 'svg') scheduleRecovery();
         else {
           if (recoveryTimer != null) window.clearTimeout(recoveryTimer); recoveryTimer = null;

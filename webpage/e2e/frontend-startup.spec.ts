@@ -36,6 +36,36 @@ test('anonymous dashboard uses public health and never polls administrator opera
   expect(privateRequests).toEqual([]);
 });
 
+test('radar arriving during renderer staging is handed to the committed map', async ({ page }) => {
+  await installDashboard(page);
+  let style: Route | undefined;
+  let manifest: Route | undefined;
+  await page.route('https://tiles.openfreemap.org/styles/**', route => { style = route; });
+  await page.route('https://api.rainviewer.com/public/weather-maps.json', route => { manifest = route; });
+  const tileRequests: string[] = [];
+  await page.route('https://tilecache.rainviewer.com/**', route => {
+    tileRequests.push(route.request().url());
+    // A deterministic raster fixture exercises the real MapLibre source and
+    // commit lifecycle; native radar imagery is checked separately online.
+    return route.fulfill({ contentType: 'image/png', body: Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64',
+    ) });
+  });
+  await page.goto(mapURL.replace('layers=earthquakes-volcanoes', 'layers=earthquakes-volcanoes,weather-radar'), { waitUntil: 'domcontentloaded' });
+  await expect.poll(() => Boolean(style && manifest)).toBe(true);
+  await expect(page.locator('.maplibregl-canvas')).toHaveCount(1);
+  await expect(page.locator('[data-map-renderer-ready]')).toHaveCount(0);
+  await manifest!.fulfill({ json: { host: 'https://tilecache.rainviewer.com', radar: { past: [
+    { time: Math.floor(Date.parse(GENERATED_AT) / 1000), path: '/v2/radar/fixture-staging' },
+  ] } } });
+  await expect(page.locator('.wm-map-radar-status')).toContainText('ready / off');
+  await style!.fallback();
+  await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', 'webgl');
+  await expect(page.locator('.wm-map-radar-status')).toContainText('ready / ready');
+  expect(tileRequests.some(url => url.includes('/v2/radar/fixture-staging/'))).toBe(true);
+  expect(tileRequests.some(url => url.includes('/v2/coverage/'))).toBe(true);
+});
+
 test('slow bootstrap and one stalled catalog source do not block map or market selection', async ({ page }) => {
   await installDashboard(page);
   let bootstrap: Route | undefined;
