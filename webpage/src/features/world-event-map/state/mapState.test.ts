@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { worldEventMapReducer } from './mapReducer';
-import { defaultWorldEventMapState } from './mapState';
+import { clampLongitude, defaultWorldEventMapState } from './mapState';
 import { filterWorldEventMapEvents, filterWorldEventMapEventsForLayers } from './selectors';
 import {
   parseWorldEventMapState,
@@ -10,6 +10,26 @@ import {
 import type { GeoEvent, HazardEvent } from '../domain/types';
 
 describe('World Event Map state', () => {
+  it('uses the same dateline endpoint for camera updates, links and saved state', () => {
+    const defaults = defaultWorldEventMapState();
+    for (const longitude of [180,181,540]) {
+      expect(clampLongitude(longitude)).toBe(-180);
+      expect(worldEventMapReducer(defaults, {
+        type:'set-camera', center:{lon:longitude,lat:20}, zoom:0.93,
+      }).center.lon).toBe(-180);
+    }
+    for (const longitude of [-180,-179,0,179,179.9999]) {
+      expect(clampLongitude(longitude)).toBe(longitude);
+    }
+    expect(clampLongitude(-181)).toBe(-180);
+    expect(clampLongitude(NaN)).toBe(0);
+    const link = parseWorldEventMapState('?center=180,20&zoom=0.93');
+    expect(link.center.lon).toBe(-180);
+    const saved = readStoredWorldEventMapState(JSON.stringify({center:{lon:180,lat:20},zoom:0.93}));
+    expect(saved.center.lon).toBe(-180);
+    expect(parseWorldEventMapState(new URL(serializeWorldEventMapUrl(link,'https://example.test')).search).center.lon).toBe(-180);
+  });
+
   it('fits only a missing valid camera, and global overview preserves filters', () => {
     const defaults = { ...defaultWorldEventMapState(), fitWorld: true };
     expect(readStoredWorldEventMapState('{bad', defaults).fitWorld).toBe(true);

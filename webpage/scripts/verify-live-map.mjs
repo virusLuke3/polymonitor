@@ -304,6 +304,23 @@ try {
         assert.deepEqual(record.errors, []);
         assert.deepEqual(record.responses.filter(r => /\/assets\//.test(r.url) && r.status >= 400), []);
       });
+      await check(`${width}: positive dateline link, reload and single-world composition`, async () => {
+        if (width === 1536) await page.setViewportSize({width:2537,height:1286});
+        // Normal production route, real sources and tiles. mapPerf is not
+        // needed for acceptance; both actual Deck projections are checked in
+        // the browser regression and the native frame is retained here.
+        await page.goto(`${base}/?view=2d&center=180,20&zoom=0.93`, {waitUntil:'domcontentloaded',timeout:60_000});
+        await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready',{timeout:60_000});
+        await expect.poll(() => Number(new URL(page.url()).searchParams.get('center')?.split(',')[0])).toBe(-180);
+        await page.waitForTimeout(1500);
+        await screenshot(`dateline-${width===1536?2537:width}`);
+        record.states.push({name:'dateline',url:page.url(),rect:await host.boundingBox()});
+        await page.reload({waitUntil:'domcontentloaded'});
+        await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready',{timeout:60_000});
+        assert.equal(Number(new URL(page.url()).searchParams.get('center')?.split(',')[0]),-180);
+        await screenshot(`dateline-reload-${width===1536?2537:width}`);
+        assert.deepEqual(record.errors,[]);
+      });
     } catch (error) {
       await screenshot(`failure-${width}`).catch(() => {});
       record.failure = error.message;

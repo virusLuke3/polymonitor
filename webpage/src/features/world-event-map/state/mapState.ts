@@ -67,7 +67,11 @@ export function clampWorldEventZoom(value: unknown) {
 export function clampLongitude(value: unknown) {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return 0;
-  return Math.max(-180, Math.min(180, numeric));
+  const longitude = Math.max(-180, Math.min(180, numeric));
+  // MapLibreOverlay normalizes +180 to -180. Use that same endpoint for
+  // the native camera, URL and persistence so a single-world basemap and
+  // both Deck overlays never project onto different world copies.
+  return longitude === 180 ? -180 : longitude;
 }
 
 export function clampLatitude(value: unknown) {

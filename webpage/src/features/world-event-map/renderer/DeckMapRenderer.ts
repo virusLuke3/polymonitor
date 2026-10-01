@@ -7,7 +7,7 @@ import { eventRepresentativePoint, mapLabelFontFamily } from './layerFactories/s
 import type { RadarFrame } from '../data/useWeatherRadar';
 import { coordinatePositions } from '../domain/countryGeometry';
 import { MapLibreOverlay } from '@deck.gl/maplibre';
-import type { Layer, LayersList, PickingInfo } from '@deck.gl/core';
+import type { Deck, Layer, LayersList, PickingInfo } from '@deck.gl/core';
 import { TextLayer } from '@deck.gl/layers';
 import type { FeatureCollection, Geometry, Position } from 'geojson';
 import * as maplibregl from 'maplibre-gl';
@@ -85,7 +85,7 @@ type MapPerformanceHarnessHost = HTMLElement & {
   __polymonitorIsolateLayer?: () => string | undefined;
   __polymonitorLayerFuses?: () => string[];
   __polymonitorMapPresentation?: (members?: boolean) => ReturnType<EventClusterIndex['diagnostics']>;
-  __polymonitorProjectGeoPoint?: (lon: number, lat: number) => { x: number; y: number };
+  __polymonitorProjectGeoPoint?: (lon: number, lat: number, target?: 'static' | 'aviation') => { x: number; y: number };
 };
 
 function geometryPositions(geometry: Geometry | null | undefined): Position[] {
@@ -396,7 +396,15 @@ export class DeckMapRenderer implements MapRenderer {
         if (layer) this.handleDeckLayerError(new Error('Controlled layer error from mapPerf harness'), layer);
         return layer?.id;
       };
-      this.performanceHarnessHost.__polymonitorProjectGeoPoint = (lon, lat) => {
+      this.performanceHarnessHost.__polymonitorProjectGeoPoint = (lon, lat, target) => {
+        if (target) {
+          const overlay = target === 'static' ? this.overlay : this.aviationOverlay;
+          const deck = (overlay as unknown as { _deck?: Deck } | null)?._deck;
+          const viewport = deck?.getViewports().find(view => view.id === 'maplibre');
+          if (!viewport) throw new Error(`${target} overlay viewport is not ready`);
+          const [x, y] = viewport.project([lon, lat]);
+          return { x: x!, y: y! };
+        }
         const point = map.project([lon, lat]);
         return { x: point.x, y: point.y };
       };

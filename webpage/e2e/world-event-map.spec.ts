@@ -46,6 +46,51 @@ function screenshot(page: Page, name: string) {
   return page.screenshot({ path: resolve(ARTIFACT_DIR, name), fullPage: false });
 }
 
+test('basemap and both overlays share a world at the positive dateline endpoint', async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 2537, height: 1286 });
+  await gotoMap(page, 'center=180,20&zoom=0.93&layers=earthquakes-volcanoes,air-routes&air=all');
+  const host = page.locator('[data-map-renderer-ready]');
+  const measurements: unknown[] = [];
+  const aligned = async (step: string) => {
+    await expect(async () => {
+      const rows = await host.evaluate(el => {
+        const project = (el as any).__polymonitorProjectGeoPoint;
+        return [[-122.1,37.4],[-73.78,40.64],[100,35]].map(([lon,lat]) => ({
+          coordinate: [lon,lat], basemap: project(lon,lat),
+          static: project(lon,lat,'static'), aviation: project(lon,lat,'aviation'),
+        }));
+      });
+      for (const row of rows) for (const overlay of [row.static, row.aviation]) {
+        expect(Math.abs(overlay.x-row.basemap.x)).toBeLessThan(0.01);
+        expect(Math.abs(overlay.y-row.basemap.y)).toBeLessThan(0.01);
+      }
+      measurements.push({step, url:page.url(), rows});
+    }).toPass({timeout:15_000});
+  };
+  await aligned('positive endpoint link');
+  await page.reload(); await waitForMapPaint(page); await aligned('link reload');
+  await host.evaluate((el:any) => el.__polymonitorMapCamera([179,20],0.93));
+  await aligned('near endpoint');
+  const box = (await host.boundingBox())!;
+  await page.mouse.move(box.x+box.width/2,box.y+box.height/2);
+  await page.mouse.down();
+  await page.mouse.move(box.x+box.width/2-120,box.y+box.height/2,{steps:12});
+  await page.mouse.up(); await page.waitForTimeout(500);
+  await aligned('drag through positive endpoint');
+  for (const width of [1440,390,2537]) {
+    await page.setViewportSize({width,height:1286});
+    await aligned(`resize ${width}`);
+  }
+  await host.evaluate((el:any) => el.__polymonitorMapCamera([-180,20],0.93));
+  await aligned('negative endpoint');
+  await host.evaluate((el:any) => el.__polymonitorMapCamera([180,20],3));
+  await aligned('regional zoom at endpoint');
+  mkdirSync(ARTIFACT_DIR,{recursive:true});
+  writeFileSync(resolve(ARTIFACT_DIR,'dateline-alignment.json'),JSON.stringify(measurements,null,2));
+  await screenshot(page,'dateline-alignment.png');
+});
+
 async function mapCanvasCenter(page: Page) {
   const canvas = page.locator('.maplibregl-canvas').first();
   const box = await canvas.boundingBox();
