@@ -67,6 +67,7 @@ test('market empty stays empty; global is explicit; text, author, license and fa
   await mount(page);
   await expect(page.getByText('No content meeting this market’s conditions', { exact: false })).toBeVisible();
   expect(requests.every(url => url.includes('/market/1'))).toBeTruthy();
+  await expect(page.locator('.wm-intel-filter-tabs')).toHaveCount(0);
   await page.getByRole('button', { name: 'Global', exact: true }).click();
   await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
   await expect(page.getByText('By Fixture author')).toBeVisible();

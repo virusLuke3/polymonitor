@@ -147,8 +147,19 @@ def collect_one(storage, snapshot_store, source, old, *, probe=False, conditiona
                 else:
                     items = parse_feed(body, source)
                 state["last_success_at"] = stamp
+            state["parsed_count"] = len(items)
             if source["publisher_id"] == "global-voices":
                 # Only approved article hosts, metadata/rights inspection, bounded and cached.
+                from .normalize import identity
+                ids = list(dict.fromkeys(identity(source, item) for item in items))
+                prior_items = {}
+                # A per-article lookup exhausts the remote DB connection's
+                # deadline before an otherwise healthy feed can be ingested.
+                for offset in range(0, len(ids), 400):
+                    batch = ids[offset:offset + 400]
+                    rows = storage.query_all(
+                        "SELECT id,raw_payload FROM content_items WHERE id IN (" + ",".join("?" for _ in batch) + ")", tuple(batch))
+                    prior_items.update({row["id"]: json.loads(row["raw_payload"]) for row in rows})
                 checked = 0
                 for item in items:
                     if not item.get("author") or any(
@@ -156,12 +167,7 @@ def collect_one(storage, snapshot_store, source, old, *, probe=False, conditiona
                         for s in ("dialogue earth", "the conversation", "occrp", "african arguments")
                     ):
                         continue
-                    from .normalize import identity
-
-                    prior = storage.query_one(
-                        "SELECT raw_payload FROM content_items WHERE id=?", (identity(source, item),)
-                    )
-                    prior_item = json.loads(prior["raw_payload"]) if prior else {}
+                    prior_item = prior_items.get(identity(source, item), {})
                     if prior_item.get("article_rights_checked") and all(
                         prior_item.get(key) == item.get(key) for key in ("title", "summary", "published_at")
                     ):
@@ -204,6 +210,8 @@ def collect_one(storage, snapshot_store, source, old, *, probe=False, conditiona
                 next_check_at=(now + timedelta(seconds=interval)).isoformat().replace("+00:00", "Z"),
             )
     except Exception as exc:
+        # Fetching HTTP 200 alone is not a successful content check/ingest.
+        state["last_success_at"] = old.get("last_success_at")
         failures = int(old.get("failure_count", 0)) + 1
         meta = getattr(exc, "meta", {})
         state.update(meta)

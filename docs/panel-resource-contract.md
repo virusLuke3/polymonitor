@@ -79,6 +79,10 @@ The existing content worker still owns the reviewed feeds (3–15 minute source
 schedules) and reuses existing USGS/NWS map snapshots. Public GETs never acquire
 external feeds or substitute global data for a market.
 
+Global Voices rights replay reads prior metadata in batches of up to 400 article
+IDs, preserving per-article rights checks while avoiding a remote DB round trip
+per card and the connection deadline that it can exhaust.
+
 The existing collector executes in a spawned process with fresh service runtime
 and connections. The parent retains the single worker/advisory lock. A 90-second
 cycle budget terminates a blocked child, marks unfinished due sources as failed,

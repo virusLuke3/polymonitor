@@ -53,7 +53,7 @@ function IntelView({ ctx, scope, days, setDays, setGlobal }: {
       <button type="button" title={copy('Auto check every 30 seconds.', '每 30 秒自动检查。')} disabled={feed.status.fetching} onClick={() => void feed.refresh()}>{feed.status.fetching ? copy('Refreshing…', '刷新中…') : feed.error ? copy('Retry', '重试') : copy('Refresh', '刷新')}</button>
     </div>
     {scope === 'market' && <p className="wm-free-intel-market-caption">{(ctx.selectedMarket?.id === ctx.selectedMarketId ? ctx.selectedMarket.title : null) || data?.marketTitle || `Market ${ctx.selectedMarketId}`}</p>}
-    {!unsupported && <div className="wm-intel-filter-tabs" role="group" aria-label={copy('Content types', '内容类型')}>{kinds.map((value) => <button type="button" aria-pressed={kind === value} className={kind === value ? 'active' : ''} onClick={() => setKind(value)} key={value}><span>{labels[value]}</span><b>{filtered(value).length}</b></button>)}</div>}
+    {!unsupported && items.length > 0 && <div className="wm-intel-filter-tabs" role="group" aria-label={copy('Content types', '内容类型')}>{kinds.map((value) => <button type="button" aria-pressed={kind === value} className={kind === value ? 'active' : ''} onClick={() => setKind(value)} key={value}><span>{labels[value]}</span><b>{filtered(value).length}</b></button>)}</div>}
     {feed.loading && <PanelLoading />}
     {feed.pending && <button type="button" className="wm-intel-new" onClick={feed.accept}>{copy('New content available', '有新内容')} · {feed.pendingCount} · {copy('show', '点击查看')}</button>}
     {(feed.error || data?.status === 'unavailable') && <p role="status">{copy('Content service unavailable.', '资讯服务暂不可用。')} {!!items.length && copy('Showing previously verified content.', '显示此前已核验的内容。')}</p>}

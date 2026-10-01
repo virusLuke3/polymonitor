@@ -660,3 +660,24 @@ def test_stale_shared_snapshot_retries_next_cycle_without_bypassing_external_fee
     assert [s['source_id'] for s in collector.due_sources(states, stamp=stamp)] == ['nws']
     states['nws']['status'] = 'rate_limited'
     assert collector.due_sources(states, force=True, selected={'nws'}, stamp=stamp) == []
+
+
+def test_article_rights_replay_uses_one_batch_read_instead_of_per_article_round_trips(storage):
+    source = source_map()['global-voices']
+    items = [article(source, url=f'https://globalvoices.org/2026/10/01/fixture-{i}/',
+                     author='Alice', article_rights_checked=True) for i in range(20)]
+    store.persist(storage, source, items, '2026-10-01T00:00:00Z')
+    fresh = [{k:v for k,v in item.items() if k != 'article_rights_checked'} for item in items]
+    with patch.object(storage, 'query_all', wraps=storage.query_all) as read, patch.object(collector, 'parse_feed', return_value=fresh), patch.object(collector, 'fetch', return_value=(b'fixture', {'http_status':200,'final_url':source['feed_url']})) as fetch:
+        state = collector.collect_one(storage, None, source, {})
+    assert read.call_count == 1 and len(read.call_args.args[1]) == 20
+    assert fetch.call_count == 1  # unchanged verified rights need no article requests
+    assert state['status'] == 'ok' and state['duplicate'] == 20 and state['public'] == 20
+
+
+def test_failed_ingest_keeps_last_success_and_actual_parsed_denominator(storage, source):
+    old = {'status':'ok', 'last_success_at':'2026-09-30T00:00:00Z'}
+    with patch.object(collector,'fetch',return_value=(b'fixture',{'http_status':200,'final_url':source['feed_url']})), patch.object(collector,'parse_feed',return_value=[article(source)]), patch.object(collector,'persist',side_effect=TimeoutError('fixture DB deadline')):
+        state = collector.collect_one(storage,None,source,old)
+    assert state['status'] == 'error' and state['last_success_at'] == old['last_success_at']
+    assert state['parsed_count'] == 1
