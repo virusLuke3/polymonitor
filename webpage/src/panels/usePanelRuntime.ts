@@ -23,6 +23,8 @@ const EMPTY_STATUS: PanelRuntimeStatus = {
   phase: 'idle',
   updatedAt: null,
   lastAttemptAt: null,
+  checkedAt: null,
+  fetching: false,
   failureCount: 0,
   error: null,
 };
@@ -168,7 +170,7 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
       const isCurrent = (id: string) => mounted.current && !controller.signal.aborted && controllers.current.get(id) === controller;
       updateStatuses(panelIds, (current, id) => ({ ...current,
         phase: dataRef.current[id] === undefined ? 'loading' : current.phase,
-        lastAttemptAt: now, error: null,
+        lastAttemptAt: now, fetching: true, error: null,
       }));
       const request = fetchPanelRuntimeData(eligible, {
         signal: controller.signal, reason: options.reason || 'refresh',
@@ -186,7 +188,7 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
           const retry = retries.current.get(id);
           if (retry != null) { window.clearTimeout(retry); retries.current.delete(id); }
           setRuntimeData(merged);
-          updateStatuses([id], () => ({ phase, updatedAt, lastAttemptAt: now, failureCount: 0, error: null,
+          updateStatuses([id], () => ({ phase, updatedAt, lastAttemptAt: now, checkedAt: Date.now(), fetching: false, failureCount: 0, error: null,
             cacheMode: metadata?.cache?.mode || null, freshness: metadata?.freshness?.state || null,
             ageSeconds: metadata?.freshness?.ageSeconds ?? null,
           }));
@@ -195,7 +197,7 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
           if (!isCurrent(id)) return;
           updateStatuses([id], (current) => ({ ...current,
             phase: dataRef.current[id] === undefined ? 'error' : 'degraded', lastAttemptAt: now,
-            failureCount: current.failureCount + 1, error: errorMessage(error),
+            fetching: false, failureCount: current.failureCount + 1, error: errorMessage(error),
           }));
         },
       }).then(({ data }) => controller.signal.aborted ? {} : data).finally(() => {
@@ -233,7 +235,7 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
     });
     updateStatuses(stopped, (current, id) => ({ ...current,
       phase: dataRef.current[id] === undefined ? (runtimeSuspended ? 'suspended' : 'idle') : current.phase,
-      lastAttemptAt: null,
+      lastAttemptAt: null, fetching: false,
     }));
     retries.current.forEach((timer, id) => {
       if (runtimeSuspended || !demandRef.current.has(id)) { window.clearTimeout(timer); retries.current.delete(id); }

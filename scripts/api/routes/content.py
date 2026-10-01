@@ -6,7 +6,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from flask import Blueprint, jsonify, request
+import logging
 from api.services.free_content.public import filter_payload
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -52,7 +54,20 @@ def _runtime_content_fallback(
     # A public read must never trigger external acquisition or substitute global data.
     return {"items": [], "count": 0, "scope": "market" if market_id is not None else "global",
             "marketId": market_id, "market_id": market_id, "sourceMode": "database:free-public",
-            "status": "unavailable", "empty_reason": "source_or_database_unavailable", "degraded": True}
+            "status": "unavailable", "empty_reason": "source_or_database_unavailable", "degraded": True,
+            "window": {"days": 30 if request.args.get("days") == "30" else 7}}
+
+
+def _content_response(payload):
+    result = filter_payload(payload)
+    unavailable = result.get("status") == "unavailable" and not result.get("items")
+    response = jsonify(result)
+    response.status_code = 503 if unavailable else 200
+    # Never let a browser/CDN pin a transient failure or hide the next seed refresh.
+    response.headers["Cache-Control"] = "no-store"
+    if unavailable:
+        response.headers["Retry-After"] = "30"
+    return response
 
 
 def create_content_blueprint(dependencies: ContentRouteDependencies) -> Blueprint:
@@ -74,9 +89,10 @@ def create_content_blueprint(dependencies: ContentRouteDependencies) -> Blueprin
                 "marketSlug": market.get("slug"),
                 "marketCategory": market.get("category"),
             }
-            return jsonify(filter_payload(payload))
-        except Exception:
-            return jsonify(
+            return _content_response(payload)
+        except Exception as exc:
+            logger.warning("Market content read failed: %s", type(exc).__name__)
+            return _content_response(
                 _runtime_content_fallback(
                     limit,
                     dependencies=dependencies,
@@ -89,8 +105,9 @@ def create_content_blueprint(dependencies: ContentRouteDependencies) -> Blueprin
         limit = min(20, max(1, int(request.args.get("limit", 8))))
         try:
             payload = dependencies.get_latest_content_payload(limit=limit, days=30 if request.args.get("days")=="30" else 7)
-        except Exception:
+        except Exception as exc:
+            logger.warning("Global content read failed: %s", type(exc).__name__)
             payload = _runtime_content_fallback(limit, dependencies=dependencies)
-        return jsonify(filter_payload(payload))
+        return _content_response(payload)
 
     return bp

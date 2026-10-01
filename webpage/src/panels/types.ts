@@ -44,6 +44,9 @@ export type PanelRuntimeStatus = {
   phase: PanelRuntimePhase;
   updatedAt: number | null;
   lastAttemptAt: number | null;
+  /** Successful HTTP/validation completion, distinct from the source timestamp. */
+  checkedAt?: number | null;
+  fetching?: boolean;
   failureCount: number;
   error: string | null;
   cacheMode?: string | null;

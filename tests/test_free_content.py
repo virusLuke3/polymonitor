@@ -250,8 +250,28 @@ def test_public_routes_cannot_bypass_legacy_permissions_or_trigger_acquisition()
     )
     client = app.test_client()
     assert client.get("/content/latest").json["items"] == []
-    result = client.get("/content/market/7").json
+    response = client.get("/content/market/7?days=30")
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] == "30" and response.headers["Cache-Control"] == "no-store"
+    result = response.json
     assert result["items"] == [] and result["marketId"] == 7 and result["scope"] == "market"
+    assert result["window"]["days"] == 30
+
+
+def test_global_outage_is_retryable_and_healthy_empty_is_not_an_error():
+    from flask import Flask
+    from api.routes.content import create_content_blueprint, ContentRouteDependencies
+    data = {"scope": "global", "marketId": None, "items": [], "status": "unavailable"}
+    app = Flask(__name__)
+    app.register_blueprint(create_content_blueprint(ContentRouteDependencies(
+        get_market_by_id=lambda _: None, get_related_content_payload=lambda **_: None,
+        get_latest_content_payload=lambda **_: data, get_runtime_content_latest=lambda **_: pytest.fail("Unexpected collector"))))
+    client = app.test_client()
+    assert client.get("/content/latest").status_code == 503
+    data["status"] = "ready"
+    response = client.get("/content/latest")
+    assert response.status_code == 200 and response.json["items"] == []
+    assert response.headers["Cache-Control"] == "no-store"
 
 
 def test_public_read_uses_one_database_query_and_reuses_route_market(storage, source):
@@ -458,3 +478,48 @@ def test_optional_redis_hit_and_failure_fall_back_to_sqlite(storage, tmp_path):
         raise ConnectionError("Fixture optional cache unavailable")
     cache["get_json"] = failed
     assert read_payload(storage, cache, now=now)["cacheMode"] == "sqlite"
+
+
+def test_optional_cache_writes_do_not_discard_successful_query_and_worker_requires_persistence(storage):
+    from api.services.free_content.snapshots import refresh_candidates
+    now = datetime(2026, 10, 1, 1, tzinfo=timezone.utc)
+    def failed(*_):
+        raise OSError("Fixture cache unavailable")
+    cache = {"store": SimpleNamespace(set=failed), "set_json": failed}
+    assert refresh_candidates(storage, cache, now=now)["records"] == []
+    with pytest.raises(RuntimeError, match="could not be persisted"):
+        refresh_candidates(storage, cache, now=now, require_cache=True)
+    redis = {}
+    def write(*args):
+        redis["snapshot"] = args[2]  # Existing setter returns None.
+    cache.update(set_json=write, get_json=lambda *_: redis.get("snapshot"))
+    assert refresh_candidates(storage, cache, now=now, require_cache=True) == redis["snapshot"]
+
+
+def test_cache_lock_failure_can_use_database_but_lock_contention_cannot_duplicate_queries(storage):
+    from api.services.free_content.snapshots import read_payload
+    from contextlib import contextmanager
+    now = datetime(2026, 10, 1, 1, tzinfo=timezone.utc)
+    @contextmanager
+    def unavailable(*_, **kwargs):
+        assert kwargs["timeout"] == 1
+        raise PermissionError("Fixture cache filesystem unavailable")
+        yield
+    cache = {"store": SimpleNamespace(get_stale=lambda *_: None, fetch_lock=unavailable, set=lambda *_: False)}
+    assert read_payload(storage, cache, now=now)["cacheMode"] == "database"
+    @contextmanager
+    def busy(*_, **kwargs):
+        raise TimeoutError("Fixture another process owns cold query")
+        yield
+    cache["store"].fetch_lock = busy
+    storage.query_all = lambda *_: pytest.fail("Contended read duplicated the cold query")
+    with pytest.raises(TimeoutError):
+        read_payload(storage, cache, now=now)
+
+
+def test_future_seed_cannot_extend_public_cache_lifetime(storage):
+    from api.services.free_content.snapshots import read_payload
+    now = datetime(2026, 10, 1, 1, tzinfo=timezone.utc)
+    future = {"schemaVersion": 1, "records": [], "generatedAt": "2026-10-02T01:00:00Z"}
+    result = read_payload(storage, {"get_json": lambda *_: future}, now=now)
+    assert result["cacheMode"] == "database" and result["generatedAt"] != future["generatedAt"]

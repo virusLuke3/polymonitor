@@ -6,14 +6,16 @@ indexed local query. Cached raw records never bypass current public-display poli
 """
 from __future__ import annotations
 
-from contextlib import nullcontext
+from contextlib import ExitStack
 from datetime import datetime, timezone
+import logging
 from .public import payload, read_records
 
 NAMESPACE = "snapshot:content:free-public"
 CACHE_KEY = "candidates-v1"
 TTL_SECONDS = 90
 MAX_STALE_SECONDS = 300
+logger = logging.getLogger(__name__)
 
 
 def _age(snapshot, now):
@@ -23,7 +25,8 @@ def _age(snapshot, now):
                and isinstance(row.get("payload"), str) for row in snapshot["records"]):
         return float("inf")
     try:
-        return max(0, (now - datetime.fromisoformat(snapshot["generatedAt"].replace("Z", "+00:00"))).total_seconds())
+        age = (now - datetime.fromisoformat(snapshot["generatedAt"].replace("Z", "+00:00"))).total_seconds()
+        return max(0, age) if age >= -60 else float("inf")
     except (KeyError, TypeError, ValueError):
         return float("inf")
 
@@ -48,20 +51,31 @@ def _cached(cache, now):
     return None, None
 
 
-def refresh_candidates(storage, cache, *, now=None):
+def refresh_candidates(storage, cache, *, now=None, require_cache=False):
     """Write only after a successful query; a failed refresh retains the previous seed."""
     now = now or datetime.now(timezone.utc)
     snapshot = {"schemaVersion": 1, "generatedAt": now.isoformat().replace("+00:00", "Z"),
                 "records": read_records(storage, days=30, now=now)}
     store = cache.get("store")
+    persisted = False
     if store:
-        store.set(NAMESPACE, CACHE_KEY, snapshot, TTL_SECONDS)
+        try:
+            persisted = bool(store.set(NAMESPACE, CACHE_KEY, snapshot, TTL_SECONDS))
+        except Exception as exc:
+            logger.warning("Content SQLite cache write failed: %s", type(exc).__name__)
     set_json = cache.get("set_json")
     if set_json:
         try:
-            set_json(NAMESPACE, CACHE_KEY, snapshot, TTL_SECONDS)
-        except Exception:
-            pass
+            written = set_json(NAMESPACE, CACHE_KEY, snapshot, TTL_SECONDS)
+            persisted = bool(written) or persisted
+            # The existing Redis setter returns None and tolerates write failures.
+            if not persisted and cache.get("get_json"):
+                verified = cache["get_json"](NAMESPACE, CACHE_KEY)
+                persisted = _age(verified, now) < TTL_SECONDS and verified.get("generatedAt") == snapshot["generatedAt"]
+        except Exception as exc:
+            logger.warning("Content Redis cache write failed: %s", type(exc).__name__)
+    if require_cache and not persisted:
+        raise RuntimeError("Content candidate seed could not be persisted")
     return snapshot
 
 
@@ -72,7 +86,14 @@ def read_payload(storage, cache=None, *, market=None, market_id=None, limit=20, 
     if snapshot is None:
         store = cache.get("store")
         # Recheck under the existing cross-process lock to prevent cold-query bursts.
-        with store.fetch_lock(NAMESPACE, CACHE_KEY) if store else nullcontext():
+        with ExitStack() as stack:
+            if store:
+                try:
+                    stack.enter_context(store.fetch_lock(NAMESPACE, CACHE_KEY, timeout=1))
+                except TimeoutError:
+                    raise  # Bound cold requests instead of starting duplicate database queries.
+                except OSError as exc:
+                    logger.warning("Content cache lock unavailable: %s", type(exc).__name__)
             snapshot, mode = _cached(cache, now)
             if snapshot is None:
                 snapshot = refresh_candidates(storage, cache, now=now)

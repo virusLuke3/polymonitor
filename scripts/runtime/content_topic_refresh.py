@@ -74,7 +74,7 @@ def main():
                     prior = meta_store.load("seed-meta:content", "related-news") or {}
                     attempted = utc_now_iso()
                     try:
-                        seed = refresh_candidates(storage, runtime.query_context["free_content_cache"])
+                        seed = refresh_candidates(storage, runtime.query_context["free_content_cache"], require_cache=True)
                         meta = build_seed_meta_payload(panel_id="related-news", namespace="seed-meta:content",
                             cache_key="related-news", service_name="polydata-content-topic-refresh.service",
                             expected_interval_seconds=max(30, min(60, args.interval)), status="ready",

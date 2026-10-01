@@ -199,3 +199,71 @@ test('explicit global scope survives market updates and market scope uses the cu
   await expect(page.getByText('Market 2', { exact: true })).toBeVisible();
   expect(requests.at(-1)).toContain('/market/2');
 });
+
+test('legacy empty outage retries automatically and check time advances even with an unchanged seed', async ({ page }) => {
+  await installDashboard(page);
+  await page.clock.install();
+  const generatedAt = await page.evaluate(() => new Date().toISOString());
+  let attempts = 0;
+  await page.route('**/wm-api/content/**', route => route.fulfill({ json: ++attempts === 1
+    ? { ...payload(1), status: 'unavailable' }
+    : { ...payload(1, ['recovered']), generatedAt } }));
+  await mount(page);
+  await expect(page.getByText('Content service unavailable.', { exact: false })).toBeVisible();
+  await page.clock.runFor(1_100);
+  await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
+  const checked = await page.locator('[data-intel-checked-at]').getAttribute('datetime');
+  await page.clock.runFor(30_100);
+  await expect.poll(() => page.locator('[data-intel-checked-at]').getAttribute('datetime')).not.toBe(checked);
+  await expect(page.locator('[data-intel-updated-at]')).toHaveAttribute('datetime', generatedAt);
+  await expect(page.getByText('Content service unavailable.', { exact: false })).toHaveCount(0);
+  expect(attempts).toBeGreaterThanOrEqual(3);
+});
+
+test('reopened panel shows a saved snapshot during an outage and stops showing it at its age limit', async ({ page }) => {
+  await installDashboard(page);
+  await page.clock.install();
+  const generatedAt = await page.evaluate(() => new Date().toISOString());
+  let fail = false;
+  await page.route('**/wm-api/content/**', route => fail
+    ? route.fulfill({ status: 503, json: { error: 'Fixture unavailable' } })
+    : route.fulfill({ json: { ...payload(1, ['saved']), generatedAt } }));
+  await mount(page);
+  await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
+  fail = true;
+  await mount(page);
+  await expect(page.getByText('Showing a saved snapshot', { exact: false })).toBeVisible();
+  await expect(page.getByText('Content service unavailable.', { exact: false })).toBeVisible();
+  await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
+  await page.clock.fastForward(300_001);
+  await expect(page.locator('.wm-free-intel-card')).toHaveCount(0);
+  await expect(page.getByText('Content service unavailable.', { exact: false })).toBeVisible();
+  await expect(page.getByText('No content meeting this market', { exact: false })).toHaveCount(0);
+});
+
+test('page hiding pauses checks and returning resumes without losing readable content', async ({ page }) => {
+  await installDashboard(page);
+  await page.clock.install();
+  let attempts = 0;
+  await page.route('**/wm-api/content/**', route => {
+    attempts++;
+    return route.fulfill({ json: payload(1, ['visible']) });
+  });
+  await mount(page);
+  await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
+  const before = attempts;
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await expect(page.getByText('Auto refresh paused', { exact: false })).toBeVisible();
+  await page.clock.runFor(31_100);
+  expect(attempts).toBe(before);
+  await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await expect.poll(() => attempts).toBeGreaterThan(before);
+  await expect(page.getByText('Auto check every 30 seconds.', { exact: false })).toBeVisible();
+});

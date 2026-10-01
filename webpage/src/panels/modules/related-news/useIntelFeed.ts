@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import { fetchLatestContent, fetchMarketContent } from '@/services/api';
-import { usePanelRuntime } from '@/panels/usePanelRuntime';
-import type { PanelModule } from '@/panels/types';
+import { usePanelResource, type PanelResource } from '@/panels/usePanelResource';
 import {
   activePayload, intelSnapshot, INTEL_REFRESH_MS, INTEL_STALE_MS, parseIntelPayload,
   reconcileReader, resourceId, type IntelPayload, type IntelSnapshot,
@@ -12,28 +11,31 @@ export { fingerprint, validScope } from './model';
 /** Parameterized content uses the existing Runtime with a dedicated endpoint and resource key. */
 export function useIntelFeed(marketId: number | null, scope: 'market' | 'global', days: number) {
   const key = resourceId({ marketId, scope, days });
-  const panels = useMemo<PanelModule[]>(() => [{
-    id: key, title: 'Related Intelligence', eyebrow: 'intel', description: 'Public content resource', batch: false,
+  const contract = useMemo<PanelResource<IntelSnapshot>>(() => ({
+    key, title: 'Related Intelligence', maxAgeMs: 5 * 60_000, cache: { version: 1 },
     refreshPolicy: { tier: 'fast', intervalMs: INTEL_REFRESH_MS, staleAfterMs: INTEL_STALE_MS },
-    fetchData: async (context) => {
-      const value = scope === 'market'
+    fetch: async context => scope === 'market'
         ? await fetchMarketContent(marketId!, 20, 8000, context?.signal, days)
-        : await fetchLatestContent(20, context?.signal, days);
-      return intelSnapshot(parseIntelPayload(value, { marketId, scope, days }));
+        : await fetchLatestContent(20, context?.signal, days),
+    parse: value => {
+      const content = parseIntelPayload(value, { marketId, scope, days });
+      // Legacy HTTP 200 failures must enter the same bounded retry path as HTTP 503.
+      if (content.status === 'unavailable' && !content.items.length) throw new Error('Content service unavailable');
+      return intelSnapshot(content);
     },
-  }], [key, marketId, scope, days]);
-  const activePanelIds = scope === 'market' && marketId == null ? [] : [key];
-  const runtime = usePanelRuntime({ panels, activePanelIds });
-  const latest = (runtime.getData(key) as IntelSnapshot | undefined)?.content;
-  const status = runtime.getStatus(key);
+    updatedAt: value => value.generatedAt ? Date.parse(value.generatedAt) : null,
+  }), [key, marketId, scope, days]);
+  const resource = usePanelResource(contract);
+  const latest = resource.data?.content;
+  const status = resource.status;
   const [reader, setReader] = useState<{ key: string; data: IntelPayload | null; pending: IntelPayload | null }>({ key, data: null, pending: null });
   const [, expire] = useState(0);
   useEffect(() => {
-    if (latest) setReader(old => reconcileReader(old, key, latest));
+    setReader(old => latest ? reconcileReader(old, key, latest) : { key, data: null, pending: null });
   }, [key, latest]);
   const current = reader.key === key ? reader : { key, data: null, pending: null };
-  const data = current.data ? activePayload(current.data) : null;
-  const pending = current.pending ? activePayload(current.pending) : null;
+  const data = latest && current.data ? activePayload(current.data) : null;
+  const pending = latest && current.pending ? activePayload(current.pending) : null;
   useEffect(() => {
     const times = [...(current.data?.items || []), ...(current.pending?.items || [])]
       .map(item => Date.parse(item.expires_at || '')).filter(time => Number.isFinite(time) && time > Date.now());
@@ -44,9 +46,9 @@ export function useIntelFeed(marketId: number | null, scope: 'market' | 'global'
   const hasNew = pending?.items.some(item => !data?.items.some(old => String(old.id) === String(item.id)));
   return {
     key, data, pending: hasNew ? pending : null, status,
-    error: status.error, loading: !data && !status.error,
+    error: resource.error, loading: resource.loading, fromCache: resource.fromCache, suspended: resource.suspended,
     stale: Boolean(data?.stale || ['stale', 'degraded', 'error'].includes(status.phase)),
-    refresh: () => runtime.refreshIds([key], { reason: 'manual', force: true }),
+    refresh: resource.refresh,
     accept: () => setReader(old => old.key === key && old.pending ? { ...old, data: activePayload(old.pending), pending: null } : old),
   };
 }
