@@ -313,7 +313,7 @@ function evidenceClaims(bundle: WorkspaceBundle): MarketEvidenceClaim[] {
   claims.push({
     id: 'content',
     label: 'Linked intelligence',
-    status: contentItems.length ? 'ok' : 'missing',
+    status: bundle.content?.status === 'unavailable' ? 'unavailable' : contentItems.length ? 'ok' : 'missing',
     source: bundle.content?.sourceMode || 'content-index',
     observedAt: latestContent,
     recordCount: contentItems.length,
@@ -558,8 +558,9 @@ function ContentCard({ item }: { item: ContentItem }) {
   return <article className="market-content-item">{body}{(item.licenseUrl || item.policyUrl) && <a href={item.licenseUrl || item.policyUrl} target="_blank" rel="noopener noreferrer">{item.licenseUrl ? 'CC BY 3.0' : zh ? '来源使用政策' : 'Source use policy'}</a>}</article>;
 }
 
-function LinkedIntelligence({ items, days, onDaysChange }: { items: ContentItem[]; days: number; onDaysChange: (days: number) => void }) {
-  const { t } = useI18n();
+function LinkedIntelligence({ items, days, unavailable, onDaysChange }: { items: ContentItem[]; days: number; unavailable: boolean; onDaysChange: (days: number) => void }) {
+  const { t, locale } = useI18n();
+  const zh = locale.startsWith('zh');
   return (
     <section className="market-card market-content-card">
       <div className="market-section-heading">
@@ -577,8 +578,8 @@ function LinkedIntelligence({ items, days, onDaysChange }: { items: ContentItem[
       </div>
       {!items.length ? (
         <div className="market-empty-state is-compact">
-          <strong>{t('market.noLinkedReporting')}</strong>
-          <span>{t('market.noLinkedReportingDetail')}</span>
+          <strong>{unavailable ? zh ? '资讯服务暂不可用。' : 'Content service unavailable.' : t('market.noLinkedReporting')}</strong>
+          <span>{unavailable ? zh ? '无法读取此市场的资讯，请重试。' : 'Market content could not be loaded. Please retry.' : zh ? '当前免费来源中，暂未找到符合本市场条件的内容。' : 'No content meeting this market’s conditions was found in the current free sources.'}</span>
         </div>
       ) : null}
     </section>
@@ -840,7 +841,7 @@ export function MarketWorkspace() {
 
             <div className="market-secondary-grid">
               <OracleTimeline events={bundle.oracle?.timeline || []} bundle={bundle} />
-              <LinkedIntelligence items={bundle.content?.items || []} days={contentDays} onDaysChange={setContentDays} />
+              <LinkedIntelligence items={bundle.content?.items || []} unavailable={bundle.content?.status === 'unavailable'} days={contentDays} onDaysChange={setContentDays} />
             </div>
           </>
         ) : (

@@ -644,7 +644,13 @@ export function fetchMarketChart(
 }
 
 export function fetchMarketContent(marketId: number, limit = 20, timeoutMs = 5000, signal?: AbortSignal, days = 7) {
-  return apiGetWithTimeout<ContentPayload>(`/content/market/${marketId}?limit=${limit}&days=${days}`, timeoutMs, signal);
+  return apiGetWithTimeout<ContentPayload>(`/content/market/${marketId}?limit=${limit}&days=${days}`, timeoutMs, signal)
+    .then((payload) => {
+      if (payload.marketId !== marketId || (payload.scope && payload.scope !== 'market')) {
+        throw new Error('Content response scope or market identity mismatch');
+      }
+      return payload;
+    });
 }
 
 function fetchMarketLob(marketId: number, timeoutMs = 4000, signal?: AbortSignal) {
@@ -761,7 +767,10 @@ export async function fetchWorkspaceBundle(
       chart: null,
       trades: [],
       oracle: null,
-      content: contentResult.status === 'fulfilled' ? contentResult.value : null,
+      content: contentResult.status === 'fulfilled' ? contentResult.value : {
+        scope: 'market', marketId, items: [], count: 0, status: 'unavailable',
+        empty_reason: 'content_request_failed', sourceMode: 'database:free-public',
+      },
       lob: includeLob && lobResult.status === 'fulfilled' ? lobResult.value : null,
       servingSource: null,
       servingUpdatedAt: null,

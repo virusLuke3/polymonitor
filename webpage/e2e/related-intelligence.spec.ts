@@ -84,3 +84,19 @@ test('dossier uses the same content API and explicitly requests history with vis
   await expect(page.locator('.market-content-card').getByRole('link', { name: 'CC BY 3.0' })).toBeVisible();
   expect(requests.some(url => url.includes('/market/1') && url.includes('days=30'))).toBeTruthy();
 });
+
+test('dossier distinguishes request failure and rejects a different market response', async ({ page }) => {
+  await installDashboard(page);
+  let wrongMarket = false;
+  await page.route('**/wm-api/content/**', route => wrongMarket
+    ? route.fulfill({ json: payload(2, ['wrong-market']) })
+    : route.fulfill({ status: 503, json: { error: 'Fixture unavailable' } }));
+  await page.goto('/markets/1');
+  const card = page.locator('.market-content-card');
+  await expect(card.getByText('Content service unavailable.', { exact: true })).toBeVisible();
+  await expect(card.getByText('No linked reporting', { exact: true })).toHaveCount(0);
+  wrongMarket = true;
+  await page.getByLabel('Dossier content time range').selectOption('30');
+  await expect(card.getByText('Content service unavailable.', { exact: true })).toBeVisible();
+  await expect(card.getByText('Fixture wrong-market', { exact: false })).toHaveCount(0);
+});
