@@ -356,7 +356,7 @@ test('mobile aviation keeps the map controls and event list unobstructed', async
     if (width === 320) await page.getByRole('combobox', { name: 'Language', exact: true }).selectOption('zh');
     await page.evaluate(() => document.fonts.ready);
     const stage = (await page.locator('.wm-map-stage').boundingBox())!;
-    const rectangles = await page.locator('.wm-map-context-controls > button, .wm-map-radar-status summary, .wm-map-controls button, .wm-world-event-list-toggle, .wm-layer-sidebar.is-collapsed, .wm-world-event-attribution').evaluateAll(elements => elements.map(e => ({ text: e.textContent, ...e.getBoundingClientRect().toJSON() })));
+    const rectangles = await page.locator('.wm-map-context-controls > button, .wm-map-radar-status summary, .wm-map-controls button, .wm-world-event-list-toggle, .wm-layer-sidebar.is-collapsed, .wm-world-event-attribution, .wm-weather-deck-status:not([hidden])').evaluateAll(elements => elements.map(e => ({ text: e.textContent, ...e.getBoundingClientRect().toJSON() })));
     for (const control of rectangles) {
       expect(control.top, control.text || 'control').toBeGreaterThanOrEqual(stage.y);
       expect(control.bottom, control.text || 'control').toBeLessThanOrEqual(stage.y + stage.height + 1);
