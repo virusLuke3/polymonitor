@@ -70,6 +70,8 @@ function sourceSignature(parsed: ParsedNaturalHazards) {
     source?.status,
     source?.dataUpdatedAt,
     source?.fetchedAt,
+    source?.lastSuccessAt,
+    source?.staleAfter,
     source?.errorCode,
     parsed.events,
   ]);
@@ -213,7 +215,11 @@ export function useNaturalHazards({ sourceKeys, zoom, center, suspended }: {
         const deadline=hazardSnapshotExpiresAt(source,record.parsed.response);
         if(deadline!=null && Date.now()>deadline) {
           records.current.delete(source);errors.current.set(source,'Last source snapshot exceeds its retention budget');
-        }else if(deadline!=null)nextExpiry=Math.min(nextExpiry,deadline);
+        }else {
+          if(deadline!=null)nextExpiry=Math.min(nextExpiry,deadline);
+          const freshUntil = Date.parse(record.parsed.response.sources[0]?.staleAfter || '');
+          if(Number.isFinite(freshUntil) && freshUntil>Date.now())nextExpiry=Math.min(nextExpiry,freshUntil);
+        }
       }
       if(Number.isFinite(nextExpiry))expiryTimer.current=window.setTimeout(()=>{expiryTimer.current=null;publish();},Math.max(1,nextExpiry-Date.now()+1));
       const active = new Map(demand.current.flatMap((source) => {

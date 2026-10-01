@@ -1,7 +1,7 @@
 import { installLocalAssets } from './fixtures/browser';
 import { expect, test, type Page } from '@playwright/test';
 import { fixtureBundle } from './fixtures/dashboard';
-import { GENERATED_AT, installFixtures } from './fixtures/world-event-map';
+import { GENERATED_AT, installFixtures, mapResponse } from './fixtures/world-event-map';
 import type {} from './fixtures/lifecycle';
 
 async function harness(page: Page, kind: Parameters<Window['frontendHarness']['mount']>[0], query = '') {
@@ -359,6 +359,33 @@ async function hidden(page: Page, value: boolean) {
 const hazardCalls = (page: Page) => page.evaluate(() => (window as any).fetchCalls
   .filter((call: any) => call.url.includes('/natural-hazards/map'))
   .map((call: any) => ({ source: new URL(call.url, location.origin).searchParams.get('source'), aborted: call.signal?.aborted })));
+
+test('HTTP source freshness expires independently of refresh and recovers without changing successful timestamps', async ({ page }) => {
+  await installFixtures(page);
+  let calls = 0;
+  await page.route('**/wm-api/runtime/world/natural-hazards/map?**', route => {
+    if (new URL(route.request().url()).searchParams.get('source') !== 'usgs') return route.fallback();
+    calls++;
+    const payload = mapResponse('usgs', []);
+    payload.sources[0]!.staleAfter = new Date(Date.parse(GENERATED_AT) + (calls === 1 ? 4000 : 125000)).toISOString() as any;
+    payload.sources[0]!.lastSuccessAt = calls === 1 ? GENERATED_AT : new Date(Date.parse(GENERATED_AT) + 65000).toISOString();
+    payload.sources[0]!.fetchedAt = payload.sources[0]!.lastSuccessAt!;
+    return route.fulfill({ json: payload });
+  });
+  await harness(page, 'hazards');
+  const source = () => page.evaluate(() => window.frontendHarness.hazards!.sources.find(item => item.key === 'usgs'));
+  await expect.poll(async () => (await source())?.phase).toBe('empty');
+  await page.clock.runFor(5000);
+  await expect.poll(async () => (await source())?.phase).toBe('stale');
+  expect(calls).toBe(1);
+  expect(await page.evaluate(() => window.frontendHarness.hazards!.response!.sources.find(item => item.key === 'usgs')!.lastSuccessAt)).toBe(GENERATED_AT);
+  await page.clock.runFor(60000);
+  await expect.poll(() => calls).toBe(2);
+  await page.clock.runFor(100);
+  await expect.poll(async () => (await source())?.phase).toBe('empty');
+  expect(calls).toBe(2);
+  await page.evaluate(() => window.frontendHarness.unmount());
+});
 
 test('hazard layers share source demand and only FIRMS restarts for a viewport change', async ({ page }) => {
   await trackRequests(page);

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { HazardMapResponse } from '../domain/types';
 import {
   sourceStatusFromAdapter,
@@ -7,6 +7,19 @@ import {
 } from './sourceStatus';
 
 describe('map source status', () => {
+  it('never turns an expired HTTP success body into a fresh source or rewrites its timestamps', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-01T06:42:00Z'));
+    try {
+      const response = { events: [], sources: [{ key: 'nws', status: 'ok',
+        coverage: { label: 'NWS', gaps: [] }, fetchedAt: '2026-10-01T06:40:00Z',
+        lastSuccessAt: '2026-10-01T06:40:00Z', staleAfter: '2026-10-01T06:41:00Z' }],
+      } as unknown as HazardMapResponse;
+      expect(sourceStatusesFromHazardResponse(response)[0]).toMatchObject({ status: 'degraded', phase: 'stale', eventCount: 0 });
+      expect(sourceStatusesFromHazardResponse(response)[0]?.message).toContain('freshness deadline has passed');
+      expect(response.sources[0]?.lastSuccessAt).toBe('2026-10-01T06:40:00Z');
+    } finally { vi.useRealTimers(); }
+  });
   it('keeps loading distinct from an empty successful source', () => {
     const loading = sourceStatusFromAdapter({
       key: 'fixture',
