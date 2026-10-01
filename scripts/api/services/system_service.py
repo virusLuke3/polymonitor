@@ -27,6 +27,7 @@ class SystemHealthDependencies:
     get_cached_json: Callable[..., Any] | None
     set_cached_json: Callable[..., Any] | None
     get_lob_runtime_status: Callable[..., Any] | None
+    snapshot_store: Any | None = None
 
     @classmethod
     def from_context(cls, context: Mapping[str, Any]) -> SystemHealthDependencies:
@@ -52,6 +53,7 @@ class SystemHealthDependencies:
                 context,
                 "get_lob_runtime_status",
             ),
+            snapshot_store=context.get("SNAPSHOT_STORE"),
         )
 
 
@@ -76,6 +78,14 @@ class SeedHealthDependencies:
 
 
 SEED_META_SPECS = [
+    {
+        "panelId": "related-news",
+        "namespace": "seed-meta:content",
+        "cacheKey": "related-news",
+        "serviceName": "polydata-content-topic-refresh.service",
+        "intervalEnv": "POLYDATA_CONTENT_WATCH_INTERVAL_SECONDS",
+        "defaultIntervalSeconds": 60,
+    },
     {
         "panelId": "geo-sanctions-shock",
         "namespace": "seed-meta:world",
@@ -492,16 +502,28 @@ def _build_system_health_payload_uncached(
                 lob_runtime.update(runtime_payload)
         except Exception as exc:
             lob_runtime.update({"status": "unavailable", "detail": str(exc)[:240]})
+    content_seed = None
+    try:
+        content_seed = _read_seed_meta(SeedHealthDependencies(dependencies.snapshot_store,
+            dependencies.get_cached_json, lambda: ""), namespace="seed-meta:content", cache_key="related-news")
+    except Exception:
+        pass
+    seed_age = _age_seconds_from_iso((content_seed or {}).get("lastSuccessAt"))
+    content_ready = bool(content_seed and content_seed.get("status") in {"ready", "ok"}
+                         and seed_age is not None and seed_age < 90)
     payload: Dict[str, Any] = {
         "database": dependencies.describe_db_target(),
         "redis": bool(dependencies.get_redis_client()),
         "apiStatus": "ok",
         "lobRuntime": lob_runtime,
         "contentSync": {
-            "status": "database-runtime-intel"
-            if dependencies.table_exists("content_items")
-            and dependencies.table_exists("content_links")
-            else "runtime-intel"
+            "status": "ready" if content_ready else "degraded" if content_seed else "unknown",
+            "mode": "database-runtime-intel",
+            "seedAgeSeconds": seed_age,
+            "lastAttemptAt": (content_seed or {}).get("lastAttemptAt"),
+            "lastSuccessAt": (content_seed or {}).get("lastSuccessAt"),
+            "sourceStates": (content_seed or {}).get("sourceStates", {}),
+            "errorSummary": (content_seed or {}).get("errorSummary"),
         },
     }
     if not dependencies.table_exists("sync_state"):
@@ -691,8 +713,8 @@ def build_seed_health_payload(dependencies: SeedHealthDependencies) -> Dict[str,
         success_age_seconds = _age_seconds_from_iso(last_success_at)
         freshness = _freshness_label(success_age_seconds, expected_interval_seconds)
         status = str(payload.get("status") or ("missing" if not payload else "unknown")).strip().lower()
-        if status == "ok" and freshness != "fresh":
-            status = "degraded"
+        if status in {"ok", "ready"}:
+            status = "ok" if freshness == "fresh" else "degraded"
         if status == "scan":
             status = "ok"
         if status == "bootstrap":

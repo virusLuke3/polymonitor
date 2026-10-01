@@ -10,6 +10,7 @@ import { PanelLoading } from '@/components/Panel';
 import { RuntimeStatusBadge } from '@/components/design-system/StatusPrimitives';
 import type { PanelRuntimeStatus } from '@/panels/types';
 import { useI18n } from '@/services/i18n';
+import { PanelResourceView, PanelResourceVisibility, usePanelResourceBinding } from '@/panels/usePanelResource';
 
 const PANEL_ROW_RESIZE_STEP = 200;
 const PANEL_COL_RESIZE_STEP = 260;
@@ -72,6 +73,7 @@ type PanelRuntimeBoundaryProps = {
   loading: boolean;
   status?: PanelRuntimeStatus;
   onRetry?: () => void;
+  resourceManaged?: boolean;
 };
 
 function clampSpan(value: number, min: number, max: number) {
@@ -112,8 +114,11 @@ export function PanelWorkspaceSlot({
   onResetPanelLayout,
 }: PanelWorkspaceSlotProps) {
   const { t } = useI18n();
+  const resource = usePanelResourceBinding(panelId);
+  const actualStatus = resource?.status ?? runtimeStatus;
   const slotRef = useRef<HTMLDivElement | null>(null);
   const [contentReady, setContentReady] = useState(!layoutManaged);
+  const [resourceVisible, setResourceVisible] = useState(!layoutManaged);
   const layout = requestedPanelLayout(layoutPrefs, panelId, size);
   const effective = layoutManaged ? effectivePanelLayout(panelId, layoutWidth) : { rowSpan: layout.rowSpan, column: `span ${layout.colSpan}` };
   const dragRef = useRef<DragState>({
@@ -356,11 +361,13 @@ export function PanelWorkspaceSlot({
     const slot = slotRef.current;
     if (!slot || typeof IntersectionObserver === 'undefined') {
       setContentReady(true);
+      setResourceVisible(true);
       onVisibilityChange(panelId, true);
       return () => onVisibilityChange(panelId, false);
     }
     const observer = new IntersectionObserver((entries) => {
       const visible = entries.some((entry) => entry.isIntersecting);
+      setResourceVisible(visible);
       onVisibilityChange(panelId, visible);
       if (visible) setContentReady(true);
     }, { rootMargin: PANEL_CONTENT_ROOT_MARGIN });
@@ -372,7 +379,7 @@ export function PanelWorkspaceSlot({
     <div
       className={`wm-panel-slot ${layoutManaged ? 'is-layout-managed' : ''} ${className}`.trim()}
       data-workspace-panel-id={panelId}
-      data-runtime-phase={runtimeStatus?.phase || 'idle'}
+      data-runtime-phase={actualStatus?.phase || 'idle'}
       data-content-ready={contentReady ? 'true' : 'false'}
       ref={slotRef}
       onMouseDown={startDrag}
@@ -382,8 +389,8 @@ export function PanelWorkspaceSlot({
       } as Record<string, string>}
     >
       {contentReady ? (
-        <PanelRuntimeBoundary loading={loading} status={runtimeStatus} onRetry={onRetry}>
-          {children}
+        <PanelRuntimeBoundary loading={resource ? false : loading} status={actualStatus} onRetry={resource?.refresh ?? onRetry} resourceManaged={Boolean(resource)}>
+          <PanelResourceView.Provider value={panelId}><PanelResourceVisibility.Provider value={resourceVisible}>{children}</PanelResourceVisibility.Provider></PanelResourceView.Provider>
         </PanelRuntimeBoundary>
       ) : <div className="wm-panel-slot-deferred" aria-hidden="true" />}
       {resizeEnabled ? (
@@ -413,6 +420,7 @@ function PanelRuntimeBoundary({
   loading,
   status,
   onRetry,
+  resourceManaged = false,
 }: PanelRuntimeBoundaryProps) {
   const { t, formatDateTime } = useI18n();
   const phase = status?.phase || 'idle';
@@ -442,7 +450,7 @@ function PanelRuntimeBoundary({
           <PanelLoading detail={t('panelRuntime.syncingPanel')} />
         </div>
       ) : null}
-      {showNotice && !loading ? (
+      {showNotice && !loading && !resourceManaged ? (
         <div className={`wm-panel-runtime-notice is-${phase}`} role="status">
           <span>{label}{updatedLabel ? ` · ${t('panelRuntime.updated', { time: updatedLabel })}` : ''}</span>
           {onRetry && phase !== 'suspended' ? <button type="button" onClick={onRetry}>{t('panelRuntime.retry')}</button> : null}

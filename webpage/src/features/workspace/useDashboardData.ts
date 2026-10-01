@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { fetchBootstrap, fetchLatestContent, fetchRecentOracle, fetchRecentTrades, fetchSystemHealth } from '@/services/api';
+import { fetchBootstrap, fetchRecentOracle, fetchRecentTrades, fetchSystemHealth } from '@/services/api';
+import { useIntelResource } from '@/panels/modules/related-news/useIntelFeed';
 import { mergeRuntimeData } from '@/panels/runtime-store';
 import type { usePanelRuntime } from '@/panels/usePanelRuntime';
-import type { BootstrapPayload, ContentItem, OracleEvent, SystemHealth, TradeRow } from '@/types';
+import type { BootstrapPayload, OracleEvent, SystemHealth, TradeRow } from '@/types';
 import type { useWorkspacePreferences } from './useWorkspacePreferences';
 
 /** Bootstrap and the shared dashboard summaries have one request lifecycle. */
@@ -12,7 +13,8 @@ export function useDashboardData(workspace: Pick<ReturnType<typeof useWorkspaceP
   const [health, setHealth] = useState<SystemHealth | null>(null);
   const [globalTrades, setGlobalTrades] = useState<TradeRow[]>([]);
   const [globalOracle, setGlobalOracle] = useState<OracleEvent[]>([]);
-  const [latestContent, setLatestContent] = useState<ContentItem[]>([]);
+  const content = useIntelResource(null, 'global', 7, workspace.panelPrefsLoaded);
+  const latestContent = content.data?.content.items.slice(0, 12) ?? [];
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const runtimeRef = useRef(runtime);
@@ -22,7 +24,7 @@ export function useDashboardData(workspace: Pick<ReturnType<typeof useWorkspaceP
     if (!panelPrefsLoaded) return;
     const controller = new AbortController();
     let refreshController: AbortController | null = null;
-    const refreshed = { health: false, trades: false, oracle: false, content: false };
+    const refreshed = { health: false, trades: false, oracle: false };
     const refresh = async () => {
       if (document.hidden || controller.signal.aborted || refreshController) return;
       const current = new AbortController();
@@ -38,7 +40,6 @@ export function useDashboardData(workspace: Pick<ReturnType<typeof useWorkspaceP
         fetchSystemHealth(current.signal).then(publish('health', setHealth)),
         fetchRecentTrades(24, current.signal).then(publish('trades', setGlobalTrades)),
         fetchRecentOracle(16, current.signal).then(publish('oracle', setGlobalOracle)),
-        fetchLatestContent(12, current.signal).then(publish('content', (value) => setLatestContent(value.items || []))),
       ]);
       if (refreshController === current) refreshController = null;
     };
@@ -58,7 +59,6 @@ export function useDashboardData(workspace: Pick<ReturnType<typeof useWorkspaceP
       if (!refreshed.health) setHealth(payload.systemHealth || null);
       if (!refreshed.trades) setGlobalTrades(payload.globalTradesPreview || []);
       if (!refreshed.oracle) setGlobalOracle(payload.globalOraclePreview || []);
-      if (!refreshed.content) setLatestContent(payload.latestContentPreview || []);
       applyBootstrapPanels(payload);
       runtimeRef.current.setRuntimeData((current) => mergeRuntimeData(current,
         payload.commoditiesPreview ? { 'commodities-watch': payload.commoditiesPreview } : {}));

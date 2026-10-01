@@ -4,6 +4,16 @@ from datetime import datetime, timedelta, timezone
 from .normalize import identity, permission, utc
 
 
+def decode_state(raw, source_id):
+    try:
+        state = json.loads(raw)
+        if not isinstance(state, dict):
+            raise ValueError("invalid-source-state")
+        return state
+    except (ValueError, TypeError):
+        return {"source_id": source_id, "status": "error", "error": "invalid-source-state"}
+
+
 def ensure_schema(storage):
     from api.services.query_service import _ensure_content_tables
 
@@ -26,7 +36,7 @@ def source_states(storage):
     if not storage.table_exists("content_source_state"):
         return {}
     return {
-        row["source_id"]: json.loads(row["state_json"])
+        row["source_id"]: decode_state(row["state_json"], row["source_id"])
         for row in storage.query_all("SELECT * FROM content_source_state")
     }
 

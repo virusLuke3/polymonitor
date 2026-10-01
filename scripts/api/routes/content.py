@@ -19,32 +19,6 @@ class ContentRouteDependencies:
     get_runtime_content_latest: Callable[..., dict[str, Any]]
 
 
-def _publish_latest_content(payload: dict) -> None:
-    if request.headers.get("X-PolyData-Telegram-Publisher") == "1":
-        return
-    try:
-        from telegram.topics.runtime_bridge import publish_panel_snapshot
-    except Exception:
-        return
-    try:
-        publish_panel_snapshot("latest-content", payload)
-    except Exception:
-        return
-
-
-def _publish_related_content(payload: dict) -> None:
-    if request.headers.get("X-PolyData-Telegram-Publisher") == "1":
-        return
-    try:
-        from telegram.topics.runtime_bridge import publish_panel_snapshot
-    except Exception:
-        return
-    try:
-        publish_panel_snapshot("related-news", payload)
-    except Exception:
-        return
-
-
 def _runtime_content_fallback(
     limit: int,
     *,
@@ -75,7 +49,10 @@ def create_content_blueprint(dependencies: ContentRouteDependencies) -> Blueprin
 
     @bp.route("/content/market/<int:market_id>", methods=["GET"])
     def api_content_by_market_id(market_id: int):
-        limit = min(20, max(1, int(request.args.get("limit", 8))))
+        try:
+            limit = min(20, max(1, int(request.args.get("limit", 8))))
+        except ValueError:
+            return jsonify({"error": "Invalid content limit"}), 400
         try:
             market = dependencies.get_market_by_id(market_id)
             if not market:
@@ -102,7 +79,10 @@ def create_content_blueprint(dependencies: ContentRouteDependencies) -> Blueprin
 
     @bp.route("/content/latest", methods=["GET"])
     def api_content_latest():
-        limit = min(20, max(1, int(request.args.get("limit", 8))))
+        try:
+            limit = min(20, max(1, int(request.args.get("limit", 8))))
+        except ValueError:
+            return jsonify({"error": "Invalid content limit"}), 400
         try:
             payload = dependencies.get_latest_content_payload(limit=limit, days=30 if request.args.get("days")=="30" else 7)
         except Exception as exc:

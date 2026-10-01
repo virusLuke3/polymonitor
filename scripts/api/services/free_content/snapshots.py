@@ -12,7 +12,7 @@ import logging
 from .public import payload, read_records
 
 NAMESPACE = "snapshot:content:free-public"
-CACHE_KEY = "candidates-v1"
+CACHE_KEY = "candidates-v2"
 TTL_SECONDS = 90
 MAX_STALE_SECONDS = 300
 logger = logging.getLogger(__name__)
@@ -34,6 +34,15 @@ def _age(snapshot, now):
 def _cached(cache, now):
     store = cache.get("store")
     get_json = cache.get("get_json")
+    # The durable local seed is the latency bound. Optional Redis must not sit
+    # in front of a fresh local hit on every HTTP request.
+    if store:
+        try:
+            local = store.get_stale(NAMESPACE, CACHE_KEY)
+            if _age(local, now) < TTL_SECONDS:
+                return local, "sqlite"
+        except Exception:
+            pass
     try:
         value = get_json(NAMESPACE, CACHE_KEY) if get_json else None
         if _age(value, now) < TTL_SECONDS:

@@ -1,82 +1,107 @@
 # Parameterized panel resources
 
 Related Intelligence (`related-news`, titled Global Updates in global scope) is
-the first consumer of `webpage/src/panels/usePanelResource.ts`. Other panels can
-adopt this contract incrementally; this change does not migrate their fetch paths.
+the first consumer. Other panels adopt this contract incrementally; their existing
+runtime fetch paths remain in place.
 
 ## Ownership and dependency direction
 
-The panel directory owns request parameters, API parsing, source semantics and
-reader behavior. Its memoized `PanelResource<T>` declares a key containing **all**
-parameters, `fetch`, `parse`, `updatedAt`, refresh policy and a maximum snapshot age.
-Key the resource-owning component by that identity. No panel imports a sibling's
-implementation. App and the explicit registry retain composition ownership.
-Keep scope/window controls outside the loading region so users can change or
-cancel a slow cold request. Show a loader only in the data region, and distinguish
-an unknown pending count from a successfully checked empty result.
+The panel directory owns parameters, parsing, source semantics and reading state.
+A `PanelResource<T>` declares the complete request key, fetch, parse,
+source timestamp, age limit, refresh policy and optional persistence promotion.
+The explicit panel registry still owns composition. No sibling implementation
+imports are needed.
 
-`usePanelResource` adapts this declaration to `usePanelRuntime` using `batch:false`.
-The existing runtime owns scheduling, request deduplication, cancellation, bounded
-retry and page visibility. It does not wait for other panels' batch endpoints.
-`checkedAt` means the last successfully validated request completion;
-`updatedAt` remains the actual source snapshot timestamp. Neither is article
-publication time. A successful check with unchanged content still advances
-`checkedAt`, without making the source snapshot newer.
+`PanelResourceProvider` mounts once at the application entry. It registers
+consumer demand by resource key and adapts contracts to the existing
+`usePanelRuntime` with `batch:false`. Same-key consumers share data, scheduling,
+inflight requests, retries and cancellation. Releasing one consumer never cancels
+another consumer's request. Releasing the last consumer removes its in-memory
+request/status/data; opt-in public persistence remains bounded. There is no
+second scheduler or collector. Declarations are stabilized by complete identity
+and policy, so a fresh object literal does not cancel/re-register on each render.
 
-## Recovery contract
+Workspace slots provide panel identity and visibility. Their status badge uses
+the actual resource owner. Parameterized panels retain their own loading/status
+region so controls stay usable during a cold request. Offscreen demand pauses;
+a still-active summary consumer may legitimately keep the same resource alive.
+Page hiding suspends all automatic checks. Manual refresh is an explicit override.
 
-- `parse` validates identity, shape and safe public content before display or cache.
-  Unavailable empty responses throw, including legacy HTTP 200 envelopes; they
-  enter the runtime error/retry path rather than becoming healthy empty lists.
-- Optional browser persistence is **only for reviewed public data**, never private
-  or user-specific resources. Cache schema versions invalidate old formats. Keys
-  separate global/market and 7/30-day windows. Every hydration is revalidated.
-- Persistence failures do not fail the request. At most eight cache entries of
-  256,000 characters each are retained; other localStorage keys are untouched.
-- A saved snapshot renders before the network completes, and is labelled as such.
-  Failure retains valid data only within `maxAgeMs`; neither cache writes nor
-  successful requests extend its original source timestamp. Expiry removes it
-  even when the network remains unavailable. Future timestamps beyond one minute
-  of clock tolerance are rejected. No timestamp means no persistent cache.
-- New cards wait for reader acceptance. Revisions, withdrawals, source state and
-  expired alerts update immediately. Resource changes cancel old requests and
-  cannot transfer a previous market's data to the new identity.
+The dashboard summary consumes the same global/7-day/20-item resource and selects
+its first 12 items; it does not make another content request or promote an
+unvalidated bootstrap preview into the complete resource.
 
-## Related Intelligence data path and timings
+## Response and recovery contract
 
-The existing content worker acquires the allowlisted feeds according to their
-own schedules (3–15 minutes). It refreshes the shared 30-day candidate seed after
-each cycle, then sleeps up to 60 seconds. This is not a promise of acquisition
-every exactly 60 seconds: work duration is additional.
+- Identity, window and `generatedAt` are mandatory. Missing source time cannot
+  acquire a new lifetime from a successful request. Future time tolerance is one
+  minute; maximum browser recovery age is five minutes of original seed age.
+- Wrong market/scope/window rejects the whole response. Individual invalid cards
+  are isolated, counted and surfaced as partial; an entirely malformed list is
+  rejected. Card render boundaries protect valid siblings.
+- `checkedAt` means validated request completion; `generatedAt` means candidate
+  seed generation. Neither is article publication or revision time. Unchanged
+  content still advances the successful check clock.
+- HTTP 503 and legacy unavailable/empty HTTP 200 enter the error path. Healthy
+  empty results stay distinct. Automatic retry observes Retry-After, bounded
+  exponential backoff and jitter. Non-retryable HTTP/identity failures await a
+  parameter change or manual retry. Persistent failure slows to five minutes.
+- Acceptance and persistence are independent: a useful partial response may
+  display without replacing a complete recovery snapshot. Invalid/stale data
+  never becomes the new saved snapshot. This does not exempt displayed content
+  from current permission, window and expiry rules.
+- Persistence is only for reviewed public data. Schema version 2, complete keys,
+  revalidation, eight entries and 256,000 characters per entry bound this cache.
+  Storage failure does not fail a panel or remove other application storage.
+- New entries wait for acceptance while the current page remains readable. If a
+  finite page rolls over completely, show the newly verified page immediately,
+  avoiding a blank area containing only a pending button. Absence from top-N is
+  not labelled a withdrawal. Revisions, permission changes and expiry apply
+  without reader confirmation. Pending count is explicit.
 
-API reads project the shared seed into the selected market/window and recheck
-current public-display permission and alert expiry. Redis freshness and SQLite
-freshness are 90 seconds; bounded SQLite fallback and browser recovery stop at
-300 seconds of **seed age**. A warm global read needs no content database query.
-Cold reads use the existing indexed database query, under a one-second ownership
-lock. Lock contention fails instead of duplicating queries. A failed optional
-cache filesystem can still serve a successful database result; SQLite and Redis
-writes are independent. The worker reports seed success only when at least one
-cache write succeeds (the existing Redis setter is verified by reading it back
-if SQLite did not persist). Failed refreshes never overwrite the last good seed.
+## Candidate seed and acquisition
 
-The browser checks every 30 seconds while the page is visible. The runtime retries
-failures twice with its existing 1/2-second backoff, then continues the normal
-30-second check schedule. Global requests have a 12-second deadline, market
-requests eight seconds; cancellation covers response-body decoding as well.
-Hidden pages pause and resume checks. Source degradation is distinct from
-request failure: public content remains visible with individual source status.
+The existing content worker still owns the reviewed feeds (3–15 minute source
+schedules) and reuses existing USGS/NWS map snapshots. Public GETs never acquire
+external feeds or substitute global data for a market.
 
-Unavailable empty content returns HTTP 503, `Retry-After: 30` and
-`Cache-Control: no-store`. Healthy empty matches return HTTP 200. Public content
-reads do not initiate feed acquisition or substitute global data for a market.
+The existing collector executes in a spawned process with fresh service runtime
+and connections. The parent retains the single worker/advisory lock. A 90-second
+cycle budget terminates a blocked child, marks unfinished due sources as failed,
+and preserves completed records/last-success evidence. Source HTTP/rights work
+shares a 45-second budget; the process boundary also bounds blocked DNS or reads.
+The parent publishes a validated seed before acquisition, every 30 seconds while
+acquisition runs, and afterward. Watch sleeps 30–60 seconds. Failed publication
+or acquisition is reported and does not permanently stop watch mode.
 
-## Verification
+The indexed candidate query reserves 256 records per publisher, using explicit
+NULL ordering and stable ID ties. It returns candidate totals/truncation and
+projection drop reasons. A high-frequency provider cannot consume another
+publisher's quota; quota overflow is explicitly partial, never comprehensive
+recall. Direct statistical relations require positive jurisdiction and matching
+metric/reference period/basis; unknown jurisdiction is at most context.
 
-Run the resource-cache and related-news model unit tests, runtime-store unit tests,
-`tests/test_free_content.py`, and `webpage/e2e/related-intelligence.spec.ts`, then
-the frontend build. Local fixtures cover scope/window races, malformed payloads,
-legacy failures, automatic recovery, unchanged-seed checks, saved-data recovery,
-age limits and visibility. Production acceptance must use the exact pushed
-commit, real APIs and real desktop/mobile browsers over several seed cycles.
-Partial upstream sources must remain reported as partial.
+Local SQLite is checked before optional Redis for a fresh seed, avoiding a Redis
+outage delay on every warm request. Freshness is 90 seconds; bounded stale SQLite
+recovery is 300 seconds. Cold reads use the existing database under a one-second
+cross-process lock. Failed queries do not replace the previous seed; SQLite and
+Redis writes are independent, and worker success requires a verified write.
+
+The related-news seed is registered in unified seed health. `contentSync` checks
+seed age/status rather than just table existence. Request, seed, source and
+article freshness remain separate; source failure or truncated candidates stay
+visible even when seed publication succeeds.
+
+## Verification and rollout
+
+Run model/cache/runtime unit tests, free-content/worker-budget/seed-health tests,
+Related Intelligence E2E and shared frontend lifecycle tests, then the frontend
+build. Cases include two consumers/one request, visibility demand, Retry-After,
+unknown timestamps, malformed item/source isolation, 2,001-candidate source
+balance, cross-country rejection, page rollover, partial cache promotion and real
+blocked-process termination. Fixtures never enter production data.
+
+Build from the exact pushed commit via `git archive`, preserving unrelated dirty
+work. Deploy that backend/frontend revision, verify release identity, and inspect
+real desktop/mobile UI across several checks/seed cycles without substituted APIs
+or tiles. Report upstream partial/failure states separately from code readiness.

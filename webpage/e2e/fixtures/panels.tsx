@@ -3,6 +3,7 @@ import { useState } from 'preact/hooks';
 import { FocusedMarketStrip } from '../../src/components/FocusedMarketStrip';
 import { PANEL_MODULES } from '../../src/panels/registry';
 import { LocaleProvider } from '../../src/services/i18n';
+import { PanelResourceProvider, PanelResourceVisibility } from '../../src/panels/usePanelResource';
 import type { PanelRenderContext } from '../../src/types';
 import '../../src/styles/fonts.css';
 import '../../src/styles/base-layer.css';
@@ -40,15 +41,27 @@ const api = {
   },
   update(id: string, runtimeData: Record<string, unknown> = {}, data: Partial<PanelRenderContext> = {}) {
     const panel = PANEL_MODULES.find(p => p.id === id)!;
-    render(<LocaleProvider><main className="wm-dashboard"><div className="wm-panels-grid">
+    render(<LocaleProvider><PanelResourceProvider><main className="wm-dashboard"><div className="wm-panels-grid">
       <div className="wm-panel-slot" data-workspace-panel-id={id}>
         {panel.render!({ ...context, ...data, runtimeData })}
       </div>
-    </div></main></LocaleProvider>, root);
+    </div></main></PanelResourceProvider></LocaleProvider>, root);
   },
   mountFocus(data: Partial<PanelRenderContext>) {
     render(null, root);
     render(<FocusFixture data={data} />, root);
+  },
+  mountMany(visible: boolean[], data: Partial<PanelRenderContext> = {}) {
+    render(null, root);
+    api.updateMany(visible, data);
+  },
+  updateMany(visible: boolean[], data: Partial<PanelRenderContext> = {}) {
+    const panel = PANEL_MODULES.find(p => p.id === 'related-news')!;
+    render(<LocaleProvider><PanelResourceProvider><main className="wm-dashboard"><div className="wm-panels-grid">
+      {visible.map((active, index) => <div className="wm-panel-slot" key={index} data-workspace-panel-id={`related-news-${index}`}>
+        <PanelResourceVisibility.Provider value={active}>{panel.render!({ ...context, ...data })}</PanelResourceVisibility.Provider>
+      </div>)}
+    </div></main></PanelResourceProvider></LocaleProvider>, root);
   },
 };
 declare global { interface Window { panelHarness: typeof api } }

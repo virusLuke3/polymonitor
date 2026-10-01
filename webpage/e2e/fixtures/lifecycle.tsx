@@ -3,6 +3,7 @@ import { render } from 'preact';
 import { useMemo, useState } from 'preact/hooks';
 import { RUNTIME_PANEL_MODULES } from '../../src/panels/registry';
 import { usePanelRuntime } from '../../src/panels/usePanelRuntime';
+import { PanelResourceProvider } from '../../src/panels/usePanelResource';
 import { useMarketFocus } from '../../src/features/market-focus/useMarketFocus';
 import { useMarketDossier } from '../../src/features/market-focus/useMarketDossier';
 import { useNaturalHazards } from '../../src/features/world-event-map/data/useNaturalHazards';
@@ -52,7 +53,7 @@ const api = {
   setHazardView: (_patch: Partial<HazardView>) => {},
   setGeometryEnabled: (_enabled: boolean) => {},
   mount: (kind: HarnessKind) => {
-    render(kind === 'dashboard' ? <Dashboard /> : kind === 'observed-runtime' ? <Runtime observed /> : kind === 'registered-runtime' ? <Runtime registered /> : kind === 'runtime' ? <Runtime /> : kind === 'focus' ? <Focus /> : kind === 'book' ? <Book />
+    render(kind === 'dashboard' ? <PanelResourceProvider><Dashboard /></PanelResourceProvider> : kind === 'observed-runtime' ? <Runtime observed /> : kind === 'registered-runtime' ? <Runtime registered /> : kind === 'runtime' ? <Runtime /> : kind === 'focus' ? <Focus /> : kind === 'book' ? <Book />
       : kind === 'aviation' ? <Aviation /> : kind === 'hazards' ? <Hazards /> : kind === 'dossier' ? <Dossier /> : kind === 'geometry' ? <Geometry /> : <Workspace />, root);
   },
   unmount: () => render(null, root),

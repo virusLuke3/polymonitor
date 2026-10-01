@@ -6,29 +6,38 @@ import {
   reconcileReader, resourceId, type IntelPayload, type IntelSnapshot,
 } from './model';
 
-export { fingerprint, validScope } from './model';
+export { validScope } from './model';
 
 /** Parameterized content uses the existing Runtime with a dedicated endpoint and resource key. */
-export function useIntelFeed(marketId: number | null, scope: 'market' | 'global', days: number) {
+export function useIntelResource(marketId: number | null, scope: 'market' | 'global', days: number, active?: boolean) {
   const key = resourceId({ marketId, scope, days });
   const contract = useMemo<PanelResource<IntelSnapshot>>(() => ({
-    key, title: 'Related Intelligence', maxAgeMs: 5 * 60_000, cache: { version: 1 },
+    key, title: 'Related Intelligence', maxAgeMs: 5 * 60_000, cache: { version: 2 },
     refreshPolicy: { tier: 'fast', intervalMs: INTEL_REFRESH_MS, staleAfterMs: INTEL_STALE_MS },
     fetch: async context => scope === 'market'
         ? await fetchMarketContent(marketId!, 20, 8000, context?.signal, days)
         : await fetchLatestContent(20, context?.signal, days),
     parse: value => {
+      if (value && typeof value === 'object' && (value as IntelPayload).status === 'unavailable'
+        && !(value as IntelPayload).items?.length) throw new Error('Content service unavailable');
       const content = parseIntelPayload(value, { marketId, scope, days });
       // Legacy HTTP 200 failures must enter the same bounded retry path as HTTP 503.
       if (content.status === 'unavailable' && !content.items.length) throw new Error('Content service unavailable');
       return intelSnapshot(content);
     },
     updatedAt: value => value.generatedAt ? Date.parse(value.generatedAt) : null,
+    shouldPersist: (next, previous) => !next.content.rejectedItemCount && !next.content.stale
+      && (!previous || next.content.status === 'ready' || previous.content.status !== 'ready'),
   }), [key, marketId, scope, days]);
-  const resource = usePanelResource(contract);
+  return usePanelResource(contract, active);
+}
+
+export function useIntelFeed(marketId: number | null, scope: 'market' | 'global', days: number) {
+  const key = resourceId({ marketId, scope, days });
+  const resource = useIntelResource(marketId, scope, days);
   const latest = resource.data?.content;
   const status = resource.status;
-  const [reader, setReader] = useState<{ key: string; data: IntelPayload | null; pending: IntelPayload | null }>({ key, data: null, pending: null });
+  const [reader, setReader] = useState<{ key: string; data: IntelPayload | null; pending: IntelPayload | null }>({ key, data: latest ?? null, pending: null });
   const [, expire] = useState(0);
   useEffect(() => {
     setReader(old => latest ? reconcileReader(old, key, latest) : { key, data: null, pending: null });
@@ -46,6 +55,7 @@ export function useIntelFeed(marketId: number | null, scope: 'market' | 'global'
   const hasNew = pending?.items.some(item => !data?.items.some(old => String(old.id) === String(item.id)));
   return {
     key, data, pending: hasNew ? pending : null, status,
+    pendingCount: hasNew ? pending!.items.filter(item => !data?.items.some(old => String(old.id) === String(item.id))).length : 0,
     error: resource.error, loading: resource.loading, fromCache: resource.fromCache, suspended: resource.suspended,
     stale: Boolean(data?.stale || ['stale', 'degraded', 'error'].includes(status.phase)),
     refresh: resource.refresh,

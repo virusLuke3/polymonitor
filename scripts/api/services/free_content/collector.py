@@ -1,5 +1,5 @@
 from __future__ import annotations
-import json, re
+import json, re, time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
@@ -66,6 +66,7 @@ def retry_delay(value, now):
 
 def collect_one(storage, snapshot_store, source, old, *, probe=False, conditional=True):
     now = datetime.now(timezone.utc)
+    deadline = time.monotonic() + 45
     stamp = now.isoformat().replace("+00:00", "Z")
     state = {
         **old,
@@ -86,7 +87,7 @@ def collect_one(storage, snapshot_store, source, old, *, probe=False, conditiona
                 state["last_success_at"] = snapshot["fetchedAt"]
                 state["snapshot_stale"] = bool(snapshot.get("staleAfter") and snapshot["staleAfter"] < stamp)
             else:
-                body, meta = fetch(session, source["feed_url"], source, {} if probe or not conditional else old)
+                body, meta = fetch(session, source["feed_url"], source, {} if probe or not conditional else old, deadline=deadline)
                 state.update(meta)
                 if meta["http_status"] == 429:
                     state.update(
@@ -165,7 +166,7 @@ def collect_one(storage, snapshot_store, source, old, *, probe=False, conditiona
                     elif checked < 5:
                         checked += 1
                         try:
-                            article, _ = fetch(session, item["url"], source)
+                            article, _ = fetch(session, item["url"], source, deadline=deadline)
                             html = article.decode("utf-8", "replace")
                             # Verify canonical article + its own rights, not the page-wide default alone.
                             body_match = re.search(
@@ -223,11 +224,9 @@ def collect_one(storage, snapshot_store, source, old, *, probe=False, conditiona
     return state
 
 
-def cycle(storage, snapshot_store, *, probe=False, force=False, selected=None):
-    ensure_schema(storage)
-    states = source_states(storage)
-    stamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    pending = [
+def due_sources(states, *, probe=False, force=False, selected=None, stamp=None):
+    stamp = stamp or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return [
         s
         for s in sources()
         if s["enabled"]
@@ -244,12 +243,24 @@ def cycle(storage, snapshot_store, *, probe=False, force=False, selected=None):
         )
     ]
 
+
+def cycle(storage, snapshot_store, *, probe=False, force=False, selected=None, on_result=None):
+    ensure_schema(storage)
+    states = source_states(storage)
+    stamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    pending = due_sources(states, probe=probe, force=force, selected=selected, stamp=stamp)
+
     def run(source):
         state = collect_one(
             storage, snapshot_store, source, states.get(source["source_id"], {}), probe=probe, conditional=not force
         )
         if not probe:
-            save_state(storage, source["source_id"], state)
+            try:
+                save_state(storage, source["source_id"], state)
+            except Exception as exc:
+                state = {**state, "status": "error", "error": "state-write-failed:" + type(exc).__name__}
+        if on_result:
+            on_result(state)
         return state
 
     with ThreadPoolExecutor(max_workers=3) as pool:

@@ -1,10 +1,11 @@
 import { expect, test } from '@playwright/test';
 import { installDashboard, fixtureMarkets } from './fixtures/dashboard';
+import { GENERATED_AT } from './fixtures/world-event-map';
 test.use({ baseURL: `http://127.0.0.1:${process.env.POLYMONITOR_E2E_PORT || 4174}` });
 
 // Isolated fixtures: production acceptance uses the real URL and real feeds.
 const item = (id: string) => ({ id, contentType: 'news', content_version: id, source: 'Global Voices', sourceId: 'global-voices', sourceKind: 'news_report', author: 'Fixture author', title: `Fixture ${id} could <script>appear</script>`, summary: 'Fixture feed excerpt', excerptFull: 'Fixture full feed excerpt, never published.', excerptOrigin: 'feed', url: 'https://globalvoices.org/fixture/', licenseUrl: 'https://creativecommons.org/licenses/by/3.0/', relation: 'context', relationReason: 'Fixture shared event; contract conditions unverified.', publishedAt: null });
-const payload = (id: number | null, ids: string[] = []) => ({ scope: id == null ? 'global' : 'market', marketId: id, market_id: id, items: ids.map(item), count: ids.length, status: 'partial', window: { days: 7 }, sources: [{ source_id: 'fixture-unavailable', status: 'error', error: 'Fixture timeout' }] });
+const payload = (id: number | null, ids: string[] = []) => ({ scope: id == null ? 'global' : 'market', marketId: id, market_id: id, items: ids.map(item), count: ids.length, status: 'partial', generatedAt: GENERATED_AT, window: { days: 7 }, sources: [{ source_id: 'fixture-unavailable', status: 'error', error: 'Fixture timeout' }] });
 async function mount(page: import('@playwright/test').Page, id: number | null = 1) {
   await page.goto('/e2e/panels.html');
   await page.waitForFunction(() => window.panelHarness);
@@ -60,8 +61,9 @@ test('slow A response cannot populate B, and a mismatched market response is rej
 test('new content waits for the reader to accept it', async ({ page }) => {
   await installDashboard(page);
   await page.clock.install();
+  const generatedAt = await page.evaluate(() => new Date().toISOString());
   let ids = ['first'];
-  await page.route('**/wm-api/content/**', route => route.fulfill({ json: payload(1, ids) }));
+  await page.route('**/wm-api/content/**', route => route.fulfill({ json: { ...payload(1, ids), generatedAt } }));
   await mount(page);
   await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
   ids = ['new', 'first'];
@@ -147,17 +149,18 @@ test('same-market window change rejects an old response and validates malformed 
 test('expired card disappears while a new card still waits for acceptance', async ({ page }) => {
   await installDashboard(page);
   await page.clock.install();
-  const expires = await page.evaluate(() => new Date(Date.now() + 31_000).toISOString());
+  const generatedAt = await page.evaluate(() => new Date().toISOString());
+  const expires = await page.evaluate(() => new Date(Date.now() + 45_000).toISOString());
   let ids = ['first'];
   await page.route('**/wm-api/content/**', route => route.fulfill({ json: {
-    ...payload(1, ids), items: ids.map(id => ({ ...item(id), expires_at: id === 'first' ? expires : null })),
+    ...payload(1, ids), generatedAt, items: ids.map(id => ({ ...item(id), expires_at: id === 'first' ? expires : null })),
   } }));
   await mount(page);
   await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
   ids = ['new', 'first'];
   await page.clock.runFor(30_100);
   await expect(page.getByRole('button', { name: 'New content available', exact: false })).toBeVisible();
-  await page.clock.runFor(1_000);
+  await page.clock.runFor(15_000);
   await expect(page.locator('.wm-free-intel-card')).toHaveCount(0);
   await page.getByRole('button', { name: 'New content available', exact: false }).click();
   await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
@@ -244,10 +247,11 @@ test('reopened panel shows a saved snapshot during an outage and stops showing i
 test('page hiding pauses checks and returning resumes without losing readable content', async ({ page }) => {
   await installDashboard(page);
   await page.clock.install();
+  const generatedAt = await page.evaluate(() => new Date().toISOString());
   let attempts = 0;
   await page.route('**/wm-api/content/**', route => {
     attempts++;
-    return route.fulfill({ json: payload(1, ['visible']) });
+    return route.fulfill({ json: { ...payload(1, ['visible']), generatedAt } });
   });
   await mount(page);
   await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
@@ -312,4 +316,77 @@ test('compact desktop panel shows its first headline without scrolling through s
   });
   expect(bounds.scroll).toBe(0);
   expect(bounds.top).toBeLessThan(bounds.bottom - 10);
+});
+
+test('two consumers share a request and checks pause only when both consumers are hidden', async ({ page }) => {
+  await installDashboard(page);
+  await page.clock.install();
+  const generatedAt = await page.evaluate(() => new Date().toISOString());
+  let requests = 0;
+  await page.route('**/wm-api/content/**', route => {
+    requests++;
+    return route.fulfill({ json: { ...payload(null, ['shared']), generatedAt } });
+  });
+  await page.goto('/e2e/panels.html');
+  await page.waitForFunction(() => window.panelHarness);
+  await page.evaluate(() => window.panelHarness.mountMany([true, true]));
+  await expect(page.locator('.wm-free-intel-card')).toHaveCount(2);
+  expect(requests).toBe(1);
+  await page.clock.runFor(30_100);
+  await expect.poll(() => requests).toBe(2);
+  await page.evaluate(() => window.panelHarness.updateMany([false, false]));
+  await page.clock.runFor(31_000);
+  expect(requests).toBe(2);
+  await expect(page.locator('.wm-free-intel-card')).toHaveCount(2);
+  await page.evaluate(() => window.panelHarness.updateMany([true, false]));
+  await expect.poll(() => requests).toBe(3);
+});
+
+test('503 Retry-After prevents automatic requests during the server waiting period', async ({ page }) => {
+  await installDashboard(page);
+  await page.clock.install();
+  let requests = 0;
+  await page.route('**/wm-api/content/**', route => {
+    requests++;
+    return route.fulfill({ status: 503, headers: { 'Retry-After': '30' }, json: { error: 'Fixture outage' } });
+  });
+  await mount(page);
+  await expect(page.getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
+  expect(requests).toBe(1);
+  await page.clock.runFor(29_900);
+  expect(requests).toBe(1);
+  await page.clock.runFor(1_100);
+  await expect.poll(() => requests).toBe(2);
+});
+
+test('one malformed card is isolated and a complete page rollover never leaves a blank list', async ({ page }) => {
+  await installDashboard(page);
+  let ids = ['first'];
+  await page.route('**/wm-api/content/**', route => route.fulfill({ json: {
+    ...payload(null, ids), items: [...ids.map(item), { ...item('bad'), title: {} }],
+  } }));
+  await mount(page, null);
+  await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
+  await expect(page.getByText('Some invalid items were excluded.')).toBeVisible();
+  ids = ['new'];
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(page.locator('.wm-free-intel-card')).toContainText('Fixture new');
+  await expect(page.getByRole('button', { name: 'New content available', exact: false })).toHaveCount(0);
+});
+
+test('partial responses can display without replacing a complete recovery snapshot', async ({ page }) => {
+  await installDashboard(page);
+  let partial = false;
+  await page.route('**/wm-api/content/**', route => route.fulfill({ json: {
+    ...payload(null, partial ? ['partial'] : ['complete-1', 'complete-2']),
+    status: partial ? 'partial' : 'ready',
+  } }));
+  await mount(page, null);
+  await expect(page.locator('.wm-free-intel-card')).toHaveCount(2);
+  partial = true;
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
+  await expect(page.locator('.wm-free-intel-card')).toContainText('Fixture partial');
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('polymonitor:panel-resource:related-news:global:all:7')!).value);
+  expect(saved.items.map((value: {id: string}) => value.id)).toEqual(['complete-1', 'complete-2']);
 });

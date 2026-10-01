@@ -190,7 +190,11 @@ def test_metric_month_year_and_specific_entity_boundaries(source):
     assert matching.relate({"title": "Core CPI month-over-month August 2026"}, item)[0] == "unmatched"
     assert matching.relate({"title": "Headline CPI year-over-year July 2026"}, item)[0] == "unmatched"
     assert matching.relate({"title": "Headline CPI year-over-year August 2025"}, item)[0] == "unmatched"
-    assert matching.relate({"title": "Headline CPI year-over-year August 2026"}, item)[0] == "direct"
+    assert matching.relate({"title": "Headline CPI year-over-year August 2026"}, item)[0] == "context"
+    item["publisher_id"] = "bls"
+    assert matching.relate({"title": "US Headline CPI year-over-year August 2026"}, item)[0] == "direct"
+    for country in ("Canada", "Japan", "Australia", "India"):
+        assert matching.relate({"title": f"{country} Headline CPI year-over-year August 2026"}, item)[0] == "unmatched"
     assert (
         matching.relate({"title": "Will SpaceX launch a rocket?"}, article(source, title="SpaceX company news"))[0]
         == "unmatched"
@@ -472,8 +476,13 @@ def test_optional_redis_hit_and_failure_fall_back_to_sqlite(storage, tmp_path):
     cache = {"store": SnapshotStore(str(tmp_path / "snapshots.db"))}
     seed = refresh_candidates(storage, cache, now=now)
     storage.query_all = lambda *_: pytest.fail("A warm read queried the database")
+    cache["get_json"] = lambda *_: pytest.fail("Fresh local seed waited for optional Redis")
+    assert read_payload(storage, cache, now=now)["cacheMode"] == "sqlite"
+    local = cache["store"]
+    cache["store"] = SimpleNamespace(get_stale=lambda *_: None)
     cache["get_json"] = lambda *_: seed
     assert read_payload(storage, cache, now=now)["cacheMode"] == "redis"
+    cache["store"] = local
     def failed(*_):
         raise ConnectionError("Fixture optional cache unavailable")
     cache["get_json"] = failed
@@ -523,3 +532,51 @@ def test_future_seed_cannot_extend_public_cache_lifetime(storage):
     future = {"schemaVersion": 1, "records": [], "generatedAt": "2026-10-02T01:00:00Z"}
     result = read_payload(storage, {"get_json": lambda *_: future}, now=now)
     assert result["cacheMode"] == "database" and result["generatedAt"] != future["generatedAt"]
+
+
+def test_source_balanced_candidates_do_not_hide_low_frequency_release(storage, source):
+    now = datetime(2026, 10, 1, 14, tzinfo=timezone.utc)
+    usgs = source_map()["usgs"]
+    records = [article(usgs, external_id=f"quake-{i}", url=f"https://earthquake.usgs.gov/earthquakes/eventpage/fixture{i}",
+                       published_at="2026-10-01T12:00:00Z", magnitude=1)
+               for i in range(2000)]
+    store.persist(storage, usgs, records, "2026-10-01T13:00:00Z")
+    store.persist(storage, source, [article(source, published_at="2026-09-30T18:00:00Z")], "2026-10-01T13:00:00Z")
+    for sid in source_map():
+        store.save_state(storage, sid, {"status": "ok", "last_success_at": "2026-10-01T13:00:00Z"})
+    result = public.payload(storage, now=now)
+    assert [item["sourceId"] for item in result["items"]] == ["fed-monetary"]
+    assert result["coverage"]["truncated"] is True
+    assert result["status"] == "partial"
+    assert result["coverage"]["candidatesScanned"] == public.CANDIDATES_PER_PUBLISHER + 1
+    assert result["coverage"]["filteredByReason"]["low_magnitude"] == public.CANDIDATES_PER_PUBLISHER
+
+
+def test_one_bad_source_state_is_isolated(storage, source):
+    now = datetime(2026, 10, 1, 14, tzinfo=timezone.utc)
+    store.persist(storage, source, [article(source, published_at="2026-09-30T18:00:00Z")], "2026-10-01T13:00:00Z")
+    store.save_state(storage, source["source_id"], {"status": "ok"})
+    with storage.get_connection() as conn:
+        conn.execute("INSERT INTO content_source_state VALUES (?,?)", ("bls-cpi", "broken-json"))
+    result = public.payload(storage, now=now)
+    assert len(result["items"]) == 1 and result["status"] == "partial"
+    assert store.source_states(storage)["bls-cpi"]["error"] == "invalid-source-state"
+
+
+def test_policy_deadline_is_not_reference_month(source):
+    item = {**article(source, published_at="2026-09-16T18:00:00Z"), "publisher_id": "fed"}
+    assert matching.relate({"title": "Will the Fed cut rates by December 2026?"}, item)[0] == "context"
+    assert matching.relate({"title": "Will the Fed cut rates in December 2026?"}, item)[0] == "unmatched"
+
+
+def test_http_total_budget_stops_before_request(source):
+    from api.services.free_content.http import fetch
+    session = SimpleNamespace(get=lambda *a, **k: pytest.fail("Expired budget initiated HTTP"))
+    with pytest.raises(TimeoutError, match="budget-exhausted"):
+        fetch(session, source["feed_url"], source, deadline=0)
+
+
+def test_related_seed_is_in_unified_health_registry():
+    from api.services.system_service import SEED_META_SPECS
+    spec = next(spec for spec in SEED_META_SPECS if spec["panelId"] == "related-news")
+    assert (spec["namespace"], spec["cacheKey"]) == ("seed-meta:content", "related-news")

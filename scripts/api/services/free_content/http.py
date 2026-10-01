@@ -1,6 +1,7 @@
 from __future__ import annotations
 import ipaddress
 import socket
+import time
 from urllib.parse import urljoin, urlsplit
 import requests
 
@@ -24,7 +25,13 @@ def validate_url(url, hosts):
             raise ValueError("non-public-host-address")
 
 
-def fetch(session, url, source, state=None):
+def fetch(session, url, source, state=None, *, deadline=None):
+    deadline = deadline if deadline is not None else time.monotonic() + 45
+    def remaining():
+        budget = deadline - time.monotonic()
+        if budget <= 0:
+            raise TimeoutError("source-budget-exhausted")
+        return budget
     headers = {
         "User-Agent": USER_AGENT,
         "Accept": "application/rss+xml, application/atom+xml, application/geo+json, application/json, text/html, application/xml",
@@ -35,8 +42,11 @@ def fetch(session, url, source, state=None):
     if state.get("last_modified"):
         headers["If-Modified-Since"] = state["last_modified"]
     for _ in range(4):
+        remaining()
         validate_url(url, source["allowed_hosts"])
-        with session.get(url, headers=headers, timeout=(6, 18), allow_redirects=False, stream=True) as r:
+        budget = remaining()
+        with session.get(url, headers=headers, timeout=(min(6, budget), min(18, budget)), allow_redirects=False, stream=True) as r:
+            remaining()
             if r.status_code in {301, 302, 303, 307, 308}:
                 url = urljoin(url, r.headers.get("Location", ""))
                 continue
@@ -57,6 +67,7 @@ def fetch(session, url, source, state=None):
             chunks = []
             size = 0
             for chunk in r.iter_content(65536):
+                remaining()
                 size += len(chunk)
                 if size > MAX_BYTES:
                     raise ValueError("response-too-large")

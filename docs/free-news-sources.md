@@ -60,16 +60,16 @@ journalctl --user -u polydata-content-topic-refresh.service -n 50 --no-pager
 ## 关联及 API
 
 - `/content/latest?limit=20&days=7`；`/content/market/{id}?limit=20&days=7`。days 只允许 7 或显式 30 天。保持原 items、marketId、contentType 字段，添加 scope、market_id、count、window、来源状态、最近成功检查时间和 empty_reason。
-- 读取仅本地数据库，复用 provider/time 索引召回最近候选，上限 2,000，再确定性关联；不是每市场采集。候选有上限，不能声称全面召回。
+- 读取只投影共享候选 seed；冷读复用 provider/time 索引，每个 publisher 保留最多 256 条候选，再确定性关联。返回候选总数、截断和过滤原因；不是每市场采集，配额溢出明确 partial，不能声称全面召回。
 - 明确拒绝不同年份/所属月份、CPI/PPI、headline/core、同比/环比和货币/统计辖区冲突。普通词 economy/AI/weather 或公司名独自不能匹配。
-- direct 仅在具体指标、所属月年和测量口径均建立时输出；其余特定实体/事件为 context 并说明未确定条件。风暴需 ID、年份、海盆；观测需地点证据。观察窗口不完整时绝不写成已满足结算。direct 不表示 YES、支持买卖或因果。
+- direct 仅在国家/统计辖区、具体指标、所属月年和测量口径均正向建立时输出；其余特定实体/事件为 context 并说明未确定条件。风暴需 ID、年份、海盆；观测需地点证据。观察窗口不完整时绝不写成已满足结算。direct 不表示 YES、支持买卖或因果。
 - Market 无匹配时 items=[]；异常返回同市场 unavailable，无全局回填。面板 AbortController + 请求代次 + 响应 ID 校验防串市场；同 key 才可保留旧列表。
 
 ## 面板行为
 
 Market / Global 为显式选择，市场标题可见；未选市场可默认 Global Updates。全部 / 报道 / 公告 / 事件区分来源性质。默认过去 7 天，30 天标为历史。作者、来源、发布时间或未知、允许摘要、原文、安全新标签、许可入口和市场关联原因可见；纯文本，展开仅显示允许的 feed 节选/数据整理，不冒充全文。移除 could → CAUTION。
 
-30 秒轮询本地 API；列表有变化时提示“有新内容”，点击后更新。默认全局按 publisher 轮转，每个 NHC/NWS/USGS 最多 4 条且小于 4.5 的地震不进入列表。来源数、显示文章数和匹配数分开。来源状态可展开，保留失败/过期/未请求信息。
+30 秒检查同源 API；摘要与面板共享资源 owner，不重复请求。新内容显示待接受数量；当前页全部滚动换新时立即显示已核验新页，避免空白。默认全局按 publisher 轮转，每个 NHC/NWS/USGS 最多 4 条且小于 4.5 的地震不进入列表。来源数、显示文章数和匹配数分开。来源状态可展开，保留失败/过期/未请求信息。
 
 ## 真实探测与入库验收（UTC）
 
@@ -153,12 +153,16 @@ NHC feed 的 summary/full advisory 同 URL 只保留更完整的 feed 节选；�
 
 ## Related Intelligence 的资源与缓存契约
 
-面板目录负责视图、`model.ts` 的响应校验及阅读状态、`useIntelFeed.ts` 的取数契约。市场 ID、market/global 范围和 7/30 天组成资源身份；切换时重建资源 owner，取消旧请求和重试。参数化端点以 `batch:false` 接入现有共享 Runtime，30 秒检查一次，页面隐藏时暂停，失败保留同资源的已核验列表并支持手动重试。此改动不修改其他面板或共享 Runtime 的实现。
+面板目录负责视图、`model.ts` 的响应校验及阅读状态、`useIntelFeed.ts` 的取数契约。市场 ID、market/global 范围和 7/30 天组成资源身份；切换时释放旧订阅，只有旧资源没有其他消费者时才取消请求和重试。参数化端点以 `batch:false` 接入现有共享 Runtime，30 秒检查一次，页面隐藏时暂停，失败保留同资源的已核验列表并支持手动重试。共享 Runtime 增加通用退避、Retry-After 和资源释放能力，其他面板仍保留原取数路径。
 
-现有 `content_topic_refresh.py` 在采集周期完成后预热一份最近 30 天、最多 2000 条的候选 seed（`snapshot:content:free-public` / `candidates-v1`），同时保存 `seed-meta:content` / `related-news` 的成功时间、失败原因及来源状态。复用既有 Redis 和 SQLite；有效期 90 秒，超过有效期但年龄不超过 300 秒可显式标记 stale 返回，超过 300 秒必须重新读取数据库。worker 每轮休眠 60 秒，完整周期还包含实际采集耗时，不能保证每分钟完成。各来源仍按自身调度与退避采集，不新增 collector，不在 API GET 中抓取外部源。
+现有 `content_topic_refresh.py` 在采集前、中、后预热最近 30 天、每个 publisher 最多 256 条的候选 seed（`snapshot:content:free-public` / `candidates-v2`），同时保存 `seed-meta:content` / `related-news` 的成功时间、失败原因及来源状态。复用既有 Redis 和 SQLite；有效期 90 秒，超过有效期但年龄不超过 300 秒可显式标记 stale 返回，超过 300 秒必须重新读取数据库。worker 每轮休眠 30–60 秒，完整周期还包含有 90 秒上限的采集耗时；采集中每 30 秒发布 seed。各来源仍按自身调度与退避采集，不新增 collector，不在 API GET 中抓取外部源。
 
-API 优先读 Redis，再读 SQLite，冷缓存使用现有跨进程锁合并候选查询。市场/时间范围投影不缓存，每次读取按当前契约、时间窗口、来源许可、警报有效期重新过滤。`generatedAt` 是候选列表核验时间，`lastSuccessfulCheckAt` 是来源最近成功时间；来源超期或失败保留 partial/unavailable，不因缓存命中变成 ready。
+API 优先读新鲜 SQLite seed，再尝试可选 Redis 和较旧 SQLite 快照，冷缓存使用现有跨进程锁合并候选查询。市场/时间范围投影不缓存，每次读取按当前契约、时间窗口、来源许可、警报有效期重新过滤。`generatedAt` 是候选列表核验时间，`lastSuccessfulCheckAt` 是来源最近成功时间；来源超期或失败保留 partial/unavailable，不因缓存命中变成 ready。
 
 新条目等待读者点击查看；已显示条目的修订、撤回、过期和来源健康立即生效。显式选择全局后，后台市场更新不改变这个选择；切回市场模式时使用当前市场 ID。浏览器按真实 expiry 到期移除警报。响应身份、卡片结构、日期及公开链接在渲染前校验，局部错误边界隔离渲染异常。专属样式由目录内的 `styles.css` 维护，滚动区域避开工作区缩放手柄的点击范围。来源内容与覆盖面仍受前述限制，合法空结果不回填全局新闻。
 
 Dossier 请求失败保留同市场 unavailable 状态，页面不再将超时标成无匹配；首页和 dossier 的共同 API reader 校验响应市场 ID/作用范围，拒绝错误市场的数据。
+
+## 2026-10-01 架构整改
+
+共享资源、缓存晋升、Retry-After、可见性和阅读状态见 `docs/panel-resource-contract.md`。原 worker 内的采集执行增加 90 秒可终止进程边界；父进程在采集前、中、后发布 seed，慢来源不阻止其余已核验资讯展示。单条来源状态 JSON 错误被隔离。seed-meta 已接入统一健康列表，contentSync 检查实际 seed 年龄和状态。HTTP 的连接/读取超时仍为 6/18 秒上限，且与许可补取共用 45 秒源预算。当前查询优先读取本地新鲜 SQLite seed，再降级 Redis/数据库；保留 90 秒新鲜、300 秒有界回放。

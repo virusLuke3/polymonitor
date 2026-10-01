@@ -52,6 +52,8 @@ export type PanelRuntimeStatus = {
   cacheMode?: string | null;
   freshness?: string | null;
   ageSeconds?: number | null;
+  retryable?: boolean;
+  nextRetryAt?: number | null;
 };
 
 export type PanelModule = PanelDefinition & {

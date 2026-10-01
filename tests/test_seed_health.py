@@ -232,3 +232,30 @@ def test_system_health_does_not_assume_a_live_book_when_reader_is_missing():
     payload = system_service._build_system_health_payload_uncached(dependencies)
     assert payload["lobRuntime"]["status"] == "warming"
     assert payload["lobRuntime"]["tokens"] == 0
+
+
+def test_related_seed_health_detects_stale_ready_meta():
+    from unittest.mock import patch
+    stamp = datetime.now(timezone.utc).isoformat()
+    dependency = system_service.SeedHealthDependencies(None,
+        lambda namespace, key: {"status": "ready", "lastSuccessAt": stamp} if key == "related-news" else None,
+        lambda: stamp)
+    with patch.object(system_service, "_age_seconds_from_iso", return_value=200):
+        item = next(item for item in system_service.build_seed_health_payload(dependency)["items"]
+                    if item["panelId"] == "related-news")
+    assert item["status"] == "degraded"
+
+
+def test_content_sync_health_checks_seed_age_not_just_table_existence():
+    from api.context import RuntimeResources
+    stamp = datetime.now(timezone.utc).isoformat()
+    seed = {"status": "ready", "lastSuccessAt": stamp, "sourceStates": {"fixture": {"status": "ok"}}}
+    resources = RuntimeResources()
+    try:
+        dependencies = system_service.SystemHealthDependencies(resources, None, lambda: "fixture", lambda: None,
+            lambda _: False, lambda *a: [], lambda *a: None, lambda *a: seed, None, None)
+        assert system_service._build_system_health_payload_uncached(dependencies)["contentSync"]["status"] == "ready"
+        seed["lastSuccessAt"] = "2026-01-01T00:00:00Z"
+        assert system_service._build_system_health_payload_uncached(dependencies)["contentSync"]["status"] == "degraded"
+    finally:
+        resources.close()

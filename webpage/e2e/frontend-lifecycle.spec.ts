@@ -42,16 +42,21 @@ test('dashboard releases slow bootstrap, publishes summaries independently and r
     if (path.endsWith('/bootstrap')) {
       releaseBootstrap = () => route.fulfill({ json: { systemHealth: { apiStatus: 'old-preview' }, globalTradesPreview: [{ id: 'old' }] } });
     } else if (path.endsWith('/content/latest')) {
-      releaseContent = () => route.fulfill({ json: { items: [{ id: 'late-content' }] } });
+      releaseContent = () => route.fulfill({ json: { scope: 'global', marketId: null, status: 'ready', generatedAt: GENERATED_AT,
+        window: { days: 7 }, items: [{ id: 'late-content', source: 'Fixture', title: 'Late content',
+          sourceKind: 'news_report', url: 'https://example.org/fixture' }] } });
     } else if (path.endsWith('/trades/recent')) {
       tradesRequests++;
       return route.fulfill({ json: [{ id: 'fresh-trade' }] });
-    } else if (path.endsWith('/system/health')) return route.fulfill({ json: { apiStatus: 'fresh-health' } });
+    } else if (path.endsWith('/health')) return route.fulfill({ json: { status: 'fresh-health', redis: true } });
     else return route.fulfill({ json: [] });
   });
   await harness(page, 'dashboard');
   await page.clock.runFor(1500);
-  await expect.poll(() => page.evaluate(() => window.frontendHarness.dashboard!.health?.apiStatus)).toBe('fresh-health');
+  await expect.poll(async () => {
+    await page.clock.runFor(100);
+    return page.evaluate(() => window.frontendHarness.dashboard!.health?.apiStatus);
+  }).toBe('fresh-health');
   expect(await page.evaluate(() => window.frontendHarness.dashboard!.loading)).toBe(false);
   expect(await page.evaluate(() => window.frontendHarness.dashboard!.globalTrades)).toEqual([{ id: 'fresh-trade' }]);
   expect(releaseContent).toBeDefined();
@@ -61,6 +66,10 @@ test('dashboard releases slow bootstrap, publishes summaries independently and r
   expect(await page.evaluate(() => window.frontendHarness.dashboard!.health?.apiStatus)).toBe('fresh-health');
   expect(await page.evaluate(() => window.frontendHarness.dashboard!.globalTrades)).toEqual([{ id: 'fresh-trade' }]);
   expect(tradesRequests).toBe(1);
+  await expect.poll(async () => {
+    await page.clock.runFor(100);
+    return page.evaluate(() => window.frontendHarness.dashboard!.latestContent.map(item => item.id));
+  }).toEqual(['late-content']);
   await page.evaluate(() => window.frontendHarness.unmount());
   await page.clock.runFor(60_000);
   expect(tradesRequests).toBe(1);

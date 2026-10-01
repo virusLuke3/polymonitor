@@ -11,6 +11,7 @@ import {
   type PanelRuntimeStatus,
 } from './types';
 import type { RuntimePanelMetadata } from '@/services/api';
+import { ApiHttpError } from '@/services/api';
 
 const DEFAULT_STALE_AFTER_MS: Record<PanelRefreshTier, number> = {
   bootstrap: 5 * 60_000,
@@ -157,6 +158,7 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
       const running = inflight.current.get(panel.id);
       if (running) { pending.add(running); return false; }
       const status = statusesRef.current[panel.id];
+      if (!options.force && status?.error && (status.retryable === false || (status.nextRetryAt ?? 0) > Date.now())) return false;
       if (!options.force && ['interval', 'refresh'].includes(options.reason || 'refresh')
         && panel.refreshPolicy?.tier === 'slow' && status?.updatedAt
         && Date.now() - status.updatedAt < (panel.refreshPolicy.staleAfterMs ?? DEFAULT_STALE_AFTER_MS.slow)) return false;
@@ -195,10 +197,20 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
         },
         onPanelError: (id, error) => {
           if (!isCurrent(id)) return;
-          updateStatuses([id], (current) => ({ ...current,
+          updateStatuses([id], (current) => {
+            const failures = current.failureCount + 1;
+            const retryable = !(error && typeof error === 'object' && 'retryable' in error && error.retryable === false)
+              && (!(error instanceof ApiHttpError) || [408, 425, 429].includes(error.status) || error.status >= 500);
+            const owner = eligible.find(panel => panel.id === id)!;
+            const interval = owner.refreshPolicy?.intervalMs ?? 30_000;
+            const backoff = retryDelay(owner, failures) ?? Math.min(300_000, interval * 2 ** Math.min(4, Math.max(0, failures - 3)));
+            const advised = error instanceof ApiHttpError && Number.isFinite(error.retryAfterMs) ? error.retryAfterMs ?? 0 : 0;
+            const delay = Math.max(advised, backoff) + Math.floor(Math.random() * backoff * 0.1);
+            return { ...current,
             phase: dataRef.current[id] === undefined ? 'error' : 'degraded', lastAttemptAt: now,
-            fetching: false, failureCount: current.failureCount + 1, error: errorMessage(error),
-          }));
+            fetching: false, failureCount: failures, error: errorMessage(error), retryable,
+            nextRetryAt: retryable ? Date.now() + delay : null,
+          }; });
         },
       }).then(({ data }) => controller.signal.aborted ? {} : data).finally(() => {
         panelIds.forEach((id) => {
@@ -250,6 +262,7 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
         const policy = panel.refreshPolicy;
         if (!policy || policy.tier === 'manual') return false;
         const status = statusesRef.current[panel.id];
+        if (status?.error && (status.retryable === false || (status.nextRetryAt ?? 0) > now)) return false;
         if (status?.lastAttemptAt == null) return true;
         const interval = policy.intervalMs ?? (policy.tier === 'fast' || policy.tier === 'slow' ? 20_000 : 0);
         return interval > 0 && now - status.lastAttemptAt >= interval;
@@ -270,8 +283,8 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
     if (runtimeSuspended) return;
     panels.forEach((panel) => {
       const status = statuses[panel.id];
-      if (!status?.error || !demandRef.current.has(panel.id) || retries.current.has(panel.id)) return;
-      const delay = retryDelay(panel, status.failureCount);
+      if (!status?.error || status.retryable === false || !demandRef.current.has(panel.id) || retries.current.has(panel.id)) return;
+      const delay = retryDelay(panel, status.failureCount) == null ? null : Math.max(0, (status.nextRetryAt ?? Date.now()) - Date.now());
       if (delay == null) return;
       retries.current.set(panel.id, window.setTimeout(() => {
         retries.current.delete(panel.id);
@@ -290,6 +303,19 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
   }, []);
   const getStatus = useCallback((id: string) => statuses[sourceId(id)] || EMPTY_STATUS, [sourceId, statuses]);
   const getData = useCallback((id: string) => runtimeData[sourceId(id)], [runtimeData, sourceId]);
+  const forgetIds = useCallback((ids: string[]) => {
+    ids.forEach(id => {
+      const controller = controllers.current.get(id);
+      controllers.current.delete(id); inflight.current.delete(id);
+      if (controller && ![...controllers.current.values()].includes(controller)) controller.abort();
+      const retry = retries.current.get(id);
+      if (retry != null) window.clearTimeout(retry);
+      retries.current.delete(id);
+    });
+    setRuntimeData(current => { const next = { ...current }; ids.forEach(id => delete next[id]); return next; });
+    const next = { ...statusesRef.current }; ids.forEach(id => delete next[id]);
+    statusesRef.current = next; if (mounted.current) setStatuses(next);
+  }, [setRuntimeData]);
   return { runtimeData, setRuntimeData, statuses, getStatus, refreshPanels, refreshIds,
-    getData, setConsumerPanels, setPanelVisible, suspended: runtimeSuspended };
+    getData, forgetIds, setConsumerPanels, setPanelVisible, suspended: runtimeSuspended };
 }

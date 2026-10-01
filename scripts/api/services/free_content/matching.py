@@ -54,6 +54,21 @@ def metric(value):
     return family, core, cadence
 
 
+def jurisdictions(value):
+    """Positive evidence only; an unrecognized jurisdiction never proves US CPI."""
+    patterns = {
+        "US": r"\bu\.?s\.?a?\b|united states|\bamerican\b|bureau of labor statistics|\bbls\b|federal reserve|\bfomc\b|\bfed\b",
+        "EU": r"euro ?area|eurozone|european central|\becb\b|eurostat",
+        "UK": r"\buk\b|united kingdom|british|bank of england|\bons\b",
+        "CA": r"canad(?:a|ian)|bank of canada",
+        "JP": r"japan(?:ese)?|bank of japan",
+        "CN": r"china|chinese",
+        "AU": r"australia(?:n)?|reserve bank of australia",
+        "IN": r"\bindia(?:n)?\b",
+    }
+    return {code for code, pattern in patterns.items() if re.search(pattern, value)}
+
+
 def relate(market, item):
     tags = market.get("tags") or []
     if isinstance(tags, str):
@@ -65,14 +80,11 @@ def relate(market, item):
     context = text(" ".join(str(market.get(k) or "") for k in ("title", "description", "rules")) + " " + " ".join(tags))
     article = text(item.get("title"))
     body = text(article + " " + str(item.get("summary") or ""))
-    if item.get("publisher_id") in {"bls", "fed"} and re.search(
-        r"euro ?area|eurozone|european central|\becb\b|\buk\b|united kingdom|\bchina\b", question
-    ):
-        return "unmatched", "Different statistical or monetary-policy jurisdiction."
-    if item.get("publisher_id") == "ecb" and re.search(
-        r"\bfed\b|fomc|federal reserve|\bu\.s\.|united states|\buk\b|united kingdom|\bchina\b", question
-    ):
-        return "unmatched", "Different monetary-policy jurisdiction."
+    source_jurisdiction = {"bls": "US", "fed": "US", "ecb": "EU"}.get(item.get("publisher_id"))
+    question_jurisdictions = jurisdictions(question)
+    if source_jurisdiction and question_jurisdictions and question_jurisdictions != {source_jurisdiction}:
+        return "unmatched", "Different or ambiguous statistical/monetary-policy jurisdiction."
+    market_jurisdictions = question_jurisdictions or jurisdictions(context)
     my, iy = years(question), years(article)
     if not iy and item.get("published_at"):
         iy = {item["published_at"][:4]}
@@ -93,8 +105,9 @@ def relate(market, item):
                 "context",
                 "Same statistical release family; reference month or measurement basis is not fully established.",
             )
-        if mm and im and mc and ic == mc and md and id_ == md and my and my.intersection(iy):
-            return "direct", "Same indicator, reference month/year and headline/core plus year/month measurement basis."
+        if (source_jurisdiction and market_jurisdictions == {source_jurisdiction}
+            and mm and im == mm and mc and ic == mc and md and id_ == md and my and iy == my):
+            return "direct", "Same jurisdiction, official release indicator, reference month/year and headline/core plus year/month measurement basis."
         return (
             "context",
             "Same statistical release family; this excerpt does not establish every contract measurement condition.",
@@ -115,7 +128,8 @@ def relate(market, item):
         if "monetary" not in item["url"] and "fomc" not in body:
             return "unmatched", "Different Federal Reserve event."
         pm = item.get("published_at", "")[5:7]
-        if mm and pm and MONTHS[int(pm) - 1] not in mm:
+        meeting_months = set(re.findall(r"\bin\s+(" + "|".join(MONTHS) + r")\b", question))
+        if meeting_months and pm and MONTHS[int(pm) - 1] not in meeting_months:
             return "unmatched", "Different policy announcement month."
         return (
             "context",
