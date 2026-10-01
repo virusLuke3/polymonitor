@@ -497,7 +497,7 @@ function WorldMonitorApp() {
 
           <MapToolbar
             state={worldEventMap.state}
-            onPresentationChange={worldEventMap.setPresentationMode}
+            onPresentationChange={viewMode === '2d' ? worldEventMap.setPresentationMode : undefined}
             onTimeRangeChange={worldEventMap.setTimeRange}
             onSeveritiesChange={worldEventMap.setSeverities}
             onBasemapProviderChange={worldEventMap.setBasemapProvider}

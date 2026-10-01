@@ -29,7 +29,7 @@ export function MapToolbar({
   onClearCountry,
 }: {
   state: Pick<WorldEventMapState, 'timeRange' | 'severities' | 'basemapProvider' | 'basemapTheme' | 'countryCode' | 'presentationMode'>;
-  onPresentationChange: (mode: WorldEventMapState['presentationMode']) => void;
+  onPresentationChange?: (mode: WorldEventMapState['presentationMode']) => void;
   onTimeRangeChange: (timeRange: WorldEventTimeRange) => void;
   onSeveritiesChange: (severities: GeoEventSeverity[]) => void;
   onBasemapProviderChange: (provider: WorldEventBasemapProvider) => void;
@@ -41,9 +41,9 @@ export function MapToolbar({
   const selected = new Set(state.severities);
   return (
     <div className="wm-world-event-map-toolbar" aria-label={mt("World Event Map filters")}>
-      <div className="wm-map-time-segments" role="group" aria-label={locale === 'zh' ? '地图展示模式' : 'Map presentation'}>
+      {onPresentationChange ? <div className="wm-map-time-segments" role="group" aria-label={locale === 'zh' ? '地图展示模式' : 'Map presentation'}>
         {(['overview', 'records'] as const).map(mode => <button type="button" aria-pressed={state.presentationMode === mode} onClick={() => onPresentationChange(mode)}>{locale === 'zh' ? mode === 'overview' ? '态势概览' : '完整记录' : mode === 'overview' ? 'Overview' : 'Records'}</button>)}
-      </div>
+      </div> : null}
       <label>
         <span>{mt("Time")}</span>
         <div className="wm-map-time-segments" role="group" aria-label={mt('Map time range')}>
