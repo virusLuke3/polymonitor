@@ -127,9 +127,13 @@ def get_related_content_payload(
     market_id: int,
     limit: int = 8,
     days: int = 7,
+    market: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     dependencies = RelatedContentDependencies.from_context(ctx)
-    return dependencies.get_related_content_by_market_id(market_id, limit=limit, days=days)
+    options = {"limit": limit, "days": days}
+    if market is not None:
+        options["market"] = market
+    return dependencies.get_related_content_by_market_id(market_id, **options)
 
 
 def get_latest_content_payload(

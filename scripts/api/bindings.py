@@ -227,8 +227,8 @@ def bind_services(runtime: ServiceRuntime) -> None:
         runtime.market_context, limit=limit
     )
     get_redis_client = lambda: api_cache.get_redis_client(runtime.cache)
-    get_related_content_by_market_id = lambda market_id, limit=8, days=7: query_service.get_related_content_by_market_id(
-        runtime.query_context, market_id, limit=limit, days=days
+    get_related_content_by_market_id = lambda market_id, limit=8, days=7, market=None: query_service.get_related_content_by_market_id(
+        runtime.query_context, market_id, limit=limit, days=days, market=market
     )
     get_runtime_lob_payload = lambda market_id: lob_service.get_runtime_lob_payload(runtime.lob, market_id)
     get_snapshot_payload = lambda namespace, cache_key, builder, *, ttl_seconds: api_cache.get_snapshot_payload(
@@ -977,9 +977,9 @@ def build_blueprints(runtime: ServiceRuntime):
         ),
         content_routes.create_content_blueprint(
             content_routes.ContentRouteDependencies(
-                get_market_by_id=lambda market_id: market_service.get_market_by_id(runtime.market_context, market_id),
-                get_related_content_payload=lambda market_id, limit=8, days=7: content_service.get_related_content_payload(
-                    runtime.related_content, market_id, limit=limit, days=days
+                get_market_by_id=lambda market_id: query_service.get_content_market_by_id(runtime.query_context, market_id),
+                get_related_content_payload=lambda market_id, limit=8, days=7, market=None: content_service.get_related_content_payload(
+                    runtime.related_content, market_id, limit=limit, days=days, market=market
                 ),
                 get_latest_content_payload=lambda limit=8, days=7: content_service.get_latest_content_payload(
                     runtime.latest_content, limit=limit, days=days

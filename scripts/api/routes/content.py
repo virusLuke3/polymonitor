@@ -65,7 +65,9 @@ def create_content_blueprint(dependencies: ContentRouteDependencies) -> Blueprin
             market = dependencies.get_market_by_id(market_id)
             if not market:
                 return jsonify({"error": "Market not found", "marketId": market_id}), 404
-            payload = dependencies.get_related_content_payload(market_id, limit=limit, days=30 if request.args.get("days")=="30" else 7)
+            payload = dependencies.get_related_content_payload(
+                market_id, limit=limit, days=30 if request.args.get("days")=="30" else 7, market=market
+            )
             payload = {
                 **payload,
                 "marketTitle": market.get("title"),

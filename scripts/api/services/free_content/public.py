@@ -4,7 +4,6 @@ from datetime import datetime, timedelta, timezone
 from .registry import source_map
 from .normalize import permission, utc
 from .matching import relate
-from .store import source_states
 
 
 def permitted_item(item, sources=None):
@@ -33,7 +32,27 @@ def payload(storage, *, market=None, market_id=None, limit=20, days=7, now=None)
     days = 30 if int(days) == 30 else 7
     cutoff = (now - timedelta(days=days)).isoformat().replace("+00:00", "Z")
     sources = source_map()
-    states = source_states(storage)
+    # One indexed local read: separate table checks/reads add multiple database
+    # round trips on the existing cross-region runtime. Missing schema remains
+    # an unavailable read, never a fabricated healthy empty result.
+    records = storage.query_all(
+        """
+        SELECT 'source' AS record_kind, source_id AS id, state_json AS payload
+        FROM content_source_state
+        UNION ALL
+        SELECT 'item' AS record_kind, id, raw_payload AS payload
+        FROM (
+            SELECT id,raw_payload FROM content_items
+            WHERE provider='free-public' AND (published_at>=? OR published_at IS NULL)
+            ORDER BY published_at DESC LIMIT 2000
+        ) AS candidates
+        """,
+        (cutoff,),
+    )
+    states = {
+        row["id"]: json.loads(row["payload"])
+        for row in records if row["record_kind"] == "source"
+    }
     statuses = []
     for source in sources.values():
         state = states.get(source["source_id"], {})
@@ -41,15 +60,13 @@ def payload(storage, *, market=None, market_id=None, limit=20, days=7, now=None)
         stale = bool(state.get("last_success_at") and due and due < now.isoformat().replace("+00:00", "Z"))
         statuses.append({**source, **state, "status": state.get("status", "not_requested"), "stale": stale})
     items = []
-    if storage.table_exists("content_items"):
+    if records:
         # Existing provider/time index; bounded candidate recall, no HTTP in reads.
-        rows = storage.query_all(
-            "SELECT id,raw_payload FROM content_items WHERE provider='free-public' AND (published_at>=? OR published_at IS NULL) ORDER BY published_at DESC LIMIT 2000",
-            (cutoff,),
-        )
-        for row in rows:
+        for row in records:
+            if row["record_kind"] != "item":
+                continue
             try:
-                item = json.loads(row.get("raw_payload") or "{}")
+                item = json.loads(row.get("payload") or "{}")
             except (ValueError, TypeError):
                 continue
             if not permitted_item(item, sources):
@@ -90,6 +107,7 @@ def payload(storage, *, market=None, market_id=None, limit=20, days=7, now=None)
                     "sourceStatus": state.get("status", "not_requested"),
                 }
             )
+    items.sort(key=lambda item: item.get("publishedAt") or "", reverse=True)
     if market_id is None:
         # Round-robin publishers, preserving chronology inside each publisher.
         groups = {}

@@ -254,6 +254,41 @@ def test_public_routes_cannot_bypass_legacy_permissions_or_trigger_acquisition()
     assert result["items"] == [] and result["marketId"] == 7 and result["scope"] == "market"
 
 
+def test_public_read_uses_one_database_query_and_reuses_route_market(storage, source):
+    from dataclasses import replace
+    from api.services.query_service import ContentStorageDependencies, get_related_content_by_market_id
+    from api.services.content_service import get_related_content_payload
+
+    store.persist(storage, source, [article(source)], "2026-10-01T00:00:00Z")
+    store.save_state(storage, source["source_id"], {"status": "ok"})
+    calls = []
+    dependency = ContentStorageDependencies(
+        resources=storage.resources, application=storage.application,
+        database_path=storage.database_path, get_backend=storage.get_backend,
+        table_exists=lambda *_: pytest.fail("A public read checked schema separately"),
+        get_connection=storage.get_connection,
+        query_all=lambda sql, params=(): calls.append(sql) or storage.query_all(sql, params),
+        query_one=lambda *_: pytest.fail("The route's market was queried twice"),
+    )
+    market = {"id": 7, "title": "Will the Fed cut interest rates after the September 2026 meeting?"}
+    result = get_related_content_by_market_id(dependency, 7, days=30, market=market)
+    assert len(calls) == 1
+    assert result["scope"] == "market" and result["marketId"] == 7
+    assert result["items"] and result["items"][0]["relation"] == "context"
+    forwarded = []
+    result = get_related_content_payload(
+        {"get_related_content_by_market_id": lambda mid, **kwargs: forwarded.append(kwargs) or result,
+         "query_one": storage.query_one}, 7, days=30, market=market,
+    )
+    assert forwarded[0]["market"] is market
+    from api.services.query_service import get_content_market_by_id
+    with storage.get_connection() as conn:
+        conn.execute("CREATE TABLE markets (id INTEGER PRIMARY KEY, title TEXT, description TEXT)")
+        conn.execute("INSERT INTO markets VALUES (7, 'Fixture question', 'Fixture rules')")
+    lookup = replace(dependency, query_one=storage.query_one)
+    assert get_content_market_by_id(lookup, 7)["description"] == "Fixture rules"
+
+
 def test_bls_atom_content_and_fractional_dates():
     source = source_map()["bls-cpi"]
     body = b'<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>Fixture CPI August</title><link href="https://www.bls.gov/news.release/archives/fixture.htm"/><content>Actual feed content fixture.</content><published>2026-08-12T07:51:16.21-04:00</published></entry></feed>'
