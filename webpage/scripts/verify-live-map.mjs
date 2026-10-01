@@ -36,6 +36,29 @@ async function capture(page, name) {
   await page.evaluate(() => document.fonts.ready);
   await page.screenshot({ path: resolve(output, `${name}.png`) });
 }
+async function verifyDateline(page, host, width, record) {
+  if (width === 1536) await page.setViewportSize({width:2537,height:1286});
+  // A complete snapshot prevents earlier theme/layer interactions from
+  // silently removing the hazard and country overlays this regression needs.
+  const layers='weather-alerts,earthquakes-volcanoes,wildfires,extreme-temperature,climate-anomalies,ucdp,sanctions-country-risk';
+  await page.goto(`${base}/?view=2d&center=180,20&zoom=0.93&time=7d&layers=${layers}&theme=dark&basemap=auto&presentation=overview&severity=info,watch,warning,critical`,{waitUntil:'domcontentloaded',timeout:60_000});
+  await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready',{timeout:60_000});
+  await expect.poll(() => Number(new URL(page.url()).searchParams.get('center')?.split(',')[0])).toBe(-180);
+  await expect(page.locator('.wm-map-source-status').filter({has:page.locator('b',{hasText:/^COUNTRY RISK$/})})).toHaveClass(/is-ok/,{timeout:45_000});
+  await expect(page.locator('.wm-world-event-list-toggle strong')).toContainText(/[1-9]/);
+  assert.equal(new URL(page.url()).searchParams.get('theme'),'dark');
+  assert.equal(new URL(page.url()).searchParams.get('layers'),layers);
+  await page.waitForTimeout(1500);
+  const actualWidth=width===1536?2537:width;
+  await capture(page,`dateline-${actualWidth}`);
+  await host.screenshot({path:resolve(output,`dateline-map-${actualWidth}.png`)});
+  record.states.push({name:'dateline',url:page.url(),rect:await host.boundingBox()});
+  await page.reload({waitUntil:'domcontentloaded'});
+  await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready',{timeout:60_000});
+  assert.equal(Number(new URL(page.url()).searchParams.get('center')?.split(',')[0]),-180);
+  await capture(page,`dateline-reload-${actualWidth}`);
+  assert.deepEqual(record.errors,[]);
+}
 async function verifyArchive(page) {
   const ranges=[];
   const source={getKey:()=>`${base}/map-tiles/planet.pmtiles`,getBytes:async(offset,length,_signal,etag)=>{
@@ -113,6 +136,14 @@ try {
         assert.equal(response.status(), 200);
         assert.equal((await response.text()).trim(), expectedSha);
       });
+      if (process.env.POLYMONITOR_VERIFY_DATELINE_ONLY==='1') {
+        await check(`${width}: native dark hazard and risk overlays at the dateline and after reload`,()=>verifyDateline(page,page.locator('[data-map-renderer-ready]'),width,record));
+        await check(`${width}: browser and published asset errors`,async()=>{
+          assert.deepEqual(record.errors,[]);
+          assert.deepEqual(record.responses.filter(r=>/\/assets\//.test(r.url)&&r.status>=400),[]);
+        });
+        continue;
+      }
       await page.goto(`${base}/?view=2d`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
       const host = page.locator('[data-map-renderer-ready]');
       if(width!==390)await check('real PMTiles byte ranges and decoded distant vector tiles',()=>verifyArchive(page));
@@ -305,21 +336,7 @@ try {
         assert.deepEqual(record.responses.filter(r => /\/assets\//.test(r.url) && r.status >= 400), []);
       });
       await check(`${width}: positive dateline link, reload and single-world composition`, async () => {
-        if (width === 1536) await page.setViewportSize({width:2537,height:1286});
-        // Normal production route, real sources and tiles. mapPerf is not
-        // needed for acceptance; both actual Deck projections are checked in
-        // the browser regression and the native frame is retained here.
-        await page.goto(`${base}/?view=2d&center=180,20&zoom=0.93`, {waitUntil:'domcontentloaded',timeout:60_000});
-        await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready',{timeout:60_000});
-        await expect.poll(() => Number(new URL(page.url()).searchParams.get('center')?.split(',')[0])).toBe(-180);
-        await page.waitForTimeout(1500);
-        await screenshot(`dateline-${width===1536?2537:width}`);
-        record.states.push({name:'dateline',url:page.url(),rect:await host.boundingBox()});
-        await page.reload({waitUntil:'domcontentloaded'});
-        await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready',{timeout:60_000});
-        assert.equal(Number(new URL(page.url()).searchParams.get('center')?.split(',')[0]),-180);
-        await screenshot(`dateline-reload-${width===1536?2537:width}`);
-        assert.deepEqual(record.errors,[]);
+        await verifyDateline(page,host,width,record);
       });
     } catch (error) {
       await screenshot(`failure-${width}`).catch(() => {});
