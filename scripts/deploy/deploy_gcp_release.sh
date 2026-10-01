@@ -14,7 +14,7 @@ DEPLOY_SSH_KEY="${DEPLOY_SSH_KEY:-}"
 DEPLOY_INSTALL_DEPENDENCIES="${DEPLOY_INSTALL_DEPENDENCIES:-1}"
 DEPLOY_VERIFY_SCOPE="${DEPLOY_VERIFY_SCOPE:-default}"
 case "${DEPLOY_VERIFY_SCOPE}" in
-  default|related-intelligence) ;;
+  default|related-intelligence|world-event-map) ;;
   *) echo "Invalid release verification scope: ${DEPLOY_VERIFY_SCOPE}" >&2; exit 1 ;;
 esac
 
