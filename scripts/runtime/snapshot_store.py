@@ -5,6 +5,9 @@
 from __future__ import annotations
 
 import json
+import fcntl
+import hashlib
+from contextlib import contextmanager
 import sqlite3
 import threading
 import time
@@ -19,6 +22,32 @@ class SnapshotStore:
         self._write_lock = threading.Lock()
         self._busy_timeout_ms = max(1, int(busy_timeout_ms))
         self._initialized = False
+
+    @contextmanager
+    def fetch_lock(self, namespace: str, cache_key: str, *, timeout: float = 6):
+        """Bounded cross-worker acquisition ownership; no SQLite transaction during HTTP.
+
+        64 striped lock files bound filesystem use even for moving viewports.
+        Process exit releases flock; a waiting caller never starts a second
+        acquisition after its budget expires.
+        """
+        lock_dir = Path(self.db_path).parent / (Path(self.db_path).name + ".fetch-locks")
+        lock_dir.mkdir(parents=True, exist_ok=True)
+        stripe = int.from_bytes(hashlib.sha256(f"{namespace}:{cache_key}".encode()).digest()[:2], "big") % 64
+        deadline = time.monotonic() + max(0, timeout)
+        with (lock_dir / str(stripe)).open("a") as handle:
+            while True:
+                try:
+                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError("shared-source-acquisition-deadline")
+                    time.sleep(min(.025, max(0, deadline - time.monotonic())))
+            try:
+                yield
+            finally:
+                fcntl.flock(handle, fcntl.LOCK_UN)
 
     def _connect(self) -> sqlite3.Connection:
         path = Path(self.db_path)

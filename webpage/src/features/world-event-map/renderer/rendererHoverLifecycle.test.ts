@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { DeckMapRenderer } from './DeckMapRenderer';
+import * as basemap from '@/config/weatherBasemap';
 import { SvgMapRenderer } from './SvgMapRenderer';
 import type { MapRendererCallbacks } from './MapRenderer';
 import { defaultWorldEventMapState } from '../state/mapState';
@@ -46,8 +47,8 @@ describe('renderer hover lifecycle', () => {
     const removeSource = vi.fn(), removeLayer = vi.fn();
     renderer.map = { isStyleLoaded: () => false, getLayer: () => ({}), getSource: () => ({}), removeLayer, removeSource };
     renderer.setRadar(null);
-    expect(removeSource.mock.calls.map(([id]) => id)).toEqual(['weather-radar', 'weather-radar-coverage']);
-    expect(removeLayer).toHaveBeenCalledTimes(2);
+    expect(removeSource.mock.calls.map(([id]) => id)).toEqual(['weather-radar', 'weather-radar-coverage', 'weather-radar-next', 'weather-radar-next-coverage']);
+    expect(removeLayer).toHaveBeenCalledTimes(4);
     renderer.map = null; renderer.destroy();
   });
   it('does not persist the provisional camera before initial world fit', () => {
@@ -520,3 +521,46 @@ for (const Renderer of [DeckMapRenderer, SvgMapRenderer]) {
     renderer.destroy();
   });
 }
+
+it('V3 layer fuse rejects the SAME toxic data but accepts a fresh corrected version once',()=>{
+  const renderer=new DeckMapRenderer() as any;
+  renderer.callbacks=callbacks();renderer.callbacks.onLayerRecovered=vi.fn();
+  const layer={id:'world-event-points',props:{data:[{id:'bad',geometry:null}]}};
+  renderer.handleDeckLayerError(new Error('bad feature'),layer);
+  expect(renderer.acceptLayerVersion({...layer,props:{data:[{id:'bad',geometry:null}]}})).toBe(false);
+  const fixed={id:layer.id,props:{data:[{id:'bad',geometry:{type:'Point',coordinates:[1,2]}}]}};
+  expect(renderer.acceptLayerVersion(fixed)).toBe(true);
+  expect(renderer.acceptLayerVersion(fixed)).toBe(true);
+  expect(renderer.callbacks.onLayerRecovered).toHaveBeenCalledOnce();renderer.destroy();
+});
+
+it('V3 radar commits only a complete visible frame and retains the previous frame on error',()=>{
+  const renderer=new DeckMapRenderer() as any;renderer.callbacks=callbacks();renderer.callbacks.onRadarStateChange=vi.fn();
+  let loaded=false;const layers=new Set<string>(),sources=new Set<string>();
+  renderer.map={isStyleLoaded:()=>true,getStyle:()=>({layers:[]}),getLayer:(id:string)=>layers.has(id),getSource:(id:string)=>sources.has(id),
+    addSource:(id:string)=>sources.add(id),addLayer:(l:any)=>layers.add(l.id),removeLayer:(id:string)=>layers.delete(id),removeSource:(id:string)=>sources.delete(id),
+    isSourceLoaded:()=>loaded,setPaintProperty:vi.fn()};
+  const first={time:100,tiles:'first',coverageTiles:'coverage'};renderer.setRadar(first);renderer.commitRadarIfReady();
+  expect(renderer.radarAppliedUrl).toBe('');loaded=true;renderer.commitRadarIfReady();expect(renderer.radarAppliedUrl).toBe('first');
+  loaded=false;renderer.setRadar({time:200,tiles:'second',coverageTiles:'coverage'});renderer.commitRadarIfReady();expect(renderer.radarAppliedUrl).toBe('first');
+  vi.stubGlobal('window',globalThis);renderer.handleMapError({sourceId:'weather-radar-next',message:'503'});
+  expect(renderer.radarAppliedUrl).toBe('first');expect(renderer.radarPending).toBeNull();
+  renderer.applyRadar();loaded=true;renderer.commitRadarIfReady();expect(renderer.radarAppliedUrl).toBe('second');
+  renderer.map=null;renderer.destroy();vi.unstubAllGlobals();
+});
+
+it('V3 a single missing tile has a bounded source retry, pauses, then recovers without replacing the GPU',async()=>{
+  vi.useFakeTimers();
+  const renderer=new DeckMapRenderer() as any;vi.stubGlobal('window',globalThis);renderer.callbacks={...callbacks(),onBasemapIssueChange:vi.fn()};
+  renderer.map={refreshTiles:vi.fn()};renderer.primaryHasContent=true;
+  const tile={x:5,y:3,z:3};
+  renderer.handleMapError({sourceId:'basemap',tile:{tileID:{canonical:tile}},message:'tile controlled 503'});
+  expect(renderer.callbacks.onRendererFallbackRequested).not.toHaveBeenCalled();
+  renderer.paused=true;vi.advanceTimersByTime(30_000);expect(renderer.map.refreshTiles).not.toHaveBeenCalled();
+  const reset=vi.spyOn(basemap,'resetWorldEventPMTilesArchive').mockResolvedValue(undefined);
+  renderer.paused=false;renderer.scheduleMissingTileRecovery();await vi.advanceTimersByTimeAsync(30_000);
+  expect(renderer.map.refreshTiles).toHaveBeenCalledWith('basemap',[tile]);
+  renderer.markPrimaryReady=vi.fn();renderer.handleSourceData({sourceId:'basemap',tile:{state:'loaded',tileID:{canonical:tile}}});
+  expect(renderer.missingBaseTiles.size).toBe(0);expect(renderer.callbacks.onBasemapIssueChange).toHaveBeenLastCalledWith(null);
+  renderer.map=null;renderer.destroy();reset.mockRestore();vi.useRealTimers();vi.unstubAllGlobals();
+});

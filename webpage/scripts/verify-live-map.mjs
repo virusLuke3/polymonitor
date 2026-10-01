@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { createHash } from 'node:crypto';
+import { PMTiles } from 'pmtiles';
+import { VectorTile } from '@mapbox/vector-tile';
+import { PbfReader as Pbf } from 'pbf';
 import { chromium, expect } from '@playwright/test';
 
 // Production acceptance: no routes, fixtures, clock overrides or renderer
@@ -32,8 +36,57 @@ async function capture(page, name) {
   await page.evaluate(() => document.fonts.ready);
   await page.screenshot({ path: resolve(output, `${name}.png`) });
 }
+async function verifyArchive(page) {
+  const ranges=[];
+  const source={getKey:()=>`${base}/map-tiles/planet.pmtiles`,getBytes:async(offset,length,_signal,etag)=>{
+    assert(length<=2_000_000,'Bounded range verification must not download an archive');
+    const result=await page.evaluate(async({url,offset,length,etag})=>{
+      const controller=new AbortController(),deadline=setTimeout(()=>controller.abort(),20_000);
+      try {
+        const response=await fetch(url,{headers:{Range:`bytes=${offset}-${offset+length-1}`,...(etag?{'If-Range':etag}:{})},signal:controller.signal,cache:'no-cache'});
+        if(response.status!==206){controller.abort();throw new Error(`Range returned ${response.status}; body deliberately not downloaded`);}
+        const data=new Uint8Array(await response.arrayBuffer());let encoded='';for(let i=0;i<data.length;i+=16384)encoded+=String.fromCharCode(...data.subarray(i,i+16384));
+        return {headers:Object.fromEntries(response.headers.entries()),bytes:btoa(encoded),status:response.status};
+      }finally{clearTimeout(deadline);}
+    },{url:`${base}/map-tiles/planet.pmtiles`,offset,length,etag});
+    const data=Buffer.from(result.bytes,'base64'),range=result.headers['content-range'];
+    assert.equal(data.length,length);assert.match(range,new RegExp(`^bytes ${offset}-${offset+length-1}/[0-9]+$`));
+    if(etag)assert.equal(result.headers.etag,etag);
+    ranges.push({offset,length,status:result.status,headers:result.headers,sha256:createHash('sha256').update(data).digest('hex')});
+    return {data:data.buffer.slice(data.byteOffset,data.byteOffset+data.byteLength),etag:result.headers.etag};
+  }};
+  await source.getBytes(0,16384);await source.getBytes(65536,4096);
+  assert(ranges[0].headers.etag);assert.equal(ranges[0].headers.etag,ranges[1].headers.etag);
+  const repeated=await source.getBytes(65536,4096,undefined,ranges[1].headers.etag);assert(repeated.data.byteLength===4096);assert.equal(ranges[1].sha256,ranges[2].sha256);
+  const archive=new PMTiles(source),header=await archive.getHeader();assert.equal(header.specVersion,3);
+  const decoded=[];for(const [z,x,y] of [[3,2,3],[3,6,2]]){
+    const tile=await archive.getZxy(z,x,y);assert(tile?.data);const vector=new VectorTile(new Pbf(new Uint8Array(tile.data)));
+    const layers=Object.entries(vector.layers).map(([name,layer])=>({name,features:layer.length}));assert(layers.some(l=>l.features>0));decoded.push({z,x,y,layers});
+  }
+  receipt.archive={ranges,decoded,header};
+}
+
 try {
-  for (const width of [1440, 390]) {
+  if(process.env.POLYMONITOR_WAIT_RELEASE==='1'){
+    const context=await browser.newContext({viewport:{width:1536,height:1000}}),page=await context.newPage();
+    await context.tracing.start({screenshots:true,snapshots:true});
+    const oldAssets=[];let published=false;page.on('response',response=>{if(/\/assets\/.*\.(js|css)/.test(response.url()))oldAssets.push({url:response.url(),status:response.status(),phase:published?'after publish':'old page'});});
+    await page.goto(`${base}/?view=3d`,{waitUntil:'domcontentloaded'});
+    const old=await context.request.get(`${base}/release-sha?verify=${Date.now()}`);receipt.previousRelease=(await old.text()).trim();
+    writeFileSync(resolve(output,'old-session-ready.json'),JSON.stringify({previous:receipt.previousRelease,expectedSha}));
+    const deadline=Date.now()+20*60_000;
+    while(Date.now()<deadline){const live=await context.request.get(`${base}/release-sha?verify=${Date.now()}`);if((await live.text()).trim()===expectedSha)break;await new Promise(resolve=>setTimeout(resolve,5000));}
+    const released=await context.request.get(`${base}/release-sha?verify=${Date.now()}`);assert.equal((await released.text()).trim(),expectedSha);published=true;
+    await page.getByRole('tab',{name:'2D Map',exact:true}).click();
+    await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-basemap-state','primary-ready',{timeout:60_000});
+    receipt.oldSession={previous:receipt.previousRelease,current:expectedSha,scripts:await page.evaluate(()=>[...document.scripts].map(s=>s.src).filter(Boolean)),state:page.url(),lateImport:'painted primary 2D',assets:oldAssets,worker:await page.evaluate(()=>navigator.serviceWorker.controller?.scriptURL)};
+    assert.deepEqual(oldAssets.filter(asset=>asset.status>=400),[]);
+    await capture(page,'old-session-late-2d');await context.tracing.stop({path:resolve(output,'old-session.zip')});await context.close();
+  }
+  if(process.env.POLYMONITOR_VERIFY_RANGE_ONLY==='1'){
+    const context=await browser.newContext(),page=await context.newPage();await page.goto(base,{waitUntil:'domcontentloaded'});await check('real PMTiles byte ranges and decoded distant vector tiles',()=>verifyArchive(page));await context.close();
+  }
+  for (const width of process.env.POLYMONITOR_VERIFY_RANGE_ONLY==='1'?[]:[1536, 390]) {
     const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 1000 }, locale: 'en-US' });
     const page = await context.newPage();
     await context.tracing.start({ screenshots: true, snapshots: true, sources: false });
@@ -62,10 +115,11 @@ try {
       });
       await page.goto(`${base}/?view=2d`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
       const host = page.locator('[data-map-renderer-ready]');
+      if(width!==390)await check('real PMTiles byte ranges and decoded distant vector tiles',()=>verifyArchive(page));
       await check(`${width}: real renderer and events`, async () => {
-        await expect(host).toHaveAttribute('data-map-renderer-ready', width === 390 ? 'svg' : 'webgl', { timeout: 60_000 });
+        await expect(host).toHaveAttribute('data-map-renderer-ready', 'webgl', { timeout: 60_000 });
         await expect(page.locator('.wm-world-event-list-toggle strong')).toContainText(/[1-9]/, { timeout: 60_000 });
-        if (width !== 390) {
+        {
           await expect(host).toHaveAttribute('data-map-basemap-state', 'primary-ready', { timeout: 45_000 });
           record.gpu = await page.evaluate(() => {
             const gl = document.createElement('canvas').getContext('webgl2');
@@ -77,6 +131,11 @@ try {
           assert(record.gpu && !/swiftshader|llvmpipe|softpipe|software/i.test(record.gpu));
           assert(record.responses.some(r => r.url.includes('planet.pmtiles') && r.status === 206 && r.range));
         }
+      });
+      await check(`${width}: default overview and measured responsive layout`,async()=>{
+        record.layout={rect:await host.boundingBox(),viewport:await page.evaluate(()=>({width:innerWidth,height:innerHeight,dpr:devicePixelRatio})),presentation:new URL(page.url()).searchParams.get('presentation'),canvases:await host.locator('canvas').count()};
+        assert.equal(record.layout.presentation,'overview');assert(record.layout.rect.width<=width+1);
+        if(width===1536)assert(record.layout.rect.height>=680,JSON.stringify(record.layout));
       });
       if (width !== 390) await check('desktop: repaired sources reach healthy UI state', async () => {
         for (const label of ['NHC', 'NWS', 'FIRMS', 'COUNTRY RISK']) {
@@ -156,6 +215,8 @@ try {
           await expect(host).toHaveAttribute('data-map-renderer-ready', 'webgl', { timeout: 60_000 });
           await expect.poll(() => observed.some(payload => payload.aircraft?.length > 0), { timeout: 60_000 }).toBe(true);
           const snapshot = observed.find(payload => payload.aircraft?.length > 0);
+          const expandAviation=page.getByRole('button',{name:'Expand aviation details'});
+          if (await expandAviation.isVisible()) await expandAviation.click();
           record.aircraft = { source: snapshot.source, status: snapshot.status, generatedAt: snapshot.generatedAt, count: snapshot.aircraft.length, limitations: snapshot.limitations };
           const aircraft = snapshot.aircraft.find(item => item.callsign) || snapshot.aircraft[0];
           await expect(page.locator('.wm-aviation-lens-stats')).toContainText('observed aircraft');
@@ -173,11 +234,16 @@ try {
           page.off('response', responseListener);
         }, { continueOnFailure: true });
       }
+      if(width===1536)await check('desktop: real offline and online recovery',async()=>{
+        await context.setOffline(true);await page.waitForTimeout(1500);await expect(host).toHaveAttribute('data-map-renderer-ready','webgl');await screenshot('desktop-offline');
+        const resumed=[];const listener=response=>{if(response.url().includes('/wm-api/runtime/')&&response.ok())resumed.push({url:response.url(),status:response.status()});};page.on('response',listener);
+        await context.setOffline(false);await expect.poll(()=>resumed.length,{timeout:45000}).toBeGreaterThan(0);await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready');record.realConnectivityCycle={offlineRenderer:'webgl',resumed};page.off('response',listener);await screenshot('desktop-online-recovered');
+      },{continueOnFailure:true});
       await check(`${width}: service worker reload uses published assets`, async () => {
         await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller)), { timeout: 30_000 }).toBe(true);
         await page.reload({ waitUntil: 'domcontentloaded', timeout: 60_000 });
-        await expect(host).toHaveAttribute('data-map-renderer-ready', width === 390 ? 'svg' : 'webgl', { timeout: 60_000 });
-        if (width !== 390) await expect(host).toHaveAttribute('data-map-basemap-state', 'primary-ready', { timeout: 45_000 });
+        await expect(host).toHaveAttribute('data-map-renderer-ready', 'webgl', { timeout: 60_000 });
+        await expect(host).toHaveAttribute('data-map-basemap-state', 'primary-ready', { timeout: 45_000 });
         record.states.push(await page.evaluate(() => ({ name: 'reload', url: location.href,
           scripts: [...document.scripts].map(s => s.src).filter(Boolean),
           worker: navigator.serviceWorker.controller?.scriptURL,

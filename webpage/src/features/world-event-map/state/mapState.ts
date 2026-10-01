@@ -3,6 +3,7 @@ import { worldEventRegionPreset, type WorldEventRegion } from '../config/regions
 import type { GeoEventSeverity } from '../domain/types';
 
 export type WorldEventTimeRange = '1h' | '6h' | '24h' | '48h' | '7d' | 'all';
+export type MapPresentationMode = 'overview' | 'records';
 export type AviationLensMode = 'all' | 'trunk' | 'watch';
 export type AviationRiskSource = 'all' | 'weather' | 'conflict' | 'corridor';
 export type WorldEventBasemapProvider = 'auto' | 'pmtiles' | 'openfreemap' | 'carto';
@@ -11,6 +12,7 @@ export type WorldEventBasemapTheme = 'dark' | 'positron';
 export interface WorldEventMapState {
   /** Transient camera command; never restored from persistence or URL. */
   fitWorld?: boolean;
+  presentationMode: MapPresentationMode;
   center: { lon: number; lat: number };
   zoom: number;
   region: WorldEventRegion;
@@ -46,6 +48,7 @@ export function defaultWorldEventMapState(): WorldEventMapState {
     region: 'global',
     activeLayerIds: executableWorldEventLayers().filter((layer) => layer.defaultEnabled).map((layer) => layer.id),
     timeRange: '7d',
+    presentationMode: 'overview',
     severities: [...WORLD_EVENT_SEVERITIES],
     selectedEventId: null,
     basemapProvider: 'auto',

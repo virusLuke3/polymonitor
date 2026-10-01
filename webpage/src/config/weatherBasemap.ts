@@ -20,6 +20,7 @@ export {
 
 let pmtilesRegistered = false;
 let pmtilesRegistration: Promise<void> | null = null;
+let pmtilesProtocol: import('pmtiles').Protocol | null = null;
 
 /** Register the exact PMTiles protocol used by WorldMonitor, once per page. */
 async function registerWorldEventPMTilesProtocol() {
@@ -28,6 +29,7 @@ async function registerWorldEventPMTilesProtocol() {
     const { Protocol } = await import('pmtiles');
     if (pmtilesRegistered) return;
     const protocol = new Protocol();
+    pmtilesProtocol = protocol;
     addProtocol('pmtiles', protocol.tile);
     pmtilesRegistered = true;
   })().catch((error) => {
@@ -35,6 +37,14 @@ async function registerWorldEventPMTilesProtocol() {
     throw error;
   });
   await pmtilesRegistration;
+}
+
+/** Only a bounded recovery probe resets the archive's rejected header promise. */
+export async function resetWorldEventPMTilesArchive() {
+  if (!WORLD_EVENT_PMTILES_URL) return;
+  await registerWorldEventPMTilesProtocol();
+  const { PMTiles } = await import('pmtiles');
+  pmtilesProtocol?.add(new PMTiles(resolveWorldEventPMTilesUrl(WORLD_EVENT_PMTILES_URL)));
 }
 
 /**
@@ -71,16 +81,16 @@ export async function buildWorldEventPMTilesStyle(url: string, language: 'en' | 
       ? { ...originalLayer, layout: { ...originalLayer.layout, 'text-font': mapBasemapFonts(language, originalLayer.layout?.['text-font']) } }
       : originalLayer;
     if (theme === 'positron') return layer;
-    if (layer.id === 'background') return { ...layer, paint: { ...layer.paint, 'background-color': '#1b1b1d' } };
-    if (layer.id === 'earth') return { ...layer, paint: { ...layer.paint, 'fill-color': '#0c0c0c' } };
-    if (layer.id === 'water') return { ...layer, paint: { ...layer.paint, 'fill-color': '#1b1b1d' } };
+    if (layer.id === 'background') return { ...layer, paint: { ...layer.paint, 'background-color': '#333333' } };
+    if (layer.id === 'earth') return { ...layer, paint: { ...layer.paint, 'fill-color': '#141414' } };
+    if (layer.id === 'water') return { ...layer, paint: { ...layer.paint, 'fill-color': '#333333' } };
     if (layer.type === 'line' && layer.id.startsWith('boundaries')) {
       return { ...layer, paint: { ...layer.paint, 'line-color': layer.id === 'boundaries_country' ? '#35383b' : '#292d30' } };
     }
     if (layer.type === 'symbol' && layer['source-layer'] === 'places') {
       return { ...layer, paint: { ...layer.paint,
         'text-color': layer.id === 'places_country' ? '#a3a8ad' : '#858d95',
-        'text-halo-color': '#0c0c0c', 'text-halo-width': 0.6, 'text-halo-blur': 0.1,
+        'text-halo-color': '#141414', 'text-halo-width': 0.6, 'text-halo-blur': 0.1,
       } };
     }
     return layer;
@@ -193,8 +203,8 @@ export function reinforceWorldEventBasemapLabels(map: LabelCapableMap, language:
 
 export function getWeatherMapFallbackStyle(theme: WeatherMapTheme = 'dark') {
   const light = theme === 'positron';
-  const background = light ? '#dce5e8' : '#1b1b1d';
-  const land = light ? '#f4f1e9' : '#0c0c0c';
+  const background = light ? '#dce5e8' : '#333333';
+  const land = light ? '#f4f1e9' : '#141414';
   const border = light ? '#7d8a90' : '#35383b';
 
   return {
@@ -243,7 +253,7 @@ export function getWeatherMapFallbackStyle(theme: WeatherMapTheme = 'dark') {
         },
         paint: {
           'text-color': light ? '#4a5459' : '#aeb7ba',
-          'text-halo-color': light ? '#eef3f4' : '#1b1b1d',
+          'text-halo-color': light ? '#eef3f4' : '#333333',
           'text-halo-width': 1.25,
           'text-halo-blur': 0.15,
           'text-opacity': 0.94,

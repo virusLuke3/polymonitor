@@ -64,6 +64,15 @@ import type {
 const RAW_BASE = import.meta.env.VITE_POLYDATA_API_BASE_URL || '/wm-api';
 const API_BASE = RAW_BASE.endsWith('/') ? RAW_BASE.slice(0, -1) : RAW_BASE;
 
+export class ApiHttpError extends Error {
+  readonly retryAfterMs: number | null;
+  constructor(readonly status: number, path: string, retryAfter: string | null) {
+    super(`API ${status} for ${path}`); this.name = 'ApiHttpError';
+    const seconds = Number(retryAfter);
+    this.retryAfterMs = retryAfter == null ? null : Number.isFinite(seconds) ? Math.max(0, seconds * 1000) : Math.max(0, Date.parse(retryAfter) - Date.now());
+  }
+}
+
 export class ApiTimeoutError extends Error {
   constructor(path: string, timeoutMs: number) {
     super(`API timeout after ${(timeoutMs / 1000).toFixed(1)}s for ${path}`);
@@ -90,7 +99,7 @@ async function apiGetWithTimeout<T>(path: string, timeoutMs = 12000, externalSig
       headers: { Accept: 'application/json' },
       signal: controller.signal,
     });
-    if (!response.ok) throw new Error(`API ${response.status} for ${path}`);
+    if (!response.ok) throw new ApiHttpError(response.status, path, response.headers.get('Retry-After'));
     // Keep timeout and cancellation ownership until the body is consumed.
     return await response.json() as T;
   } catch (error) {

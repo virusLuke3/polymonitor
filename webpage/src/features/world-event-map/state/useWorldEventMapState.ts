@@ -59,6 +59,7 @@ export function useWorldEventMapState() {
 
   return useMemo(() => ({
     state,
+    setPresentationMode: (mode: 'overview' | 'records') => dispatch({ type: 'set-presentation', mode }),
     setCamera: (center: { lon: number; lat: number }, zoom: number) => dispatch({ type: 'set-camera', center, zoom }),
     setZoom: (zoom: number) => dispatch({ type: 'set-zoom', zoom }),
     setRegion: (region: WorldEventRegion) => dispatch({ type: 'set-region', region }),

@@ -1,3 +1,5 @@
+import type { RendererViewport } from '../renderer/MapRenderer';
+import type { AviationPhase } from '../data/useAviationViewport';
 import { lazy, Suspense } from 'preact/compat';
 import { useI18n } from '@/services/i18n';
 import type { GeoEvent } from '../domain/types';
@@ -5,6 +7,8 @@ import type { AviationLensMode, AviationRiskSource, WorldEventMapState } from '.
 const WorldEventMap = lazy(() => import('./WorldEventMap').then((module) => ({ default: module.WorldEventMap })));
 
 export function WorldEventMapView({
+  onViewportChange,
+  aviationStatus,
   onRendererKindChange,
   events,
   state,
@@ -17,6 +21,8 @@ export function WorldEventMapView({
   onCountryChange,
   onWeatherPreset,
 }: {
+  onViewportChange?: (viewport: RendererViewport) => void;
+  aviationStatus?: {phase: AviationPhase; error: string | null; payload: import('@/types').AviationViewportPayload | null};
   onRendererKindChange?: (kind: 'webgl' | 'svg') => void;
   events: GeoEvent[];
   state: WorldEventMapState;
@@ -34,6 +40,8 @@ export function WorldEventMapView({
     <div className="wm-inline-weather-map">
       <Suspense fallback={<div className="wm-world-event-map-shell" role="status">{t('map.loadingworldeventrenderer')}</div>}>
         <WorldEventMap
+          onViewportChange={onViewportChange}
+          aviationStatus={aviationStatus}
           onRendererKindChange={onRendererKindChange}
           events={events}
           state={state}
@@ -45,7 +53,6 @@ export function WorldEventMapView({
           onAviationClose={onAviationClose}
           onCountryChange={onCountryChange}
           onWeatherPreset={onWeatherPreset}
-          height={620}
         />
       </Suspense>
     </div>

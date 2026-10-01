@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
-import { fetchNaturalHazardMapSource } from '@/services/api';
+import { ApiHttpError, fetchNaturalHazardMapSource } from '@/services/api';
 import type {
   HazardEvent,
   HazardKind,
@@ -15,6 +15,8 @@ import {
 import {
   HAZARD_MAP_SOURCE_KEYS,
   hazardMapGeometryZoom,
+  hazardSnapshotRetainable,
+  hazardSnapshotExpiresAt,
   readHazardMapSnapshot,
   writeHazardMapSnapshot,
   type HazardMapSourceKey,
@@ -69,12 +71,7 @@ function sourceSignature(parsed: ParsedNaturalHazards) {
     source?.dataUpdatedAt,
     source?.fetchedAt,
     source?.errorCode,
-    parsed.events.map((event) => [
-      event.id,
-      event.updatedAt,
-      event.revision.revisionAt,
-      event.revision.cancelled,
-    ]),
+    parsed.events,
   ]);
 }
 
@@ -137,6 +134,7 @@ function sourceStatus(
     : '';
   return {
     ...parsedStatus,
+    phase: record.refreshError || record.origin === 'cache' ? 'stale' : parsedStatus.phase,
     status: record.refreshError || record.origin === 'cache'
       ? parsedStatus.status === 'error' ? 'error' : 'degraded'
       : parsedStatus.status,
@@ -195,6 +193,7 @@ export function useNaturalHazards({ sourceKeys, zoom, center, suspended }: {
   const records = useRef(new Map<HazardMapSourceKey, SourceRecord>());
   const errors = useRef(new Map<HazardMapSourceKey, string>());
   const publishFrame = useRef<number | null>(null);
+  const expiryTimer = useRef<number | null>(null);
   const [state, setState] = useState<NaturalHazardsState>({
     events: [], response: null,
     sources: HAZARD_MAP_SOURCE_KEYS.map((key) => sourceStatus(key, undefined, false, undefined)),
@@ -207,14 +206,24 @@ export function useNaturalHazards({ sourceKeys, zoom, center, suspended }: {
       publishFrame.current = null;
       if (!mounted.current) return;
       const startedAt = performance.now();
+      if(expiryTimer.current!=null)window.clearTimeout(expiryTimer.current);expiryTimer.current=null;
+      let nextExpiry=Infinity;
+      for(const source of demand.current) {
+        const record=records.current.get(source);if(!record)continue;
+        const deadline=hazardSnapshotExpiresAt(source,record.parsed.response);
+        if(deadline!=null && Date.now()>deadline) {
+          records.current.delete(source);errors.current.set(source,'Last source snapshot exceeds its retention budget');
+        }else if(deadline!=null)nextExpiry=Math.min(nextExpiry,deadline);
+      }
+      if(Number.isFinite(nextExpiry))expiryTimer.current=window.setTimeout(()=>{expiryTimer.current=null;publish();},Math.max(1,nextExpiry-Date.now()+1));
       const active = new Map(demand.current.flatMap((source) => {
         const record = records.current.get(source);
         return record ? [[source, record] as const] : [];
       }));
       const events = mergeHazardEvents(active);
-      const sources = HAZARD_MAP_SOURCE_KEYS.map((source) => sourceStatus(
+      const sources = HAZARD_MAP_SOURCE_KEYS.map((source) => ({...sourceStatus(
         source, records.current.get(source), errors.current.has(source), errors.current.get(source),
-      ));
+      ), ...(!demand.current.includes(source) ? {phase: 'disabled' as const} : {})}));
       const activeStatuses = sources.filter((source) => demand.current.includes(source.key as HazardMapSourceKey));
       const responseErrors = [...active.values()].flatMap((record) => record.parsed.response.errors);
       for (const source of demand.current) {
@@ -239,7 +248,7 @@ export function useNaturalHazards({ sourceKeys, zoom, center, suspended }: {
   }, []);
 
   const pump = useCallback(() => {
-    if (!mounted.current || paused.current || document.hidden) return;
+    if (!mounted.current || paused.current || document.hidden || navigator.onLine === false) return;
     let running = [...tasks.current.values()].filter((task) => task.controller).length;
     for (const task of tasks.current.values()) {
       if (running >= INITIAL_SOURCE_CONCURRENCY) break;
@@ -252,14 +261,28 @@ export function useNaturalHazards({ sourceKeys, zoom, center, suspended }: {
 
   useEffect(() => {
     mounted.current = true;
+    const connectivity = () => {
+      tasks.current.forEach(task => {
+        stopSource(task); task.timer = null;
+        task.queued = true;
+      });
+      if (!document.hidden && navigator.onLine !== false) pump();
+    };
+    document.addEventListener('visibilitychange', connectivity);
+    window.addEventListener('online', connectivity);
+    window.addEventListener('offline', connectivity);
     return () => {
+      document.removeEventListener('visibilitychange', connectivity);
+      window.removeEventListener('online', connectivity);
+      window.removeEventListener('offline', connectivity);
       mounted.current = false;
+      if(expiryTimer.current!=null)window.clearTimeout(expiryTimer.current);expiryTimer.current=null;
       tasks.current.forEach(stopSource);
       tasks.current.clear();
       if (publishFrame.current != null) window.cancelAnimationFrame(publishFrame.current);
       publishFrame.current = null;
     };
-  }, []);
+  }, [pump]);
 
   useEffect(() => {
     const keyFor = (source: HazardMapSourceKey) => `${geometryZoom}:${source === 'firms' ? firmsViewportKey : ''}`;
@@ -274,6 +297,8 @@ export function useNaturalHazards({ sourceKeys, zoom, center, suspended }: {
       const task: SourceTask = { key: keyFor(source), controller: null, timer: null, queued: true, run: () => {} };
       tasks.current.set(source, task);
       let failures = 0;
+      let retryAfterMs: number | null = null;
+      let blocked = false;
       let networkCommitted = false;
       const isCurrent = () => mounted.current && !paused.current && !document.hidden
         && demand.current.includes(source) && tasks.current.get(source) === task
@@ -290,13 +315,13 @@ export function useNaturalHazards({ sourceKeys, zoom, center, suspended }: {
         publish();
       };
       const schedule = (failed: boolean) => {
-        if (!isCurrent()) return;
+        if (!isCurrent() || blocked) return;
         const delay = failed ? RETRY_DELAYS_MS[Math.min(RETRY_DELAYS_MS.length - 1, Math.max(0, failures - 1))]!
           : REFRESH_INTERVAL_MS[source];
         const jitter = Math.floor(Math.random() * (failed ? 1000 : 3000));
         task.timer = window.setTimeout(() => {
           task.timer = null; task.queued = true; pump();
-        }, delay + jitter);
+        }, Math.max(delay + jitter, retryAfterMs || 0));
       };
       task.run = () => {
         const controller = new AbortController();
@@ -308,6 +333,12 @@ export function useNaturalHazards({ sourceKeys, zoom, center, suspended }: {
             recordMapDataPhase('network', source, startedAt, payload.events?.length || 0);
             const parseStartedAt = performance.now();
             const parsed = parseNaturalHazardsResponse(payload);
+            const upstream = payload.sources[0] as typeof payload.sources[number] & {condition?: string; retryAfterSeconds?: number};
+            blocked = upstream?.condition === 'blocked';
+            retryAfterMs = upstream?.condition === 'throttled' && Number.isFinite(upstream.retryAfterSeconds) ? Number(upstream.retryAfterSeconds) * 1000 : null;
+            if (!parsed.events.length && (parsed.rejected.length || parsed.response.sources.some(item => item.status === 'error'))) {
+              throw new Error(parsed.response.errors.map(item=>item.code).join(' · ') || 'Source response was invalid or unavailable');
+            }
             recordMapDataPhase('parse', source, parseStartedAt, parsed.events.length);
             commit(parsed, 'network');
             failures = 0;
@@ -317,13 +348,18 @@ export function useNaturalHazards({ sourceKeys, zoom, center, suspended }: {
             if (!isCurrent() || controller.signal.aborted) return;
             const message = error instanceof Error ? error.message : String(error);
             failures += 1;
+            blocked ||= error instanceof ApiHttpError && [401,403].includes(error.status);
+            if (error instanceof ApiHttpError) retryAfterMs = error.retryAfterMs;
             errors.current.set(source, message);
             const existing = records.current.get(source);
-            if (existing) records.current.set(source, { ...existing, refreshError: message });
+            if (existing && hazardSnapshotRetainable(source, existing.parsed.response)) records.current.set(source, { ...existing, refreshError: message });
+            else records.current.delete(source);
             publish(); schedule(true);
           }).finally(() => {
-            task.controller = null;
-            if (isCurrent()) pump();
+            if (task.controller === controller) {
+              task.controller = null;
+              if (isCurrent()) pump();
+            }
           });
       };
       const cacheStartedAt = performance.now();

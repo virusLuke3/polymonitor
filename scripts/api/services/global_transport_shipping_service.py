@@ -10,9 +10,13 @@ import math
 import os
 from collections import Counter
 from collections.abc import Mapping
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import nullcontext
+from concurrent.futures import wait
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from time import monotonic
+from urllib3.util import Timeout
+from threading import Lock
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
@@ -1144,6 +1148,8 @@ def _normalize_opensky_state(row: List[Any], *, region: Dict[str, Any], sampled_
         "riskScore": min(88, risk_score),
         "source": "OpenSky",
         "sourceUrl": OPENSKY_DOC_URL,
+        "observedAt": datetime.fromtimestamp(float(row[3]), timezone.utc).isoformat().replace("+00:00", "Z") if _float(row[3]) and 0 < float(row[3]) <= datetime.now(timezone.utc).timestamp() else None,
+        "receivedAt": sampled_at,
         "updatedAt": sampled_at,
     }
 
@@ -1226,7 +1232,10 @@ def _normalize_adsb_aircraft(row: Dict[str, Any], *, hub: Dict[str, Any], sample
         "heading": _float(row.get("track") if row.get("track") is not None else row.get("true_heading")),
         "verticalRate": round(vertical_rate_ft_min * 0.00508, 2) if vertical_rate_ft_min is not None else None,
         "onGround": on_ground,
-        "lastContact": row.get("seen") or row.get("seen_pos"),
+        "lastContact": row.get("seen"),
+        "positionAgeSeconds": row.get("seen_pos"),
+        "observedAt": None,
+        "receivedAt": sampled_at,
         "status": "watch" if risk_score >= 34 else "normal",
         "riskScore": min(92, risk_score),
         "source": "ADSB.lol",
@@ -1266,9 +1275,13 @@ def _adsb_viewport_snapshot(
     aircraft: List[Dict[str, Any]] = []
     errors: List[Dict[str, str]] = []
     sectors = _adsb_viewport_samples(bbox)
+    resources = _dependencies(ctx).resources
+    deadline = monotonic() + 7.5
     seen: set[str] = set()
 
     def fetch_sector(index: int, sector: Dict[str, float]) -> tuple[int, Dict[str, Any], List[Any]]:
+        if deadline - monotonic() <= 0.1:
+            raise TimeoutError("aviation-sector-deadline")
         hub = {"id": f"viewport-{index + 1}", "iata": None, "icao": None}
         url = (
             f"{_adsb_base_url()}/point/{sector['lat']:.5f}/"
@@ -1277,35 +1290,41 @@ def _adsb_viewport_snapshot(
         payload = _http_json_get(
             ctx,
             url,
-            timeout=_env_int("POLYDATA_ADSB_VIEWPORT_TIMEOUT_SECONDS", 6, minimum=2, maximum=15),
+            timeout=Timeout(total=max(0.1, deadline-monotonic()), connect=min(2, max(0.1, deadline-monotonic())), read=min(6, max(0.1, deadline-monotonic()))),
             headers={"User-Agent": "polydata-global-transport/1.0"},
         )
-        rows = payload.get("ac") if isinstance(payload, dict) else []
-        return index, hub, rows if isinstance(rows, list) else []
+        rows = payload.get("ac") if isinstance(payload, dict) else None
+        if not isinstance(rows, list):
+            raise ValueError("invalid-adsb-aircraft-catalog")
+        return index, hub, rows
 
-    with ThreadPoolExecutor(max_workers=min(4, len(sectors)), thread_name_prefix="adsb-viewport") as executor:
-        futures = {
-            executor.submit(fetch_sector, index, sector): index
-            for index, sector in enumerate(sectors)
-        }
-        for future in as_completed(futures):
-            index = futures[future]
-            try:
-                _, hub, rows = future.result()
-            except Exception as exc:
-                errors.append({"sector": str(index + 1), "error": exc.__class__.__name__})
-                continue
-            for row in rows:
-                item = _normalize_adsb_aircraft(row, hub=hub, sampled_at=sampled_at)
-                if item is None:
-                    continue
-                if not (west <= float(item["lon"]) <= east and south <= float(item["lat"]) <= north):
-                    continue
-                identity = str(item.get("icao24") or item.get("id"))
-                if identity in seen:
-                    continue
-                seen.add(identity)
-                aircraft.append(item)
+    futures = {}
+    for index, sector in enumerate(sectors):
+        if not resources.aviation_slots.acquire(blocking=False):
+            errors.append({"sector": str(index + 1), "error": "viewport-capacity-limited"}); continue
+        try:
+            future = resources.submit(resources.aviation_executor, fetch_sector, index, sector)
+            future.add_done_callback(lambda _f: resources.aviation_slots.release())
+            futures[future] = index
+        except RuntimeError:
+            resources.aviation_slots.release()
+            errors.append({"sector": str(index + 1), "error": "viewport-runtime-unavailable"})
+    done, pending = wait(futures, timeout=max(0, deadline - monotonic()))
+    for future in pending:
+        future.cancel() # Running HTTP retains its slot until it really finishes.
+        errors.append({"sector": str(futures[future] + 1), "error": "viewport-deadline"})
+    for future in done:
+        index = futures[future]
+        try:
+            _, hub, rows = future.result()
+        except Exception as exc:
+            errors.append({"sector": str(index + 1), "error": exc.__class__.__name__}); continue
+        for row in rows:
+            item = _normalize_adsb_aircraft(row, hub=hub, sampled_at=sampled_at)
+            if item is None or not (west <= float(item["lon"]) <= east and south <= float(item["lat"]) <= north): continue
+            identity = str(item.get("icao24") or item.get("id"))
+            if identity in seen: continue
+            seen.add(identity); aircraft.append(item)
 
     errors.sort(key=lambda item: item["sector"])
     aircraft.sort(key=lambda item: (
@@ -1498,7 +1517,42 @@ def _opensky_live_status(ctx: dict) -> Dict[str, Any]:
     return live_payload
 
 
-def get_aviation_viewport_snapshot(
+def get_aviation_viewport_snapshot(ctx: GlobalTransportShippingContext, *, bbox, zoom, limit=180):
+    resources = _dependencies(ctx).resources
+    bounded_zoom = max(0.0, min(12.0, float(zoom)))
+    quantum = max(0.25, 8 / (2 ** max(0, int(bounded_zoom) - 2)))
+    w, s, e, n = bbox
+    canonical = (max(-180, math.floor(w / quantum) * quantum), max(-90, math.floor(s / quantum) * quantum),
+                 min(180, math.ceil(e / quantum) * quantum), min(90, math.ceil(n / quantum) * quantum))
+    scope = (canonical, int(bounded_zoom), max(1, min(360, int(limit))))
+    with resources.aviation_scope_guard:
+        entry = resources.aviation_scopes.setdefault(scope, [Lock(), 0])
+        entry[1] += 1
+    lock = entry[0]
+    started = monotonic()
+    acquired = lock.acquire(timeout=8)
+    try:
+        if acquired:
+            shared_lock = getattr(_dependencies(ctx).snapshot_store, "fetch_lock", None)
+            try:
+                with (shared_lock(ADSB_SNAPSHOT_NAMESPACE, str(scope), timeout=max(0, 8 - (monotonic() - started))) if shared_lock else nullcontext()):
+                    return _get_aviation_viewport_snapshot(ctx, bbox=bbox, zoom=zoom, limit=limit)
+            except TimeoutError:
+                acquired_result = {"schemaVersion": AVIATION_VIEWPORT_SCHEMA_VERSION, "generatedAt": _utc_now_iso(ctx),
+                    "status": "unavailable", "bbox": list(bbox), "zoom": zoom, "aircraft": [], "aircraftCount": 0,
+                    "errorCode": "aviation-shared-acquisition-deadline"}
+                return acquired_result
+        return {"schemaVersion": AVIATION_VIEWPORT_SCHEMA_VERSION, "generatedAt": _utc_now_iso(ctx),
+            "status": "unavailable", "bbox": list(bbox), "zoom": zoom, "aircraft": [], "aircraftCount": 0,
+            "errorCode": "aviation-singleflight-deadline", "limitations": ["The same viewport is still being acquired; retry is bounded."]}
+    finally:
+        if acquired: lock.release()
+        with resources.aviation_scope_guard:
+            entry[1] -= 1
+            if not entry[1]: resources.aviation_scopes.pop(scope, None)
+
+
+def _get_aviation_viewport_snapshot(
     ctx: GlobalTransportShippingContext,
     *,
     bbox: tuple[float, float, float, float],
@@ -1530,8 +1584,11 @@ def get_aviation_viewport_snapshot(
             "limitations": ["Live aircraft positions are requested only at zoom 2 or higher."],
         }
     quantum = max(0.25, 8 / (2 ** max(0, int(bounded_zoom) - 2)))
-    quantized = tuple(round(value / quantum) * quantum for value in bbox)
-    cache_key = "viewport-v1:" + ":".join(f"{value:.2f}" for value in quantized)
+    quantized = (max(-180, math.floor(west / quantum) * quantum), max(-90, math.floor(south / quantum) * quantum),
+                 min(180, math.ceil(east / quantum) * quantum), min(90, math.ceil(north / quantum) * quantum))
+    cache_key = f"viewport-v2:{bounded_limit}:" + ":".join(f"{value:.4f}" for value in quantized)
+    bbox = quantized
+    west, south, east, north = bbox
     cached = _read_cached_payload(ctx, OPENSKY_SNAPSHOT_NAMESPACE, cache_key, max_age_seconds=30)
     if cached is not None:
         return cached

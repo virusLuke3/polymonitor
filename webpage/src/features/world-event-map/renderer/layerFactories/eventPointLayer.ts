@@ -1,3 +1,4 @@
+import { isMajorWorldEvent } from '../eventDisclosure';
 import type { Layer, LayersList } from '@deck.gl/core';
 import { IconLayer, ScatterplotLayer, TextLayer } from '@deck.gl/layers';
 import { worldEventLayerById, worldEventLayerIdForEvent } from '../../config/layerRegistry';
@@ -24,6 +25,7 @@ import {
 
 export function createEventPointLayers({
   events,
+  presentationMode = 'overview',
   zoom,
   selectedEventId,
   showLabels,
@@ -35,6 +37,7 @@ export function createEventPointLayers({
   screenSize,
 }: {
   events: GeoEvent[];
+  presentationMode?: 'overview' | 'records';
   zoom: number;
   selectedEventId: string | null;
   showLabels: boolean;
@@ -48,6 +51,8 @@ export function createEventPointLayers({
   const index = clusterIndex || new EventClusterIndex();
   index.update(events);
   const { singles, clusters } = index.presentation(zoom, selectedEventId, viewport, project);
+  const clusterSize = (cluster: EventCluster) => presentationMode === 'overview' && !cluster.important ? Math.min(18, 12 + Math.log2(cluster.count + 1)) : Math.min(24, clusterMarkerSize(cluster.count));
+  const pointSize = (event: GeoEvent) => presentationMode === 'overview' && event.id !== selectedEventId && !isMajorWorldEvent(event) ? 6 : markerSize(event, selectedEventId);
   const layers: Layer[] = [
     ...createEventObservationLayer(events, zoom, selectedEventId, viewport),
   ].filter((layer): layer is Layer => Boolean(layer) && !Array.isArray(layer));
@@ -57,21 +62,21 @@ export function createEventPointLayers({
     const mixed = clusters.filter(cluster => cluster.mixed);
     if (mixed.length) layers.push(new ScatterplotLayer<EventCluster>({
       id: 'world-event-mixed-stack-rims', data: mixed,
-      getPosition: cluster => cluster.coordinates, getRadius: cluster => clusterMarkerSize(cluster.count) / 2 + 2,
+      getPosition: cluster => cluster.coordinates, getRadius: cluster => clusterSize(cluster) / 2 + 2,
       getLineColor: [157, 174, 184, 200], getLineWidth: 1,
       radiusUnits: 'pixels', lineWidthUnits: 'pixels', filled: false, stroked: true, pickable: false,
     }));
     layers.push(new ScatterplotLayer<EventCluster>({
       id: 'world-event-clusters', data: clusters,
       getPosition: cluster => cluster.coordinates,
-      getRadius: cluster => clusterMarkerSize(cluster.count) / 2,
-      getFillColor: cluster => [...cluster.color.slice(0, 3), 235] as [number, number, number, number],
+      getRadius: cluster => clusterSize(cluster) / 2,
+      getFillColor: cluster => presentationMode === 'overview' && !cluster.important ? [128, 142, 149, 135] : [...cluster.color.slice(0, 3), 235] as [number, number, number, number],
       getLineColor: [15, 18, 21, 255], getLineWidth: 1,
       radiusUnits: 'pixels', lineWidthUnits: 'pixels', filled: true, stroked: true,
       pickable: true, autoHighlight: false,
     }));
     layers.push(new TextLayer<EventCluster>({
-      id: 'world-event-cluster-counts', data: clusters,
+      id: 'world-event-cluster-counts', data: clusters.filter(cluster => presentationMode === 'records' || cluster.important || zoom >= 4),
       getPosition: cluster => cluster.coordinates, getText: cluster => String(cluster.count),
       getSize: 11, getColor: [12, 15, 18, 255], getTextAnchor: 'middle', getAlignmentBaseline: 'center',
       fontFamily: mapLabelFontFamily(), fontWeight: 600, characterSet: 'auto', pickable: false,
@@ -82,8 +87,8 @@ export function createEventPointLayers({
       id: 'world-event-points', data: singles,
       iconAtlas: MAP_SYMBOL_MASK_ATLAS, iconMapping: MAP_SYMBOL_MASK_ICON_MAPPING,
       getIcon: mapSymbolForEvent, getPosition: event => eventRepresentativePoint(event)!,
-      getSize: event => markerSize(event, selectedEventId), getColor: event => eventColor(event, 245),
-      sizeUnits: 'pixels', sizeMinPixels: 10, sizeMaxPixels: 20,
+      getSize: event => pointSize(event), getColor: event => eventColor(event, 245),
+      sizeUnits: 'pixels', sizeMinPixels: 4, sizeMaxPixels: 26,
       alphaCutoff: 0.05, pickable: true, autoHighlight: false,
     }));
   }
@@ -105,13 +110,13 @@ export function createEventPointLayers({
       const point = eventRepresentativePoint(event);
       const screen = point ? project(point) : null;
       if (!screen) continue;
-      const radius = markerSize(event, selectedEventId) / 2 + 2;
+      const radius = pointSize(event) / 2 + 2;
       boxes.push([screen.x - radius, screen.y - radius, screen.x + radius, screen.y + radius]);
     }
     for (const cluster of clusters) {
       const screen = project(cluster.coordinates);
       if (!screen) continue;
-      const radius = clusterMarkerSize(cluster.count) / 2 + 5;
+      const radius = clusterSize(cluster) / 2 + 5;
       boxes.push([screen.x - radius, screen.y - radius, screen.x + radius, screen.y + radius]);
     }
   }
@@ -135,7 +140,7 @@ export function createEventPointLayers({
       const fontSize = event.id === selectedEventId ? 13 : 11;
       // The renderer measures the loaded font. No DOM or second layout engine here.
       const width = measureLabel?.(label, fontSize) ?? 220;
-      const gap = markerSize(event, selectedEventId) / 2 + 4;
+      const gap = pointSize(event) / 2 + 4;
       const candidates = [
         { offset: [gap, -gap] as [number, number], anchor: 'start' as const, baseline: 'bottom' as const },
         { offset: [gap, gap] as [number, number], anchor: 'start' as const, baseline: 'top' as const },

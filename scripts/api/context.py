@@ -60,14 +60,20 @@ class RuntimeResources:
     agent_rate_buckets: dict[str, list[float]] = field(default_factory=dict)
 
     hazard_locks: dict[str, Any] = field(default_factory=dict)
+    hazard_pending: dict[str, Any] = field(default_factory=dict)
+    aviation_executor: ThreadPoolExecutor = field(default_factory=lambda: ThreadPoolExecutor(max_workers=4, thread_name_prefix="aviation-viewport"))
+    aviation_slots: Any = field(default_factory=lambda: threading.BoundedSemaphore(8))
+    aviation_scopes: dict[str, Any] = field(default_factory=dict)
+    aviation_scope_guard: Any = field(default_factory=threading.Lock)
     hazard_lock_guard: Any = field(default_factory=threading.Lock)
     hazard_executor: ThreadPoolExecutor = field(
         default_factory=lambda: ThreadPoolExecutor(max_workers=9, thread_name_prefix="natural-hazard")
     )
     zone_cache: dict[str, tuple[float, Any]] = field(default_factory=dict)
     zone_cache_lock: Any = field(default_factory=threading.Lock)
+    zone_pending: dict[str, Any] = field(default_factory=dict)
     zone_executor: ThreadPoolExecutor = field(
-        default_factory=lambda: ThreadPoolExecutor(max_workers=24, thread_name_prefix="nws-zone")
+        default_factory=lambda: ThreadPoolExecutor(max_workers=6, thread_name_prefix="nws-zone")
     )
     http_local: Any = field(default_factory=threading.local)
     http_sessions: list[Any] = field(default_factory=list)
@@ -112,13 +118,17 @@ class RuntimeResources:
             self.stopped.set()
             threads = tuple(self._threads)
             futures = tuple(self._futures)
-        for executor in (self.hazard_executor, self.zone_executor):
+        for executor in (self.hazard_executor, self.zone_executor, self.aviation_executor):
             executor.shutdown(wait=False, cancel_futures=True)
         for thread in threads:
             if thread is not threading.current_thread():
                 thread.join(timeout=max(0, deadline - time.monotonic()))
-        if futures:
-            wait(futures, timeout=max(0, deadline - time.monotonic()))
+        # Executor.shutdown cancels queued futures without notifying wait's
+        # waiter machinery. Already-cancelled work must not consume the entire
+        # shutdown budget or delay a release while nothing is running.
+        running = tuple(future for future in futures if not future.done())
+        if running:
+            wait(running, timeout=max(0, deadline - time.monotonic()))
         pending = sum(thread.is_alive() for thread in threads) + sum(not future.done() for future in futures)
         if pending:
             logging.getLogger(__name__).warning("Runtime shutdown deadline reached; pending tasks=%d", pending)

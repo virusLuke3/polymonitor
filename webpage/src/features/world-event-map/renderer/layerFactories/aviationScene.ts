@@ -60,7 +60,6 @@ type AviationBudget = {
   routes: number;
   routeRunners: number;
   seededAircraft: number;
-  liveAircraft: number;
   hubs: number;
   hubLabels: number;
 };
@@ -200,24 +199,24 @@ export function aviationBudget(zoom: number, lens: AviationLensMode): AviationBu
   if (zoom < 1.6) {
     return {
       routes: scale(32, 24), routeRunners: scale(24, 18), seededAircraft: scale(24, 18),
-      liveAircraft: scale(18, 12), hubs: 10, hubLabels: 6,
+      hubs: 10, hubLabels: 6,
     };
   }
   if (zoom < 2.8) {
     return {
       routes: scale(48, 32), routeRunners: scale(28, 20), seededAircraft: scale(36, 24),
-      liveAircraft: scale(28, 18), hubs: 14, hubLabels: 8,
+      hubs: 14, hubLabels: 8,
     };
   }
   if (zoom < 4) {
     return {
       routes: scale(72, 48), routeRunners: scale(36, 24), seededAircraft: scale(48, 32),
-      liveAircraft: scale(36, 24), hubs: 18, hubLabels: 10,
+      hubs: 18, hubLabels: 10,
     };
   }
   return {
     routes: scale(140, 96), routeRunners: scale(72, 48), seededAircraft: scale(96, 64),
-    liveAircraft: scale(64, 42), hubs: 28, hubLabels: 16,
+    hubs: 28, hubLabels: 16,
   };
 }
 
@@ -557,8 +556,7 @@ export function selectAviationRenderData(
     .sort((left, right) => (
       Number(right.id === state.selectedEventId) - Number(left.id === state.selectedEventId)
       || aircraftPriority(right) - aircraftPriority(left)
-    ))
-    .slice(0, budget.liveAircraft);
+    ));
   return {
     routes: flattenGroups(routeGroups),
     hubs,

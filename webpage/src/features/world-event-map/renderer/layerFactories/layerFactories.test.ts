@@ -249,7 +249,7 @@ describe('world event layer factories', () => {
     expect(pointProps.getIcon).toBeDefined();
     expect(color.slice(0, 3)).toEqual([231, 140, 68]);
     expect(color[3]).toBe(245);
-    expect(pointProps.sizeMaxPixels).toBe(20);
+    expect(pointProps.sizeMaxPixels).toBe(26);
     expect(ring).toBeUndefined();
   });
 
@@ -308,6 +308,8 @@ describe('world event layer factories', () => {
     expect(index.buildCount).toBe(1);
 
     index.update([...events]);
+    expect(index.buildCount).toBe(1);
+    index.update(events.map(event => event.id === 'persistent:0' ? { ...event, severity: 'info' as const } : event));
     expect(index.buildCount).toBe(2);
   });
 
@@ -466,12 +468,12 @@ describe('world event layer factories', () => {
     expect(selected.routeMotionGroups).toHaveLength(24);
     expect(selected.flights).toHaveLength(24);
     expect(selected.flightMotionGroups).toHaveLength(24);
-    expect(selected.liveAircraft).toHaveLength(18);
+    expect(selected.liveAircraft).toHaveLength(40);
     expect(aviationLayerStatsForState([...routes, ...flights, ...live], aviationState()))
       .toMatchObject({
         visibleRoutes: 32,
         visibleFlights: 24,
-        visibleLiveAircraft: 18,
+        visibleLiveAircraft: 40,
       });
 
     const staticSections = createAviationStaticLayerSections(
@@ -539,7 +541,7 @@ describe('world event layer factories', () => {
     expect(selected.hubs.every((hub) => Number(String(hub.properties.code).slice(1)) <= 18)).toBe(true);
     expect(selected.flightMotionGroups).toHaveLength(18);
     expect(selected.flightMotionGroups.filter((group) => group.event.properties.layer === 'trunk')).toHaveLength(18);
-    expect(selected.liveAircraft).toHaveLength(13);
+    expect(selected.liveAircraft).toHaveLength(61);
 
     const watch = selectAviationRenderData(
       [...routes, ...flights, ...hubs, ...live],

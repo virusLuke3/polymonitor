@@ -1,6 +1,6 @@
 import { useAviationViewport } from '../../src/features/world-event-map/data/useAviationViewport';
 import { render } from 'preact';
-import { useState } from 'preact/hooks';
+import { useMemo, useState } from 'preact/hooks';
 import { RUNTIME_PANEL_MODULES } from '../../src/panels/registry';
 import { usePanelRuntime } from '../../src/panels/usePanelRuntime';
 import { useMarketFocus } from '../../src/features/market-focus/useMarketFocus';
@@ -89,7 +89,9 @@ function Dossier() {
 function Aviation() {
   const [view, setView] = useState<HazardView>({ layers: [], zoom: 3, center: [-70, 43], active: true });
   api.setAviationView = patch => setView(current => ({ ...current, ...patch }));
-  api.aviation = useAviationViewport(view.active, view.center, view.zoom);
+  const viewport = useMemo(()=>({center:view.center,zoom:view.zoom,widthCssPx:960,heightCssPx:620,revision:1,
+    bounds:[[view.center[0]-20,view.center[1]-12,view.center[0]+20,view.center[1]+12] as [number,number,number,number]]}),[view.center,view.zoom]);
+  api.aviation = useAviationViewport(view.active, viewport);
   return <output>{api.aviation.payload?.generatedAt}</output>;
 }
 function Hazards() {

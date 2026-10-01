@@ -634,7 +634,24 @@ def validate_readiness_payload(kind: str, payload: Any, *, now: datetime, max_ag
         ):
             raise RuntimeError("API dependencies are not ready")
         return
-    if kind == "trades":
+    if kind.startswith("hazard-"):
+        key = kind.removeprefix("hazard-")
+        if not isinstance(payload, dict) or payload.get("schemaVersion") != "natural-hazards-map.v1" or not isinstance(payload.get("events"), list):
+            raise RuntimeError(f"{kind}: invalid map catalog")
+        source = next((s for s in payload.get("sources", []) if s.get("key") == key), {})
+        if source.get("status") not in {"ok", "partial", "empty"} or source.get("errorCode"):
+            raise RuntimeError(f"{kind}: catalog source is {source.get('status', 'missing')}")
+        # Event occurrence and response generation are not acquisition success.
+        stamp = str(source.get("lastSuccessAt") or "")
+    elif kind == "aviation":
+        if not isinstance(payload, dict) or payload.get("schemaVersion") != "aviation-viewport.v1" or not isinstance(payload.get("aircraft"), list):
+            raise RuntimeError("aviation: invalid viewport payload")
+        if payload.get("status") not in {"ok", "partial", "empty"}:
+            raise RuntimeError(f"aviation: source is {payload.get('status', 'missing')}")
+        if payload.get("aircraftCount") != len(payload["aircraft"]):
+            raise RuntimeError("aviation: returned observation count is inconsistent")
+        stamp = str(payload.get("generatedAt") or "")
+    elif kind == "trades":
         if not isinstance(payload, list) or not payload:
             raise RuntimeError("Recent trade read returned no verifiable data")
         stamps = [row.get("timestamp") for row in payload if isinstance(row, dict)]
@@ -661,6 +678,13 @@ def _command_verify(args: argparse.Namespace) -> int:
         "flow": "/runtime/panels/suspicious-flow?limit=12",
         "trades": "/trades/recent?limit=1",
     }
+    if args.scope == "world-event-map":
+        endpoints = {
+            "health": "/health",
+            "hazard-usgs": "/runtime/world/natural-hazards/map?source=usgs&limit=500&zoom=3",
+            "hazard-nws": "/runtime/world/natural-hazards/map?source=nws&limit=500&zoom=3",
+            "aviation": "/runtime/transport/aviation-viewport?bbox=-110,30,-90,45&zoom=3",
+        }
     deadline = time.monotonic() + args.wait_seconds
     while True:
         errors = []
@@ -673,7 +697,7 @@ def _command_verify(args: argparse.Namespace) -> int:
             except (OSError, ValueError, RuntimeError) as exc:
                 errors.append(f"{kind}: {exc}")
         if not errors:
-            print("release-readiness: health, recent trades, Whale Tracker and Flow Watch passed")
+            print("release-readiness: " + ", ".join(endpoints) + " passed; scope=" + args.scope)
             return 0
         print("release-readiness pending: " + "; ".join(errors), flush=True)
         if time.monotonic() >= deadline:
@@ -720,6 +744,7 @@ def build_parser() -> argparse.ArgumentParser:
     verify = commands.add_parser("verify", help="check dependency health and live data freshness")
     verify.add_argument("--url", default="http://127.0.0.1:18500")
     verify.add_argument("--wait-seconds", type=int, default=180)
+    verify.add_argument("--scope", choices=["default", "world-event-map"], default="default")
     verify.set_defaults(handler=_command_verify)
     return parser
 

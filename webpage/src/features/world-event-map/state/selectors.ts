@@ -45,7 +45,8 @@ export function filterWorldEventMapEvents(
       if (Number.isFinite(expiresAt) && expiresAt <= now) return false;
     }
     if (cutoff == null) return true;
-    const timestamp = event.updatedAt || event.occurredAt;
+    const timestamp = isHazardGeoEvent(event) && event.hazardKind === 'earthquake'
+      ? event.occurredAt || event.updatedAt : event.updatedAt || event.occurredAt;
     if (!timestamp) return false;
     const parsed = Date.parse(timestamp);
     return Number.isFinite(parsed) && parsed >= cutoff && parsed <= now;

@@ -20,7 +20,7 @@ import {
   selectAviationRenderData,
   stringProperty,
 } from './aviationScene';
-import { MAP_MONO_FONT_FAMILY } from './shared';
+import { mapLabelFontFamily } from './shared';
 
 const AVIATION_COUNT_CHARACTER_SET = '0123456789';
 const AVIATION_HUB_CHARACTER_SET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-';
@@ -148,11 +148,11 @@ function createAviationMarkerLayerSections(
         getPosition: (marker) => marker.position,
         getText: (marker) => String(marker.count),
         getPixelOffset: [8, -8],
-        getSize: 8,
+        getSize: 11,
         getColor: [225, 247, 250, 230],
         getTextAnchor: 'middle',
         getAlignmentBaseline: 'center',
-        fontFamily: MAP_MONO_FONT_FAMILY,
+        fontFamily: mapLabelFontFamily(),
         fontWeight: 800,
         characterSet: AVIATION_COUNT_CHARACTER_SET,
         pickable: false,
@@ -184,7 +184,7 @@ function createAviationMarkerLayerSections(
       getColor: [174, 233, 241, 195],
       getTextAnchor: 'start',
       getAlignmentBaseline: 'center',
-      fontFamily: MAP_MONO_FONT_FAMILY,
+      fontFamily: mapLabelFontFamily(),
       fontWeight: 900,
       characterSet: AVIATION_HUB_CHARACTER_SET,
       pickable: false,
@@ -333,11 +333,11 @@ export function createAviationDynamicLayers(
         getPosition: (point) => point.position,
         getText: (point) => String(point.count),
         getPixelOffset: [8, -8],
-        getSize: 8,
+        getSize: 11,
         getColor: [225, 247, 250, 230],
         getTextAnchor: 'middle',
         getAlignmentBaseline: 'center',
-        fontFamily: MAP_MONO_FONT_FAMILY,
+        fontFamily: mapLabelFontFamily(),
         fontWeight: 800,
         characterSet: AVIATION_COUNT_CHARACTER_SET,
         pickable: false,

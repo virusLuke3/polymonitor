@@ -1,4 +1,4 @@
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect, request, test, type Page } from '@playwright/test';
 
@@ -20,7 +20,7 @@ async function gotoMap(page: Page, search = '') {
   // and preview so worker/interaction checks never depend on external tiles.
   await page.goto(`/?view=2d&mapPerf=1&basemap=openfreemap&time=all&severity=info,watch,warning,critical&${search}`);
   await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute(
-    'data-map-renderer-ready', (page.viewportSize()?.width || 1440) <= 720 ? 'svg' : 'webgl',
+    'data-map-renderer-ready', search.includes('renderer=svg') ? 'svg' : 'webgl',
   );
   await expect(page.getByRole('button', { name: /^All events/i })).toContainText(/[1-9]/);
   await waitForMapPaint(page);
@@ -187,7 +187,7 @@ test('WebGL map covers layered hazards, details, URL state, provider reload and 
   await screenshot(page, '07-country-filter.png');
 
   await page.goto(`/?view=2d&mapPerf=1&basemap=openfreemap&time=all&center=-73,42&zoom=3.2&layers=air-routes&air=all`);
-  await expect(page.getByText('ALL AVIATION')).toBeVisible();
+  await expect(page.getByText('All aviation', {exact:true})).toBeVisible();
   await expect.poll(async () => page.evaluate(() => (
     window.__POLYMONITOR_MAP_PERF__?.snapshot().phases['dynamic-commit'].count || 0
   ))).toBeGreaterThan(0);
@@ -231,7 +231,7 @@ test('climate anomaly includes reproducible geometry and visual evidence', async
 test('WebGL event and cluster picking form complete interaction loops', async ({ page }) => {
   await gotoMap(page, 'center=-122.1,37.4&zoom=8&layers=earthquakes-volcanoes');
   const center = await projectedMapPoint(page, -122.1, 37.4);
-  await hoverMapPoint(page, center, /Cluster.*7 earthquake/i);
+  await hoverMapPoint(page, center, /Cluster.*3 earthquake/i);
   await page.mouse.click(center.x, center.y);
   // Coincident targets now expose the candidates instead of choosing an arbitrary record.
   await expect(page.getByRole('heading', { name: 'Cluster members' })).toBeVisible();
@@ -244,12 +244,13 @@ test('WebGL event and cluster picking form complete interaction loops', async ({
   await expect(page.getByRole('button', { name: /^All events/i })).toContainText('8');
   await waitForMapPaint(page);
   const clusterPoint = await projectedMapPoint(page, -122.1, 37.4);
-  await hoverMapPoint(page, clusterPoint, /Cluster.*7 earthquake/i);
+  await hoverMapPoint(page, clusterPoint, /Cluster.*3 earthquake/i);
   for (const [dx, dy] of [[0, 0], [-10, 0], [10, 0], [0, -10], [0, 10]]) {
     const point = await projectedMapPoint(page, -122.1, 37.4);
     await page.mouse.click(point.x + dx!, point.y + dy!);
     await expect(page.getByRole('heading', { name: 'Cluster members' })).toBeVisible();
-    await expect(page.locator('.wm-world-event-list-summary')).toContainText('7');
+    await expect(page.locator('.wm-world-event-list-summary')).toContainText('7 / 7');
+    await expect(page.getByRole('button', {name:/M6.4 Test Ridge Earthquake/})).toBeVisible();
     await expect(page.locator('.wm-country-context-card')).toHaveCount(0);
     await page.getByRole('button', { name: 'Close all events drawer' }).click();
   }
@@ -293,7 +294,7 @@ test('mobile aviation keeps the map controls and event list unobstructed', async
 
 test('live aircraft supports viewport loading, hover, click and inspector details', async ({ page }) => {
   await gotoMap(page, 'center=-70,43&zoom=5&layers=air-routes&air=all');
-  await expect(page.getByText('ALL AVIATION')).toBeVisible();
+  await expect(page.getByText('All aviation', {exact:true})).toBeVisible();
   const expand = (await page.locator('.wm-map-focus-toggle').boundingBox())!;
   const lens = (await page.locator('.wm-aviation-lens').boundingBox())!;
   expect(lens.x + lens.width).toBeLessThanOrEqual(expand.x);
@@ -311,7 +312,7 @@ test('live aircraft supports viewport loading, hover, click and inspector detail
 test('SVG fallback and reduced-motion mobile preserve events, interaction entry points and cleanup', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.setViewportSize({ width: 390, height: 844 });
-  await gotoMap(page, 'center=-70,22&zoom=3&layers=weather-alerts,earthquakes-volcanoes,wildfires,extreme-temperature,climate-anomalies');
+  await gotoMap(page, 'renderer=svg&center=-70,22&zoom=3&layers=weather-alerts,earthquakes-volcanoes,wildfires,extreme-temperature,climate-anomalies');
   await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', 'svg');
   await expect(page.locator('.wm-world-event-svg-map')).toBeVisible();
   await expect(page.locator('.wm-world-event-svg-cyclone-geometry.is-forecast')).toHaveCount(1);
@@ -334,7 +335,7 @@ test('SVG fallback and reduced-motion mobile preserve events, interaction entry 
 test('SVG country context and filtering remain keyboard-accessible', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.setViewportSize({ width: 390, height: 844 });
-  await gotoMap(page, 'center=-98,39&zoom=3&layers=earthquakes-volcanoes,wildfires');
+  await gotoMap(page, 'renderer=svg&center=-98,39&zoom=3&layers=earthquakes-volcanoes,wildfires');
   await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', 'svg');
   const usCountry = page.locator('[aria-label^="United States"][aria-label$="map area"]');
   await expect(usCountry).toBeVisible();
@@ -413,12 +414,35 @@ test('country risk evidence reaches a selectable polygon in both primary and SVG
 });
 
 
-test('thirty layer, provider and selection cycles keep resources bounded and tooltips safe', async ({ page }) => {
+test('fifty layer, provider and selection cycles keep resources bounded and tooltips safe', async ({ page }) => {
   test.setTimeout(180_000);
+  await page.addInitScript(()=>{
+    const timeouts=new Set<number>(),intervals=new Set<number>();
+    const set=window.setTimeout.bind(window),clear=window.clearTimeout.bind(window);
+    const repeat=window.setInterval.bind(window),stop=window.clearInterval.bind(window);
+    window.setTimeout=((callback:any,delay:any,...args:any[])=>{const id=set(()=>{timeouts.delete(id);callback(...args);},delay);timeouts.add(id);return id;}) as any;
+    window.clearTimeout=((id:number)=>{timeouts.delete(id);clear(id);}) as any;
+    window.setInterval=((...args:any[])=>{const id=(repeat as any)(...args);intervals.add(id);return id;}) as any;
+    window.clearInterval=((id:number)=>{intervals.delete(id);stop(id);}) as any;
+    (window as any).__v3Timers=()=>({timeouts:timeouts.size,intervals:intervals.size});
+  });
+  let mapRequests=0;page.on('request',request=>{if(/natural-hazards\/map|aviation-viewport/.test(request.url()))mapRequests++;});
   await gotoMap(page, 'center=-122.1,37.4&zoom=8&layers=earthquakes-volcanoes');
   const baselineCanvases = await page.locator('.wm-weather-deck-map canvas').count();
+  const cdp=await page.context().newCDPSession(page);
+  await cdp.send('HeapProfiler.collectGarbage');
+  await cdp.send('Performance.enable');
+  const coldResources=await cdp.send('Memory.getDOMCounters');
+  // The drawer retains its initialized DOM on close. Exercise the same path
+  // once before measuring repetition; keep the cold counts in the receipt.
+  await page.locator('.wm-world-event-list-toggle').click();
+  await page.getByRole('button',{name:/M6.4 Test Ridge Earthquake/}).click();
+  await page.keyboard.press('Escape');await page.locator('.wm-world-event-list-close').click();
+  await waitForMapPaint(page);await cdp.send('HeapProfiler.collectGarbage');
+  const beforeResources={...await cdp.send('Memory.getDOMCounters'), metrics:(await cdp.send('Performance.getMetrics')).metrics,timers:await page.evaluate(()=>(window as any).__v3Timers())};
+  const resourceSamples=[];
   const checkbox = page.locator('.wm-layer-row').filter({ hasText: 'Earthquakes' }).getByRole('checkbox');
-  for (let cycle = 0; cycle < 30; cycle++) {
+  for (let cycle = 0; cycle < 50; cycle++) {
     await checkbox.uncheck(); await checkbox.check();
     if (cycle % 5 === 0) {
       await page.getByRole('combobox', { name: 'Basemap provider' }).selectOption(cycle % 10 === 0 ? 'carto' : 'openfreemap');
@@ -431,9 +455,18 @@ test('thirty layer, provider and selection cycles keep resources bounded and too
     await page.locator('.wm-world-event-list-close').click();
     expect(await page.locator('.wm-weather-deck-map canvas').count()).toBeLessThanOrEqual(baselineCanvases);
     expect(await page.locator('.wm-world-event-renderer-tooltip').count()).toBeLessThanOrEqual(1);
+    if(cycle % 10 === 9){await cdp.send('HeapProfiler.collectGarbage');resourceSamples.push({cycle:cycle+1,...await cdp.send('Memory.getDOMCounters'),metrics:(await cdp.send('Performance.getMetrics')).metrics,timers:await page.evaluate(()=>(window as any).__v3Timers()),mapRequests});}
   }
+  // Native DOM/listener accounting after collection, measured throughout the run.
+  const finalResources=resourceSamples.at(-1)!;
+  mkdirSync(ARTIFACT_DIR,{recursive:true});
+  writeFileSync(resolve(ARTIFACT_DIR,'fifty-cycle-resources.json'),JSON.stringify({coldResources,beforeResources,resourceSamples,baselineCanvases},null,2));
+  expect(finalResources.jsEventListeners).toBeLessThanOrEqual(beforeResources.jsEventListeners + 12);
+  expect(finalResources.documents).toBeLessThanOrEqual(beforeResources.documents + 1);
+  expect(finalResources.timers.intervals).toBeLessThanOrEqual(beforeResources.timers.intervals);
+  expect(finalResources.timers.timeouts).toBeLessThanOrEqual(beforeResources.timers.timeouts + 2);
   const point = await projectedMapPoint(page, -122.1, 37.4);
-  await hoverMapPoint(page, point, /Cluster.*7 earthquake/i);
+  await hoverMapPoint(page, point, /Cluster.*3 earthquake/i);
   const tooltip = page.locator('.wm-world-event-renderer-tooltip');
   const box = (await tooltip.boundingBox())!;
   const host = (await page.locator('[data-map-renderer-ready]').boundingBox())!;
@@ -444,6 +477,8 @@ test('thirty layer, provider and selection cycles keep resources bounded and too
   await page.goto('/login');
   await expect(page.locator('.auth-login-layout')).toBeVisible();
   await expect(page.locator('.maplibregl-canvas, .wm-world-event-renderer-tooltip')).toHaveCount(0);
+  const stopped=mapRequests;await page.waitForTimeout(1500);expect(mapRequests).toBe(stopped);
+  writeFileSync(resolve(ARTIFACT_DIR,'fifty-cycle-resources.json'),JSON.stringify({coldResources,beforeResources,resourceSamples,baselineCanvases,unmounted:{canvases:await page.locator('.maplibregl-canvas').count(),tooltips:await page.locator('.wm-world-event-renderer-tooltip').count(),requestsBefore:stopped,requestsAfter:mapRequests,timers:await page.evaluate(()=>(window as any).__v3Timers())}},null,2));
 });
 
 
@@ -482,7 +517,7 @@ test('rapid report switches reject a late response and source text remains inert
 test('edge tooltip stays inside the map and legend retains geometry semantics', async ({ page }) => {
   await gotoMap(page, 'center=-123.8,37.4&zoom=8&layers=earthquakes-volcanoes,weather-alerts');
   const point = await projectedMapPoint(page, -122.1, 37.4);
-  await hoverMapPoint(page, point, /Cluster.*7 earthquake/i);
+  await hoverMapPoint(page, point, /Cluster.*3 earthquake/i);
   const tip = (await page.locator('.wm-world-event-renderer-tooltip').boundingBox())!;
   const host = (await page.locator('[data-map-renderer-ready]').boundingBox())!;
   expect(tip.x).toBeGreaterThanOrEqual(host.x);

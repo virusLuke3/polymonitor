@@ -321,3 +321,35 @@ def test_release_readiness_rejects_successful_http_with_stale_or_unavailable_dat
     )
     with pytest.raises(RuntimeError):
         release.validate_readiness_payload("health", {"status": "degraded", "database": True, "redis": False}, now=now)
+
+
+def test_map_release_checks_acquisition_time_and_preserves_partial_coverage():
+    from datetime import datetime, timezone
+    import pytest
+
+    now = datetime(2026, 10, 1, 12, tzinfo=timezone.utc)
+    source = {"key": "nws", "status": "partial", "lastSuccessAt": now.isoformat(), "errorCode": None}
+    payload = {"schemaVersion": "natural-hazards-map.v1", "events": [], "sources": [source], "generatedAt": now.isoformat()}
+    release.validate_readiness_payload("hazard-nws", payload, now=now)
+    for change in (
+        {"status": "degraded"}, {"lastSuccessAt": "2026-09-30T12:00:00Z"},
+        {"lastSuccessAt": None}, {"errorCode": "nws-provider-deadline-exceeded"},
+    ):
+        with pytest.raises(RuntimeError):
+            release.validate_readiness_payload("hazard-nws", {**payload, "sources": [{**source, **change}]}, now=now)
+    with pytest.raises(RuntimeError):
+        release.validate_readiness_payload("hazard-usgs", payload, now=now)
+
+
+def test_map_release_rejects_unavailable_or_inconsistent_aviation():
+    from datetime import datetime, timezone
+    import pytest
+
+    now = datetime(2026, 10, 1, 12, tzinfo=timezone.utc)
+    payload = {"schemaVersion": "aviation-viewport.v1", "aircraft": [], "aircraftCount": 0, "status": "empty", "generatedAt": now.isoformat()}
+    release.validate_readiness_payload("aviation", payload, now=now)
+    release.validate_readiness_payload("aviation", {**payload, "status": "partial"}, now=now)
+    for change in ({"status": "unavailable"}, {"schemaVersion": "unknown"}, {"aircraftCount": 1}, {"generatedAt": "2026-09-30T12:00:00Z"}):
+        with pytest.raises(RuntimeError):
+            release.validate_readiness_payload("aviation", {**payload, **change}, now=now)
+    assert release.build_parser().parse_args(["verify", "--scope", "world-event-map"]).scope == "world-event-map"

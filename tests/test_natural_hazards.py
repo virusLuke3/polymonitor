@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from datetime import datetime, timezone
 import json
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
@@ -198,7 +199,18 @@ def test_nws_provider_resolves_official_affected_zone_geometry() -> None:
     def fake_get(url: str, **_kwargs):
         return zone_payload if "/zones/" in url else alert_payload
 
-    event = nws.fetch(fake_get)["events"][0]
+    from api.context import RuntimeResources
+    from datetime import datetime, timezone
+    resources = RuntimeResources()
+    try:
+        first = nws.fetch(fake_get, resources=resources, now=datetime(2026, 8, 2, 11, tzinfo=timezone.utc))["events"]
+        # CAP never waits for geometry. Completed enrichment is merged into the same revision.
+        deadline = time.monotonic() + 1
+        while resources.zone_pending and time.monotonic() < deadline:
+            time.sleep(0.005)
+        event = nws.enrich_cached_events(first, resources, now=datetime(2026, 8, 2, 11, tzinfo=timezone.utc))[0]
+    finally:
+        resources.close()
     assert event["geometry"]["type"] == "Polygon"
     assert event["locationPrecision"] == "region"
     assert event["properties"]["geometrySource"] == "nws-affected-zones"
@@ -324,7 +336,9 @@ def test_nws_provider_keeps_best_previous_official_zone_geometry() -> None:
     previous_events = [{
         "id": "extreme-heat:nws:urn:test:heat-retained",
         "geometry": previous_geometry,
-        "properties": {"resolvedZoneCount": 2},
+        "revision": {"nativeEventId": "urn:test:heat-retained"},
+        "properties": {"resolvedZoneCount": 2, "affectedZones": [
+            "https://api.weather.gov/zones/forecast/ZZZ901", "https://api.weather.gov/zones/forecast/ZZZ902"]},
     }]
 
     def fake_get(url: str, **_kwargs):
@@ -332,7 +346,8 @@ def test_nws_provider_keeps_best_previous_official_zone_geometry() -> None:
             raise TimeoutError("bounded refresh")
         return alert_payload
 
-    event = nws.fetch(fake_get, previous_events=previous_events)["events"][0]
+    from datetime import datetime, timezone
+    event = nws.fetch(fake_get, previous_events=previous_events, now=datetime(2026,8,2,11,tzinfo=timezone.utc))["events"][0]
     assert event["geometry"] == previous_geometry
     assert event["properties"]["resolvedZoneCount"] == 2
     assert event["properties"]["unresolvedZoneCount"] == 0
@@ -511,7 +526,8 @@ def test_provider_deadline_uses_snapshot_published_at_wait_boundary(monkeypatch)
         dependencies.resources.close()
 
 
-def test_provider_deadline_retains_last_successful_snapshot() -> None:
+def test_provider_deadline_retains_last_successful_snapshot(monkeypatch) -> None:
+    monkeypatch.setattr(snapshots, "utc_now", lambda: datetime(2026, 7, 29, 0, 5, tzinfo=timezone.utc))
     store = StaleOnlySnapshotStore()
     store.values[(snapshots.SNAPSHOT_NAMESPACE, "nws")] = {
         "events": [{"id": "flood:nws:stale"}],
@@ -574,6 +590,7 @@ def test_service_returns_partial_data_when_one_provider_fails(monkeypatch) -> No
 
 
 def test_cached_service_mode_never_calls_live_providers(monkeypatch) -> None:
+    monkeypatch.setattr(snapshots, "utc_now", lambda: datetime(2026, 7, 29, 0, 5, tzinfo=timezone.utc))
     store = StaleOnlySnapshotStore()
     store.values[(snapshots.SNAPSHOT_NAMESPACE, "usgs")] = {
         "events": [{"id": "earthquake:usgs:cached", "hazardKind": "earthquake"}],
@@ -874,3 +891,247 @@ def test_firms_public_download_is_shared_and_viewport_is_filtered():
     import pytest
     with pytest.raises(ValueError, match="required-for-product"):
         firms.fetch(get, map_key="", source="VIIRS_SNPP_NRT")
+
+
+def test_v3_nws_catalog_is_independent_of_blocked_geometry_and_recovers_same_revision():
+    from api.context import RuntimeResources
+    from datetime import datetime, timezone
+    from threading import Event
+    release = Event(); started = Event(); resources = RuntimeResources()
+    zone = 'https://api.weather.gov/zones/forecast/VVV001'
+    geometry = {'type': 'Polygon', 'coordinates': [[[-100,35],[-99,35],[-99,36],[-100,35]]]}
+    catalog = {'updated':'2026-10-01T01:00:00Z','features':[{'geometry':None,'properties':{
+        'id':'cap-v3','sent':'2026-10-01T01:00:00Z','event':'Tornado Warning','severity':'Extreme',
+        'expires':'2026-10-02T01:00:00Z','affectedZones':[zone]}}]}
+    calls=[]
+    def get(url, **kwargs):
+        calls.append((url, kwargs['timeout']))
+        if '/zones/' in url:
+            started.set(); release.wait(1);return {'geometry':geometry}
+        return catalog
+    try:
+        start=time.monotonic();first=nws.fetch(get,resources=resources)['events'];assert time.monotonic()-start < .1
+        assert first[0]['geometry'] is None;assert started.wait(.5)
+        for _ in range(10):nws.fetch(get,resources=resources)
+        assert sum('/zones/' in url for url,_ in calls)==1
+        release.set()
+        deadline=time.monotonic()+1
+        while resources.zone_pending and time.monotonic()<deadline:time.sleep(.005)
+        enhanced=nws.enrich_cached_events(first,resources)[0]
+        assert enhanced['geometry']==geometry
+        assert enhanced['id']==first[0]['id'] and enhanced['updatedAt']==first[0]['updatedAt']
+        revised={**catalog['features'][0], 'properties':{**catalog['features'][0]['properties'], 'id':'cap-v4','messageType':'Cancel',
+            'references':[{'identifier':'cap-v3'}],'affectedZones':['https://api.weather.gov/zones/forecast/VVV002']}}
+        cancelled=nws.fetch(lambda *_a,**_k:{'features':[revised]},resources=resources,previous_events=[enhanced])['events'][0]
+        assert cancelled['revision']['cancelled'] and cancelled['geometry'] is None
+        assert nws.enrich_cached_events([cancelled],resources)[0]['geometry'] is None
+    finally:release.set();resources.close()
+
+
+def test_v3_nws_zone_queue_and_http_budgets_are_bounded():
+    from api.context import RuntimeResources
+    from threading import Event
+    release=Event(); resources=RuntimeResources(); calls=[]
+    features=[{'properties':{'id':f'alert:{i}','event':'Tornado Warning','affectedZones':[f'https://api.weather.gov/zones/forecast/ZZ{i:04}']}} for i in range(640)]
+    def get(url,**kwargs):
+        calls.append(kwargs['timeout'])
+        if '/zones/' in url:release.wait(.2);raise TimeoutError('controlled geometry fault')
+        return {'features':features}
+    try:
+        for _ in range(3):
+            result=nws.fetch(get,resources=resources)
+            assert len(result['events'])==600
+            assert len(resources.zone_pending)<=nws.MAX_ZONE_FETCHES_PER_REFRESH
+        assert resources.zone_executor._max_workers==6
+        assert all(t.total<=nws.PROVIDER_FETCH_BUDGET_SECONDS for t in calls)
+    finally:release.set();resources.close()
+
+
+def test_v3_hazard_cold_callers_share_one_future_and_failure_recovers():
+    from api.context import RuntimeResources
+    from threading import Event
+    resources=RuntimeResources(); store=FakeSnapshotStore(); release=Event(); started=Event(); count=[]
+    deps=service.NaturalHazardDependencies.from_context({'_resources':resources,'SNAPSHOT_STORE':store,'http_json_get':lambda *_a,**_k:None})
+    def fetch():count.append(1);started.set();release.wait(1);return {'events':[], 'data_updated_at':'2026-10-01T00:00:00Z'}
+    try:
+        with ThreadPoolExecutor(max_workers=8) as callers:
+            first=callers.submit(service._fetch_provider_results,dependencies=deps,source_specs={'nws':(60,fetch)},deadline_seconds=.5)
+            assert started.wait(.5)
+            rest=[callers.submit(service._fetch_provider_results,dependencies=deps,source_specs={'nws':(60,fetch)},deadline_seconds=.5) for _ in range(6)]
+            time.sleep(.02);assert len(count)==1;release.set()
+            assert all(f.result()['nws']['status']=='ok' for f in [first,*rest])
+        assert len(count)==1
+    finally:release.set();resources.close()
+
+
+def test_v3_stale_snapshot_has_source_specific_age_and_keeps_success_time(monkeypatch):
+    store = StaleOnlySnapshotStore()
+    monkeypatch.setattr(snapshots, 'utc_now', lambda: datetime(2026, 10, 1, 1, tzinfo=timezone.utc))
+    base = {'events': [{'id': 'alert'}], 'fetchedAt': '2026-10-01T00:50:00Z', 'dataUpdatedAt': '2026-09-30T23:00:00Z'}
+    store.values[(snapshots.SNAPSHOT_NAMESPACE, 'nws')] = base
+    retained = snapshots.stale_source_result(store, 'nws', 'controlled-timeout')
+    assert retained['fetchedAt'] == base['fetchedAt']
+    assert retained['dataUpdatedAt'] == base['dataUpdatedAt']
+    store.values[(snapshots.SNAPSHOT_NAMESPACE, 'nws')] = {**base, 'fetchedAt': '2026-10-01T00:44:59Z'}
+    assert snapshots.stale_source_result(store, 'nws', 'controlled-timeout') is None
+    store.values[(snapshots.SNAPSHOT_NAMESPACE, 'nws')] = {**base, 'fetchedAt': None}
+    assert snapshots.stale_source_result(store, 'nws', 'controlled-timeout') is None
+    store.values[(snapshots.SNAPSHOT_NAMESPACE, 'climate-anomaly')] = {**base, 'fetchedAt': '2026-09-30T00:00:00Z'}
+    assert snapshots.stale_source_result(store, 'climate-anomaly', 'controlled-timeout') is not None
+
+
+def test_v3_schema_failure_retains_snapshot_but_valid_empty_replaces_it(monkeypatch):
+    from threading import Lock
+    store = StaleOnlySnapshotStore()
+    monkeypatch.setattr(snapshots, 'utc_now', lambda: datetime(2026, 10, 1, 1, tzinfo=timezone.utc))
+    store.values[(snapshots.SNAPSHOT_NAMESPACE, 'nws')] = {'events':[{'id':'old'}], 'fetchedAt':'2026-10-01T00:59:00Z'}
+    def fetch(get):
+        return snapshots.fetch_with_snapshot(key='nws', snapshot_store=store, source_lock=Lock(), fetcher=get, ttl_seconds=60)
+    failed = fetch(lambda: {'events':None})
+    assert failed['status']=='degraded' and failed['events']==[{'id':'old'}]
+    assert failed['lastSuccessAt']=='2026-10-01T00:59:00Z'
+    monkeypatch.setattr(snapshots, 'utc_now', lambda: datetime(2026,10,1,1,1,tzinfo=timezone.utc))
+    empty = fetch(lambda: {'events':[],'data_updated_at':'2026-10-01T00:59:30Z'})
+    assert empty['status']=='ok' and empty['events']==[]
+    assert empty['dataUpdatedAt']=='2026-10-01T00:59:30Z'
+
+
+def test_v3_nws_expired_queued_job_releases_singleflight_entry():
+    from api.context import RuntimeResources
+    resources = RuntimeResources(); url='https://api.weather.gov/zones/forecast/LATE001'
+    resources.zone_pending[url] = True
+    try:
+        assert nws._zone_geometry(resources, lambda *_a, **_k: (_ for _ in ()).throw(AssertionError('expired task cannot request')), url, time.monotonic()-1) is None
+        assert url not in resources.zone_pending
+    finally: resources.close()
+
+
+def test_v3_provider_auth_and_retry_after_are_explicit_without_new_success_time(monkeypatch):
+    from threading import Lock
+    from requests import HTTPError, Response
+    store=StaleOnlySnapshotStore()
+    monkeypatch.setattr(snapshots, 'utc_now', lambda: datetime(2026,10,1,1,tzinfo=timezone.utc))
+    store.values[(snapshots.SNAPSHOT_NAMESPACE,'nws')]={'events':[{'id':'old'}],'fetchedAt':'2026-10-01T00:59:00Z'}
+    def result(status, retry):
+        response=Response();response.status_code=status;response.headers['Retry-After']=retry
+        def fail(): raise HTTPError('controlled upstream fault', response=response)
+        return snapshots.fetch_with_snapshot(key='nws', snapshot_store=store, source_lock=Lock(), fetcher=fail, ttl_seconds=60)
+    blocked=result(403,'60')
+    assert blocked['condition']=='blocked' and blocked['errorCode']=='nws-http-403'
+    assert blocked['fetchedAt']=='2026-10-01T00:59:00Z'
+    monkeypatch.setattr(snapshots, 'utc_now', lambda: datetime(2026,10,1,1,6,tzinfo=timezone.utc))
+    throttled=result(429,'120')
+    assert throttled['condition']=='throttled' and throttled['retryAfterSeconds']==120
+    assert throttled['lastSuccessAt']==blocked['lastSuccessAt']
+
+
+def test_v3_provider_cooldown_expiry_reprobes_and_then_recovers(monkeypatch):
+    from api.context import RuntimeResources
+    from requests import HTTPError, Response
+    resources=RuntimeResources();store=StaleOnlySnapshotStore();clock=[100.];calls=[]
+    monkeypatch.setattr(snapshots,'utc_now',lambda:datetime.fromtimestamp(clock[0], timezone.utc))
+    deps=service.NaturalHazardDependencies.from_context({'_resources':resources,'SNAPSHOT_STORE':store,'http_json_get':lambda *_a,**_k:None})
+    failed=[True]
+    def fetch():
+        calls.append(1)
+        if failed[0]:
+            response=Response();response.status_code=429;response.headers['Retry-After']='10'
+            raise HTTPError('controlled throttle',response=response)
+        return {'events':[], 'data_updated_at':'2026-10-01T00:00:00Z'}
+    run=lambda:service._fetch_provider_results(dependencies=deps,source_specs={'nws':(60,fetch)})['nws']
+    try:
+        assert run()['condition']=='throttled'
+        for _ in range(20):assert run()['status']=='error'
+        assert len(calls)==1
+        clock[0]+=11;assert run()['condition']=='throttled';assert len(calls)==2
+        for _ in range(10):run()
+        assert len(calls)==2 # The second Retry-After replaces the expired deadline.
+        failed[0]=False;clock[0]+=11;assert run()['status']=='ok'
+        assert store.get_stale(snapshots.CONDITION_NAMESPACE,'nws')['retryAt'] == 0
+    finally:resources.close()
+
+
+def test_v3_cross_process_cold_source_and_failure_have_one_owner(tmp_path):
+    import multiprocessing as mp
+    from runtime.snapshot_store import SnapshotStore
+    from threading import Lock
+    ctx = mp.get_context("fork")
+    path = str(tmp_path / "shared.sqlite3")
+    SnapshotStore(path)._ensure_schema()
+    for failing in (False, True):
+        calls = ctx.Value("i", 0)
+        start = ctx.Event()
+        results = ctx.Queue()
+        def worker():
+            store = SnapshotStore(path)
+            def acquire():
+                with calls.get_lock(): calls.value += 1
+                time.sleep(.2)
+                if failing: raise ValueError("controlled source failure")
+                return {"events": [{"id": "native-shared"}], "data_updated_at": "2026-10-01T00:00:00Z"}
+            start.wait(3)
+            results.put(snapshots.fetch_with_snapshot(key="nws" if failing else "usgs", snapshot_store=store,
+                source_lock=Lock(), fetcher=acquire, ttl_seconds=60))
+        processes = [ctx.Process(target=worker) for _ in range(4)]
+        for process in processes: process.start()
+        start.set()
+        returned = [results.get(timeout=5) for _ in processes]
+        for process in processes:
+            process.join(2)
+            assert process.exitcode == 0
+        assert calls.value == 1
+        assert all(result["status"] == ("error" if failing else "ok") for result in returned)
+        if not failing: assert all(result["events"] == [{"id": "native-shared"}] for result in returned)
+
+
+def test_v3_shared_fetch_lock_timeout_and_process_exit_release(tmp_path):
+    import multiprocessing as mp
+    import pytest
+    from runtime.snapshot_store import SnapshotStore
+    ctx = mp.get_context("fork"); ready = ctx.Event()
+    path = str(tmp_path / "shared.sqlite3")
+    def hold():
+        with SnapshotStore(path).fetch_lock("source", "key"):
+            ready.set(); time.sleep(5)
+    process = ctx.Process(target=hold); process.start()
+    try:
+        assert ready.wait(2)
+        with pytest.raises(TimeoutError):
+            with SnapshotStore(path).fetch_lock("source", "key", timeout=.1): pass
+        process.terminate(); process.join(2)
+        with SnapshotStore(path).fetch_lock("source", "key", timeout=.1): pass
+    finally:
+        if process.is_alive(): process.terminate()
+        process.join(2)
+
+
+def test_v3_nws_geometry_shared_cache_is_available_to_another_worker(tmp_path):
+    from api.context import RuntimeResources
+    from runtime.snapshot_store import SnapshotStore
+    store = SnapshotStore(str(tmp_path / 'shared.sqlite3'))
+    zone = 'https://api.weather.gov/zones/forecast/VVV001'
+    geometry = {'type':'Polygon','coordinates':[[[-100,35],[-99,35],[-99,36],[-100,35]]]}
+    worker = RuntimeResources()
+    event = {'id':'native-cap', 'updatedAt':'2026-10-01T00:00:00Z', 'geometry':None,
+        'expiresAt':'2026-10-02T00:00:00Z', 'revision':{'revisionAt':'2026-10-01T00:00:00Z'},
+        'properties':{'affectedZones':[zone]}}
+    try:
+        store.set(nws.ZONE_SNAPSHOT_NAMESPACE, zone, geometry, nws.ZONE_CACHE_TTL_SECONDS)
+        enriched = nws.enrich_cached_events([event], worker, snapshot_store=store,
+            now=datetime(2026,10,1,1,tzinfo=timezone.utc))[0]
+        assert enriched['geometry'] == geometry
+        assert enriched['id'] == event['id'] and enriched['updatedAt'] == event['updatedAt']
+        cancelled={**event,'revision':{'cancelled':True}}
+        assert nws.enrich_cached_events([cancelled],worker,snapshot_store=store)[0]['geometry'] is None
+    finally:worker.close()
+
+
+def test_nws_expired_absolute_deadline_does_not_start_new_http_work():
+    calls = []
+    try:
+        nws.fetch(http_json_get=lambda *args, **kwargs: calls.append((args, kwargs)), deadline=time.monotonic()-.01)
+    except TimeoutError as exc:
+        assert str(exc) == 'nws-catalog-deadline-before-acquisition'
+    else:
+        raise AssertionError('Expired queued work must fail before acquisition')
+    assert calls == []

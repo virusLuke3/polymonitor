@@ -252,7 +252,7 @@ export function adaptTransportReference(
         provider: nonEmpty(flight.source) || provider,
         url: nonEmpty(flight.sourceUrl),
         nativeId,
-        observedAt: isoTimestamp(flight.updatedAt) || generatedAt,
+        observedAt: isoTimestamp(flight.observedAt),
         freshness,
         status: sourceStatus,
       }],

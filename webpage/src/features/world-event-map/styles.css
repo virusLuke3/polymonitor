@@ -4,6 +4,7 @@
 
 .wm-map-stage, .wm-world-event-map-toolbar {
   --font-body: 'Noto Sans SC Variable', sans-serif;
+  font-family: var(--font-body);
   --map-tools-left: 190px;
 }
 
@@ -11,7 +12,8 @@
 .wm-map-stage:has(.wm-layer-sidebar:not(.is-collapsed)) { --map-tools-left: 282px; }
 
 .wm-map-status-strip {
-  display: inline-flex;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-start;
   min-width: 0;
@@ -21,19 +23,10 @@
   border-radius: 0;
   background: transparent;
   box-shadow: none;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: none;
-  gap: 8px;
+  gap: 6px 8px;
 }
 
-.wm-map-status-strip::-webkit-scrollbar {
-  display: none;
-}
-
-.wm-map-status-strip > * {
-  flex: 0 0 auto;
-}
+.wm-map-status-strip > .wm-map-source-statuses { flex: 1 1 100%; }
 
 .wm-map-status-metric {
   display: inline-flex;
@@ -42,7 +35,7 @@
   min-width: 0;
   color: rgba(186, 199, 213, 0.76);
   font: 500 12px/1.3 var(--font-body);
-  text-transform: uppercase;
+  text-transform: none;
   white-space: nowrap;
   flex: 0 0 auto;
 }
@@ -76,7 +69,7 @@
   background: rgba(5, 8, 12, 0.86);
   color: rgba(186, 199, 213, 0.78);
   font: 500 12px/1.3 var(--font-body);
-  text-transform: uppercase;
+  text-transform: none;
 }
 
 .wm-world-event-map-toolbar label,
@@ -94,7 +87,7 @@
   color: rgba(222, 232, 242, 0.7);
   background: rgba(255, 255, 255, 0.035);
   font: 500 12px/1.3 var(--font-body);
-  text-transform: uppercase;
+  text-transform: none;
 }
 
 .wm-world-event-country-filter {
@@ -102,7 +95,7 @@
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.035);
   font: 500 12px/1.3 var(--font-body);
-  text-transform: uppercase;
+  text-transform: none;
   min-height: 32px;
   padding: 0 7px;
   border-color: rgba(80, 220, 255, 0.32);
@@ -149,7 +142,7 @@
 
 .wm-inline-weather-map .wm-weather-deck-map {
   width: 100%;
-  height: 100% !important;
+  height: 100%;
   min-height: 0;
   border: 0;
 }
@@ -190,7 +183,7 @@
 
   .wm-world-event-severity-filters button {
     padding: 0 6px;
-    font-size: 11px;
+    font-size: 12px;
     min-height: 44px;
   }
 
@@ -211,7 +204,7 @@
   place-items: center;
   min-height: 260px;
   color: rgba(255, 178, 36, 0.9);
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 10px;
   font-weight: 900;
   letter-spacing: 0.8px;
@@ -227,7 +220,7 @@
   height: 320px;
   min-height: 260px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  background: var(--wm-map-ocean, #1b1b1d);
+  background: var(--wm-map-ocean, #333333);
   overflow: hidden;
 }
 
@@ -245,21 +238,21 @@
 
 .wm-weather-deck-map .maplibregl-map,
 .wm-weather-deck-map .maplibregl-canvas {
-  background: var(--wm-map-ocean, #1b1b1d);
+  background: var(--wm-map-ocean, #333333);
 }
 
 .wm-weather-deck-map > .wm-weather-deck-basemap.maplibregl-map {
   position: absolute !important;
   inset: 0 !important;
   width: 100% !important;
-  height: 100% !important;
+  height: 100%;
   min-height: 0 !important;
 }
 
 .wm-weather-deck-map .maplibregl-canvas-container,
 .wm-weather-deck-map .maplibregl-canvas {
   width: 100% !important;
-  height: 100% !important;
+  height: 100%;
 }
 
 .wm-weather-deck-map .maplibregl-control-container {
@@ -284,7 +277,7 @@
 .wm-world-event-svg-map {
   width: 100%;
   height: 100%;
-  background: #1b1b1d;
+  background: #333333;
   cursor: grab;
   touch-action: none;
 }
@@ -294,7 +287,7 @@
 }
 
 .wm-world-event-svg-countries path {
-  fill: #0c0c0c;
+  fill: #141414;
   stroke: #35383b;
   stroke-width: 0.65;
   vector-effect: non-scaling-stroke;
@@ -394,14 +387,12 @@
   width: min(330px, calc(100% - 360px));
   min-width: 260px;
   padding: 10px;
-  border: 1px solid rgba(94, 238, 255, 0.24);
-  border-radius: 8px;
-  background:
-    linear-gradient(135deg, rgba(7, 30, 42, 0.94), rgba(4, 12, 17, 0.91)),
-    rgba(0, 0, 0, 0.82);
+  border: 1px solid #343b40;
+  border-radius: 4px;
+  background: #171b1eee;
   color: #dff8ff;
-  font-family: var(--font-mono);
-  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.42);
+  font-family: var(--font-body);
+  box-shadow: none;
   backdrop-filter: blur(10px);
 }
 
@@ -423,19 +414,19 @@
 .wm-aviation-lens header span {
   display: block;
   color: #6f93a4;
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 900;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  text-transform: none;
 }
 
 .wm-aviation-lens header strong {
   display: block;
   margin-top: 3px;
   color: #ecfbff;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.1;
-  text-transform: uppercase;
+  text-transform: none;
 }
 
 .wm-aviation-lens header > button {
@@ -445,7 +436,7 @@
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.035);
   color: #91aab5;
-  font: 900 15px/1 var(--font-mono);
+  font: 600 15px/1 var(--font-body);
   cursor: pointer;
 }
 
@@ -459,9 +450,9 @@
   align-items: center;
   gap: 4px;
   color: #92aab5;
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 800;
-  text-transform: uppercase;
+  text-transform: none;
 }
 
 .wm-aviation-lens-stats b {
@@ -509,9 +500,9 @@
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.035);
   color: #829aa5;
-  font: 900 8px/1 var(--font-mono);
+  font: 600 12px/1.3 var(--font-body);
   letter-spacing: 0.04em;
-  text-transform: uppercase;
+  text-transform: none;
   cursor: pointer;
 }
 
@@ -545,7 +536,7 @@
 .wm-aviation-lens > p {
   margin: 0;
   color: #71858e;
-  font-size: 8px;
+  font-size: 12px;
   line-height: 1.4;
 }
 
@@ -563,6 +554,8 @@
   }
 }
 
+.wm-map-renderer-retry { font: 12px var(--font-body); color: inherit; background: transparent; border: 1px solid currentColor; padding: 4px 8px; margin-left: 8px; cursor: pointer; }
+
 .wm-weather-deck-status {
   position: absolute;
   right: 8px;
@@ -572,11 +565,11 @@
   border: 1px solid rgba(68, 255, 136, 0.18);
   background: rgba(0, 200, 100, 0.15);
   color: #44ff88;
-  font-family: var(--font-mono);
-  font-size: 8px;
+  font-family: var(--font-body);
+  font-size: 12px;
   font-weight: 900;
   letter-spacing: 0.6px;
-  text-transform: uppercase;
+  text-transform: none;
 }
 
 .wm-world-event-attribution {
@@ -586,8 +579,8 @@
   z-index: 5;
   max-width: min(310px, calc(50% - 80px));
   color: rgba(176, 188, 190, 0.68);
-  font-family: var(--font-mono);
-  font-size: 7px;
+  font-family: var(--font-body);
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.25px;
   pointer-events: none;
@@ -642,7 +635,7 @@
 
 .wm-world-event-list-toggle strong {
   color: #fff;
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -681,7 +674,7 @@
   display: block;
   margin-bottom: 4px;
   color: #5bbbdc;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 1.1px;
 }
@@ -691,7 +684,7 @@
   color: #f3f8f8;
   font-size: 14px;
   letter-spacing: 0.45px;
-  text-transform: uppercase;
+  text-transform: none;
 }
 
 .wm-world-event-list-close {
@@ -758,10 +751,10 @@
 
 .wm-world-event-list-filters label > span {
   color: #8fa0a5;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.55px;
-  text-transform: uppercase;
+  text-transform: none;
 }
 
 .wm-world-event-list-filters input,
@@ -796,7 +789,7 @@
   color: #647277;
 }
 
-.wm-map-counts small { display: block; margin-top: 4px; font-size: 11px; color: #89959d; }
+.wm-map-counts small { display: block; margin-top: 4px; font-size: 12px; color: #89959d; }
 
 .wm-world-event-list-summary {
   display: flex;
@@ -807,7 +800,7 @@
   padding: 7px 14px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.075);
   color: #86959a;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .wm-world-event-list-summary strong {
@@ -903,9 +896,9 @@
   padding: 3px 4px;
   border: 1px solid currentColor;
   border-radius: 3px;
-  font-size: 11px;
+  font-size: 12px;
   text-align: center;
-  text-transform: uppercase;
+  text-transform: none;
 }
 
 .wm-world-event-list li .wm-event-list-symbol {
@@ -927,7 +920,7 @@
   overflow: hidden;
   align-self: center;
   color: #ecf3f3;
-  font-size: 11px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -936,10 +929,10 @@
   overflow: hidden;
   align-self: center;
   color: #91a0a4;
-  font-size: 11px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
-  text-transform: uppercase;
+  text-transform: none;
 }
 
 .wm-world-event-list li .wm-event-list-kind {
@@ -957,7 +950,7 @@
   grid-row: 3;
   align-self: center;
   color: #68777c;
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -977,13 +970,13 @@
 
 .wm-world-event-list-empty strong {
   color: #e3ebeb;
-  font-size: 11px;
-  text-transform: uppercase;
+  font-size: 12px;
+  text-transform: none;
 }
 
 .wm-world-event-list-empty p {
   margin: 7px 0 14px;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .wm-world-event-svg-air-route {
@@ -1050,7 +1043,7 @@
   background: rgba(3, 10, 14, 0.95);
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.48);
   color: #dcebef;
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
 }
 
 .wm-country-context-card strong {
@@ -1075,8 +1068,8 @@
   border-radius: 3px;
   background: rgba(255, 255, 255, 0.045);
   color: #c9d7db;
-  font: 800 8px/1 var(--font-mono);
-  text-transform: uppercase;
+  font: 600 11px/1.3 var(--font-body);
+  text-transform: none;
   cursor: pointer;
 }
 
@@ -1131,7 +1124,7 @@
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.75px;
-  text-transform: uppercase;
+  text-transform: none;
 }
 
 .wm-world-event-tooltip strong {
@@ -1188,7 +1181,7 @@
   background: rgba(255, 255, 255, 0.04);
   color: #aab2ae;
   cursor: pointer;
-  font: 900 18px/1 var(--font-mono);
+  font: 600 18px/1 var(--font-body);
 }
 
 .wm-event-inspector-close:hover,
@@ -1214,7 +1207,7 @@
   padding: 3px 6px;
   border: 1px solid rgba(115, 216, 255, 0.25);
   color: #73d8ff;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.6px;
 
@@ -1282,7 +1275,7 @@
 
 .wm-event-inspector-fields dt {
   color: #87928d;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
 
 
@@ -1292,7 +1285,7 @@
   margin: 4px 0 0;
   overflow-wrap: anywhere;
   color: #f0f4f1;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   line-height: 1.35;
 }
@@ -1308,7 +1301,7 @@
   display: block;
   margin-bottom: 4px;
   color: #ffd38a;
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.55px;
 
 }
@@ -1334,15 +1327,17 @@
 
 .wm-event-inspector-source strong {
   color: #ecf4ef;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .wm-event-inspector-source span,
 .wm-event-inspector-source code {
   overflow-wrap: anywhere;
   color: #8f9b95;
-  font: 800 9px/1.4 var(--font-mono);
+  font: 400 12px/1.4 var(--font-body);
 }
+
+.wm-event-inspector-source code { font-family: var(--font-mono); }
 
 .wm-event-inspector-source .tone-ok { color: #77e0ae; }
 .wm-event-inspector-source .tone-partial,
@@ -1352,7 +1347,7 @@
 .wm-event-inspector-source a {
   width: fit-content;
   color: #73d8ff;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   text-decoration: none;
 }
@@ -1419,7 +1414,7 @@
 
 .wm-event-inspector-market-head span {
   color: #9ca5a1;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.55px;
 
@@ -1439,7 +1434,7 @@
 .wm-event-inspector-market-quote span {
   overflow: hidden;
   color: #bfc7c3;
-  font-size: 11px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1452,13 +1447,13 @@
 .wm-event-inspector-market-quote em {
   grid-column: 1 / -1;
   color: #78847e;
-  font-size: 11px;
+  font-size: 12px;
   font-style: normal;
 }
 
 .wm-event-inspector-market-list details {
   color: #99a49f;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .wm-event-inspector-market-list summary {
@@ -1479,7 +1474,7 @@
   background: rgba(126, 101, 176, 0.1);
   color: #cbb9f5;
   cursor: pointer;
-  font: 900 8px/1 var(--font-mono);
+  font: 600 12px/1.3 var(--font-body);
   letter-spacing: 0.45px;
   text-decoration: none;
 }
@@ -1498,14 +1493,14 @@
   border-radius: 4px;
   background: rgba(255, 80, 80, 0.08);
   color: #ffaaaa;
-  font: 800 8px/1.2 var(--font-mono);
+  font: 500 12px/1.4 var(--font-body);
   letter-spacing: 0.4px;
   cursor: pointer;
 }
 
 .wm-event-inspector-market-audit {
   color: #797f7c !important;
-  font-size: 11px !important;
+  font-size: 12px !important;
   letter-spacing: 0.4px;
 }
 

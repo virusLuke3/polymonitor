@@ -15,6 +15,7 @@ import {
 } from './mapState';
 
 export type WorldEventMapAction =
+  | { type: 'set-presentation'; mode: WorldEventMapState['presentationMode'] }
   | { type: 'set-camera'; center: { lon: number; lat: number }; zoom: number }
   | { type: 'set-zoom'; zoom: number }
   | { type: 'set-region'; region: WorldEventRegion }
@@ -51,6 +52,7 @@ export function worldEventMapReducer(
       zoom: clampWorldEventZoom(action.zoom),
     };
   }
+  if (action.type === 'set-presentation') return { ...state, presentationMode: action.mode };
   if (action.type === 'set-zoom') return { ...state, fitWorld: false, zoom: clampWorldEventZoom(action.zoom) };
   if (action.type === 'set-region') {
     if (!isWorldEventRegion(action.region)) return state;
