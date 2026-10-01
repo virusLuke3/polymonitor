@@ -69,6 +69,40 @@ test('optional country loading does not falsely demote a ready cached basemap', 
   } finally { release(); await page.goto('about:blank'); await page.unrouteAll({behavior:'ignoreErrors'}); await assets.dispose(); }
 });
 
+test('initial world fit does not wait for optional geometry or override saved cameras', async ({page}) => {
+  test.skip(phase === 'before'); mkdirSync(root, {recursive:true});
+  await page.setViewportSize({width:1536,height:1000});
+  await page.clock.setFixedTime(new Date(GENERATED_AT)); await installFixtures(page);
+  const assets = await installRealMapAssets(page);
+  let release!: () => void, requested = 0;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  await page.route('**/map-data/world-countries.geojson', async route => {
+    requested++; await held; await route.continue();
+  });
+  try {
+    await page.goto('/?view=2d&mapPerf=1&basemap=pmtiles');
+    const host = page.locator('[data-map-renderer-ready]');
+    await expect.poll(() => requested).toBeGreaterThan(0);
+    await expect(host).toHaveAttribute('data-map-renderer-ready', 'webgl');
+    const worldFitError = () => host.evaluate((el: any) => {
+      const west = el.__polymonitorProjectGeoPoint(-180, 0);
+      const east = el.__polymonitorProjectGeoPoint(180, 0);
+      const mercator = (lat: number) => (1 - Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360)) / Math.PI) / 2;
+      const expectedWidth = Math.min(el.clientWidth - 48, (el.clientHeight - 48) / (mercator(-56) - mercator(72)));
+      return Math.abs(east.x - west.x - expectedWidth);
+    });
+    await expect.poll(worldFitError).toBeLessThan(3);
+    await host.screenshot({path:resolve(root,'world-fit-before-optional-load.png')});
+    await page.goto('/?view=2d&mapPerf=1&basemap=pmtiles&center=12,35&zoom=3');
+    await expect(host).toHaveAttribute('data-map-renderer-ready', 'webgl');
+    release(); await page.waitForTimeout(2000);
+    expect(new URL(page.url()).searchParams.get('center')).toBe('12.0000,35.0000');
+    expect(new URL(page.url()).searchParams.get('zoom')).toBe('3.00');
+    writeFileSync(resolve(root,'initial-camera-readiness.json'), JSON.stringify({requested,
+      fitBeforeOptionalLoad:true,explicitCameraPreserved:true,url:page.url()}));
+  } finally { release(); await page.goto('about:blank'); await page.unrouteAll({behavior:'ignoreErrors'}); await assets.dispose(); }
+});
+
 for (const viewport of [{width:1536,height:1000},{width:2048,height:567},{width:390,height:844}]) {
   test(`default composition ${viewport.width}x${viewport.height}`, async ({page}) => {
     test.setTimeout(120_000); mkdirSync(root,{recursive:true});

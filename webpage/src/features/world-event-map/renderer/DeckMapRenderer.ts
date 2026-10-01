@@ -464,7 +464,6 @@ export class DeckMapRenderer implements MapRenderer {
     map.once('load', () => {
       if (this.destroyed) return;
       this.mountOverlaysIfNeeded();
-      if (this.state?.fitWorld) this.fitWorld();
       this.emitViewport();
       reinforceWorldEventBasemapLabels(map, this.language);
       this.ensureCountryHoverLayers();
@@ -491,6 +490,10 @@ export class DeckMapRenderer implements MapRenderer {
     map.getCanvas().addEventListener('webglcontextrestored', this.handleContextRestored);
     map.getCanvas().addEventListener('mousedown', this.handlePointerDown, { capture: true });
     window.addEventListener('mouseup', this.handlePointerUp, { capture: true });
+
+    // Camera fitting only needs the container, not loaded tiles or optional
+    // radar/country sources. Their pending requests can hold `load` indefinitely.
+    if (this.state?.fitWorld) this.fitWorld();
 
     this.fallbackTimer = window.setTimeout(() => {
       if (!this.map || this.fallbackApplied || this.destroyed) return;
