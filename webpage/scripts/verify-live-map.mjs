@@ -178,6 +178,7 @@ try {
       // Allow real labels and event sources to finish their first paint.
       await page.waitForTimeout(2000);
       await screenshot(`${width === 390 ? 'mobile' : 'desktop'}-${width}-en`);
+      if(width===390){await host.scrollIntoViewIfNeeded();await screenshot('mobile-map-visible-390-en');}
       record.states.push({ name: 'initial', url: page.url(), text: (await page.locator('body').innerText()).slice(0,4500) });
       await page.locator('.wm-language-switch select').selectOption('zh');
       await page.waitForTimeout(1500);

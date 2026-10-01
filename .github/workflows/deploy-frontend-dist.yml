@@ -86,7 +86,16 @@ jobs:
           ssh -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" "
             set -eu
             mkdir -p '$REMOTE_DEPLOY_PATH'
-            rsync -az --delete '$RELEASE_DIR/' '$REMOTE_DEPLOY_PATH/'
+            # Keep immutable chunks for tabs opened before this release and
+            # preserve separately published documentation. Publish controls
+            # only after all assets are present; each replacement is atomic.
+            rsync -az --exclude index.html --exclude sw.js --exclude release-sha \
+              --exclude docs/ --exclude docs-assets/ '$RELEASE_DIR/' '$REMOTE_DEPLOY_PATH/'
+            for control in index.html sw.js release-sha; do
+              test -f '$RELEASE_DIR/'\"\$control\"
+              install -m 0644 '$RELEASE_DIR/'\"\$control\" '$REMOTE_DEPLOY_PATH/'\"\$control.next\"
+              mv -f '$REMOTE_DEPLOY_PATH/'\"\$control.next\" '$REMOTE_DEPLOY_PATH/'\"\$control\"
+            done
             find '$REMOTE_DEPLOY_PATH' -type d -exec chmod 0755 {} +
             find '$REMOTE_DEPLOY_PATH' -type f -exec chmod 0644 {} +
             rm -rf '$RELEASE_DIR'
