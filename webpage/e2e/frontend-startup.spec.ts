@@ -48,7 +48,7 @@ test('radar arriving during renderer staging is handed to the committed map', as
     // A deterministic raster fixture exercises the real MapLibre source and
     // commit lifecycle; native radar imagery is checked separately online.
     return route.fulfill({ contentType: 'image/png', body: Buffer.from(
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64',
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64',
     ) });
   });
   await page.goto(mapURL.replace('layers=earthquakes-volcanoes', 'layers=earthquakes-volcanoes,weather-radar'), { waitUntil: 'domcontentloaded' });
