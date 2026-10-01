@@ -44,6 +44,13 @@ def save_state(storage, source_id, state):
 
 
 def persist(storage, source, items, now):
+    # Reuse the runtime's content lock: overlapping feeds must see the first
+    # writer's identity/first_seen even when the connection pool grows.
+    with storage.resources.content_lock:
+        return _persist(storage, source, items, now)
+
+
+def _persist(storage, source, items, now):
     counts = {"new": 0, "updated": 0, "duplicate": 0, "excluded": 0, "public": 0}
     if not source.get("storage_allowed"):
         return {**counts, "excluded": len(items)}

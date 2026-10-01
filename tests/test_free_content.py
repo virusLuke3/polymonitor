@@ -287,3 +287,45 @@ def test_batch_persistence_keeps_identity_and_304_counts_are_current(storage, so
     with patch.object(collector, "fetch", return_value=(b"", {"http_status": 304, "final_url": source["feed_url"]})):
         state = collector.collect_one(storage, None, source, {"new": 401, "public": 401, "parsed_count": 401})
     assert state["new"] == state["public"] == state["parsed_count"] == 0
+
+
+def test_no_service_keys_required_and_http_checks_redirect_and_size(storage, source):
+    from api.services.free_content import http
+
+    class Response:
+        status_code = 200
+        headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            pass
+
+        def iter_content(self, _):
+            yield b"<rss><channel/></rss>"
+
+    class Session:
+        def get(self, url, **kwargs):
+            assert set(kwargs["headers"]) <= {"User-Agent", "Accept", "If-None-Match", "If-Modified-Since"}
+            return Response()
+
+    with (
+        patch.dict("os.environ", {}, clear=True),
+        patch.object(http.socket, "getaddrinfo", return_value=[(None, None, None, None, ("8.8.8.8", 443))]),
+    ):
+        body, meta = http.fetch(Session(), source["feed_url"], source)
+        assert normalize.parse_feed(body, source) == [] and meta["http_status"] == 200
+        with patch.object(collector, "fetch", return_value=(body, meta)):
+            assert collector.collect_one(storage, None, source, {})["status"] == "healthy_empty"
+        with patch.object(Response, "iter_content", return_value=iter([b"x" * (http.MAX_BYTES + 1)])):
+            with pytest.raises(ValueError, match="response-too-large"):
+                http.fetch(Session(), source["feed_url"], source)
+        with (
+            patch.object(Response, "status_code", 302),
+            patch.object(Response, "headers", {"Location": "https://127.0.0.1/internal"}),
+        ):
+            with pytest.raises(ValueError, match="unapproved-host"):
+                http.fetch(Session(), source["feed_url"], source)
+    with pytest.raises(ValueError, match="not-rss-or-atom"):
+        normalize.parse_feed(b"<html><body>Error</body></html>", source)
