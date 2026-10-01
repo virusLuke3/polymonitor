@@ -137,11 +137,25 @@ try {
         assert.equal(record.layout.presentation,'overview');assert(record.layout.rect.width<=width+1);
         if(width===1536)assert(record.layout.rect.height>=680,JSON.stringify(record.layout));
       });
-      if (width !== 390) await check('desktop: repaired sources reach healthy UI state', async () => {
-        for (const label of ['NHC', 'NWS', 'FIRMS', 'COUNTRY RISK']) {
+      if (width !== 390) await check('desktop: healthy core sources and explicit optional NWS boundaries', async () => {
+        for (const label of ['NHC', 'FIRMS', 'COUNTRY RISK']) {
           const badge = page.locator('.wm-map-source-status').filter({ has: page.locator('b', { hasText: new RegExp(`^${label}$`) }) });
           await expect(badge).toHaveClass(/is-ok/, { timeout: 120_000 });
         }
+        const nwsBadge = page.locator('.wm-map-source-status').filter({ has: page.locator('b', { hasText: /^NWS$/ }) });
+        const nwsResponse = await context.request.get(`${base}/wm-api/runtime/world/natural-hazards/map?source=nws&limit=1200&zoom=2`);
+        assert.equal(nwsResponse.status(), 200);
+        const nws = await nwsResponse.json(), core = nws.sources.find(source => source.key === 'nws');
+        assert(core && core.status === 'ok' && !core.errorCode, JSON.stringify(core));
+        assert.deepEqual(nws.errors, []);
+        assert(Date.now() - Date.parse(core.lastSuccessAt) < 300_000);
+        assert(Date.parse(core.staleAfter) > Date.now());
+        const geometryIncomplete = nws.events.some(event => !event.geometry || Number(event.properties?.unresolvedZoneCount || 0) > 0);
+        if (geometryIncomplete) {
+          await expect(nwsBadge).toHaveClass(/is-partial/);
+          await expect(nwsBadge).toHaveAttribute('title', /Fresh catalog; optional official boundaries/);
+        } else await expect(nwsBadge).toHaveClass(/is-ok/);
+        record.nws = { core, count: nws.events.length, geometryIncomplete, badge: await nwsBadge.innerText(), explanation: await nwsBadge.getAttribute('title') };
         record.sourceHealth = await page.locator('.wm-map-source-statuses').innerText();
       }, { continueOnFailure: true });
       await check(`${width}: map typography uses proportional map roles`, async () => {
@@ -178,6 +192,7 @@ try {
       // Allow real labels and event sources to finish their first paint.
       await page.waitForTimeout(2000);
       await screenshot(`${width === 390 ? 'mobile' : 'desktop'}-${width}-en`);
+      if(width===390){await host.scrollIntoViewIfNeeded();await screenshot('mobile-map-visible-390-en');}
       record.states.push({ name: 'initial', url: page.url(), text: (await page.locator('body').innerText()).slice(0,4500) });
       await page.locator('.wm-language-switch select').selectOption('zh');
       await page.waitForTimeout(1500);

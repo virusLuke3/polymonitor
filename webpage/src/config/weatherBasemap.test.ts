@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   OPENFREEMAP_DARK_STYLE,
   mapBasemapFonts,
@@ -72,6 +72,24 @@ describe('World Event Map vector basemap', () => {
 
   it('uses the zero-config OpenFreeMap style outside the production PMTiles build', async () => {
     expect(await getWeatherMapStyle('dark')).toBe(OPENFREEMAP_DARK_STYLE);
+  });
+
+  it('keeps automatic light and dark themes on the configured same-origin archive', async () => {
+    vi.stubEnv('VITE_PMTILES_URL', '/map-tiles/planet.pmtiles');
+    vi.resetModules();
+    try {
+      const { getWeatherMapStyle: configuredStyle } = await import('./weatherBasemap');
+      for (const theme of ['dark', 'positron'] as const) {
+        const style = await configuredStyle(theme, 'auto', 'zh');
+        expect(typeof style).toBe('object');
+        expect((style as any).sources.basemap.url).toContain('/map-tiles/planet.pmtiles');
+        expect((style as any).layers.some((layer: any) => layer['source-layer'] === 'places')).toBe(true);
+      }
+      expect(await configuredStyle('dark', 'openfreemap')).toBe(OPENFREEMAP_DARK_STYLE);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    }
   });
 
   it('preserves every provider layer, rank and layout while applying one paint palette', async () => {

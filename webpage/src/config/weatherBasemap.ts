@@ -117,7 +117,7 @@ export async function getWeatherMapStyle(
   language: 'en' | 'zh' = 'en',
 ): Promise<StyleSpecification | string> {
   const resolvedProvider = provider === 'auto'
-    ? (theme !== 'positron' && WORLD_EVENT_PMTILES_URL ? 'pmtiles' : 'openfreemap')
+    ? (WORLD_EVENT_PMTILES_URL ? 'pmtiles' : 'openfreemap')
     : provider;
   if (resolvedProvider === 'pmtiles' && WORLD_EVENT_PMTILES_URL) {
     await registerWorldEventPMTilesProtocol();
