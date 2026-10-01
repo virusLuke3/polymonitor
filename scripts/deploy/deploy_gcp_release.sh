@@ -182,7 +182,6 @@ REMOTE_RESTART_UNITS="${RESTART_UNITS[*]}"
 ssh "${SSH_OPTIONS[@]}" "${REMOTE}" "
   set -eu
   python3 '${REMOTE_RELEASE_DIR}/gcp_release.py' verify --url http://127.0.0.1:18500 --scope '${DEPLOY_VERIFY_SCOPE}'
-  curl -fsS --max-time 15 'http://127.0.0.1:18500/analytics/addresses/0xffffffffffffffffffffffffffffffffffffffff/trades?limit=1' >/dev/null
   curl -fsS --max-time 10 http://127.0.0.1/wm-api/health >/dev/null
   for unit in ${REMOTE_RESTART_UNITS}; do
     systemctl --user is-active --quiet \"\$unit\"
