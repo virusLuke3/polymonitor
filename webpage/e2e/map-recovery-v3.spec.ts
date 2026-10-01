@@ -212,6 +212,36 @@ test('actual context loss restores frame and picking; persistent failure recover
   }finally{await page.goto('about:blank');await page.unrouteAll({behavior:'ignoreErrors'});await assets.dispose();}
 });
 
+test('slow vector tiles keep their loaded index and paint before the bounded grace expires',async({page})=>{
+  test.skip(phase==='before');test.setTimeout(90_000);mkdirSync(root,{recursive:true});
+  await page.clock.setFixedTime(new Date(GENERATED_AT));await installFixtures(page);
+  const assets=await installRealMapAssets(page);let release!:()=>void,heldRequests=0;
+  const {bytesToHeader}=await import('pmtiles');
+  const tileDataStart=page.waitForResponse(response=>response.url().includes('/map-tiles/')
+    && (response.request().headers().range||'').startsWith('bytes=0-'))
+    .then(async response=>bytesToHeader(Uint8Array.from(await response.body()).buffer).tileDataOffset);
+  const held=new Promise<void>(resolve=>{release=resolve;});
+  await page.route('**/map-tiles/**',async route=>{
+    const range=route.request().headers().range||'';
+    // PMTiles metadata is a separate nonzero range inside the archive header.
+    // Let metadata/directories load; delay only the actual vector tile payloads.
+    if(!range.startsWith('bytes=0-') && Number(range.match(/^bytes=(\d+)/)?.[1])>=await tileDataStart){
+      heldRequests++;await held;
+    }
+    await route.fallback();
+  });
+  try {
+    await page.goto('/?view=2d&mapPerf=1&basemap=pmtiles&center=0,20&zoom=2&layers=earthquakes-volcanoes');
+    const host=page.locator('.wm-weather-deck-basemap');
+    await expect.poll(()=>heldRequests).toBeGreaterThan(0);
+    await page.waitForTimeout(12_000);
+    await expect(host).toHaveAttribute('data-map-basemap-state','initializing');
+    release();await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready');
+    await host.screenshot({path:resolve(root,'slow-tiles-kept-primary.png')});
+    writeFileSync(resolve(root,'slow-tiles-grace.json'),JSON.stringify({heldRequests,heldMs:12000,painted:'primary-ready'}));
+  }finally{release();await page.goto('about:blank');await page.unrouteAll({behavior:'ignoreErrors'});await assets.dispose();}
+});
+
 test('failed PMTiles recovers from local geometry to the primary without losing camera or events',async({page})=>{
   test.skip(phase==='before');test.setTimeout(120_000);mkdirSync(root,{recursive:true});
   await page.setViewportSize({width:1536,height:1000});await page.clock.setFixedTime(new Date(GENERATED_AT));

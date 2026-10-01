@@ -1,4 +1,5 @@
 import type { RendererViewport } from '../renderer/MapRenderer';
+import { MAP_RENDERER_TIMEOUTS } from '../renderer/MapRenderer';
 import type { AviationPhase } from '../data/useAviationViewport';
 import type { ClusterSelection, ScreenBox } from '../renderer/layerFactories/eventClusters';
 import { observeMapOcclusion } from '../renderer/mapOcclusion';
@@ -350,10 +351,14 @@ export function WorldEventMap({
         if (!isCurrent()) return;
         clearRendererDeadline();
         setRendererError(reason?.message ?? null);
-        // Keep the existing deadline for actual initialization.
+        // Do not destroy a progressing WebGL candidate before its own bounded
+        // primary/fallback lifecycle and first-frame verification can complete.
+        const initializationTimeout = kind === 'webgl'
+          ? 2 * MAP_RENDERER_TIMEOUTS.primary + MAP_RENDERER_TIMEOUTS.localGeometry + MAP_RENDERER_TIMEOUTS.frameVerification
+          : 12_000;
         rendererDeadline = window.setTimeout(() => fail(new Error(
           `${kind === 'webgl' ? 'WebGL' : 'SVG'} map renderer loading timed out.`,
-        )), 12_000);
+        )), initializationTimeout);
         const renderer: MapRenderer = new Renderer();
         candidate = renderer;
         renderer.setLanguage?.(languageRef.current);

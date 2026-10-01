@@ -4,6 +4,14 @@ import type { RadarFrame } from '../data/useWeatherRadar';
 import type { GeoEvent } from '../domain/types';
 import type { WorldEventMapState } from '../state/mapState';
 
+// The host must let primary loading (including its one metadata grace period),
+// local fallback loading, and the first painted/pickable frame finish in order.
+export const MAP_RENDERER_TIMEOUTS = {
+  primary: 10_000,
+  localGeometry: 6_000,
+  frameVerification: 2_000,
+} as const;
+
 export type BasemapState =
   | 'idle'
   | 'initializing'

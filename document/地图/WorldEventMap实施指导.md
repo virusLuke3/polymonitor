@@ -918,6 +918,7 @@ idle
 要求：
 
 - 主远程 basemap 有可配置超时。
+- 主底图初始等待为 10 秒；仅在 basemap 元数据已经到达、实际瓦片仍未就绪时追加一次 10 秒预算。可选来源不延长预算，元数据不能冒充已绘制底图；总预算耗尽仍降级并保留既有有界恢复。 外层 WebGL 初始化预算必须覆盖这 20 秒、6 秒本地几何预算与 2 秒首帧/拾取验证，不能用独立的 12 秒定时器提前销毁候选渲染器。
 - fallback 只能执行一次，避免 `setStyle()` 错误循环。
 - 本地 `/map-data/world-countries.geojson` 必须有独立 smoke test。
 - basemap 错误不得清空 Deck events。

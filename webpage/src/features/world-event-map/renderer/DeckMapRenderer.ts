@@ -1,4 +1,4 @@
-import { splitViewportBounds } from './MapRenderer';
+import { MAP_RENDERER_TIMEOUTS, splitViewportBounds } from './MapRenderer';
 import { loadMapFonts } from '../config/mapTypography';
 import type { ScreenBox } from './layerFactories/eventClusters';
 import { mapPresentationCounts } from './eventDisclosure';
@@ -209,7 +209,7 @@ export class DeckMapRenderer implements MapRenderer {
     return new Promise(resolve => {
       let frame = false;
       let timer: number | undefined;
-      const deadline = performance.now() + 2_000;
+      const deadline = performance.now() + MAP_RENDERER_TIMEOUTS.frameVerification;
       const painted = () => { frame = true; };
       const finish = (ok: boolean) => {
         window.clearTimeout(timer); this.map?.off('render', painted);
@@ -226,6 +226,7 @@ export class DeckMapRenderer implements MapRenderer {
     });
   }
   private fallbackTimer: number | null = null;
+  private primaryMetadataReady = false;
   private fallbackSourceTimer: number | null = null;
   private fallbackCountryLabels: CountryBasemapLabel[] = [];
   private fallbackCountryLabelsLoading: Promise<void> | null = null;
@@ -492,10 +493,7 @@ export class DeckMapRenderer implements MapRenderer {
     if (this.state?.fitWorld) this.fitWorld();
     else this.handleMoveEnd(); // Publish any constraint applied to an old URL camera.
 
-    this.fallbackTimer = window.setTimeout(() => {
-      if (!this.map || this.fallbackApplied || this.destroyed) return;
-      this.applyLocalFallback(new Error('Primary basemap did not become ready within 10 seconds.'));
-    }, 10_000);
+    this.schedulePrimaryDeadline();
   }
 
   setState(state: WorldEventMapState) {
@@ -1290,6 +1288,7 @@ export class DeckMapRenderer implements MapRenderer {
 
   private handleSourceData = (event: MapSourceDataEvent) => {
     if (!this.fallbackApplied && event.sourceId === 'basemap') {
+      if (event.sourceDataType === 'metadata') this.primaryMetadataReady = true;
       // MapLibre considers an errored tile "loaded" too. Metadata/load/idle
       // alone therefore cannot prove that a vector basemap actually painted.
       const tile = (event as MapSourceDataEvent & { tile?: { state?: string; tileID?: {canonical?: {x: number; y: number; z: number}} } }).tile;
@@ -1324,6 +1323,22 @@ export class DeckMapRenderer implements MapRenderer {
     if (!this.primaryHasContent || this.fallbackApplied || !this.map || this.destroyed) return;
     this.clearFallbackTimer();
     this.emitBasemapState('primary-ready');
+  }
+
+  private schedulePrimaryDeadline(allowMetadataGrace = true) {
+    this.clearFallbackTimer();
+    this.fallbackTimer = window.setTimeout(() => {
+      this.fallbackTimer = null;
+      if (!this.map || this.fallbackApplied || this.destroyed) return;
+      if (this.primaryHasContent) { this.markPrimaryReady(); return; }
+      // A cold archive can spend most of the first budget acquiring its index.
+      // Give its actual vector tiles one additional budget, never optional
+      // radar/country data, and never mark metadata alone as a painted map.
+      if (allowMetadataGrace && this.primaryMetadataReady) {
+        this.schedulePrimaryDeadline(false); return;
+      }
+      this.applyLocalFallback(new Error('Primary basemap did not paint within its bounded loading deadline.'));
+    }, MAP_RENDERER_TIMEOUTS.primary);
   }
 
   private mountOverlaysIfNeeded() {
@@ -1737,6 +1752,7 @@ export class DeckMapRenderer implements MapRenderer {
     const generation = ++this.basemapStyleGeneration;
     this.fallbackApplied = false;
     this.primaryHasContent = false;
+    this.primaryMetadataReady = false;
     this.missingBaseTiles.clear(); this.missingTileAttempts = 0;
     this.callbacks?.onBasemapIssueChange?.(null);
     this.clearFallbackTimer();
@@ -1746,10 +1762,7 @@ export class DeckMapRenderer implements MapRenderer {
       const style = await getWeatherMapStyle(state.basemapTheme, state.basemapProvider, this.language);
       if (this.destroyed || generation !== this.basemapStyleGeneration || map !== this.map) return;
       map.setStyle(style, { diff: false });
-      this.fallbackTimer = window.setTimeout(() => {
-        if (!this.map || this.fallbackApplied || this.destroyed || generation !== this.basemapStyleGeneration) return;
-        this.applyLocalFallback(new Error('Selected basemap did not become ready within 10 seconds.'));
-      }, 10_000);
+      this.schedulePrimaryDeadline();
     } catch (error) {
       if (this.destroyed || generation !== this.basemapStyleGeneration) return;
       this.applyLocalFallback(error instanceof Error ? error : new Error(String(error)));
@@ -1845,7 +1858,7 @@ export class DeckMapRenderer implements MapRenderer {
       this.requestRendererFallback(new Error(
         'Local country geometry did not become renderable within 6 seconds.',
       ));
-    }, 6_000);
+    }, MAP_RENDERER_TIMEOUTS.localGeometry);
   }
 
   private clearFallbackSourceTimer() {

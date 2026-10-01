@@ -19,6 +19,25 @@ function callbacks(): MapRendererCallbacks {
 }
 
 describe('renderer hover lifecycle', () => {
+  it.each(['basemap', 'weather-radar', 'country-boundaries'])('bounds initial loading while only %s metadata is ready', (sourceId) => {
+    const renderer = new DeckMapRenderer() as any;
+    vi.useFakeTimers(); vi.stubGlobal('window', globalThis);
+    renderer.map = {}; renderer.callbacks = callbacks(); renderer.applyLocalFallback = vi.fn();
+    try {
+      renderer.schedulePrimaryDeadline();
+      renderer.handleSourceData({sourceId, sourceDataType:'metadata'});
+      vi.advanceTimersByTime(10_000);
+      expect(renderer.applyLocalFallback).toHaveBeenCalledTimes(sourceId==='basemap'?0:1);
+      expect(renderer.callbacks.onBasemapStateChange).not.toHaveBeenCalledWith('primary-ready');
+      if (sourceId==='basemap') {
+        // More metadata does not renew the one-shot grace budget.
+        renderer.handleSourceData({sourceId,sourceDataType:'metadata'});
+        vi.advanceTimersByTime(10_000);
+        expect(renderer.applyLocalFallback).toHaveBeenCalledTimes(1);
+      }
+    } finally {renderer.map=null;renderer.destroy();vi.useRealTimers();vi.unstubAllGlobals();}
+  });
+
   it('mounts radar on a parsed style without waiting for unrelated source loading or animation idle', () => {
     const renderer = new DeckMapRenderer() as any;
     renderer.callbacks = { ...callbacks(), onRadarStateChange: vi.fn() };
