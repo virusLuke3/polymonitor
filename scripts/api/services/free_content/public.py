@@ -8,6 +8,15 @@ from .store import decode_state
 
 CANDIDATES_PER_PUBLISHER = 256
 RAW_CANDIDATES_PER_PUBLISHER = 2048
+# One bounded collector cycle (90s) plus the longest watch sleep (60s).
+CHECK_GRACE_SECONDS = 150
+
+
+def source_is_stale(state, now):
+    due = utc(state.get("next_check_at"))
+    overdue = bool(state.get("last_success_at") and due and
+        datetime.fromisoformat(due.replace("Z", "+00:00")) + timedelta(seconds=CHECK_GRACE_SECONDS) < now)
+    return bool(state.get("snapshot_stale") or overdue)
 
 
 def eligible_item(raw, sources, cutoff, now):
@@ -135,8 +144,7 @@ def payload(storage, *, market=None, market_id=None, limit=20, days=7, now=None,
         if not source.get("enabled"):
             continue
         state = states.get(source["source_id"], {})
-        due = utc(state.get("next_check_at"))
-        stale = bool(state.get("snapshot_stale") or (state.get("last_success_at") and due and due < now.isoformat().replace("+00:00", "Z")))
+        stale = source_is_stale(state, now)
         statuses.append({**source, **state, "status": state.get("status", "not_requested"), "stale": stale})
     items = []
     scanned = 0

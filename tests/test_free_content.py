@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 import json, sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 import pytest
@@ -639,3 +639,22 @@ def test_related_seed_is_in_unified_health_registry():
     from api.services.system_service import SEED_META_SPECS
     spec = next(spec for spec in SEED_META_SPECS if spec["panelId"] == "related-news")
     assert (spec["namespace"], spec["cacheKey"]) == ("seed-meta:content", "related-news")
+
+
+def test_source_refresh_schedule_has_bounded_cycle_grace_without_masking_snapshot_expiry():
+    now = datetime(2026, 10, 1, 0, 0, tzinfo=timezone.utc)
+    state = {'last_success_at': '2026-09-30T23:50:00Z', 'next_check_at': '2026-10-01T00:00:00Z'}
+    assert not public.source_is_stale(state, now + timedelta(seconds=150))
+    assert public.source_is_stale(state, now + timedelta(seconds=151))
+    assert public.source_is_stale({**state, 'snapshot_stale': True}, now)
+
+
+def test_stale_shared_snapshot_retries_next_cycle_without_bypassing_external_feed_backoff():
+    stamp = '2026-10-01T00:00:00Z'
+    later = '2026-10-01T00:05:00Z'
+    states = {s['source_id']: {'status': 'ok', 'next_check_at': later} for s in source_map().values()}
+    states['nws']['status'] = 'stale'
+    states['nasa-release']['status'] = 'error'
+    assert [s['source_id'] for s in collector.due_sources(states, stamp=stamp)] == ['nws']
+    states['nws']['status'] = 'rate_limited'
+    assert collector.due_sources(states, force=True, selected={'nws'}, stamp=stamp) == []

@@ -105,7 +105,11 @@ Redis writes are independent, and worker success requires a verified write.
 
 The related-news seed is registered in unified seed health. `contentSync` checks
 seed age/status rather than just table existence. Request, seed, source and
-article freshness remain separate; source failure or truncated candidates stay
+article freshness remain separate. Source `next_check_at` is a scheduling due
+time; one collector cycle plus watch sleep (150 seconds) bounds the time allowed
+to complete a due check before reporting overdue. Explicitly expired shared map
+snapshots remain stale immediately and are retried next worker cycle using only
+the existing local cache; external feed Retry-After/backoff stays intact; source failure or truncated candidates stay
 visible even when seed publication succeeds.
 
 ## Verification and rollout

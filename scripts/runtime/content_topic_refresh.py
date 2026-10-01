@@ -20,6 +20,7 @@ def publish_seed(runtime, storage, interval, cycle_error=None):
     from api.services.free_content.snapshots import refresh_candidates, NAMESPACE, CACHE_KEY
     from api.services.free_content.store import source_states
     from api.services.free_content.registry import sources
+    from api.services.free_content.public import source_is_stale
     from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, utc_now_iso
 
     attempted = utc_now_iso()
@@ -34,7 +35,7 @@ def publish_seed(runtime, storage, interval, cycle_error=None):
         states = {source["source_id"]: saved.get(source["source_id"], {"status": "not_requested"})
                   for source in sources() if source.get("enabled")}
         degraded = cycle_error or any(s.get("status") not in {"ok", "unchanged", "healthy_empty"}
-            or s.get("snapshot_stale") or (s.get("next_check_at") and s["next_check_at"] < attempted) for s in states.values())
+            or source_is_stale(s, datetime.fromisoformat(attempted.replace("Z", "+00:00"))) for s in states.values())
         meta = build_seed_meta_payload(panel_id="related-news", namespace="seed-meta:content",
             cache_key="related-news", service_name="polydata-content-topic-refresh.service",
             expected_interval_seconds=max(30, min(60, interval)), status="degraded" if degraded else "ready",

@@ -241,6 +241,10 @@ def due_sources(states, *, probe=False, force=False, selected=None, stamp=None):
         and (
             probe
             or force
+            # Retry an overdue shared snapshot next cycle. This only reads the
+            # existing local map cache; it never acquires an external source.
+            or (not probe and s["transport"] == "snapshot"
+                and states.get(s["source_id"], {}).get("status") in {"stale", "error"})
             or not states.get(s["source_id"], {}).get("next_check_at")
             or states[s["source_id"]]["next_check_at"] <= stamp
         )
