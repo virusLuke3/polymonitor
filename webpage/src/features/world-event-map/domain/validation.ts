@@ -104,7 +104,11 @@ function isSource(value: unknown): value is GeoEventSource {
 
 function hazardMetricsMatch(event: HazardEvent) {
   if (event.hazardKind === 'earthquake') return event.metrics.kind === 'earthquake';
-  if (event.hazardKind === 'tropical-cyclone') return event.metrics.kind === 'tropical-cyclone';
+  // A cyclone track/advisory and a CAP area warning describe the same hazard
+  // with different measurements. NWS warnings must keep their CAP semantics.
+  if (event.hazardKind === 'tropical-cyclone') {
+    return event.metrics.kind === 'tropical-cyclone' || event.metrics.kind === 'weather-alert';
+  }
   if (event.hazardKind === 'severe-storm'
     || event.hazardKind === 'tornado'
     || event.hazardKind === 'flood'

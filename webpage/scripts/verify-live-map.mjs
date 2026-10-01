@@ -258,9 +258,14 @@ try {
         }, { continueOnFailure: true });
       }
       if(width===1536)await check('desktop: real offline and online recovery',async()=>{
-        await context.setOffline(true);await page.waitForTimeout(1500);await expect(host).toHaveAttribute('data-map-renderer-ready','webgl');await screenshot('desktop-offline');
         const resumed=[];const listener=response=>{if(response.url().includes('/wm-api/runtime/')&&response.ok())resumed.push({url:response.url(),status:response.status()});};page.on('response',listener);
-        await context.setOffline(false);await expect.poll(()=>resumed.length,{timeout:45000}).toBeGreaterThan(0);await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready');record.realConnectivityCycle={offlineRenderer:'webgl',resumed};page.off('response',listener);await screenshot('desktop-online-recovered');
+        try {
+          await context.setOffline(true);await page.waitForTimeout(1500);await expect(host).toHaveAttribute('data-map-renderer-ready','webgl');await screenshot('desktop-offline');
+          await context.setOffline(false);await expect.poll(()=>resumed.length,{timeout:45000}).toBeGreaterThan(0);await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready');record.realConnectivityCycle={offlineRenderer:'webgl',resumed};await screenshot('desktop-online-recovered');
+        } finally {
+          // A failed offline assertion must not poison later, independent gates.
+          await context.setOffline(false);page.off('response',listener);
+        }
       },{continueOnFailure:true});
       await check(`${width}: service worker reload uses published assets`, async () => {
         await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller)), { timeout: 30_000 }).toBe(true);

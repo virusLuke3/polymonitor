@@ -1169,6 +1169,7 @@ def _distance_nm(lat: float, lon: float, other_lat: float, other_lon: float) -> 
 
 def _adsb_viewport_samples(
     bbox: tuple[float, float, float, float],
+    hubs: List[Dict[str, Any]] | None = None,
 ) -> List[Dict[str, Any]]:
     """Cover a regional viewport within four public 250 NM queries if possible.
 
@@ -1198,7 +1199,28 @@ def _adsb_viewport_samples(
         sectors = grid(rows, columns)
         if all(sector["coversCell"] for sector in sectors):
             return sectors
-    return grid(2, 2)
+    sectors = []
+    # The global grid often samples ocean, although real airport coverage is
+    # already available in the shared OpenFlights seed. Use published hub
+    # coordinates for broad samples, without implying surveillance completeness.
+    candidates = [hub for hub in (hubs or []) if isinstance(hub, dict)
+                  and _float(hub.get("lat")) is not None and _float(hub.get("lon")) is not None
+                  and south <= float(hub["lat"]) <= north and west <= float(hub["lon"]) <= east]
+    candidates.sort(key=lambda hub: -(_float(hub.get("routeCount")) or 0))
+    for hub in candidates:
+        lat, lon = float(hub["lat"]), float(hub["lon"])
+        if any(_distance_nm(lat, lon, sector["lat"], sector["lon"]) < 375 for sector in sectors):
+            continue
+        sectors.append({"lat": lat, "lon": lon, "radiusNm": 250, "coversCell": False,
+                        "hubCode": str(hub.get("iata") or hub.get("icao") or hub.get("id") or "HUB")})
+        if len(sectors) == 4:
+            return sectors
+    for sector in grid(2, 2):
+        if len(sectors) == 4:
+            break
+        if not any(_distance_nm(sector["lat"], sector["lon"], item["lat"], item["lon"]) < 375 for item in sectors):
+            sectors.append(sector)
+    return sectors
 
 
 def _adsb_number(value: Any) -> Optional[float]:
@@ -1293,7 +1315,10 @@ def _adsb_viewport_snapshot(
     west, south, east, north = bbox
     aircraft: List[Dict[str, Any]] = []
     errors: List[Dict[str, str]] = []
-    sectors = _adsb_viewport_samples(bbox)
+    seeded = _read_seeded_snapshot(ctx)
+    aviation = seeded.get("aviation", {}) if seeded else {}
+    hubs = aviation.get("hubs", []) if isinstance(aviation, dict) else []
+    sectors = _adsb_viewport_samples(bbox, hubs if isinstance(hubs, list) else [])
     resources = _dependencies(ctx).resources
     deadline = min(deadline, monotonic() + 7.5) if deadline is not None else monotonic() + 7.5
     seen: set[str] = set()
@@ -1301,7 +1326,7 @@ def _adsb_viewport_snapshot(
     def fetch_sector(index: int, sector: Dict[str, Any]) -> tuple[int, Dict[str, Any], List[Any]]:
         if deadline - monotonic() <= 0.1:
             raise TimeoutError("aviation-sector-deadline")
-        hub = {"id": f"viewport-{index + 1}", "iata": None, "icao": None}
+        hub = {"id": f"viewport-{index + 1}", "iata": sector.get("hubCode"), "icao": None}
         url = (
             f"{_adsb_base_url()}/point/{sector['lat']:.5f}/"
             f"{sector['lon']:.5f}/{int(sector['radiusNm'])}"
@@ -1374,6 +1399,8 @@ def _adsb_viewport_snapshot(
         "errors": errors,
         "limitations": [
             "Aircraft positions are real ADSB observations; surveillance coverage and update delay vary.",
+            *(["Broad query samples prioritize published OpenFlights airport hubs from the shared reference cache."]
+              if any(sector.get("hubCode") for sector in sectors) else []),
             *(["Large viewports are sampled with bounded sectors and are not complete global coverage."]
               if not all(sector["coversCell"] for sector in sectors) else []),
             *(["Some query sectors failed; their aircraft observations are unavailable."] if errors else []),

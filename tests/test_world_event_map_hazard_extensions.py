@@ -409,6 +409,36 @@ def test_adsb_regional_queries_cover_corners_without_exceeding_public_radius(bbo
     assert all(sector['radiusNm'] <= 250 for sector in sectors)
 
 
+def test_broad_aviation_uses_existing_reference_hubs_without_claiming_full_coverage(monkeypatch):
+    monkeypatch.setattr(transport, '_opensky_access_token', lambda _ctx: (None, {'status': 'auth-error'}))
+    hubs = [{'iata': 'ATL', 'lat': 33.6367, 'lon': -84.4281, 'routeCount': 700},
+            {'iata': 'LAX', 'lat': 33.9425, 'lon': -118.4081, 'routeCount': 600},
+            {'iata': 'JFK', 'lat': 40.6398, 'lon': -73.7789, 'routeCount': 500},
+            {'iata': 'LHR', 'lat': 51.4775, 'lon': -0.4614, 'routeCount': 900}]
+    urls = []
+    def fetch(_ctx, url, **kwargs):
+        urls.append(url)
+        parts = url.split('/')
+        lat, lon = float(parts[-3]), float(parts[-2])
+        return {'ac': [{'hex': 'shared-plane', 'lat': 33.65, 'lon': -84.4},
+                       {'hex': f'{lat}:{lon}', 'lat': lat, 'lon': lon}]}
+    monkeypatch.setattr(transport, '_http_json_get', fetch)
+    resources = RuntimeResources()
+    try:
+        ctx = {'_resources': resources, 'get_cached_json': lambda ns, key:
+               {'aviation': {'hubs': hubs}} if ns == transport.GLOBAL_TRANSPORT_SNAPSHOT_NAMESPACE else None}
+        result = transport.get_aviation_viewport_snapshot(ctx, bbox=(-165,10,-30,59), zoom=2, limit=180)
+        assert 1 <= len(urls) <= 4
+        assert all(any(f"/{hub['lat']:.5f}/{hub['lon']:.5f}/250" in url for url in urls) for hub in hubs[:3])
+        assert not any('/51.47750/-0.46140/' in url for url in urls)
+        assert sum(item['icao24'] == 'shared-plane' for item in result['aircraft']) == 1
+        assert result['coverage']['complete'] is False
+        assert any('published OpenFlights' in note for note in result['limitations'])
+        assert transport._adsb_viewport_samples((-75,39,-72,42), hubs)[0]['coversCell'] is True
+    finally:
+        resources.close()
+
+
 def test_aviation_regional_sector_failure_recovers_without_false_complete(monkeypatch):
     monkeypatch.setattr(transport, '_opensky_access_token', lambda _ctx: (None, {'status': 'auth-error'}))
     failure = False

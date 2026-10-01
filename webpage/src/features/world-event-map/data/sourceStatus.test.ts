@@ -7,6 +7,14 @@ import {
 } from './sourceStatus';
 
 describe('map source status', () => {
+  it('explains contract rejection separately from optional boundary coverage', () => {
+    const response = { events: [], sources: [{ key: 'nws', status: 'ok',
+      coverage: { label: 'NWS', gaps: [] } }] } as unknown as HazardMapResponse;
+    const status = sourceStatusesFromHazardResponse(response, 2)[0];
+    expect(status).toMatchObject({ status: 'partial', rejectedCount: 2 });
+    expect(status?.message).toContain('2 records rejected by the map contract');
+    expect(status?.message).not.toContain('optional official boundaries');
+  });
   it('never turns an expired HTTP success body into a fresh source or rewrites its timestamps', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-10-01T06:42:00Z'));

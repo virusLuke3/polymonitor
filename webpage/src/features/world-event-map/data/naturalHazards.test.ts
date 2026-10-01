@@ -44,6 +44,22 @@ function response(events: unknown[]) {
 }
 
 describe('natural hazard response boundary', () => {
+  it('retains CAP cyclone area warnings and track advisories without changing native measurements', () => {
+    const cap = { ...validEarthquake, id: 'tropical-cyclone:nws:warning',
+      hazardKind: 'tropical-cyclone', category: 'weather',
+      geometry: { type: 'Polygon', coordinates: [[[145, 15], [146, 15], [146, 16], [145, 15]]] },
+      locationPrecision: 'region', sources: [{ provider: 'NWS', nativeId: 'warning' }],
+      metrics: { kind: 'weather-alert', providerSeverity: 'Severe', certainty: 'Likely', urgency: 'Immediate' },
+    };
+    const track = { ...cap, id: 'tropical-cyclone:nhc:advisory',
+      metrics: { kind: 'tropical-cyclone', maximumWind: { value: 60, unit: 'kt' } } };
+    const incompatible = { ...cap, id: 'tropical-cyclone:invalid', metrics: { kind: 'earthquake', magnitude: 5 } };
+    const parsed = parseNaturalHazardsResponse(response([cap, track, incompatible]));
+    expect(parsed.events.map(event => event.id)).toEqual([cap.id, track.id]);
+    expect(parsed.events[0]?.metrics).toEqual(cap.metrics);
+    expect(parsed.rejected).toEqual([expect.objectContaining({ index: 2, message: expect.stringContaining('incompatible') })]);
+  });
+
   it('retains valid source-native hazard geometry', () => {
     const parsed = parseNaturalHazardsResponse(response([validEarthquake]));
     expect(parsed.events).toHaveLength(1);
