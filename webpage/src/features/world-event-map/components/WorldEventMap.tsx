@@ -490,7 +490,7 @@ export function WorldEventMap({
     const measureHeight = () => {
       if (!stage || stage.classList.contains('is-map-focused')) return;
       const available = Math.max(260, window.innerHeight - stage.getBoundingClientRect().top - 16);
-      const target = window.innerWidth <= 720 ? Math.min(640, Math.max(300, available))
+      const target = window.innerWidth <= 720 ? Math.min(640, Math.max(420, available))
         : Math.min(available, Math.max(560, Math.min(1000, stage.clientWidth / 2.1)));
       stage.style.setProperty('--wm-map-height', `${Math.round(target)}px`);
     };

@@ -334,6 +334,8 @@ test('mobile aviation keeps the map controls and event list unobstructed', async
   ) }));
   await gotoMap(page, 'layers=air-routes&air=watch&zoom=1.5');
   const lens = (await page.locator('.wm-aviation-lens').boundingBox())!;
+  const zoomAction = (await page.locator('.wm-map-aviation-zoom').boundingBox())!;
+  expect(zoomAction.y + zoomAction.height, 'the folded aviation action must not be clipped inside its card').toBeLessThanOrEqual(lens.y + lens.height);
   for (const selector of ['.wm-map-controls', '.wm-map-focus-toggle', '.wm-world-event-list-toggle', '.wm-map-radar-status', '.wm-map-legend-toggle']) {
     const control = (await page.locator(selector).boundingBox())!;
     const overlap = Math.min(lens.x + lens.width, control.x + control.width) > Math.max(lens.x, control.x)
