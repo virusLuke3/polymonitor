@@ -304,6 +304,19 @@ export type ChartPayload = {
 };
 
 export type ContentItem = {
+  sourceId?: string;
+  sourceKind?: 'news_report' | 'official_release' | 'alert' | 'observation';
+  author?: string | null;
+  excerptOrigin?: string;
+  excerptFull?: string;
+  excerptTruncated?: boolean;
+  permissionBasis?: string;
+  policyUrl?: string;
+  licenseUrl?: string | null;
+  relation?: 'direct' | 'context' | null;
+  relationReason?: string | null;
+  sourceStatus?: string;
+  content_version?: string;
   id?: string | number;
   contentType?: string | null;
   source?: string | null;
@@ -318,8 +331,26 @@ export type ContentItem = {
   sourceCount?: number | null;
 };
 
+export type ContentSourceStatus = {
+  source_id: string;
+  publisher_name: string;
+  status: string;
+  stale?: boolean;
+  checked_at?: string;
+  last_success_at?: string;
+  error?: string | null;
+};
+
 export type ContentPayload = {
-  marketId: number;
+  marketId: number | null;
+  scope?: 'market' | 'global';
+  marketTitle?: string | null;
+  count?: number;
+  status?: string;
+  empty_reason?: string | null;
+  window?: { days: number; from: string; to: string };
+  lastSuccessfulCheckAt?: string | null;
+  sources?: ContentSourceStatus[];
   items: ContentItem[];
   sourceMode?: string;
   topicIds?: string[];

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from flask import Blueprint, jsonify, request
+from api.services.free_content.public import filter_payload
 
 
 @dataclass(frozen=True)
@@ -48,21 +49,10 @@ def _runtime_content_fallback(
     dependencies: ContentRouteDependencies,
     market_id: int | None = None,
 ) -> dict:
-    enabled = str(os.environ.get("POLYDATA_CONTENT_API_REFRESH_ENABLED", "0")).strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-    if not enabled:
-        payload = {"items": [], "sourceMode": "database-empty", "degraded": True}
-    else:
-        payload = dependencies.get_runtime_content_latest(limit=limit)
-        payload["sourceMode"] = f"{payload.get('sourceMode') or 'runtime-rss'}:db-fallback"
-        payload["degraded"] = True
-    if market_id is not None:
-        payload["marketId"] = market_id
-    return payload
+    # A public read must never trigger external acquisition or substitute global data.
+    return {"items": [], "count": 0, "scope": "market" if market_id is not None else "global",
+            "marketId": market_id, "market_id": market_id, "sourceMode": "database:free-public",
+            "status": "unavailable", "empty_reason": "source_or_database_unavailable", "degraded": True}
 
 
 def create_content_blueprint(dependencies: ContentRouteDependencies) -> Blueprint:
@@ -75,15 +65,16 @@ def create_content_blueprint(dependencies: ContentRouteDependencies) -> Blueprin
             market = dependencies.get_market_by_id(market_id)
             if not market:
                 return jsonify({"error": "Market not found", "marketId": market_id}), 404
-            payload = dependencies.get_related_content_payload(market_id, limit=limit)
+            payload = dependencies.get_related_content_payload(
+                market_id, limit=limit, days=30 if request.args.get("days")=="30" else 7, market=market
+            )
             payload = {
                 **payload,
                 "marketTitle": market.get("title"),
                 "marketSlug": market.get("slug"),
                 "marketCategory": market.get("category"),
             }
-            _publish_related_content(payload)
-            return jsonify(payload)
+            return jsonify(filter_payload(payload))
         except Exception:
             return jsonify(
                 _runtime_content_fallback(
@@ -97,10 +88,9 @@ def create_content_blueprint(dependencies: ContentRouteDependencies) -> Blueprin
     def api_content_latest():
         limit = min(20, max(1, int(request.args.get("limit", 8))))
         try:
-            payload = dependencies.get_latest_content_payload(limit=limit)
+            payload = dependencies.get_latest_content_payload(limit=limit, days=30 if request.args.get("days")=="30" else 7)
         except Exception:
             payload = _runtime_content_fallback(limit, dependencies=dependencies)
-        _publish_latest_content(payload)
-        return jsonify(payload)
+        return jsonify(filter_payload(payload))
 
     return bp

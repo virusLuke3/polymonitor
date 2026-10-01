@@ -213,8 +213,8 @@ export function fetchRecentOracle(limit = 24, signal?: AbortSignal) {
   return apiGet<OraclePayload['timeline']>(`/oracle/recent?limit=${limit}`, signal);
 }
 
-export function fetchLatestContent(limit = 8, signal?: AbortSignal) {
-  return apiGet<ContentPayload>(`/content/latest?limit=${limit}`, signal);
+export function fetchLatestContent(limit = 8, signal?: AbortSignal, days = 7) {
+  return apiGet<ContentPayload>(`/content/latest?limit=${limit}&days=${days}`, signal);
 }
 
 export function fetchRuntimeCommodities(signal?: AbortSignal) {
@@ -652,8 +652,14 @@ export function fetchMarketChart(
   return apiGetWithTimeout<ChartPayload>(`/markets/${marketId}/chart?${params.toString()}`, timeoutMs, signal);
 }
 
-function fetchMarketContent(marketId: number, limit = 20, timeoutMs = 5000, signal?: AbortSignal) {
-  return apiGetWithTimeout<ContentPayload>(`/content/market/${marketId}?limit=${limit}`, timeoutMs, signal);
+export function fetchMarketContent(marketId: number, limit = 20, timeoutMs = 5000, signal?: AbortSignal, days = 7) {
+  return apiGetWithTimeout<ContentPayload>(`/content/market/${marketId}?limit=${limit}&days=${days}`, timeoutMs, signal)
+    .then((payload) => {
+      if (payload.marketId !== marketId || (payload.scope && payload.scope !== 'market')) {
+        throw new Error('Content response scope or market identity mismatch');
+      }
+      return payload;
+    });
 }
 
 function fetchMarketLob(marketId: number, timeoutMs = 4000, signal?: AbortSignal) {
@@ -692,7 +698,7 @@ function preferLoadedBundle(primary: WorkspaceBundle, secondary: WorkspaceBundle
     chart: primary.chart?.points?.length ? primary.chart : secondary.chart,
     trades: primary.trades?.length ? primary.trades : secondary.trades,
     oracle: primaryOracle ? primaryOracle : secondaryOracle,
-    content: primary.content?.items?.length ? primary.content : secondary.content,
+    content: secondary.content ?? primary.content,
     lob: primary.lob || secondary.lob,
     servingSource: primary.servingSource || secondary.servingSource,
     servingUpdatedAt: primary.servingUpdatedAt || secondary.servingUpdatedAt,
@@ -737,17 +743,18 @@ export function fetchMarketWideAiSnapshot(lens: MarketWideAiInsightLens, timeout
 
 export async function fetchWorkspaceBundle(
   marketId: number,
-  options: { includeContent?: boolean; includeLob?: boolean; signal?: AbortSignal } = {},
+  options: { includeContent?: boolean; contentDays?: number; includeLob?: boolean; signal?: AbortSignal } = {},
 ): Promise<WorkspaceBundle> {
   const includeContent = Boolean(options.includeContent);
   const includeLob = Boolean(options.includeLob);
-  const inflightKey = `${marketId}:${includeContent ? 'content' : 'base'}:${includeLob ? 'lob' : 'no-lob'}`;
+  const contentDays = options.contentDays === 30 ? 30 : 7;
+  const inflightKey = `${marketId}:${includeContent ? `content:${contentDays}` : 'base'}:${includeLob ? 'lob' : 'no-lob'}`;
   const inflight = options.signal ? null : workspaceBundleInflight.get(inflightKey);
   if (inflight) return inflight;
 
   const request = (async () => {
     const contentPromise = includeContent
-      ? fetchMarketContent(marketId, 20, 3800, options.signal)
+      ? fetchMarketContent(marketId, 20, 8000, options.signal, contentDays)
       : Promise.resolve(null);
     const lobPromise = includeLob ? fetchMarketLob(marketId, 1800, options.signal) : Promise.resolve(null);
     const detailPromise = fetchMarketWorkspaceBundle(marketId, 22000, options.signal)
@@ -769,7 +776,10 @@ export async function fetchWorkspaceBundle(
       chart: null,
       trades: [],
       oracle: null,
-      content: contentResult.status === 'fulfilled' ? contentResult.value : null,
+      content: contentResult.status === 'fulfilled' ? contentResult.value : {
+        scope: 'market', marketId, items: [], count: 0, status: 'unavailable',
+        empty_reason: 'content_request_failed', sourceMode: 'database:free-public',
+      },
       lob: includeLob && lobResult.status === 'fulfilled' ? lobResult.value : null,
       servingSource: null,
       servingUpdatedAt: null,

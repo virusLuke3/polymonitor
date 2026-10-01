@@ -1,9 +1,8 @@
 import type { PanelRenderContext } from '@/types';
 
 function focusedContent(ctx: Pick<PanelRenderContext, 'bundle' | 'bootstrap' | 'selectedMarketId' | 'latestContent'>) {
-  return ctx.bundle?.content?.items?.length
-    ? ctx.bundle.content.items
-    : (ctx.bootstrap?.featuredMarket?.id === ctx.selectedMarketId ? ctx.bootstrap.contentPreview : ctx.latestContent);
+  if (ctx.selectedMarketId == null) return ctx.latestContent;
+  return ctx.bundle?.content?.marketId === ctx.selectedMarketId ? ctx.bundle.content.items : [];
 }
 
 function globalMarkets(ctx: Pick<PanelRenderContext, 'markets' | 'bootstrap'>) {

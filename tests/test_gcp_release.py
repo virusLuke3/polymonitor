@@ -26,13 +26,21 @@ def test_release_failure_restores_files_or_leaves_complete_recovery(tmp_path, mo
             item = tarfile.TarInfo(name)
             item.size, item.mode = 3, 0o644
             archive.addfile(item, io.BytesIO(b"new"))
-            entries.append({"path": name, "action": "upsert", "before_sha256": release._sha256(b"old"),
-                            "after_sha256": release._sha256(b"new"), "after_mode": "0644"})
+            entries.append(
+                {
+                    "path": name,
+                    "action": "upsert",
+                    "before_sha256": release._sha256(b"old"),
+                    "after_sha256": release._sha256(b"new"),
+                    "after_mode": "0644",
+                }
+            )
     if failure == "hash":
         entries[-1]["after_sha256"] = "invalid"
     manifest = tmp_path / "manifest.json"
-    manifest.write_text(json.dumps({"version": release.MANIFEST_VERSION, "base_sha": "old",
-                                    "target_sha": "new", "entries": entries}))
+    manifest.write_text(
+        json.dumps({"version": release.MANIFEST_VERSION, "base_sha": "old", "target_sha": "new", "entries": entries})
+    )
     receipt = backups / "new" / "receipt.json"
     if failure == "crash":
         code = """
@@ -47,7 +55,9 @@ def crash(source, target):
 Path.replace = crash
 apply_release(*(Path(value) for value in sys.argv[1:]))
 """
-        result = subprocess.run([sys.executable, "-B", "-c", code, str(root), str(manifest), str(payload), str(backups)])
+        result = subprocess.run(
+            [sys.executable, "-B", "-c", code, str(root), str(manifest), str(payload), str(backups)]
+        )
         assert result.returncode == 9
         assert (root / "first.py").read_bytes() == b"new"
         release.rollback_release(root, receipt)
@@ -62,11 +72,13 @@ apply_release(*(Path(value) for value in sys.argv[1:]))
 
         if failure == "stage":
             copyfile = shutil.copyfile
+
             def no_space(source, destination, **kwargs):
                 if Path(destination).name == ".second.py.polydata-new":
                     assert (root / "first.py").read_bytes() == b"old"
                     raise OSError("injected disk full")
                 return copyfile(source, destination, **kwargs)
+
             monkeypatch.setattr(shutil, "copyfile", no_space)
         elif failure != "hash":
             monkeypatch.setattr(Path, "replace", fail)
@@ -321,6 +333,53 @@ def test_release_readiness_rejects_successful_http_with_stale_or_unavailable_dat
     )
     with pytest.raises(RuntimeError):
         release.validate_readiness_payload("health", {"status": "degraded", "database": True, "redis": False}, now=now)
+
+
+def test_content_release_scope_rejects_unreviewed_empty_or_stale_data():
+    from datetime import datetime, timezone
+    import copy
+    import pytest
+
+    now = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    good = {
+        "scope": "global",
+        "status": "partial",
+        "count": 1,
+        "lastSuccessfulCheckAt": now.isoformat(),
+        "sources": [
+            {
+                "source_id": "global-voices",
+                "enabled": True,
+                "probe_status": "passed",
+                "policy_checked_at": now.isoformat(),
+                "display_title_allowed": True,
+            }
+        ],
+        "items": [
+            {
+                "sourceId": "global-voices",
+                "display_allowed": True,
+                "title": "Fixture article",
+                "url": "https://globalvoices.org/fixture/",
+                "author": "Fixture author",
+                "licenseUrl": "https://creativecommons.org/licenses/by/3.0/",
+            }
+        ],
+    }
+    release.validate_readiness_payload("content", good, now=now)
+    for change in (
+        {"scope": "market"},
+        {"items": []},
+        {"lastSuccessfulCheckAt": "2026-09-28T00:00:00Z"},
+        {"status": "unavailable"},
+    ):
+        with pytest.raises(RuntimeError):
+            release.validate_readiness_payload("content", {**good, **change}, now=now)
+    bad = copy.deepcopy(good)
+    bad["items"][0]["display_allowed"] = False
+    with pytest.raises(RuntimeError):
+        release.validate_readiness_payload("content", bad, now=now)
+    assert release.build_parser().parse_args(["verify"]).scope == "default"
 
 
 def test_map_release_checks_acquisition_time_and_preserves_partial_coverage():

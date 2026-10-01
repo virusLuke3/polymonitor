@@ -20,3 +20,12 @@ hunks, and build the release from a clean checkout of the pushed commit. Local
 tests are preflight checks, not production acceptance. Capture desktop and
 mobile screenshots from the real production URL without substituted APIs or
 tiles, verify the deployed release identity, and report remaining failures.
+
+Work in the original project checkout on `main`. Do not create task branches or
+additional Git worktrees unless the user explicitly requests them. For clean
+release builds, export the pushed commit with `git archive` into a temporary
+build directory instead of creating a worktree.
+
+Commit only changes owned by the current task. If a file also contains unrelated
+user or task changes, stage only the owned hunks; never stage the whole mixed
+file. Preserve all other staged, unstaged, and untracked work.

@@ -1423,16 +1423,23 @@ def _count_topic_content(
     return int(row.get("count") or 0)
 
 
+def get_content_market_by_id(ctx: Mapping[str, Any], market_id: int) -> Dict[str, Any] | None:
+    """Only local question metadata is needed for content, never trading/Oracle joins."""
+    storage = ContentStorageDependencies.from_context(ctx)
+    return storage.query_one("SELECT * FROM markets WHERE id = ?", (market_id,)) or None
+
+
 def get_related_content_by_market_id(
     ctx: Mapping[str, Any],
     market_id: int,
     limit: int = 8,
+    days: int = 7,
+    market: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
-    return _get_related_content_by_market_id(
-        RelatedContentQueryDependencies.from_context(ctx),
-        market_id,
-        limit=limit,
-    )
+    from api.services.free_content.public import payload
+    storage = ContentStorageDependencies.from_context(ctx)
+    market = market if market is not None else get_content_market_by_id(storage, market_id)
+    return payload(storage, market=market, market_id=market_id, limit=limit, days=days)
 
 
 def _get_related_content_by_market_id(
@@ -1640,11 +1647,11 @@ def _get_related_content_by_market_id(
 def get_latest_content_snapshot(
     ctx: Mapping[str, Any],
     limit: int = 8,
+    days: int = 7,
 ) -> Dict[str, Any]:
-    return _get_latest_content_snapshot(
-        LatestContentQueryDependencies.from_context(ctx),
-        limit=limit,
-    )
+    from api.services.free_content.public import payload
+    dependencies = LatestContentQueryDependencies.from_context(ctx)
+    return payload(dependencies.storage, limit=limit, days=days)
 
 
 def _get_latest_content_snapshot(
