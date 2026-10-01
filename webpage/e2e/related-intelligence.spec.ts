@@ -178,3 +178,24 @@ test('source disclosure remains clickable above workspace resize handles', async
   await panel.locator('.wm-intel-sources summary').click();
   await expect(panel.locator('.wm-intel-sources')).toHaveAttribute('open', '');
 });
+
+test('explicit global scope survives market updates and market scope uses the current identity', async ({ page }) => {
+  await installDashboard(page);
+  const requests: string[] = [];
+  await page.route('**/wm-api/content/**', route => {
+    requests.push(route.request().url());
+    const market = route.request().url().match(/\/market\/(\d+)/);
+    return route.fulfill({ json: market ? payload(Number(market[1])) : payload(null, ['global']) });
+  });
+  await mount(page);
+  await page.getByRole('button', { name: 'Global', exact: true }).click();
+  await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
+  await page.evaluate(data => window.panelHarness.update('related-news', {}, data), { selectedMarketId: 2, selectedMarket: fixtureMarkets[0] });
+  await expect(page.getByRole('button', { name: 'Global', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
+  expect(requests.some(url => url.includes('/market/2'))).toBeFalsy();
+  await page.getByRole('button', { name: 'Market', exact: true }).click();
+  await expect(page.locator('.wm-free-intel-card')).toHaveCount(0);
+  await expect(page.getByText('Market 2', { exact: true })).toBeVisible();
+  expect(requests.at(-1)).toContain('/market/2');
+});

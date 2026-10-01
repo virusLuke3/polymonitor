@@ -11,9 +11,7 @@ import { resourceId, type IntelResource } from './model';
 type Inputs = PanelInputs<'selectedMarketId' | 'selectedMarket'>;
 const kinds = ['all', 'news_report', 'official_release', 'event'] as const;
 function RelatedIntelPanel({ ctx }: { ctx: Inputs }) {
-  const [choice, setChoice] = useState({ marketId: ctx.selectedMarketId, global: ctx.selectedMarketId == null });
-  const setGlobal = (global: boolean) => setChoice({ marketId: ctx.selectedMarketId, global });
-  const global = choice.marketId === ctx.selectedMarketId ? choice.global : ctx.selectedMarketId == null;
+  const [global, setGlobal] = useState(false);
   const [days, setDays] = useState(7);
   const scope = global || ctx.selectedMarketId == null ? 'global' : 'market';
   const key = resourceId({ marketId: ctx.selectedMarketId, scope, days });
@@ -29,7 +27,7 @@ function IntelView({ ctx, scope, days, setDays, setGlobal }: {
   const copy = (en: string, cn: string) => i18n.locale.startsWith('zh') ? cn : en;
   const [kind, setKind] = useState<typeof kinds[number]>('all');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const feed = useIntelFeed(ctx.selectedMarketId, scope, days);
+  const feed = useIntelFeed(scope === 'global' ? null : ctx.selectedMarketId, scope, days);
   const data = feed.data;
   const items = data?.items || [];
   const labels = { all: copy('All', '全部'), news_report: copy('Reports', '报道'), official_release: copy('Official', '公告'), event: copy('Events', '事件') };
@@ -42,7 +40,7 @@ function IntelView({ ctx, scope, days, setDays, setGlobal }: {
       <select aria-label={copy('Content time range', '资讯时间范围')} value={days} onChange={(event) => setDays(Number(event.currentTarget.value))}><option value={7}>{copy('Past 7 days', '过去 7 天')}</option><option value={30}>{copy('Past 30 days · history', '过去 30 天 · 历史')}</option></select>
       <button type="button" disabled={feed.status.phase === 'loading'} onClick={() => void feed.refresh()}>{feed.error ? copy('Retry', '重试') : copy('Refresh', '刷新')}</button>
     </div>
-    {scope === 'market' && <p className="wm-free-intel-market-caption">{ctx.selectedMarket?.title || data?.marketTitle || `Market ${ctx.selectedMarketId}`}</p>}
+    {scope === 'market' && <p className="wm-free-intel-market-caption">{(ctx.selectedMarket?.id === ctx.selectedMarketId ? ctx.selectedMarket.title : null) || data?.marketTitle || `Market ${ctx.selectedMarketId}`}</p>}
     <div className="wm-intel-filter-tabs" role="tablist" aria-label={copy('Content types', '内容类型')}>{kinds.map((value) => <button type="button" role="tab" aria-selected={kind === value} className={kind === value ? 'active' : ''} onClick={() => setKind(value)} key={value}><span>{labels[value]}</span><b>{filtered(value).length}</b></button>)}</div>
     {feed.pending && <button type="button" className="wm-intel-new" onClick={feed.accept}>{copy('New content available · show', '有新内容 · 点击查看')}</button>}
     {(feed.error || data?.status === 'unavailable') && <p role="status">{copy('Content service unavailable.', '资讯服务暂不可用。')} {!!items.length && copy('Showing previously verified content.', '显示此前已核验的内容。')}</p>}
