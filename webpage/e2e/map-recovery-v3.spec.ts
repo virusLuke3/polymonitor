@@ -8,6 +8,37 @@ const phase = process.env.MAP_RECOVERY_PHASE;
 const root = resolve('artifacts/map-visual-recovery-v3', phase || 'unrequested');
 test.skip(!phase, 'Explicit V3 comparison captures.');
 test.use({ trace: 'on', reducedMotion: 'reduce' });
+test('a cached hazard response refreshes at its original server deadline', async ({page}) => {
+  test.skip(phase === 'before'); mkdirSync(root, {recursive:true});
+  await page.clock.install({time:new Date(GENERATED_AT)}); await installFixtures(page);
+  const assets = await installRealMapAssets(page);
+  const {mapResponse,sourceEvents} = await import('./fixtures/world-event-map');
+  const bodies:any[] = [];
+  await page.route('**/wm-api/runtime/world/natural-hazards/map?**', async route => {
+    const key = new URL(route.request().url()).searchParams.get('source')!;
+    const body = mapResponse(key, sourceEvents[key] || []);
+    if (key === 'usgs') {
+      const now = await page.evaluate(() => Date.now());
+      const first = bodies.length === 0;
+      body.sources[0].fetchedAt = new Date(first ? Date.parse(GENERATED_AT)-55_000 : now).toISOString();
+      body.sources[0].lastSuccessAt = body.sources[0].fetchedAt;
+      body.sources[0].staleAfter = new Date(first ? Date.parse(GENERATED_AT)+5_000 : now+60_000).toISOString();
+      bodies.push(body);
+    }
+    await route.fulfill({json:body});
+  });
+  try {
+    await page.goto('/?view=2d&basemap=pmtiles&time=all&layers=earthquakes-volcanoes');
+    await expect.poll(() => bodies.length).toBeGreaterThan(0);
+    await expect(page.locator('.wm-map-source-status').filter({has:page.locator('b',{hasText:/^USGS$/})})).toHaveClass(/is-ok/);
+    await page.clock.fastForward(10_000);
+    await expect.poll(() => bodies.length).toBeGreaterThan(1);
+    expect(bodies.length).toBeLessThanOrEqual(3);
+    expect(bodies[0].sources[0].lastSuccessAt).toBe(new Date(Date.parse(GENERATED_AT)-55_000).toISOString());
+    writeFileSync(resolve(root,'source-deadline-refresh.json'), JSON.stringify({bodies,originalTimestampPreserved:true}));
+  } finally { await page.goto('about:blank'); await page.unrouteAll({behavior:'ignoreErrors'}); await assets.dispose(); }
+});
+
 test('optional country loading does not falsely demote a ready cached basemap', async ({page}) => {
   test.skip(phase === 'before'); mkdirSync(root, {recursive:true});
   await page.clock.setFixedTime(new Date(GENERATED_AT)); await installFixtures(page);

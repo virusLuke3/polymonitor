@@ -7,6 +7,16 @@ import {
 } from './sourceStatus';
 
 describe('map source status', () => {
+  it('marks unresolved official boundaries as partial while preserving the healthy CAP status', () => {
+    const response = { events: [{ sources: [{ provider: 'NWS' }], properties: { unresolvedZoneCount: 1 } }],
+      sources: [{ key: 'nws', status: 'ok', coverage: { label: 'NWS', gaps: [] } }],
+    } as unknown as HazardMapResponse;
+    expect(sourceStatusesFromHazardResponse(response)[0]).toMatchObject({ status: 'partial', phase: 'partial', eventCount: 1 });
+    expect(response.sources[0]?.status).toBe('ok');
+    response.events[0]!.geometry = { type: 'Point', coordinates: [145,15] };
+    response.events[0]!.properties.unresolvedZoneCount = 0;
+    expect(sourceStatusesFromHazardResponse(response)[0]).toMatchObject({ status: 'ok', phase: 'fresh' });
+  });
   it('explains contract rejection separately from optional boundary coverage', () => {
     const response = { events: [], sources: [{ key: 'nws', status: 'ok',
       coverage: { label: 'NWS', gaps: [] } }] } as unknown as HazardMapResponse;

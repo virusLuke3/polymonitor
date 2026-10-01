@@ -151,11 +151,15 @@ try {
         assert(Date.now() - Date.parse(core.lastSuccessAt) < 300_000);
         assert(Date.parse(core.staleAfter) > Date.now());
         const geometryIncomplete = nws.events.some(event => !event.geometry || Number(event.properties?.unresolvedZoneCount || 0) > 0);
-        if (geometryIncomplete) {
+        // The independent API probe can observe a newer CAP revision than the
+        // page. Check the page's own boundary explanation and record both.
+        await expect(nwsBadge).toHaveClass(/is-(ok|partial)/, { timeout: 30_000 });
+        const displayedGeometryIncomplete = /optional official boundaries/.test(await nwsBadge.getAttribute('title') || '');
+        if (displayedGeometryIncomplete) {
           await expect(nwsBadge).toHaveClass(/is-partial/);
           await expect(nwsBadge).toHaveAttribute('title', /Fresh catalog; optional official boundaries/);
         } else await expect(nwsBadge).toHaveClass(/is-ok/);
-        record.nws = { core, count: nws.events.length, geometryIncomplete, badge: await nwsBadge.innerText(), explanation: await nwsBadge.getAttribute('title') };
+        record.nws = { core, count: nws.events.length, geometryIncomplete, displayedGeometryIncomplete, badge: await nwsBadge.innerText(), explanation: await nwsBadge.getAttribute('title') };
         record.sourceHealth = await page.locator('.wm-map-source-statuses').innerText();
       }, { continueOnFailure: true });
       await check(`${width}: map typography uses proportional map roles`, async () => {

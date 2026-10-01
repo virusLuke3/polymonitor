@@ -19,6 +19,19 @@ function callbacks(): MapRendererCallbacks {
 }
 
 describe('renderer hover lifecycle', () => {
+  it('mounts radar on a parsed style without waiting for unrelated source loading or animation idle', () => {
+    const renderer = new DeckMapRenderer() as any;
+    renderer.callbacks = { ...callbacks(), onRadarStateChange: vi.fn() };
+    const addSource = vi.fn(), addLayer = vi.fn(), once = vi.fn();
+    renderer.map = { isStyleLoaded: () => false, getStyle: () => ({layers:[]}), getSource: () => null,
+      getLayer: () => null, addSource, addLayer, once };
+    renderer.setRadar({ tiles: '/radar/{z}/{x}/{y}.png', coverageTiles: '/coverage/{z}/{x}/{y}.png' });
+    expect(addSource.mock.calls.map(([id]) => id)).toEqual(['weather-radar', 'weather-radar-coverage']);
+    expect(addLayer).toHaveBeenCalledTimes(2);
+    expect(once).not.toHaveBeenCalled();
+    expect(renderer.callbacks.onRadarStateChange).toHaveBeenCalledWith('loading');
+    renderer.map = null; renderer.destroy();
+  });
   it('checks event picking at the click position before claiming a country without prior hover', () => {
     const renderer = new DeckMapRenderer() as any;
     renderer.callbacks = callbacks();

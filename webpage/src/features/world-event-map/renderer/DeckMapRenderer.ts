@@ -140,7 +140,6 @@ function sameEventReferences(
 export class DeckMapRenderer implements MapRenderer {
   private radarFrame: RadarFrame | null = null;
   private radarAppliedUrl = '';
-  private radarIdlePending = false;
 
   setRadar(frame: RadarFrame | null) { this.radarFrame = frame; this.applyRadar(); }
 
@@ -164,13 +163,10 @@ export class DeckMapRenderer implements MapRenderer {
       if (this.radarRetryTimer != null) window.clearTimeout(this.radarRetryTimer); this.radarRetryTimer = null;
       this.callbacks?.onRadarStateChange?.('off', null); return;
     }
-    if (!map.isStyleLoaded()) {
-      if (!this.radarIdlePending) {
-        this.radarIdlePending = true;
-        map.once('idle', () => { this.radarIdlePending = false; this.applyRadar(); });
-      }
-      return;
-    }
+    // isStyleLoaded also waits for unrelated sources. Aviation animation can
+    // keep `idle` from firing indefinitely. A parsed style permits addSource;
+    // handleStyleLoad already retries this when the style itself is pending.
+    if (!map.getStyle()?.layers) return;
     const frame = this.radarFrame;
     if (this.radarAppliedUrl === frame.tiles || this.radarPending?.frame.tiles === frame.tiles) return;
     if (this.radarPending) this.removeRadarBank(this.radarPending.bank);

@@ -107,11 +107,11 @@ export function sourceStatusesFromHazardResponse(
     ].filter(Boolean);
     if (rejectedCount > 0) details.push(`${rejectedCount} record${rejectedCount === 1 ? '' : 's'} rejected by the map contract; see data quality for details.`);
     const geometryIncomplete = source.key === 'nws' && response.events.some(event => event.sources.some(item => names.includes(item.provider)) && (!event.geometry || Number(event.properties.unresolvedZoneCount || 0) > 0));
-    if (geometryIncomplete) details.push('Fresh catalog; optional official boundaries are incomplete or still resolving.');
     const transportExpired = ['ok', 'partial'].includes(source.status)
       && Number.isFinite(Date.parse(source.staleAfter || '')) && Date.parse(source.staleAfter!) <= Date.now();
+    if (geometryIncomplete) details.push(`${transportExpired ? 'Retained catalog' : 'Fresh catalog'}; optional official boundaries are incomplete or still resolving.`);
     if (transportExpired) details.push('Source freshness deadline has passed; retaining the original last-success time while refreshing.');
-    const status = transportExpired ? 'degraded' : source.status === 'ok' && rejectedCount > 0 ? 'partial' : source.status;
+    const status = transportExpired ? 'degraded' : source.status === 'ok' && (rejectedCount > 0 || geometryIncomplete) ? 'partial' : source.status;
     return {
       phase: geometryIncomplete && status === 'ok' ? 'partial' : status === 'error' ? 'unavailable' : status === 'degraded' ? 'stale' : status === 'partial' ? 'partial' : eventCount === 0 ? 'empty' : 'fresh',
       key: source.key,

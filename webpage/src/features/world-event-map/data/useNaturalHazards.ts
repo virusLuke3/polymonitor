@@ -322,8 +322,16 @@ export function useNaturalHazards({ sourceKeys, zoom, center, suspended }: {
       };
       const schedule = (failed: boolean) => {
         if (!isCurrent() || blocked) return;
-        const delay = failed ? RETRY_DELAYS_MS[Math.min(RETRY_DELAYS_MS.length - 1, Math.max(0, failures - 1))]!
+        const expiresAt = Date.parse(records.current.get(source)?.parsed.response.sources[0]?.staleAfter || '');
+        // A successful response can be a cache hit near its original deadline.
+        // Starting a full interval here would leave it stale for most of the
+        // next minute. Keep the server deadline, without rewriting freshness
+        // or aggressively polling an already degraded source.
+        const refreshDelay = Number.isFinite(expiresAt) && expiresAt > Date.now()
+          ? Math.min(REFRESH_INTERVAL_MS[source], Math.max(1000, expiresAt - Date.now()))
           : REFRESH_INTERVAL_MS[source];
+        const delay = failed ? RETRY_DELAYS_MS[Math.min(RETRY_DELAYS_MS.length - 1, Math.max(0, failures - 1))]!
+          : refreshDelay;
         const jitter = Math.floor(Math.random() * (failed ? 1000 : 3000));
         task.timer = window.setTimeout(() => {
           task.timer = null; task.queued = true; pump();
