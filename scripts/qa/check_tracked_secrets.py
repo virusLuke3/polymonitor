@@ -25,6 +25,8 @@ SECRET_PATTERNS = {
 HOME_PATH_PATTERN = re.compile(r"/(?:home|Users)/([A-Za-z0-9._-]+)(?:/|$)")
 REMOTE_HOME_PATTERN = re.compile(r"\b([A-Za-z0-9._-]+)@[A-Za-z0-9._-]+:~/")
 GENERIC_HOME_NAMES = {"example", "runner", "user", "username"}
+# Official feed directory: its /home/html/ URL is not a local home directory.
+PUBLIC_HOME_URLS = ("https://www.ecb.europa.eu/home/html/rss.en.html",)
 
 
 def _tracked_paths(root: Path) -> Iterable[Path]:
@@ -57,7 +59,10 @@ def scan(root: Path) -> list[tuple[str, int, str]]:
             if label:
                 findings.append((str(path.relative_to(root)), line_number, label))
                 continue
-            home_match = HOME_PATH_PATTERN.search(line)
+            path_text = line
+            for public_url in PUBLIC_HOME_URLS:
+                path_text = path_text.replace(public_url, "")
+            home_match = HOME_PATH_PATTERN.search(path_text)
             if home_match and home_match.group(1).lower() not in GENERIC_HOME_NAMES:
                 findings.append((str(path.relative_to(root)), line_number, "personal-home-path"))
                 continue
