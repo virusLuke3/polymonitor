@@ -537,29 +537,28 @@ function OracleTimeline({ events, bundle }: { events: OracleEvent[]; bundle: Wor
 }
 
 function ContentCard({ item }: { item: ContentItem }) {
-  const { t, formatRelativeTime } = useI18n();
+  const { t, formatDateTime, locale } = useI18n();
+  const zh = locale.startsWith('zh');
   const body = (
     <>
       <div className="market-content-meta">
-        <span>{cleanSource(item.provider || item.source || item.contentType)}</span>
-        <time>{formatRelativeTime(item.publishedAt)}</time>
+        <span>{cleanSource(item.source || item.provider || item.contentType)}</span>
+        <time>{item.publishedAt ? formatDateTime(item.publishedAt) : zh ? '发布时间未知' : 'Publication time unknown'}</time>
       </div>
-      <strong>{item.title || t('market.untitledIntelligence')}</strong>
-      {item.summary ? <p>{item.summary}</p> : null}
+      {item.author && <p>{zh ? '作者' : 'By'} {item.author}</p>}
+      <strong>{item.url ? <a href={item.url} target="_blank" rel="noopener noreferrer">{item.title || t('market.untitledIntelligence')}</a> : item.title || t('market.untitledIntelligence')}</strong>
+      {item.summary ? <p>{item.summary} <small>{item.excerptOrigin === 'structured' ? zh ? '数据整理' : 'Data summary' : zh ? '节选' : 'Excerpt'}</small></p> : null}
+      {item.relationReason && <p>{item.relation === 'direct' ? zh ? '直接关联' : 'Direct relation' : zh ? '仅背景关联' : 'Background only'} · {item.relationReason}</p>}
       <div className="market-content-footer">
-        <span>{item.category || t('market.marketContext')}</span>
+        <span>{item.sourceKind?.replace(/_/g, ' ') || item.category || t('market.marketContext')}</span>
         {item.relevanceScore != null ? <em>{t('market.relevance', { score: Math.round(Number(item.relevanceScore) * 100) })}</em> : null}
       </div>
     </>
   );
-  return item.url ? (
-    <a className="market-content-item" href={item.url} target="_blank" rel="noopener noreferrer">{body}</a>
-  ) : (
-    <article className="market-content-item">{body}</article>
-  );
+  return <article className="market-content-item">{body}{(item.licenseUrl || item.policyUrl) && <a href={item.licenseUrl || item.policyUrl} target="_blank" rel="noopener noreferrer">{item.licenseUrl ? 'CC BY 3.0' : zh ? '来源使用政策' : 'Source use policy'}</a>}</article>;
 }
 
-function LinkedIntelligence({ items }: { items: ContentItem[] }) {
+function LinkedIntelligence({ items, days, onDaysChange }: { items: ContentItem[]; days: number; onDaysChange: (days: number) => void }) {
   const { t } = useI18n();
   return (
     <section className="market-card market-content-card">
@@ -570,6 +569,7 @@ function LinkedIntelligence({ items }: { items: ContentItem[] }) {
         </div>
         <StatusBadge label={t('market.items', { count: items.length })} tone={items.length ? 'info' : 'warning'} compact />
       </div>
+      <select aria-label="Dossier content time range" value={days} onChange={event => onDaysChange(Number(event.currentTarget.value))}><option value={7}>Past 7 days</option><option value={30}>Past 30 days · history</option></select>
       <div className="market-content-grid">
         {items.slice(0, MAX_VISIBLE_CONTENT).map((item, index) => (
           <ContentCard item={item} key={item.id || `${item.url || item.title}-${index}`} />
@@ -641,7 +641,8 @@ export function MarketWorkspace() {
     formatRelativeTime,
   } = useI18n();
   const marketId = readMarketId();
-  const { bundle, loading, error, setError, lastRefreshedAt, refresh } = useMarketDossier(marketId, t);
+  const [contentDays, setContentDays] = useState(7);
+  const { bundle, loading, error, setError, lastRefreshedAt, refresh } = useMarketDossier(marketId, t, contentDays);
   const [watchState, setWatchState] = useState<'idle' | 'busy' | 'watched'>('idle');
 
   const outcome = useMemo(() => selectedWorkspaceOutcome(bundle), [bundle]);
@@ -839,7 +840,7 @@ export function MarketWorkspace() {
 
             <div className="market-secondary-grid">
               <OracleTimeline events={bundle.oracle?.timeline || []} bundle={bundle} />
-              <LinkedIntelligence items={bundle.content?.items || []} />
+              <LinkedIntelligence items={bundle.content?.items || []} days={contentDays} onDaysChange={setContentDays} />
             </div>
           </>
         ) : (

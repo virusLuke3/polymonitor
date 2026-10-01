@@ -9,7 +9,7 @@ type Translator = (key: MessageKey, params?: Record<string, string | number>) =>
 const REFRESH_INTERVAL_MS = 30_000;
 
 /** The independent market page owns its dossier and follow-up book as one request. */
-export function useMarketDossier(marketId: number | null, t: Translator) {
+export function useMarketDossier(marketId: number | null, t: Translator, contentDays = 7) {
   const [bundle, setBundle] = useState<WorkspaceBundle | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -35,7 +35,7 @@ export function useMarketDossier(marketId: number | null, t: Translator) {
       && request.current?.controller === controller && currentMarket.current === marketId;
     setLoading(true);
     const promise = (async () => {
-      const next = await fetchWorkspaceBundle(marketId, { includeContent: true, includeLob: true, signal: controller.signal });
+      const next = await fetchWorkspaceBundle(marketId, { includeContent: true, contentDays, includeLob: true, signal: controller.signal });
       if (!isCurrent()) return;
       if (!next.market || !bundleMatchesMarket(next, marketId)) throw new Error(t('market.noIdentity', { id: marketId }));
       const outcome = selectedWorkspaceOutcome(next);
@@ -66,7 +66,7 @@ export function useMarketDossier(marketId: number | null, t: Translator) {
     });
     request.current = { controller, promise };
     return promise;
-  }, [marketId, t]);
+  }, [marketId, t, contentDays]);
 
   useEffect(() => {
     mounted.current = true;

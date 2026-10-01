@@ -728,17 +728,18 @@ export function fetchMarketWideAiSnapshot(lens: MarketWideAiInsightLens, timeout
 
 export async function fetchWorkspaceBundle(
   marketId: number,
-  options: { includeContent?: boolean; includeLob?: boolean; signal?: AbortSignal } = {},
+  options: { includeContent?: boolean; contentDays?: number; includeLob?: boolean; signal?: AbortSignal } = {},
 ): Promise<WorkspaceBundle> {
   const includeContent = Boolean(options.includeContent);
   const includeLob = Boolean(options.includeLob);
-  const inflightKey = `${marketId}:${includeContent ? 'content' : 'base'}:${includeLob ? 'lob' : 'no-lob'}`;
+  const contentDays = options.contentDays === 30 ? 30 : 7;
+  const inflightKey = `${marketId}:${includeContent ? `content:${contentDays}` : 'base'}:${includeLob ? 'lob' : 'no-lob'}`;
   const inflight = options.signal ? null : workspaceBundleInflight.get(inflightKey);
   if (inflight) return inflight;
 
   const request = (async () => {
     const contentPromise = includeContent
-      ? fetchMarketContent(marketId, 20, 3800, options.signal)
+      ? fetchMarketContent(marketId, 20, 8000, options.signal, contentDays)
       : Promise.resolve(null);
     const lobPromise = includeLob ? fetchMarketLob(marketId, 1800, options.signal) : Promise.resolve(null);
     const detailPromise = fetchMarketWorkspaceBundle(marketId, 22000, options.signal)

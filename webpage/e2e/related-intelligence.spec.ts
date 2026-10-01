@@ -69,3 +69,18 @@ test('new content waits for the reader to accept it', async ({ page }) => {
   await page.getByRole('button', { name: 'New content available', exact: false }).click();
   await expect(page.locator('.wm-free-intel-card')).toHaveCount(2);
 });
+
+test('dossier uses the same content API and explicitly requests history with visible attribution', async ({ page }) => {
+  await installDashboard(page);
+  const requests: string[] = [];
+  await page.route('**/wm-api/content/**', route => {
+    requests.push(route.request().url());
+    return route.fulfill({ json: route.request().url().includes('days=30') ? payload(1, ['history']) : payload(1) });
+  });
+  await page.goto('/markets/1');
+  await expect(page.getByLabel('Dossier content time range')).toBeVisible();
+  await page.getByLabel('Dossier content time range').selectOption('30');
+  await expect(page.locator('.market-content-card').getByText('By Fixture author')).toBeVisible();
+  await expect(page.locator('.market-content-card').getByRole('link', { name: 'CC BY 3.0' })).toBeVisible();
+  expect(requests.some(url => url.includes('/market/1') && url.includes('days=30'))).toBeTruthy();
+});

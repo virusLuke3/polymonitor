@@ -72,7 +72,6 @@ def create_content_blueprint(dependencies: ContentRouteDependencies) -> Blueprin
                 "marketSlug": market.get("slug"),
                 "marketCategory": market.get("category"),
             }
-            _publish_related_content(payload)
             return jsonify(filter_payload(payload))
         except Exception:
             return jsonify(
@@ -90,7 +89,6 @@ def create_content_blueprint(dependencies: ContentRouteDependencies) -> Blueprin
             payload = dependencies.get_latest_content_payload(limit=limit, days=30 if request.args.get("days")=="30" else 7)
         except Exception:
             payload = _runtime_content_fallback(limit, dependencies=dependencies)
-        _publish_latest_content(payload)
         return jsonify(filter_payload(payload))
 
     return bp

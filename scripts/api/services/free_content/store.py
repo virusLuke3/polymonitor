@@ -90,14 +90,14 @@ def persist(storage, source, items, now):
                     (content_id, version, raw, now),
                 )
                 conn.execute(
-                    "INSERT INTO content_items(id,content_type,provider,source,category,topic_id,title,url,published_at,summary,raw_payload,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET topic_id=excluded.topic_id,title=excluded.title,summary=excluded.summary,published_at=excluded.published_at,raw_payload=excluded.raw_payload,updated_at=excluded.updated_at",
+                    "INSERT INTO content_items(id,content_type,provider,source,category,topic_id,title,url,published_at,summary,raw_payload,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET topic_id=excluded.topic_id,title=excluded.title,url=excluded.url,summary=excluded.summary,published_at=excluded.published_at,raw_payload=excluded.raw_payload,updated_at=excluded.updated_at",
                     (
                         content_id,
                         "news",
                         "free-public",
                         source["publisher_name"],
                         source["source_kind"],
-                        "free:" + source["publisher_id"] + (":" + item["storm_id"] if item.get("storm_id") else ""),
+                        "free:" + source["publisher_id"] + (":" + item["event_id"] if source['publisher_id']=='nhc' else ""),
                         item["title"],
                         item["url"],
                         item.get("published_at"),

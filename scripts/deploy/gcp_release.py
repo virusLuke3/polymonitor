@@ -634,6 +634,48 @@ def validate_readiness_payload(kind: str, payload: Any, *, now: datetime, max_ag
         ):
             raise RuntimeError("API dependencies are not ready")
         return
+    if kind == "content":
+        if (
+            not isinstance(payload, dict)
+            or payload.get("scope") != "global"
+            or payload.get("status") not in {"ready", "partial"}
+        ):
+            raise RuntimeError("Public free-content service is unavailable or incorrectly scoped")
+        items = payload.get("items")
+        sources = payload.get("sources")
+        if (
+            not isinstance(items, list)
+            or not items
+            or payload.get("count") != len(items)
+            or not isinstance(sources, list)
+        ):
+            raise RuntimeError("No verifiable public content or invalid counts/source coverage")
+        approved = {
+            source["source_id"]
+            for source in sources
+            if source.get("enabled")
+            and source.get("probe_status") == "passed"
+            and source.get("policy_checked_at")
+            and source.get("display_title_allowed")
+        }
+        for item in items:
+            if (
+                not item.get("display_allowed")
+                or item.get("sourceId") not in approved
+                or not item.get("title")
+                or not str(item.get("url", "")).startswith("https://")
+            ):
+                raise RuntimeError("Public content lacks reviewed provenance or permission")
+            if item.get("sourceId") == "global-voices" and (not item.get("author") or not item.get("licenseUrl")):
+                raise RuntimeError("Required author/license attribution missing")
+        stamp = payload.get("lastSuccessfulCheckAt")
+        try:
+            age = (now - datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))).total_seconds()
+        except (ValueError, TypeError):
+            raise RuntimeError("Public content has no verifiable successful check time") from None
+        if not -5 <= age <= max_age:
+            raise RuntimeError(f"Content successful check age {age:.0f}s exceeds acceptance window")
+        return
     if kind == "trades":
         if not isinstance(payload, list) or not payload:
             raise RuntimeError("Recent trade read returned no verifiable data")
@@ -661,6 +703,8 @@ def _command_verify(args: argparse.Namespace) -> int:
         "flow": "/runtime/panels/suspicious-flow?limit=12",
         "trades": "/trades/recent?limit=1",
     }
+    if args.scope == "related-intelligence":
+        endpoints = {"health": "/health", "content": "/content/latest?limit=20&days=7"}
     deadline = time.monotonic() + args.wait_seconds
     while True:
         errors = []
@@ -673,7 +717,7 @@ def _command_verify(args: argparse.Namespace) -> int:
             except (OSError, ValueError, RuntimeError) as exc:
                 errors.append(f"{kind}: {exc}")
         if not errors:
-            print("release-readiness: health, recent trades, Whale Tracker and Flow Watch passed")
+            print("release-readiness: " + ", ".join(endpoints) + " passed; scope=" + args.scope)
             return 0
         print("release-readiness pending: " + "; ".join(errors), flush=True)
         if time.monotonic() >= deadline:
@@ -720,6 +764,7 @@ def build_parser() -> argparse.ArgumentParser:
     verify = commands.add_parser("verify", help="check dependency health and live data freshness")
     verify.add_argument("--url", default="http://127.0.0.1:18500")
     verify.add_argument("--wait-seconds", type=int, default=180)
+    verify.add_argument("--scope", choices=["default", "related-intelligence"], default="default")
     verify.set_defaults(handler=_command_verify)
     return parser
 

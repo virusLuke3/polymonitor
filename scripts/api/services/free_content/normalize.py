@@ -118,6 +118,8 @@ def permission(source, item):
             return False, "not-institutional-press-release"
     if source["publisher_id"] == "nasa" and "/news-release/" not in item["url"]:
         return False, "not-nasa-news-release"
+    if source["publisher_id"] == "nhc" and not str(item.get("event_id", "")).startswith("nhc:"):
+        return False, "event-identity-unverified"
     if source["source_kind"] == "alert":
         if item.get("status") != "Actual" or item.get("message_type") == "Cancel":
             return False, "non-active-alert"
@@ -171,11 +173,25 @@ def parse_feed(body, source):
             "rights_text": plain(fields.get("rights") or "") + " " + (fields.get("encoded") or raw_excerpt)[:150000],
         }
         if source["publisher_id"] == "nhc":
-            storm = re.search(r"\b(AL|EP|CP)(\d{2})(20\d{2})\b", item["rights_text"], re.I)
+            storm = re.search(
+                r"(?<![A-Z0-9])(AL|EP|CP)(\d{2})(20\d{2})(?![A-Z0-9])", item["title"] + " " + item["rights_text"], re.I
+            )
             item.update(basin=source["basin"], storm_id=storm.group(0).upper() if storm else None)
-            item["event_id"] = (item["storm_id"] + ":" + url) if storm else url
+            # Refresh URLs contain a changing bulletin timestamp; product and
+            # official storm ID identify the revision chain across those URLs.
+            product = re.search(r"/refresh/([^/]+)/", urlsplit(url).path)
+            key = (item["storm_id"] + ":" + product[1] + ":" + urlsplit(url).query) if storm and product else url
+            item["event_id"] = "nhc:" + key
         if item["title"]:
             items.append(item)
+    if source["publisher_id"] == "nhc":
+        # Summary and full advisory share a URL. Prefer the fuller feed excerpt.
+        unique = {}
+        for item in items:
+            prior = unique.get(item["event_id"])
+            if not prior or len(item["summary"]) > len(prior["summary"]):
+                unique[item["event_id"]] = item
+        return list(unique.values())
     return items
 
 

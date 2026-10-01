@@ -260,3 +260,20 @@ def test_bls_atom_content_and_fractional_dates():
     item = normalize.parse_feed(body, source)[0]
     assert item["published_at"] == "2026-08-12T11:51:16.210000Z"
     assert item["summary"] == "Actual feed content fixture."
+
+
+def test_nhc_timestamp_urls_and_summary_do_not_duplicate_advisories(storage):
+    source = source_map()["nhc-ep"]
+
+    def feed(timestamp):
+        return f"<rss><channel><item><title>Summary (EP182026)</title><link>https://www.nhc.noaa.gov/text/refresh/MIATCPEP3+shtml/{timestamp}.shtml</link><description>Summary</description></item><item><title>Rachel Advisory</title><link>https://www.nhc.noaa.gov/text/refresh/MIATCPEP3+shtml/{timestamp}.shtml</link><description>EP182026 Official full feed excerpt {timestamp}</description></item></channel></rss>".encode()
+
+    first = normalize.parse_feed(feed("010234"), source)
+    assert len(first) == 1 and first[0]["storm_id"] == "EP182026"
+    store.persist(storage, source, first, "2026-10-01T03:00:00Z")
+    second = normalize.parse_feed(feed("010834"), source)
+    result = store.persist(storage, source, second, "2026-10-01T09:00:00Z")
+    assert result["new"] == 0 and result["updated"] == 1
+    row = storage.query_one("SELECT url,raw_payload FROM content_items")
+    assert row["url"] == json.loads(row["raw_payload"])["url"] == second[0]["url"]
+    assert len(storage.query_all("SELECT * FROM content_versions")) == 2

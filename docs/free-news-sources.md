@@ -52,7 +52,7 @@ journalctl --user -u polydata-content-topic-refresh.service -n 50 --no-pager
 ## 标准化、保存与 HTTP
 
 - UTC；缺失发布时间为 null，不借 fetched_at 补齐。first_seen 不因更新改变；版本保存独立首次获取时间。RSS 摘要纯文本截取，HTML 引用块和脚本隔离；无摘要不补写。
-- URL 去除已知跟踪参数，保留业务 query。publisher + canonical URL 确定跨 feed 身份；NHC 用风暴 ID + 公告 URL、USGS/NWS 用现有稳定事件 ID。变化记录版本，发现入口独立记录；标题相似不合并。
+- URL 去除已知跟踪参数，保留业务 query。publisher + canonical URL 确定跨 feed 身份；NHC 用风暴 ID + 官方公告产品（忽略 refresh URL 中的变化时间戳）、USGS/NWS 用现有稳定事件 ID。变化记录版本，发现入口独立记录；标题相似不合并。
 - 最多 3 并发、连接/读取 6/18 秒、2.5MB 上限、最多 3 次重定向；每跳检查批准 host、HTTPS、公开 IP、无 credentials/其他端口。禁止 XML DTD/实体。
 - ETag/Last-Modified 与 304；429 Retry-After、5xx/超时/XML 错误退避；尊重 Cache-Control max-age。单源失败不终止整轮。共享文件锁和 PostgreSQL advisory lock 防止同机/跨主机重复 worker。
 - 90 天 / 20,000 条 / 每条 12 版本为可配置上限，仅清理本 worker 的记录；不保存完整响应、不动旧历史。
@@ -119,3 +119,11 @@ Market / Global 为显式选择，市场标题可见；未选市场可默认 Glo
 自动化测试使用隔离 SQLite/显式浏览器 fixtures，不写真实内容表。覆盖 RSS/Atom、纯文本/实体防护、去重/版本/first_seen、许可/旧内容隔离、304/429/失败/合法空、指标月年口径/辖区冲突、过期警报、快照复用、高频限额、无全局回填、A→B/错误 ID、署名许可/展开、新内容提示。正式验收只使用真实数据库、真实 API 与 https://polymonitor.club，不替换 API/地图瓦片。
 
 这些源以国际报道、宏观官方发布、航天新闻稿、热带气旋、地震和美国天气警报为主；不声称覆盖全部政治/体育/Crypto 新闻。不做全文阅读、自动翻译、AI 摘要、行情因果、交易建议或自动结算。月度无新增是正常状态；一日快照不代表全历史。
+
+## 发布范围
+
+现有 GCP 发布入口支持显式 `DEPLOY_VERIFY_SCOPE=related-intelligence`，验证 health、真实免费内容、来源许可/署名、计数及最近成功检查时间，仍保留冲突检测、失败回滚和目标 unit 的 active 检查。默认范围继续检查交易、Whale Tracker 和 Flow Watch。资讯 API GET 仅本地读取，不再触发 Telegram 发送。
+
+首轮发布默认全站验收失败并自动回滚：ClickHouse OrderFilled 不可用，最近交易 500，Whale Tracker/Flow Watch 过期。相关问题不作为资讯验收通过，也不修改无关交易模块。最终资讯范围部署及真实页面状态见交付验收。
+
+NHC feed 的 summary/full advisory 同 URL 只保留更完整的 feed 节选；同一风暴产品跨公告更新保存版本，数据库 URL 同步原文最新地址。初轮本任务形成的旧 URL 身份保留历史、按未核验事件身份隔离。Dossier 同样提供 7/30 天显式范围、来源优先于内部 provider、作者、许可入口、节选与关联原因。

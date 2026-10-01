@@ -12,6 +12,11 @@ DEPLOY_STATE_DIR="${DEPLOY_STATE_DIR:-.local/state/polydata-deploy}"
 DEPLOY_DRY_RUN="${DEPLOY_DRY_RUN:-0}"
 DEPLOY_SSH_KEY="${DEPLOY_SSH_KEY:-}"
 DEPLOY_INSTALL_DEPENDENCIES="${DEPLOY_INSTALL_DEPENDENCIES:-1}"
+DEPLOY_VERIFY_SCOPE="${DEPLOY_VERIFY_SCOPE:-default}"
+case "${DEPLOY_VERIFY_SCOPE}" in
+  default|related-intelligence) ;;
+  *) echo "Invalid release verification scope: ${DEPLOY_VERIFY_SCOPE}" >&2; exit 1 ;;
+esac
 
 : "${DEPLOY_HOST:?Set DEPLOY_HOST}"
 : "${DEPLOY_USER:?Set DEPLOY_USER}"
@@ -176,7 +181,7 @@ done
 REMOTE_RESTART_UNITS="${RESTART_UNITS[*]}"
 ssh "${SSH_OPTIONS[@]}" "${REMOTE}" "
   set -eu
-  python3 '${REMOTE_RELEASE_DIR}/gcp_release.py' verify --url http://127.0.0.1:18500
+  python3 '${REMOTE_RELEASE_DIR}/gcp_release.py' verify --url http://127.0.0.1:18500 --scope '${DEPLOY_VERIFY_SCOPE}'
   curl -fsS --max-time 10 http://127.0.0.1/wm-api/health >/dev/null
   for unit in ${REMOTE_RESTART_UNITS}; do
     systemctl --user is-active --quiet \"\$unit\"
