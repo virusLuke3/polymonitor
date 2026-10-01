@@ -4,6 +4,7 @@ import os
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, cast
 
 from flask import Blueprint, Response, current_app, jsonify, request
@@ -12,6 +13,21 @@ from api.contracts import api_envelope, api_error, runtime_panel_metadata
 from api.runtime_panels import RUNTIME_PANEL_MODULES, get_panel_by_id
 from api.runtime_panels.types import RuntimePanelContext
 from api.services import hls_proxy_service, youtube_embed_service, youtube_live_probe_service
+
+
+def _hazard_http_cache_control(payload: dict[str, Any], maximum_age: int) -> str:
+    """The source snapshot owns stale retention; HTTP caches only keep fresh bodies."""
+    age = maximum_age
+    for source in payload.get("sources") or []:
+        if source.get("status") not in {"ok", "partial"}:
+            return "no-store"
+        if source.get("staleAfter"):
+            try:
+                deadline = datetime.fromisoformat(source["staleAfter"].replace("Z", "+00:00")).timestamp()
+                age = min(age, int(deadline - time.time()))
+            except (TypeError, ValueError):
+                return "no-store"
+    return f"public, max-age={age}, must-revalidate" if age > 0 else "no-store"
 
 try:
     import requests as requests_module
@@ -247,7 +263,7 @@ def create_runtime_panels_blueprint(dependencies: RuntimePanelRouteDependencies)
             return jsonify({"status": "error", "error": str(exc)}), 400
         response = _public_conditional_json(
             payload,
-            "public, max-age=30, stale-while-revalidate=300, stale-if-error=86400",
+            _hazard_http_cache_control(payload, 30),
         )
         response.headers["X-Map-Source"] = source
         response.headers["X-Map-Event-Count"] = str((payload.get("counts") or {}).get("events") or 0)
@@ -287,7 +303,7 @@ def create_runtime_panels_blueprint(dependencies: RuntimePanelRouteDependencies)
             ), 404
         return _public_conditional_json(
             payload,
-            "public, max-age=60, stale-while-revalidate=300, stale-if-error=86400",
+            _hazard_http_cache_control(payload, 60),
         )
 
     @bp.route("/v1/runtime/panels", methods=["GET"])

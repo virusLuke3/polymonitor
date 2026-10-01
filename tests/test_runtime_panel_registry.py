@@ -13,6 +13,16 @@ from api.runtime_panels import RUNTIME_PANEL_MODULES, get_default_panel_ids
 from api.services.bootstrap_service import BootstrapPrewarmDependencies
 
 
+def test_hazard_http_cache_never_outlives_source_freshness(monkeypatch):
+    monkeypatch.setattr(_route_runtime_panels.time, "time", lambda: 1790836920.0)  # 2026-10-01 06:42 UTC
+    source = {"status": "ok", "staleAfter": "2026-10-01T06:42:12Z"}
+    assert _route_runtime_panels._hazard_http_cache_control({"sources": [source]}, 30) == "public, max-age=12, must-revalidate"
+    source["staleAfter"] = "2026-10-01T06:41:00Z"
+    assert _route_runtime_panels._hazard_http_cache_control({"sources": [source]}, 30) == "no-store"
+    source.update(status="degraded", staleAfter="2026-10-01T06:45:00Z")
+    assert _route_runtime_panels._hazard_http_cache_control({"sources": [source]}, 30) == "no-store"
+
+
 def test_runtime_panel_modules_have_unique_ids_and_routes():
     panel_ids = [panel.panel_id for panel in RUNTIME_PANEL_MODULES]
     routes = [panel.route for panel in RUNTIME_PANEL_MODULES]
@@ -118,7 +128,7 @@ def test_runtime_panel_blueprint_registers_all_routes(monkeypatch):
     assert commodity_response.get_json()["limit"] == 3
     map_response = client.get("/runtime/world/natural-hazards/map?source=usgs&zoom=2")
     assert map_response.status_code == 200
-    assert map_response.headers["Cache-Control"].startswith("public, max-age=30")
+    assert map_response.headers["Cache-Control"] == "public, max-age=30, must-revalidate"
     assert map_response.headers["ETag"]
     assert map_response.headers["X-Map-Source"] == "usgs"
     assert map_response.headers["Server-Timing"].startswith("hazard-map;dur=")
