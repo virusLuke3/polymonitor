@@ -149,6 +149,16 @@ NHC feed 的 summary/full advisory 同 URL 只保留更完整的 feed 节选；�
 
 生产发现跨地区数据库逐条写入事件的往返耗时过长；已复用原数据库封装的批量查询/写入，保留同一事务、内容身份、版本及发现入口。304 本轮 parsed/new/public 为 0，不沿用上一轮计数；最近实际入库计数另保留 last_ingest_counts / last_ingested_at。
 
-公开资讯读取合并来源状态与索引候选为一次数据库查询；市场关联只读取 markets 中的原始问题/规则字段，复用路由已经读取的市场，不再依赖价格、交易、Oracle 或结算 join。每次请求仍重新检查许可和警报有效期，不用内容缓存掩盖延迟。
+公开资讯冷读合并来源状态与索引候选为一次数据库查询；市场关联只读取 markets 中的原始问题/规则字段，复用路由已经读取的市场，不依赖价格、交易、Oracle 或结算 join。
+
+## Related Intelligence 的资源与缓存契约
+
+面板目录负责视图、`model.ts` 的响应校验及阅读状态、`useIntelFeed.ts` 的取数契约。市场 ID、market/global 范围和 7/30 天组成资源身份；切换时重建资源 owner，取消旧请求和重试。参数化端点以 `batch:false` 接入现有共享 Runtime，30 秒检查一次，页面隐藏时暂停，失败保留同资源的已核验列表并支持手动重试。此改动不修改其他面板或共享 Runtime 的实现。
+
+现有 `content_topic_refresh.py` 在采集周期完成后预热一份最近 30 天、最多 2000 条的候选 seed（`snapshot:content:free-public` / `candidates-v1`），同时保存 `seed-meta:content` / `related-news` 的成功时间、失败原因及来源状态。复用既有 Redis 和 SQLite；有效期 90 秒，超过有效期但年龄不超过 300 秒可显式标记 stale 返回，超过 300 秒必须重新读取数据库。worker 每轮休眠 60 秒，完整周期还包含实际采集耗时，不能保证每分钟完成。各来源仍按自身调度与退避采集，不新增 collector，不在 API GET 中抓取外部源。
+
+API 优先读 Redis，再读 SQLite，冷缓存使用现有跨进程锁合并候选查询。市场/时间范围投影不缓存，每次读取按当前契约、时间窗口、来源许可、警报有效期重新过滤。`generatedAt` 是候选列表核验时间，`lastSuccessfulCheckAt` 是来源最近成功时间；来源超期或失败保留 partial/unavailable，不因缓存命中变成 ready。
+
+新条目等待读者点击查看；已显示条目的修订、撤回、过期和来源健康立即生效。浏览器按真实 expiry 到期移除警报。响应身份、卡片结构、日期及公开链接在渲染前校验，局部错误边界隔离渲染异常。来源内容与覆盖面仍受前述限制，合法空结果不回填全局新闻。
 
 Dossier 请求失败保留同市场 unavailable 状态，页面不再将超时标成无匹配；首页和 dossier 的共同 API reader 校验响应市场 ID/作用范围，拒绝错误市场的数据。

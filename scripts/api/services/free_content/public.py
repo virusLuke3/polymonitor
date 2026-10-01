@@ -6,13 +6,13 @@ from .normalize import permission, utc
 from .matching import relate
 
 
-def permitted_item(item, sources=None):
+def permitted_item(item, sources=None, now=None):
     sources = sources or source_map()
     source = sources.get(item.get("sourceId") or item.get("source_id"))
     if not source:
         return False
     expires = item.get("expires_at")
-    active = not expires or expires > datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    active = not expires or expires > (now or datetime.now(timezone.utc)).isoformat().replace("+00:00", "Z")
     return permission(source, item)[0] and bool(item.get("display_allowed")) and active
 
 
@@ -27,15 +27,13 @@ def filter_payload(payload):
     return result
 
 
-def payload(storage, *, market=None, market_id=None, limit=20, days=7, now=None):
+def read_records(storage, *, days=30, now=None):
     now = now or datetime.now(timezone.utc)
-    days = 30 if int(days) == 30 else 7
     cutoff = (now - timedelta(days=days)).isoformat().replace("+00:00", "Z")
-    sources = source_map()
     # One indexed local read: separate table checks/reads add multiple database
     # round trips on the existing cross-region runtime. Missing schema remains
     # an unavailable read, never a fabricated healthy empty result.
-    records = storage.query_all(
+    return storage.query_all(
         """
         SELECT 'source' AS record_kind, source_id AS id, state_json AS payload
         FROM content_source_state
@@ -49,6 +47,14 @@ def payload(storage, *, market=None, market_id=None, limit=20, days=7, now=None)
         """,
         (cutoff,),
     )
+
+
+def payload(storage, *, market=None, market_id=None, limit=20, days=7, now=None, records=None):
+    now = now or datetime.now(timezone.utc)
+    days = 30 if int(days) == 30 else 7
+    cutoff = (now - timedelta(days=days)).isoformat().replace("+00:00", "Z")
+    sources = source_map()
+    records = read_records(storage, days=days, now=now) if records is None else records
     states = {
         row["id"]: json.loads(row["payload"])
         for row in records if row["record_kind"] == "source"
@@ -57,7 +63,7 @@ def payload(storage, *, market=None, market_id=None, limit=20, days=7, now=None)
     for source in sources.values():
         state = states.get(source["source_id"], {})
         due = utc(state.get("next_check_at"))
-        stale = bool(state.get("last_success_at") and due and due < now.isoformat().replace("+00:00", "Z"))
+        stale = bool(state.get("snapshot_stale") or (state.get("last_success_at") and due and due < now.isoformat().replace("+00:00", "Z")))
         statuses.append({**source, **state, "status": state.get("status", "not_requested"), "stale": stale})
     items = []
     if records:
@@ -69,11 +75,13 @@ def payload(storage, *, market=None, market_id=None, limit=20, days=7, now=None)
                 item = json.loads(row.get("payload") or "{}")
             except (ValueError, TypeError):
                 continue
-            if not permitted_item(item, sources):
+            if not permitted_item(item, sources, now):
                 continue
             if item.get("expires_at") and item["expires_at"] <= now.isoformat().replace("+00:00", "Z"):
                 continue
             if item.get("published_at") and item["published_at"] > now.isoformat().replace("+00:00", "Z"):
+                continue
+            if item.get("published_at") and item["published_at"] < cutoff:
                 continue
             if item["source_kind"] == "observation" and float(item.get("magnitude") or 0) < 4.5:
                 continue
@@ -140,7 +148,7 @@ def payload(storage, *, market=None, market_id=None, limit=20, days=7, now=None)
         "status": "unavailable"
         if unavailable
         else "partial"
-        if any(s["status"] not in {"ok", "unchanged", "healthy_empty"} for s in statuses)
+        if any(s["status"] not in {"ok", "unchanged", "healthy_empty"} or s["stale"] for s in statuses)
         else "ready",
         "empty_reason": (
             "sources_unavailable"

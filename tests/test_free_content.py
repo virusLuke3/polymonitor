@@ -364,3 +364,97 @@ def test_no_service_keys_required_and_http_checks_redirect_and_size(storage, sou
                 http.fetch(Session(), source["feed_url"], source)
     with pytest.raises(ValueError, match="not-rss-or-atom"):
         normalize.parse_feed(b"<html><body>Error</body></html>", source)
+
+
+def test_shared_seed_separates_windows_and_markets_without_more_database_reads(storage, source, tmp_path):
+    from api.services.free_content.snapshots import read_payload
+    from runtime.snapshot_store import SnapshotStore
+
+    store.persist(storage, source, [article(source)], "2026-10-01T00:00:00Z")
+    now = datetime(2026, 10, 1, 1, tzinfo=timezone.utc)
+    cache = {"store": SnapshotStore(str(tmp_path / "snapshots.db"))}
+    first = read_payload(storage, cache, days=30, now=now)
+    assert first["cacheMode"] == "database" and len(first["items"]) == 1
+    storage.query_all = lambda *_: pytest.fail("Warm content read queried the database")
+    assert read_payload(storage, cache, days=7, now=now)["items"] == []
+    other = read_payload(storage, cache, days=30, now=now, market_id=2,
+                         market={"title": "Will a football club win this season?"})
+    assert other["marketId"] == 2 and other["items"] == [] and other["cacheMode"] == "sqlite"
+
+
+def test_seed_rechecks_expiry_policy_and_reports_staleness(storage, source, tmp_path):
+    from api.services.free_content.snapshots import read_payload, refresh_candidates
+    from runtime.snapshot_store import SnapshotStore
+    from datetime import timedelta
+
+    store.persist(storage, source, [article(source)], "2026-10-01T00:00:00Z")
+    now = datetime(2026, 10, 1, 1, tzinfo=timezone.utc)
+    cache = {"store": SnapshotStore(str(tmp_path / "snapshots.db"))}
+    seed = refresh_candidates(storage, cache, now=now)
+    storage.query_all = lambda *_: pytest.fail("Bounded stale read queried the database")
+    result = read_payload(storage, cache, days=30, now=now + timedelta(seconds=100))
+    assert result["stale"] and result["cacheMode"] == "sqlite-stale"
+    assert result["generatedAt"] == seed["generatedAt"]
+    with patch("api.services.free_content.public.permission", return_value=(False, "revoked")):
+        assert read_payload(storage, cache, days=30, now=now)["items"] == []
+    with patch("api.services.free_content.public.permitted_item", return_value=False):
+        assert read_payload(storage, cache, days=30, now=now)["items"] == []
+
+
+def test_failed_refresh_retains_last_seed_and_old_seed_cannot_serve_forever(storage, tmp_path):
+    from api.services.free_content.snapshots import read_payload, refresh_candidates, NAMESPACE, CACHE_KEY
+    from runtime.snapshot_store import SnapshotStore
+    from datetime import timedelta
+
+    now = datetime(2026, 10, 1, 1, tzinfo=timezone.utc)
+    cache = {"store": SnapshotStore(str(tmp_path / "snapshots.db"))}
+    seed = refresh_candidates(storage, cache, now=now)
+    def failed(*_):
+        raise RuntimeError("Fixture database unavailable")
+    storage.query_all = failed
+    with pytest.raises(RuntimeError):
+        refresh_candidates(storage, cache, now=now)
+    assert cache["store"].get_stale(NAMESPACE, CACHE_KEY) == seed
+    with pytest.raises(RuntimeError):
+        read_payload(storage, cache, now=now + timedelta(seconds=301))
+
+
+def test_overdue_source_is_partial_even_with_successful_previous_response(storage):
+    for source_id in source_map():
+        store.save_state(storage, source_id, {"status": "ok", "last_success_at": "2026-10-01T00:00:00Z",
+                                            "next_check_at": "2026-10-01T00:01:00Z"})
+    result = public.payload(storage, now=datetime(2026, 10, 1, 1, tzinfo=timezone.utc))
+    assert result["status"] == "partial" and all(s["stale"] for s in result["sources"])
+
+
+def test_alert_expiry_is_rechecked_inside_fresh_seed(storage, tmp_path):
+    from api.services.free_content.snapshots import read_payload, refresh_candidates
+    from runtime.snapshot_store import SnapshotStore
+    from datetime import timedelta
+
+    source = source_map()["nws"]
+    now = datetime(2026, 10, 1, 1, tzinfo=timezone.utc)
+    store.persist(storage, source, [article(source, url="https://api.weather.gov/alerts/fixture",
+        status="Actual", message_type="Alert", published_at="2026-10-01T00:59:00Z",
+        expires_at="2026-10-01T01:00:30Z")], now.isoformat())
+    cache = {"store": SnapshotStore(str(tmp_path / "snapshots.db"))}
+    refresh_candidates(storage, cache, now=now)
+    assert len(read_payload(storage, cache, now=now)["items"]) == 1
+    storage.query_all = lambda *_: pytest.fail("Expiry check queried the database")
+    assert read_payload(storage, cache, now=now + timedelta(seconds=31))["items"] == []
+
+
+def test_optional_redis_hit_and_failure_fall_back_to_sqlite(storage, tmp_path):
+    from api.services.free_content.snapshots import read_payload, refresh_candidates
+    from runtime.snapshot_store import SnapshotStore
+
+    now = datetime(2026, 10, 1, 1, tzinfo=timezone.utc)
+    cache = {"store": SnapshotStore(str(tmp_path / "snapshots.db"))}
+    seed = refresh_candidates(storage, cache, now=now)
+    storage.query_all = lambda *_: pytest.fail("A warm read queried the database")
+    cache["get_json"] = lambda *_: seed
+    assert read_payload(storage, cache, now=now)["cacheMode"] == "redis"
+    def failed(*_):
+        raise ConnectionError("Fixture optional cache unavailable")
+    cache["get_json"] = failed
+    assert read_payload(storage, cache, now=now)["cacheMode"] == "sqlite"

@@ -1,24 +1,33 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useState } from 'preact/hooks';
 import type { PanelInputs, PanelRenderMap } from '../../types';
 import { Panel } from '@/components/Panel';
 import { panelFromRenderer } from '@/panels/definePanel';
 import { useI18n } from '@/services/i18n';
 import { useIntelFeed } from './useIntelFeed';
+import { Component, type ComponentChildren } from 'preact';
+import { resourceId, type IntelResource } from './model';
 
 type Inputs = PanelInputs<'selectedMarketId' | 'selectedMarket'>;
 const kinds = ['all', 'news_report', 'official_release', 'event'] as const;
 function RelatedIntelPanel({ ctx }: { ctx: Inputs }) {
-  const i18n = useI18n();
-  const zh = i18n.locale.startsWith('zh');
-  const copy = (en: string, cn: string) => zh ? cn : en;
   const [choice, setChoice] = useState({ marketId: ctx.selectedMarketId, global: ctx.selectedMarketId == null });
   const setGlobal = (global: boolean) => setChoice({ marketId: ctx.selectedMarketId, global });
   const global = choice.marketId === ctx.selectedMarketId ? choice.global : ctx.selectedMarketId == null;
   const [days, setDays] = useState(7);
+  const scope = global || ctx.selectedMarketId == null ? 'global' : 'market';
+  const key = resourceId({ marketId: ctx.selectedMarketId, scope, days });
+  return <IntelBoundary key={key}><IntelView ctx={ctx} scope={scope} days={days} setDays={setDays} setGlobal={setGlobal} /></IntelBoundary>;
+}
+
+/** Remount the resource owner when identity changes, cancelling its requests and subscriptions. */
+function IntelView({ ctx, scope, days, setDays, setGlobal }: {
+  ctx: Inputs; scope: IntelResource['scope']; days: number;
+  setDays: (days: number) => void; setGlobal: (global: boolean) => void;
+}) {
+  const i18n = useI18n();
+  const copy = (en: string, cn: string) => i18n.locale.startsWith('zh') ? cn : en;
   const [kind, setKind] = useState<typeof kinds[number]>('all');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  useEffect(() => { setGlobal(ctx.selectedMarketId == null); setExpanded({}); }, [ctx.selectedMarketId]);
-  const scope = global || ctx.selectedMarketId == null ? 'global' : 'market';
   const feed = useIntelFeed(ctx.selectedMarketId, scope, days);
   const data = feed.data;
   const items = data?.items || [];
@@ -30,12 +39,15 @@ function RelatedIntelPanel({ ctx }: { ctx: Inputs }) {
       <button type="button" aria-pressed={scope === 'market'} disabled={ctx.selectedMarketId == null} onClick={() => setGlobal(false)}>{copy('Market', '市场')}</button>
       <button type="button" aria-pressed={scope === 'global'} onClick={() => setGlobal(true)}>{copy('Global', '全局')}</button>
       <select aria-label={copy('Content time range', '资讯时间范围')} value={days} onChange={(event) => setDays(Number(event.currentTarget.value))}><option value={7}>{copy('Past 7 days', '过去 7 天')}</option><option value={30}>{copy('Past 30 days · history', '过去 30 天 · 历史')}</option></select>
+      <button type="button" disabled={feed.status.phase === 'loading'} onClick={() => void feed.refresh()}>{feed.error ? copy('Retry', '重试') : copy('Refresh', '刷新')}</button>
     </div>
     {scope === 'market' && <p className="wm-free-intel-market-caption">{ctx.selectedMarket?.title || data?.marketTitle || `Market ${ctx.selectedMarketId}`}</p>}
     <div className="wm-intel-filter-tabs" role="tablist" aria-label={copy('Content types', '内容类型')}>{kinds.map((value) => <button type="button" role="tab" aria-selected={kind === value} className={kind === value ? 'active' : ''} onClick={() => setKind(value)} key={value}><span>{labels[value]}</span><b>{filtered(value).length}</b></button>)}</div>
     {feed.pending && <button type="button" className="wm-intel-new" onClick={feed.accept}>{copy('New content available · show', '有新内容 · 点击查看')}</button>}
-    {(feed.error || data?.status === 'unavailable') && <p role="status">{copy('Content service unavailable.', '资讯服务暂不可用。')} {feed.data && copy('Showing the last loaded list.', '显示上次加载的列表。')}</p>}
-    {!feed.error && data && !filtered(kind).length && <p className="wm-intel-empty">{scope === 'market' ? copy('No content meeting this market’s conditions was found in the current free sources.', '当前免费来源中，暂未找到符合本市场条件的内容。') : copy('No public content in this type and time range.', '此类型和时间范围内暂无可公开展示的内容。')}</p>}
+    {(feed.error || data?.status === 'unavailable') && <p role="status">{copy('Content service unavailable.', '资讯服务暂不可用。')} {!!items.length && copy('Showing previously verified content.', '显示此前已核验的内容。')}</p>}
+    {!feed.error && data?.status !== 'unavailable' && feed.stale && <p role="status">{copy('Some sources are unavailable or overdue. Available content is shown below.', '部分来源不可用或超过检查时间，下方展示仍可用的内容。')}</p>}
+    {data?.generatedAt && <p className="wm-news-meta">{copy('List checked', '列表检查时间')}：<time dateTime={data.generatedAt}>{i18n.formatDateTime(data.generatedAt)}</time>{data.stale ? copy(' · cached data is overdue', ' · 缓存已超过刷新期限') : ''}</p>}
+    {!feed.error && data && data.status !== 'unavailable' && !feed.pending && !filtered(kind).length && <p className="wm-intel-empty">{scope === 'market' ? copy('No content meeting this market’s conditions was found in the current free sources.', '当前免费来源中，暂未找到符合本市场条件的内容。') : copy('No public content in this type and time range.', '此类型和时间范围内暂无可公开展示的内容。')}</p>}
     <div className="wm-intel-list">{filtered(kind).map((item) => {
       const id = String(item.id);
       return <article className="wm-free-intel-card" key={id}>
@@ -52,6 +64,15 @@ function RelatedIntelPanel({ ctx }: { ctx: Inputs }) {
     })}</div>
     {data && <details className="wm-intel-sources"><summary>{copy('Source status', '来源状态')} · {data.sources?.length || 0} {copy('feeds', '个订阅入口')} · {items.length} {scope === 'market' ? copy('matches', '条匹配') : copy('items', '条内容')}</summary><p>{copy('Last successful check', '最近成功检查')}：{data.lastSuccessfulCheckAt ? i18n.formatDateTime(data.lastSuccessfulCheckAt) : copy('Unknown', '未知')}</p>{data.sources?.map((source) => <p key={source.source_id}><b>{source.source_id}</b> · {source.status}{source.stale ? ' · stale' : ''}<br />{source.error || ''}</p>)}</details>}
   </Panel>;
+}
+
+/** A malformed card must not take down neighbouring panels. */
+class IntelBoundary extends Component<{ children: ComponentChildren }, { failed: boolean }> {
+  state = { failed: false };
+  componentDidCatch() { this.setState({ failed: true }); }
+  render() {
+    return this.state.failed ? <Panel title="Related Intelligence" className="wm-related-intel-panel"><p role="alert">Unable to display content / 资讯显示失败</p><button type="button" onClick={() => this.setState({ failed: false })}>Retry / 重试</button></Panel> : this.props.children;
+  }
 }
 const renderers: PanelRenderMap<'selectedMarketId' | 'selectedMarket'> = { 'related-news': { render: (ctx) => <RelatedIntelPanel ctx={ctx} /> } };
 export const panel = panelFromRenderer(renderers, { contextKeys: ['selectedMarketId', 'selectedMarket'], id: 'related-news', title: 'Related Intelligence', eyebrow: 'intel', description: 'Reviewed free sources, explicitly scoped to a market or global updates.', defaultEnabled: true });

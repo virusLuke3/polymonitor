@@ -1436,10 +1436,11 @@ def get_related_content_by_market_id(
     days: int = 7,
     market: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
-    from api.services.free_content.public import payload
+    from api.services.free_content.snapshots import read_payload
     storage = ContentStorageDependencies.from_context(ctx)
     market = market if market is not None else get_content_market_by_id(storage, market_id)
-    return payload(storage, market=market, market_id=market_id, limit=limit, days=days)
+    return read_payload(storage, ctx.get("free_content_cache") if isinstance(ctx, Mapping) else None,
+                        market=market, market_id=market_id, limit=limit, days=days)
 
 
 def _get_related_content_by_market_id(
@@ -1649,9 +1650,10 @@ def get_latest_content_snapshot(
     limit: int = 8,
     days: int = 7,
 ) -> Dict[str, Any]:
-    from api.services.free_content.public import payload
+    from api.services.free_content.snapshots import read_payload
     dependencies = LatestContentQueryDependencies.from_context(ctx)
-    return payload(dependencies.storage, limit=limit, days=days)
+    return read_payload(dependencies.storage, ctx.get("free_content_cache") if isinstance(ctx, Mapping) else None,
+                        limit=limit, days=days)
 
 
 def _get_latest_content_snapshot(

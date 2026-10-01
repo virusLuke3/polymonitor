@@ -16,7 +16,9 @@ test('market empty stays empty; global is explicit; text, author, license and fa
   const requests: string[] = [];
   await page.route('**/wm-api/content/**', route => {
     requests.push(route.request().url());
-    return route.fulfill({ json: route.request().url().includes('/latest') ? payload(null, ['global']) : payload(1) });
+    const data = route.request().url().includes('/latest') ? payload(null, ['global']) : payload(1);
+    data.window.days = Number(new URL(route.request().url()).searchParams.get('days') || 7);
+    return route.fulfill({ json: data });
   });
   await mount(page);
   await expect(page.getByText('No content meeting this market’s conditions', { exact: false })).toBeVisible();
@@ -99,4 +101,65 @@ test('dossier distinguishes request failure and rejects a different market respo
   await page.getByLabel('Dossier content time range').selectOption('30');
   await expect(card.getByText('Content service unavailable.', { exact: true })).toBeVisible();
   await expect(card.getByText('Fixture wrong-market', { exact: false })).toHaveCount(0);
+});
+
+test('failed refresh preserves content and manual retry recovers', async ({ page }) => {
+  await installDashboard(page);
+  let fail = false;
+  await page.route('**/wm-api/content/**', route => fail
+    ? route.fulfill({ status: 503, json: { error: 'Fixture unavailable' } })
+    : route.fulfill({ json: payload(1, ['first']) }));
+  await mount(page);
+  await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
+  fail = true;
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(page.getByText('Content service unavailable.', { exact: false })).toBeVisible();
+  await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
+  fail = false;
+  await page.getByRole('button', { name: 'Retry', exact: true }).click();
+  await expect(page.getByText('Content service unavailable.', { exact: false })).toHaveCount(0);
+});
+
+test('same-market window change rejects an old response and validates malformed cards', async ({ page }) => {
+  await installDashboard(page);
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  let started = false;
+  let malformed = true;
+  await page.route('**/wm-api/content/**', async route => {
+    const days = Number(new URL(route.request().url()).searchParams.get('days') || 7);
+    if (days === 7) { started = true; await held; }
+    const data = { ...payload(1, [days === 7 ? 'old' : 'history']), window: { days } };
+    await route.fulfill({ json: malformed && days === 30 ? { ...data, items: [{ title: {} }] } : data }).catch(() => {});
+  });
+  await mount(page);
+  await expect.poll(() => started).toBeTruthy();
+  await page.getByLabel('Content time range').selectOption('30');
+  await expect(page.getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
+  release();
+  await expect(page.locator('.wm-free-intel-card')).toHaveCount(0);
+  malformed = false;
+  await page.getByRole('button', { name: 'Retry', exact: true }).click();
+  await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
+  await expect(page.locator('.wm-free-intel-card')).toContainText('Fixture history');
+});
+
+test('expired card disappears while a new card still waits for acceptance', async ({ page }) => {
+  await installDashboard(page);
+  await page.clock.install();
+  const expires = await page.evaluate(() => new Date(Date.now() + 31_000).toISOString());
+  let ids = ['first'];
+  await page.route('**/wm-api/content/**', route => route.fulfill({ json: {
+    ...payload(1, ids), items: ids.map(id => ({ ...item(id), expires_at: id === 'first' ? expires : null })),
+  } }));
+  await mount(page);
+  await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
+  ids = ['new', 'first'];
+  await page.clock.runFor(30_100);
+  await expect(page.getByRole('button', { name: 'New content available', exact: false })).toBeVisible();
+  await page.clock.runFor(1_000);
+  await expect(page.locator('.wm-free-intel-card')).toHaveCount(0);
+  await page.getByRole('button', { name: 'New content available', exact: false }).click();
+  await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
+  await expect(page.locator('.wm-free-intel-card')).toContainText('Fixture new');
 });

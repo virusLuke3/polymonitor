@@ -470,6 +470,8 @@ def bind_services(runtime: ServiceRuntime) -> None:
         "utc_now_iso": utc_now_iso,
     }
     runtime.query_context = {
+        "free_content_cache": {"store": runtime.SNAPSHOT_STORE, "get_json": get_cached_json,
+                               "set_json": runtime.set_cached_json},
         "_resources": runtime.resources,
         "CONTENT_RUNTIME_PROVIDER": runtime.CONTENT_RUNTIME_PROVIDER,
         "DB_PATH": runtime.SETTINGS.db_path,

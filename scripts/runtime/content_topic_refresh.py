@@ -29,6 +29,9 @@ def main():
     from api.services.free_content.collector import cycle
     from api.services.free_content.store import source_states
     from api.services.free_content.registry import sources
+    from api.services.free_content.snapshots import refresh_candidates, NAMESPACE, CACHE_KEY
+    from api.cache import get_redis_client
+    from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, utc_now_iso
 
     if args.list_topics:
         print(json.dumps(sources(), ensure_ascii=False))
@@ -65,6 +68,26 @@ def main():
                     selected=set(filter(None, args.sources.split(","))) or None,
                 ):
                     print(json.dumps(result, ensure_ascii=False, default=str), flush=True)
+                if not args.probe:
+                    meta_store = SeedMetaStore(redis_client=get_redis_client(runtime.cache),
+                        redis_prefix=runtime.SETTINGS.redis_prefix, snapshot_store=runtime.SNAPSHOT_STORE)
+                    prior = meta_store.load("seed-meta:content", "related-news") or {}
+                    attempted = utc_now_iso()
+                    try:
+                        seed = refresh_candidates(storage, runtime.query_context["free_content_cache"])
+                        meta = build_seed_meta_payload(panel_id="related-news", namespace="seed-meta:content",
+                            cache_key="related-news", service_name="polydata-content-topic-refresh.service",
+                            expected_interval_seconds=max(30, min(60, args.interval)), status="ready",
+                            last_attempt_at=attempted, last_success_at=seed["generatedAt"],
+                            record_count=sum(r["record_kind"] == "item" for r in seed["records"]),
+                            source_states=source_states(storage), cache_mode="seeded",
+                            metadata={"candidateNamespace": NAMESPACE, "candidateKey": CACHE_KEY})
+                    except Exception as exc:
+                        meta = {**prior, "panelId": "related-news", "status": "error",
+                                "lastAttemptAt": attempted, "lastSuccessAt": prior.get("lastSuccessAt"),
+                                "errorSummary": type(exc).__name__}
+                    meta_store.store("seed-meta:content", "related-news", meta)
+                    print(json.dumps({"seed": "related-news", "status": meta["status"]}), flush=True)
                 if not args.watch:
                     break
                 time.sleep(max(30, min(60, args.interval)))
