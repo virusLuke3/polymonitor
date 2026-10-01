@@ -1507,6 +1507,8 @@
 }
 
 @media (max-width: 860px) {
+  .wm-world-event-attribution { max-width: calc(100% - 16px); bottom: 1px; font-size: 9px; line-height: 10px; letter-spacing: 0; }
+  .wm-globe-area-flat .wm-map-controls { bottom: 16px; }
   .wm-map-legend-toggle, .wm-map-aviation-toggle, .wm-map-radar-status summary { min-height: 44px; }
   .wm-globe-area-flat:has(.wm-map-aviation-toggle) { --wm-map-mobile-tools-top: 128px; }
   .wm-map-context-controls { left: 12px; right: 68px; max-width: none; bottom: 24px; }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiTimeoutError, fetchAllActiveMarkets, fetchMarketWideAiSnapshot, fetchRuntimeGlobalTemperatureMonitor, fetchSystemHealth, fetchWorkspaceBundle } from './api';
+import { ApiTimeoutError, fetchAllActiveMarkets, fetchAviationViewport, fetchMarketWideAiSnapshot, fetchRuntimeGlobalTemperatureMonitor, fetchSystemHealth, fetchWorkspaceBundle } from './api';
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
@@ -28,6 +28,7 @@ describe('HTTP lifecycle', () => {
   it.each([
     ['temperature', (signal: AbortSignal) => fetchRuntimeGlobalTemperatureMonitor(60, signal)],
     ['AI snapshot', (signal: AbortSignal) => fetchMarketWideAiSnapshot('overview', 8000, signal)],
+    ['aviation', (signal: AbortSignal) => fetchAviationViewport([-10, 30, 10, 50], 3, signal)],
   ] as const)('keeps %s cancellation connected while consuming the response body', async (_name, requestData) => {
     vi.stubGlobal('window', globalThis);
     let requestSignal!: AbortSignal;
@@ -46,14 +47,31 @@ describe('HTTP lifecycle', () => {
     expect(requestSignal.aborted).toBe(true);
     expect(fetch).toHaveBeenCalledTimes(1);
   });
-  it('times out stalled response bodies and releases its timer', async () => {
+  it.each([
+    ['temperature', () => fetchRuntimeGlobalTemperatureMonitor(), 12_000],
+    ['aviation', () => fetchAviationViewport([-10, 30, 10, 50], 3), 15_000],
+  ] as const)('times out stalled %s response bodies and releases its timer', async (_name, requestData, deadline) => {
     vi.useFakeTimers(); vi.stubGlobal('window', globalThis);
     vi.stubGlobal('fetch', vi.fn(async (_url, options) => ({ ok: true,
       json: () => new Promise((_resolve, reject) => options.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))),
     })));
-    const request = fetchRuntimeGlobalTemperatureMonitor();
+    const request = requestData();
     const rejected = expect(request).rejects.toBeInstanceOf(ApiTimeoutError);
-    await vi.advanceTimersByTimeAsync(12_000); await rejected;
+    await vi.advanceTimersByTimeAsync(deadline); await rejected;
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it('allows an acquired aviation response to finish transferring after the server budget', async () => {
+    vi.useFakeTimers(); vi.stubGlobal('window', globalThis);
+    const payload = { status: 'partial', aircraft: [{ icao24: 'abc123' }] };
+    vi.stubGlobal('fetch', vi.fn(async (_url, options) => ({ ok: true,
+      json: () => new Promise((resolve, reject) => {
+        const timer = setTimeout(() => resolve(payload), 14_000);
+        options.signal.addEventListener('abort', () => { clearTimeout(timer); reject(new DOMException('Aborted', 'AbortError')); });
+      }),
+    })));
+    const request = fetchAviationViewport([-10, 30, 10, 50], 3);
+    const result = expect(request).resolves.toEqual(payload);
+    await vi.advanceTimersByTimeAsync(14_000); await result;
     expect(vi.getTimerCount()).toBe(0);
   });
   it('does not start a detail fallback after cancellation and cancels optional content and book requests', async () => {

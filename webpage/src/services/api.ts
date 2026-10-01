@@ -311,7 +311,9 @@ export function fetchAviationViewport(
   const params = new URLSearchParams({ bbox: bbox.join(','), zoom: String(zoom), limit: '180' });
   return apiGetWithTimeout<import('@/types').AviationViewportPayload>(
     `/runtime/transport/aviation-viewport?${params.toString()}`,
-    10_000,
+    // The server has an 8.5s acquisition deadline. Allow bounded network/body
+    // transfer time as well; the same signal still cancels obsolete viewports.
+    15_000,
     signal,
   );
 }
