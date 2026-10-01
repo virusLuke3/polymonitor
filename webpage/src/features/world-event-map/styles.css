@@ -4,16 +4,18 @@
 
 .wm-map-stage, .wm-world-event-map-toolbar {
   --font-body: 'Noto Sans SC Variable', sans-serif;
-  font-family: var(--font-body);
   --map-tools-left: 190px;
 }
+
+.wm-map-stage[data-map-view="2d"], .wm-map-section[data-map-view="2d"] .wm-world-event-map-toolbar { font-family: var(--font-body); }
+.wm-map-section[data-map-view="2d"] .wm-map-source-statuses { flex-wrap: wrap; min-width: 0; gap: 4px; }
+.wm-map-section[data-map-view="2d"] .wm-map-source-status { font: 500 12px/1.2 var(--font-body); }
 
 
 .wm-map-stage:has(.wm-layer-sidebar:not(.is-collapsed)) { --map-tools-left: 282px; }
 
 .wm-map-status-strip {
-  display: flex;
-  flex-wrap: wrap;
+  display: inline-flex;
   align-items: center;
   justify-content: flex-start;
   min-width: 0;
@@ -23,10 +25,16 @@
   border-radius: 0;
   background: transparent;
   box-shadow: none;
-  gap: 6px 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  gap: 8px;
 }
 
-.wm-map-status-strip > .wm-map-source-statuses { flex: 1 1 100%; }
+.wm-map-status-strip::-webkit-scrollbar { display: none; }
+.wm-map-status-strip > * { flex: 0 0 auto; }
+.wm-map-section[data-map-view="2d"] .wm-map-status-strip { display: flex; flex-wrap: wrap; overflow: visible; gap: 6px 8px; }
+.wm-map-section[data-map-view="2d"] .wm-map-status-strip > .wm-map-source-statuses { flex: 1 1 100%; }
 
 .wm-map-status-metric {
   display: inline-flex;

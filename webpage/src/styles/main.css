@@ -705,9 +705,7 @@ html[lang='zh-CN'] .wm-promo-copy {
 }
 
 .wm-map-source-statuses {
-  flex-wrap: wrap;
-  min-width: 0;
-  gap: 4px;
+  gap: 5px;
 }
 
 .wm-map-source-status {
@@ -716,7 +714,7 @@ html[lang='zh-CN'] .wm-promo-copy {
   border: 1px solid rgba(83, 218, 255, 0.22);
   border-radius: 3px;
   color: #b6c9d7;
-  font: 500 12px/1.2 var(--font-body);
+  font: 600 8px/1 var(--font-mono);
   white-space: nowrap;
 }
 
@@ -2609,6 +2607,7 @@ html[lang='zh-CN'] .wm-promo-copy {
   }
 
   .wm-map-stage {
+    height: auto;
     min-height: 0;
   }
 
