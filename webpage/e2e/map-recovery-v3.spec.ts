@@ -8,6 +8,36 @@ const phase = process.env.MAP_RECOVERY_PHASE;
 const root = resolve('artifacts/map-visual-recovery-v3', phase || 'unrequested');
 test.skip(!phase, 'Explicit V3 comparison captures.');
 test.use({ trace: 'on', reducedMotion: 'reduce' });
+test('optional country loading does not falsely demote a ready cached basemap', async ({page}) => {
+  test.skip(phase === 'before'); mkdirSync(root, {recursive:true});
+  await page.clock.setFixedTime(new Date(GENERATED_AT)); await installFixtures(page);
+  const assets = await installRealMapAssets(page);
+  let release!: () => void, requested = 0;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  await page.route('**/map-data/world-countries.geojson', async route => {
+    requested++; await held; await route.continue();
+  });
+  try {
+    await page.goto('/?view=2d&mapPerf=1&basemap=pmtiles&center=-120,37&zoom=3&time=all&layers=earthquakes-volcanoes');
+    const host = page.locator('[data-map-renderer-ready]');
+    await expect.poll(() => requested).toBeGreaterThan(0);
+    await expect(host).toHaveAttribute('data-map-renderer-ready', 'webgl', {timeout:10_000});
+    await expect(host).toHaveAttribute('data-map-basemap-state', 'primary-ready');
+    release();
+    const point = await host.evaluate(el => {
+      const p = (el as any).__polymonitorProjectGeoPoint(-120,37), box = el.getBoundingClientRect();
+      return {x:box.x+p.x,y:box.y+p.y};
+    });
+    await expect.poll(async () => {
+      await page.mouse.click(point.x, point.y);
+      return page.locator('.wm-world-event-list.is-open,.wm-event-inspector').isVisible();
+    }).toBe(true);
+    await host.screenshot({path:resolve(root,'optional-country-ready-picking.png')});
+    writeFileSync(resolve(root,'optional-country-readiness.json'), JSON.stringify({requested,renderer:'webgl',
+      sequence:['optional geometry held','primary frame and Deck ready','optional geometry released','real event picking']}));
+  } finally { release(); await page.goto('about:blank'); await page.unrouteAll({behavior:'ignoreErrors'}); await assets.dispose(); }
+});
+
 for (const viewport of [{width:1536,height:1000},{width:2048,height:567},{width:390,height:844}]) {
   test(`default composition ${viewport.width}x${viewport.height}`, async ({page}) => {
     test.setTimeout(120_000); mkdirSync(root,{recursive:true});

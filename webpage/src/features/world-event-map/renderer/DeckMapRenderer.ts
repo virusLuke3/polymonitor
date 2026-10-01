@@ -451,6 +451,11 @@ export class DeckMapRenderer implements MapRenderer {
       onError: (error: Error, layer?: Layer) => this.handleDeckLayerError(error, layer),
     });
     this.overlay = overlay;
+    // Like WorldMonitor, attach Deck with the map, before optional radar and
+    // country sources can delay MapLibre's aggregate `load` event. A cached
+    // basemap may report ready first; its picking check must find a mounted
+    // overlay rather than incorrectly demoting that healthy map to SVG.
+    this.mountOverlaysIfNeeded();
 
     map.once('load', () => {
       if (this.destroyed) return;
