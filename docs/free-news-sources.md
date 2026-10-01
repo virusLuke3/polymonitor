@@ -60,7 +60,7 @@ journalctl --user -u polydata-content-topic-refresh.service -n 50 --no-pager
 ## 关联及 API
 
 - `/content/latest?limit=20&days=7`；`/content/market/{id}?limit=20&days=7`。days 只允许 7 或显式 30 天。保持原 items、marketId、contentType 字段，添加 scope、market_id、count、window、来源状态、最近成功检查时间和 empty_reason。
-- 读取只投影共享候选 seed；冷读复用 provider/time 索引，每个 publisher 有界读取最多 2,048 条原始记录，先过滤许可、过期、异常和低震级，再保留最多 256 条合格候选进行确定性关联。返回候选总数、截断和过滤原因；不是每市场采集，配额溢出明确 partial，不能声称全面召回。
+- 读取只投影共享候选 seed；冷读复用 provider/time 索引，每个 publisher 有界读取最多 2,048 条原始记录，先过滤许可、过期、异常和低震级，再保留最多 512 条合格候选进行确定性关联。返回候选总数、截断和过滤原因；不是每市场采集，配额溢出明确 partial，不能声称全面召回。
 - 明确拒绝不同年份/所属月份、CPI/PPI、headline/core、同比/环比和货币/统计辖区冲突。普通词 economy/AI/weather 或公司名独自不能匹配。
 - direct 仅在国家/统计辖区、具体指标、所属月年和测量口径均正向建立时输出；其余特定实体/事件为 context 并说明未确定条件。风暴需 ID、年份、海盆；观测需地点证据。观察窗口不完整时绝不写成已满足结算。direct 不表示 YES、支持买卖或因果。
 - Market 无匹配时 items=[]；异常返回同市场 unavailable，无全局回填。面板 AbortController + 请求代次 + 响应 ID 校验防串市场；同 key 才可保留旧列表。
@@ -155,7 +155,7 @@ NHC feed 的 summary/full advisory 同 URL 只保留更完整的 feed 节选；�
 
 面板目录负责视图、`model.ts` 的响应校验及阅读状态、`useIntelFeed.ts` 的取数契约。市场 ID、market/global 范围和 7/30 天组成资源身份；切换时释放旧订阅，只有旧资源没有其他消费者时才取消请求和重试。参数化端点以 `batch:false` 接入现有共享 Runtime，30 秒检查一次，页面隐藏时暂停，失败保留同资源的已核验列表并支持手动重试。共享 Runtime 增加通用退避、Retry-After 和资源释放能力，其他面板仍保留原取数路径。
 
-现有 `content_topic_refresh.py` 在采集前、中、后预热最近 30 天、每个 publisher 最多 256 条合格候选的 seed（原始扫描上限 2,048；先过滤再应用候选配额）（`snapshot:content:free-public` / `candidates-v3`），同时保存 `seed-meta:content` / `related-news` 的成功时间、失败原因及来源状态。复用既有 Redis 和 SQLite；有效期 90 秒，超过有效期但年龄不超过 300 秒可显式标记 stale 返回，超过 300 秒必须重新读取数据库。worker 每轮休眠 30–60 秒，完整周期还包含有 90 秒上限的采集耗时；采集中每 30 秒发布 seed。各来源仍按自身调度与退避采集，不新增 collector，不在 API GET 中抓取外部源。
+现有 `content_topic_refresh.py` 在采集前、中、后预热最近 30 天、每个 publisher 最多 512 条合格候选的 seed（原始扫描上限 2,048；先过滤再应用候选配额）（`snapshot:content:free-public` / `candidates-v4`），同时保存 `seed-meta:content` / `related-news` 的成功时间、失败原因及来源状态。复用既有 Redis 和 SQLite；有效期 90 秒，超过有效期但年龄不超过 300 秒可显式标记 stale 返回，超过 300 秒必须重新读取数据库。worker 每轮休眠 30–60 秒，完整周期还包含有 90 秒上限的采集耗时；采集中每 30 秒发布 seed。各来源仍按自身调度与退避采集，不新增 collector，不在 API GET 中抓取外部源。
 
 API 优先读新鲜 SQLite seed，再尝试可选 Redis 和较旧 SQLite 快照，冷缓存使用现有跨进程锁合并候选查询。市场/时间范围投影不缓存，每次读取按当前契约、时间窗口、来源许可、警报有效期重新过滤。`generatedAt` 是候选列表核验时间，`lastSuccessfulCheckAt` 是来源最近成功时间；来源超期或失败保留 partial/unavailable，不因缓存命中变成 ready。
 

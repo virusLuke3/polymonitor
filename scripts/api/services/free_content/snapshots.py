@@ -12,7 +12,7 @@ import logging
 from .public import payload, read_records
 
 NAMESPACE = "snapshot:content:free-public"
-CACHE_KEY = "candidates-v3"
+CACHE_KEY = "candidates-v4"
 TTL_SECONDS = 90
 MAX_STALE_SECONDS = 300
 logger = logging.getLogger(__name__)

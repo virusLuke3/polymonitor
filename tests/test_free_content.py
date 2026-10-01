@@ -572,14 +572,14 @@ def test_source_balanced_candidates_do_not_hide_low_frequency_release(storage, s
 def test_actual_eligible_quota_still_reports_partial(storage, source):
     now = datetime(2026, 10, 1, 14, tzinfo=timezone.utc)
     records = [article(source, url=f"https://www.federalreserve.gov/newsevents/pressreleases/monetary{i}.htm",
-                       published_at="2026-10-01T12:00:00Z") for i in range(257)]
+                       published_at="2026-10-01T12:00:00Z") for i in range(public.CANDIDATES_PER_PUBLISHER + 1)]
     store.persist(storage, source, records, "2026-10-01T13:00:00Z")
     for sid in source_map():
         store.save_state(storage, sid, {"status": "ok"})
     result = public.payload(storage, now=now)
     assert result["coverage"]["truncated"] and result["status"] == "partial"
-    assert result["coverage"]["candidateTotals"][source["publisher_name"]] == 257
-    assert result["coverage"]["candidatesScanned"] == 256
+    assert result["coverage"]["candidateTotals"][source["publisher_name"]] == public.CANDIDATES_PER_PUBLISHER + 1
+    assert result["coverage"]["candidatesScanned"] == public.CANDIDATES_PER_PUBLISHER
 
 
 def test_raw_scan_ceiling_is_explicit_and_does_not_hide_other_publisher(storage, source):
@@ -609,6 +609,8 @@ def test_sports_gap_is_not_a_broken_feed_or_global_fallback(storage, source):
     assert result["status"] == "ready" and result["empty_reason"] == "market_not_covered"
     assert result["marketCoverage"] == {"status": "unsupported", "topic": "sports", "sourceIds": []}
     assert len(public.payload(storage, now=now)["items"]) == 1
+    assert matching.market_coverage({"title": "Eagles vs. Bears: O/U 57.5", "category": "combo"}, source_map().values(), [])["status"] == "unsupported"
+    assert matching.market_coverage({"title": "Trump vs. Biden", "category": "politics"}, source_map().values(), [])["status"] == "unknown"
 
 
 def test_one_bad_source_state_is_isolated(storage, source):

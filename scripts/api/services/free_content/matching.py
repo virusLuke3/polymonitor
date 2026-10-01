@@ -83,7 +83,7 @@ def market_coverage(market, sources, items):
             tags = []
     category = text(str(market.get("category") or "") + " " + " ".join(map(str, tags)))
     question = text(market.get("title"))
-    topic = "sports" if re.search(r"\bsports?\b|\bnfl\b|\bnba\b|football|soccer|basketball|baseball|tennis|esports", category) else (
+    topic = "sports" if re.search(r"\bsports?\b|\bnfl\b|\bnba\b|football|soccer|basketball|baseball|tennis|esports|\bspread\s*:|\bo/u\s*\d", category + " " + question) else (
         "crypto" if re.search(r"\bcrypto\b|bitcoin|ethereum", category + " " + question) else None)
     source_ids = [source["source_id"] for source in sources if source.get("enabled") and topic in source.get("topics", [])]
     return {"status": "unsupported" if topic and not source_ids else "unknown",

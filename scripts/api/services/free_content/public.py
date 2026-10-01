@@ -6,7 +6,7 @@ from .normalize import permission, utc
 from .matching import relate, market_coverage
 from .store import decode_state
 
-CANDIDATES_PER_PUBLISHER = 256
+CANDIDATES_PER_PUBLISHER = 512
 RAW_CANDIDATES_PER_PUBLISHER = 2048
 # One bounded collector cycle (90s) plus the longest watch sleep (60s).
 CHECK_GRACE_SECONDS = 150

@@ -90,7 +90,7 @@ or acquisition is reported and does not permanently stop watch mode.
 
 The indexed candidate query reads up to 2,048 raw records per publisher, using
 explicit NULL ordering and stable ID ties. Permission, expiry, malformed data and
-low-magnitude earthquake filters run before reserving 256 eligible candidate
+low-magnitude earthquake filters run before reserving 512 eligible candidate
 slots per publisher. Raw and eligible denominators, both bounds and projection
 drop reasons remain visible; hitting either bound is still explicitly partial. A high-frequency provider cannot consume another
 publisher's quota; quota overflow is explicitly partial, never comprehensive
