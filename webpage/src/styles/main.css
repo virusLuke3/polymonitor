@@ -2763,13 +2763,13 @@ html[lang='zh-CN'] .wm-promo-copy {
 
   .wm-layer-sidebar {
     width: min(260px, calc(100% - 84px));
-    bottom: 104px;
+    bottom: var(--wm-map-mobile-tools-top, 104px);
     max-height: min(62vh, calc(100% - 114px));
   }
 
   .wm-layer-sidebar.is-collapsed {
     width: 132px;
-    bottom: 78px;
+    bottom: var(--wm-map-mobile-tools-top, 78px);
   }
 
   .wm-layer-brief {

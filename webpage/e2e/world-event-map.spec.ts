@@ -322,6 +322,16 @@ test('WebGL country hover, click, fit, context menu and filter remain connected'
 
 test('mobile aviation keeps the map controls and event list unobstructed', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.route('https://api.rainviewer.com/public/weather-maps.json', route => route.fulfill({ json: {
+    host: 'https://tilecache.rainviewer.com', radar: { past: [
+      { time: Math.floor(Date.parse(GENERATED_AT) / 1000), path: '/v2/radar/layout-fixture' },
+    ] },
+  } }));
+  // A committed timestamp is wider than "Off". Exercise that layout with a
+  // deterministic raster; native radar imagery is verified in production.
+  await page.route('https://tilecache.rainviewer.com/**', route => route.fulfill({ contentType: 'image/png', body: Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64',
+  ) }));
   await gotoMap(page, 'layers=air-routes&air=watch&zoom=1.5');
   const lens = (await page.locator('.wm-aviation-lens').boundingBox())!;
   for (const selector of ['.wm-map-controls', '.wm-map-focus-toggle', '.wm-world-event-list-toggle', '.wm-map-radar-status', '.wm-map-legend-toggle']) {
@@ -335,10 +345,19 @@ test('mobile aviation keeps the map controls and event list unobstructed', async
   await page.locator('.wm-world-event-list-close').click();
   await page.getByRole('button', { name: 'Hide aviation layer', exact: true }).click();
   await expect(page.locator('.wm-aviation-lens')).toHaveCount(0);
-  const rectangles = await page.locator('.wm-map-context-controls button, .wm-map-radar-status summary, .wm-map-controls button').evaluateAll(elements => elements.map(e => e.getBoundingClientRect().toJSON()));
-  for (let i = 0; i < rectangles.length; i++) for (let j = i + 1; j < rectangles.length; j++) {
-    const a = rectangles[i]!, b = rectangles[j]!;
-    expect(Math.min(a.right, b.right) > Math.max(a.left, b.left) && Math.min(a.bottom, b.bottom) > Math.max(a.top, b.top)).toBe(false);
+  await page.locator('.wm-map-radar-status summary').click();
+  await page.getByRole('button', { name: 'Enable weather view', exact: true }).click();
+  await expect(page.locator('.wm-map-radar-status')).toHaveAttribute('data-radar-tiles', 'ready', { timeout: 30_000 });
+  await page.locator('.wm-map-radar-status summary').click();
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    if (width === 320) await page.getByRole('combobox', { name: 'Language', exact: true }).selectOption('zh');
+    await page.evaluate(() => document.fonts.ready);
+    const rectangles = await page.locator('.wm-map-context-controls > button, .wm-map-radar-status summary, .wm-map-controls button, .wm-world-event-list-toggle, .wm-layer-sidebar.is-collapsed').evaluateAll(elements => elements.map(e => ({ text: e.textContent, ...e.getBoundingClientRect().toJSON() })));
+    for (let i = 0; i < rectangles.length; i++) for (let j = i + 1; j < rectangles.length; j++) {
+      const a = rectangles[i]!, b = rectangles[j]!;
+      expect(Math.min(a.right, b.right) > Math.max(a.left, b.left) && Math.min(a.bottom, b.bottom) > Math.max(a.top, b.top), `${width}: ${a.text} / ${b.text}`).toBe(false);
+    }
   }
 });
 

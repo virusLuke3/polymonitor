@@ -1508,8 +1508,11 @@
 
 @media (max-width: 860px) {
   .wm-map-legend-toggle, .wm-map-aviation-toggle, .wm-map-radar-status summary { min-height: 44px; }
+  .wm-globe-area-flat:has(.wm-map-aviation-toggle) { --wm-map-mobile-tools-top: 128px; }
   .wm-map-context-controls { left: 12px; right: 68px; max-width: none; bottom: 24px; }
-  .wm-weather-deck-legend { left: 12px; }
+  .wm-map-context-controls:has(.wm-map-aviation-toggle) { display: grid; grid-template-columns: max-content minmax(0, 1fr); justify-items: start; }
+  .wm-map-radar-status { grid-column: 1 / -1; }
+  .wm-weather-deck-legend { left: 12px; bottom: calc(var(--wm-map-mobile-tools-top, 78px) - 6px); }
   .wm-map-radar-status > div { right: 0; }
   .wm-map-controls button { width: 44px; height: 44px; }
 
@@ -1517,7 +1520,7 @@
 
   .wm-world-event-list {
     right: 10px;
-    bottom: 78px;
+    bottom: var(--wm-map-mobile-tools-top, 78px);
     left: 10px;
   }
 
@@ -1612,6 +1615,10 @@
     bottom: auto;
   }
 
+}
+
+@media (max-width: 360px) {
+  .wm-map-stage:has(.wm-map-aviation-toggle) .wm-world-event-list:not(.is-open) { bottom: 178px; }
 }
 
 @media (max-height: 500px) {
