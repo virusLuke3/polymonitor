@@ -25,7 +25,7 @@ test('optional country loading does not falsely demote a ready cached basemap', 
     await expect(host).toHaveAttribute('data-map-basemap-state', 'primary-ready');
     release();
     const point = await host.evaluate(el => {
-      const p = (el as any).__polymonitorProjectGeoPoint(-120,37), box = el.getBoundingClientRect();
+      const p = (el as any).__polymonitorProjectGeoPoint(-122.1,37.4), box = el.getBoundingClientRect();
       return {x:box.x+p.x,y:box.y+p.y};
     });
     await expect.poll(async () => {
