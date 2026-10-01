@@ -8,29 +8,17 @@ from runtime.content_runtime import RuntimeContentItem, RuntimeContentProvider
 
 
 class ContentRelatedIntelTestCase(unittest.TestCase):
-    def test_related_content_payload_uses_snapshot_cache(self):
-        snapshot_calls = []
-        builder_calls = []
-
-        def snapshot_getter(namespace, cache_key, builder, *, ttl_seconds):
-            snapshot_calls.append((namespace, cache_key, ttl_seconds))
-            return builder()
-
+    def test_related_content_reads_current_permission_filtered_database_view(self):
+        calls = []
         ctx = {
-            "get_snapshot_payload": snapshot_getter,
-            "get_related_content_by_market_id": lambda market_id, limit=8: builder_calls.append((market_id, limit)) or {"items": [{"id": "n1"}]},
-            "table_exists": lambda table_name: table_name in {"content_items", "content_links"},
-            "query_one": lambda sql, params=(): {"links": 2, "link_created_at": "2026-06-01T00:00:00Z", "item_updated_at": "2026-06-01T00:01:00Z"},
+            "get_snapshot_payload": lambda *_args, **_kwargs: self.fail("Public content must recheck current rights and expiry"),
+            "get_related_content_by_market_id": lambda market_id, limit=8, days=7: calls.append((market_id, limit, days)) or {"scope": "market", "marketId": market_id, "items": []},
+            "table_exists": lambda _name: True,
+            "query_one": lambda *_args: {},
         }
-
-        payload = content_service.get_related_content_payload(ctx, 42, limit=20)
-
-        self.assertEqual({"items": [{"id": "n1"}]}, payload)
-        self.assertEqual([(42, 20)], builder_calls)
-        self.assertEqual(1, len(snapshot_calls))
-        self.assertEqual("snapshot:content:related", snapshot_calls[0][0])
-        self.assertEqual(300, snapshot_calls[0][2])
-        self.assertIn('"marketId": 42', snapshot_calls[0][1])
+        payload = content_service.get_related_content_payload(ctx, 42, limit=20, days=30)
+        self.assertEqual([], payload["items"])
+        self.assertEqual([(42, 20, 30)], calls)
 
     def test_topic_ranking_keeps_news_when_other_intel_types_are_plentiful(self):
         provider = RuntimeContentProvider(feeds=[])

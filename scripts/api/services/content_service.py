@@ -126,39 +126,16 @@ def get_related_content_payload(
     ctx: Mapping[str, Any],
     market_id: int,
     limit: int = 8,
+    days: int = 7,
 ) -> Dict[str, Any]:
     dependencies = RelatedContentDependencies.from_context(ctx)
-    if dependencies.get_snapshot_payload is not None:
-        cache_key = json.dumps(
-            {
-                "marketId": int(market_id),
-                "limit": int(limit),
-                "version": _related_content_version(dependencies, int(market_id)),
-                "v": 1,
-            },
-            sort_keys=True,
-            ensure_ascii=True,
-        )
-        return dependencies.get_snapshot_payload(
-            "snapshot:content:related",
-            cache_key,
-            lambda: _get_related_content_payload_uncached(
-                dependencies,
-                market_id,
-                limit=limit,
-            ),
-            ttl_seconds=_RELATED_CONTENT_SNAPSHOT_TTL_SECONDS,
-        )
-    return _get_related_content_payload_local_cached(
-        dependencies,
-        market_id,
-        limit=limit,
-    )
+    return dependencies.get_related_content_by_market_id(market_id, limit=limit, days=days)
 
 
 def get_latest_content_payload(
     ctx: Mapping[str, Any],
     limit: int = 8,
+    days: int = 7,
 ) -> Dict[str, Any]:
     dependencies = LatestContentDependencies.from_context(ctx)
-    return dependencies.get_latest_content_snapshot(limit=limit)
+    return dependencies.get_latest_content_snapshot(limit=limit, days=days)

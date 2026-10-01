@@ -367,7 +367,7 @@ export function mergeWorkspaceBundle(base: WorkspaceBundle | null, patch: Worksp
     chart: chooseWorkspaceChart(current.chart, patch.chart),
     trades: patch.trades?.length ? patch.trades : current.trades,
     oracle: patch.oracle || current.oracle,
-    content: patch.content?.items?.length ? patch.content : current.content,
+    content: patch.content ?? current.content,
     lob: chooseWorkspaceLob(current.lob, patch.lob),
     servingSource: patch.servingSource || current.servingSource,
     servingUpdatedAt: patch.servingUpdatedAt || current.servingUpdatedAt,

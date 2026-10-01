@@ -1,0 +1,677 @@
+{
+  "schema_version": 1,
+  "retention_days": 90,
+  "max_items": 20000,
+  "max_versions_per_item": 12,
+  "default_window_days": 7,
+  "sources": [
+    {
+      "source_id": "global-voices",
+      "publisher_id": "global-voices",
+      "publisher_name": "Global Voices",
+      "feed_url": "https://globalvoices.org/feed/",
+      "discovery_url": "https://globalvoices.org/feeds/",
+      "transport": "rss-atom",
+      "source_kind": "news_report",
+      "topics": [
+        "international"
+      ],
+      "poll_interval_seconds": 900,
+      "enabled": true,
+      "policy_url": "https://globalvoices.org/about/global-voices-attribution-policy/",
+      "permission_basis": "CC BY 3.0; original Global Voices text only",
+      "attribution_requirements": [
+        "publisher",
+        "original-link",
+        "author",
+        "license-link",
+        "excerpt-label"
+      ],
+      "content_restrictions": [
+        "text-only",
+        "no-media",
+        "no-logo",
+        "no-endorsement",
+        "exclude-special-rights"
+      ],
+      "policy_checked_at": "2026-10-01T02:42:45.908051Z",
+      "probe_status": "passed",
+      "probe": {
+        "source_id": "global-voices",
+        "configured_url": "https://globalvoices.org/feed/",
+        "checked_at": "2026-10-01T02:37:38.686544+00:00",
+        "http_status": 200,
+        "final_url": "https://globalvoices.org/feed/",
+        "bytes": 252117,
+        "items": 15,
+        "sample": [
+          {
+            "title": "In Brazil’s capital, residents grow their own heat-fighting solutions",
+            "link": "https://globalvoices.org/2026/09/30/in-brazils-capital-residents-grow-their-own-heat-fighting-solutions/",
+            "creator": "Dialogue Earth",
+            "pubDate": "Wed, 30 Sep 2026 14:09:26 +0000"
+          }
+        ]
+      },
+      "storage_allowed": true,
+      "display_title_allowed": true,
+      "display_excerpt_allowed": true,
+      "allowed_hosts": [
+        "globalvoices.org"
+      ],
+      "license_url": "https://creativecommons.org/licenses/by/3.0/",
+      "language": "en"
+    },
+    {
+      "source_id": "bls-cpi",
+      "publisher_id": "bls",
+      "publisher_name": "U.S. Bureau of Labor Statistics",
+      "feed_url": "https://www.bls.gov/feed/cpi.rss",
+      "discovery_url": "https://www.bls.gov/feed/",
+      "transport": "rss-atom",
+      "source_kind": "official_release",
+      "topics": [
+        "cpi"
+      ],
+      "poll_interval_seconds": 600,
+      "enabled": true,
+      "policy_url": "https://www.bls.gov/bls/linksite.htm",
+      "permission_basis": "BLS public-domain text",
+      "attribution_requirements": [
+        "publisher",
+        "original-link",
+        "excerpt-label"
+      ],
+      "content_restrictions": [
+        "text-only",
+        "no-media",
+        "no-logo",
+        "no-endorsement",
+        "exclude-special-rights"
+      ],
+      "policy_checked_at": "2026-10-01T02:42:45.908156Z",
+      "probe_status": "passed",
+      "probe": {
+        "source_id": "bls-cpi",
+        "configured_url": "https://www.bls.gov/feed/cpi.rss",
+        "checked_at": "2026-10-01T02:37:38.689135+00:00",
+        "http_status": 200,
+        "final_url": "https://www.bls.gov/feed/cpi.rss",
+        "bytes": 8394,
+        "items": 12,
+        "sample": [
+          {
+            "title": "CPI for all items increases 0.4% in August; gasoline rises",
+            "link": "",
+            "published": "2026-09-11T07:50:40.968-04:00"
+          }
+        ]
+      },
+      "storage_allowed": true,
+      "display_title_allowed": true,
+      "display_excerpt_allowed": true,
+      "allowed_hosts": [
+        "www.bls.gov"
+      ],
+      "license_url": null,
+      "language": "en"
+    },
+    {
+      "source_id": "bls-empsit",
+      "publisher_id": "bls",
+      "publisher_name": "U.S. Bureau of Labor Statistics",
+      "feed_url": "https://www.bls.gov/feed/empsit.rss",
+      "discovery_url": "https://www.bls.gov/feed/",
+      "transport": "rss-atom",
+      "source_kind": "official_release",
+      "topics": [
+        "employment"
+      ],
+      "poll_interval_seconds": 600,
+      "enabled": true,
+      "policy_url": "https://www.bls.gov/bls/linksite.htm",
+      "permission_basis": "BLS public-domain text",
+      "attribution_requirements": [
+        "publisher",
+        "original-link",
+        "excerpt-label"
+      ],
+      "content_restrictions": [
+        "text-only",
+        "no-media",
+        "no-logo",
+        "no-endorsement",
+        "exclude-special-rights"
+      ],
+      "policy_checked_at": "2026-10-01T02:42:45.908162Z",
+      "probe_status": "passed",
+      "probe": {
+        "source_id": "bls-empsit",
+        "configured_url": "https://www.bls.gov/feed/empsit.rss",
+        "checked_at": "2026-10-01T02:37:38.690926+00:00",
+        "http_status": 200,
+        "final_url": "https://www.bls.gov/feed/empsit.rss",
+        "bytes": 8541,
+        "items": 12,
+        "sample": [
+          {
+            "title": "Payroll employment increases by 162,000 in August; unemployment rate unchanged at 4.1%",
+            "link": "",
+            "published": "2026-09-04T07:51:08.695-04:00"
+          }
+        ]
+      },
+      "storage_allowed": true,
+      "display_title_allowed": true,
+      "display_excerpt_allowed": true,
+      "allowed_hosts": [
+        "www.bls.gov"
+      ],
+      "license_url": null,
+      "language": "en"
+    },
+    {
+      "source_id": "bls-ppi",
+      "publisher_id": "bls",
+      "publisher_name": "U.S. Bureau of Labor Statistics",
+      "feed_url": "https://www.bls.gov/feed/ppi.rss",
+      "discovery_url": "https://www.bls.gov/feed/",
+      "transport": "rss-atom",
+      "source_kind": "official_release",
+      "topics": [
+        "ppi"
+      ],
+      "poll_interval_seconds": 600,
+      "enabled": true,
+      "policy_url": "https://www.bls.gov/bls/linksite.htm",
+      "permission_basis": "BLS public-domain text",
+      "attribution_requirements": [
+        "publisher",
+        "original-link",
+        "excerpt-label"
+      ],
+      "content_restrictions": [
+        "text-only",
+        "no-media",
+        "no-logo",
+        "no-endorsement",
+        "exclude-special-rights"
+      ],
+      "policy_checked_at": "2026-10-01T02:42:45.908167Z",
+      "probe_status": "passed",
+      "probe": {
+        "source_id": "bls-ppi",
+        "configured_url": "https://www.bls.gov/feed/ppi.rss",
+        "checked_at": "2026-10-01T02:37:38.692382+00:00",
+        "http_status": 200,
+        "final_url": "https://www.bls.gov/feed/ppi.rss",
+        "bytes": 8638,
+        "items": 12,
+        "sample": [
+          {
+            "title": "PPI for final demand moves up 0.4% in August; goods advance 1.1%, services rise 0.1%",
+            "link": "",
+            "published": "2026-09-10T07:50:35.512-04:00"
+          }
+        ]
+      },
+      "storage_allowed": true,
+      "display_title_allowed": true,
+      "display_excerpt_allowed": true,
+      "allowed_hosts": [
+        "www.bls.gov"
+      ],
+      "license_url": null,
+      "language": "en"
+    },
+    {
+      "source_id": "fed-monetary",
+      "publisher_id": "fed",
+      "publisher_name": "Federal Reserve Board",
+      "feed_url": "https://www.federalreserve.gov/feeds/press_monetary.xml",
+      "discovery_url": "https://www.federalreserve.gov/feeds/feeds.htm",
+      "transport": "rss-atom",
+      "source_kind": "official_release",
+      "topics": [
+        "monetary-policy"
+      ],
+      "poll_interval_seconds": 600,
+      "enabled": true,
+      "policy_url": "https://www.federalreserve.gov/disclaimer.htm",
+      "permission_basis": "Board public-domain information; attributed",
+      "attribution_requirements": [
+        "publisher",
+        "original-link",
+        "excerpt-label"
+      ],
+      "content_restrictions": [
+        "text-only",
+        "no-media",
+        "no-logo",
+        "no-endorsement",
+        "exclude-special-rights"
+      ],
+      "policy_checked_at": "2026-10-01T02:42:45.908171Z",
+      "probe_status": "passed",
+      "probe": {
+        "source_id": "fed-monetary",
+        "configured_url": "https://www.federalreserve.gov/feeds/press_monetary.xml",
+        "checked_at": "2026-10-01T02:37:39.381805+00:00",
+        "http_status": 200,
+        "final_url": "https://www.federalreserve.gov/feeds/press_monetary.xml",
+        "bytes": 9645,
+        "items": 15,
+        "sample": [
+          {
+            "title": "Federal Reserve issues FOMC statement",
+            "link": "https://www.federalreserve.gov/newsevents/pressreleases/monetary20260916a.htm",
+            "pubDate": "Wed, 16 Sep 2026 18:00:00 GMT"
+          }
+        ]
+      },
+      "storage_allowed": true,
+      "display_title_allowed": true,
+      "display_excerpt_allowed": true,
+      "allowed_hosts": [
+        "www.federalreserve.gov"
+      ],
+      "license_url": null,
+      "language": "en"
+    },
+    {
+      "source_id": "fed-all",
+      "publisher_id": "fed",
+      "publisher_name": "Federal Reserve Board",
+      "feed_url": "https://www.federalreserve.gov/feeds/press_all.xml",
+      "discovery_url": "https://www.federalreserve.gov/feeds/feeds.htm",
+      "transport": "rss-atom",
+      "source_kind": "official_release",
+      "topics": [
+        "federal-reserve"
+      ],
+      "poll_interval_seconds": 600,
+      "enabled": true,
+      "policy_url": "https://www.federalreserve.gov/disclaimer.htm",
+      "permission_basis": "Board public-domain information; attributed",
+      "attribution_requirements": [
+        "publisher",
+        "original-link",
+        "excerpt-label"
+      ],
+      "content_restrictions": [
+        "text-only",
+        "no-media",
+        "no-logo",
+        "no-endorsement",
+        "exclude-special-rights"
+      ],
+      "policy_checked_at": "2026-10-01T02:42:45.908175Z",
+      "probe_status": "passed",
+      "probe": {
+        "source_id": "fed-all",
+        "configured_url": "https://www.federalreserve.gov/feeds/press_all.xml",
+        "checked_at": "2026-10-01T02:37:39.387461+00:00",
+        "http_status": 200,
+        "final_url": "https://www.federalreserve.gov/feeds/press_all.xml",
+        "bytes": 14678,
+        "items": 20,
+        "sample": [
+          {
+            "title": "Federal Reserve Board finalizes changes to enhance the transparency and public accountability of its stress test and reduce volatility in its stress test-related capital requirements",
+            "link": "https://www.federalreserve.gov/newsevents/pressreleases/bcreg20260930a.htm",
+            "pubDate": "Wed, 30 Sep 2026 13:00:00 GMT"
+          }
+        ]
+      },
+      "storage_allowed": true,
+      "display_title_allowed": true,
+      "display_excerpt_allowed": true,
+      "allowed_hosts": [
+        "www.federalreserve.gov"
+      ],
+      "license_url": null,
+      "language": "en"
+    },
+    {
+      "source_id": "ecb-press",
+      "publisher_id": "ecb",
+      "publisher_name": "European Central Bank",
+      "feed_url": "https://www.ecb.europa.eu/rss/press.html",
+      "discovery_url": "https://www.ecb.europa.eu/home/html/rss.en.html",
+      "transport": "rss-atom",
+      "source_kind": "official_release",
+      "topics": [
+        "ecb"
+      ],
+      "poll_interval_seconds": 900,
+      "enabled": true,
+      "policy_url": "https://www.ecb.europa.eu/services/using-our-site/disclaimer/html/index.en.html",
+      "permission_basis": "ECB free accurate reproduction of institutional press releases; excludes author-named documents",
+      "attribution_requirements": [
+        "publisher",
+        "original-link",
+        "excerpt-label"
+      ],
+      "content_restrictions": [
+        "text-only",
+        "no-media",
+        "no-logo",
+        "no-endorsement",
+        "exclude-special-rights"
+      ],
+      "policy_checked_at": "2026-10-01T02:42:45.908179Z",
+      "probe_status": "passed",
+      "probe": {
+        "source_id": "ecb-press",
+        "configured_url": "https://www.ecb.europa.eu/rss/press.html",
+        "checked_at": "2026-10-01T02:37:39.423026+00:00",
+        "http_status": 200,
+        "final_url": "https://www.ecb.europa.eu/rss/press.html",
+        "bytes": 5677,
+        "items": 15,
+        "sample": [
+          {
+            "title": " Christine Lagarde: Interview with La Croix",
+            "link": "https://www.ecb.europa.eu//press/inter/date/2026/html/ecb.in260930~10084a5f3d.en.html",
+            "pubDate": "Wed, 30 Sep 2026 19:00:00 +0200"
+          }
+        ]
+      },
+      "storage_allowed": true,
+      "display_title_allowed": true,
+      "display_excerpt_allowed": true,
+      "allowed_hosts": [
+        "www.ecb.europa.eu"
+      ],
+      "license_url": null,
+      "language": "en"
+    },
+    {
+      "source_id": "nasa-release",
+      "publisher_id": "nasa",
+      "publisher_name": "NASA",
+      "feed_url": "https://www.nasa.gov/news-release/feed/",
+      "discovery_url": "https://www.nasa.gov/rss-feeds/",
+      "transport": "rss-atom",
+      "source_kind": "official_release",
+      "topics": [
+        "space"
+      ],
+      "poll_interval_seconds": 900,
+      "enabled": true,
+      "policy_url": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+      "permission_basis": "NASA factual informational use with attribution; own news-release text only",
+      "attribution_requirements": [
+        "publisher",
+        "original-link",
+        "excerpt-label"
+      ],
+      "content_restrictions": [
+        "text-only",
+        "no-media",
+        "no-logo",
+        "no-endorsement",
+        "exclude-special-rights"
+      ],
+      "policy_checked_at": "2026-10-01T02:42:45.908182Z",
+      "probe_status": "passed",
+      "probe": {
+        "source_id": "nasa-release",
+        "configured_url": "https://www.nasa.gov/news-release/feed/",
+        "checked_at": "2026-10-01T02:37:40.073673+00:00",
+        "http_status": 200,
+        "final_url": "https://www.nasa.gov/news-release/feed/",
+        "bytes": 234361,
+        "items": 10,
+        "sample": [
+          {
+            "title": "Curiosity Blog, Sols 5016–5021: Fantastic Minerals and How To Detect Them",
+            "link": "https://science.nasa.gov/blog/curiosity-blog-sols-5016-5021-fantastic-minerals-and-how-to-detect-them/",
+            "creator": "",
+            "pubDate": "Wed, 30 Sep 2026 23:37:47 +0000"
+          }
+        ]
+      },
+      "storage_allowed": true,
+      "display_title_allowed": true,
+      "display_excerpt_allowed": true,
+      "allowed_hosts": [
+        "www.nasa.gov",
+        "science.nasa.gov"
+      ],
+      "license_url": null,
+      "language": "en"
+    },
+    {
+      "source_id": "nhc-at",
+      "publisher_id": "nhc",
+      "publisher_name": "NOAA National Hurricane Center",
+      "feed_url": "https://www.nhc.noaa.gov/index-at.xml",
+      "discovery_url": "https://www.nhc.noaa.gov/aboutrss.shtml",
+      "transport": "rss-atom",
+      "source_kind": "official_release",
+      "topics": [
+        "tropical-cyclone"
+      ],
+      "poll_interval_seconds": 600,
+      "enabled": true,
+      "policy_url": "https://www.weather.gov/disclaimer",
+      "permission_basis": "NOAA/NWS public-domain products; attributed excerpts",
+      "attribution_requirements": [
+        "publisher",
+        "original-link",
+        "excerpt-label"
+      ],
+      "content_restrictions": [
+        "text-only",
+        "no-media",
+        "no-logo",
+        "no-endorsement",
+        "exclude-special-rights"
+      ],
+      "policy_checked_at": "2026-10-01T02:42:45.908186Z",
+      "probe_status": "passed",
+      "probe": {
+        "source_id": "nhc-at",
+        "configured_url": "https://www.nhc.noaa.gov/index-at.xml",
+        "checked_at": "2026-10-01T02:37:40.092618+00:00",
+        "http_status": 200,
+        "final_url": "https://www.nhc.noaa.gov/index-at.xml",
+        "bytes": 2090,
+        "items": 2,
+        "sample": [
+          {
+            "title": "Atlantic Tropical Weather Outlook",
+            "pubDate": "Wed, 30 Sep 2026 23:09:31 GMT",
+            "link": "https://www.nhc.noaa.gov/gtwo.php?basin=atlc",
+            "author": "nhcwebmaster@noaa.gov (NHC Webmaster)"
+          }
+        ]
+      },
+      "storage_allowed": true,
+      "display_title_allowed": true,
+      "display_excerpt_allowed": true,
+      "allowed_hosts": [
+        "www.nhc.noaa.gov"
+      ],
+      "license_url": null,
+      "language": "en",
+      "basin": "atlantic"
+    },
+    {
+      "source_id": "nhc-ep",
+      "publisher_id": "nhc",
+      "publisher_name": "NOAA National Hurricane Center",
+      "feed_url": "https://www.nhc.noaa.gov/index-ep.xml",
+      "discovery_url": "https://www.nhc.noaa.gov/aboutrss.shtml",
+      "transport": "rss-atom",
+      "source_kind": "official_release",
+      "topics": [
+        "tropical-cyclone"
+      ],
+      "poll_interval_seconds": 600,
+      "enabled": true,
+      "policy_url": "https://www.weather.gov/disclaimer",
+      "permission_basis": "NOAA/NWS public-domain products; attributed excerpts",
+      "attribution_requirements": [
+        "publisher",
+        "original-link",
+        "excerpt-label"
+      ],
+      "content_restrictions": [
+        "text-only",
+        "no-media",
+        "no-logo",
+        "no-endorsement",
+        "exclude-special-rights"
+      ],
+      "policy_checked_at": "2026-10-01T02:42:45.908189Z",
+      "probe_status": "passed",
+      "probe": {
+        "source_id": "nhc-ep",
+        "configured_url": "https://www.nhc.noaa.gov/index-ep.xml",
+        "checked_at": "2026-10-01T02:37:40.538226+00:00",
+        "http_status": 200,
+        "final_url": "https://www.nhc.noaa.gov/index-ep.xml",
+        "bytes": 30902,
+        "items": 13,
+        "sample": [
+          {
+            "title": "Eastern North Pacific Tropical Weather Outlook",
+            "pubDate": "Wed, 30 Sep 2026 23:07:02 GMT",
+            "link": "https://www.nhc.noaa.gov/gtwo.php?basin=epac",
+            "author": "nhcwebmaster@noaa.gov (NHC Webmaster)"
+          }
+        ]
+      },
+      "storage_allowed": true,
+      "display_title_allowed": true,
+      "display_excerpt_allowed": true,
+      "allowed_hosts": [
+        "www.nhc.noaa.gov"
+      ],
+      "license_url": null,
+      "language": "en",
+      "basin": "eastern-pacific"
+    },
+    {
+      "source_id": "usgs",
+      "publisher_id": "usgs",
+      "publisher_name": "U.S. Geological Survey",
+      "feed_url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson",
+      "discovery_url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/geojson.php",
+      "transport": "snapshot",
+      "source_kind": "observation",
+      "topics": [
+        "earthquake"
+      ],
+      "poll_interval_seconds": 180,
+      "enabled": true,
+      "policy_url": "https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits",
+      "permission_basis": "USGS-produced public-domain observations",
+      "attribution_requirements": [
+        "publisher",
+        "original-link",
+        "excerpt-label"
+      ],
+      "content_restrictions": [
+        "text-only",
+        "no-media",
+        "no-logo",
+        "no-endorsement",
+        "exclude-special-rights"
+      ],
+      "policy_checked_at": "2026-10-01T02:42:45.908193Z",
+      "probe_status": "passed",
+      "probe": {
+        "source_id": "usgs",
+        "configured_url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson",
+        "checked_at": "2026-10-01T02:37:40.856002+00:00",
+        "http_status": 200,
+        "final_url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson",
+        "bytes": 167378,
+        "items": 234,
+        "sample": [
+          {
+            "title": "M 0.6 - 15 km WSW of Searles Valley, CA",
+            "headline": null,
+            "status": "automatic",
+            "sent": null,
+            "time": 1790821808430,
+            "updated": 1790822009845,
+            "url": "https://earthquake.usgs.gov/earthquakes/eventpage/ci41341391"
+          }
+        ]
+      },
+      "storage_allowed": true,
+      "display_title_allowed": true,
+      "display_excerpt_allowed": true,
+      "allowed_hosts": [
+        "earthquake.usgs.gov"
+      ],
+      "license_url": null,
+      "language": "en",
+      "snapshot_key": "usgs"
+    },
+    {
+      "source_id": "nws",
+      "publisher_id": "nws",
+      "publisher_name": "National Weather Service",
+      "feed_url": "https://api.weather.gov/alerts/active",
+      "discovery_url": "https://www.weather.gov/documentation/services-web-api",
+      "transport": "snapshot",
+      "source_kind": "alert",
+      "topics": [
+        "weather-alert"
+      ],
+      "poll_interval_seconds": 300,
+      "enabled": true,
+      "policy_url": "https://www.weather.gov/disclaimer",
+      "permission_basis": "NOAA/NWS public-domain products; attributed excerpts",
+      "attribution_requirements": [
+        "publisher",
+        "original-link",
+        "excerpt-label"
+      ],
+      "content_restrictions": [
+        "text-only",
+        "no-media",
+        "no-logo",
+        "no-endorsement",
+        "exclude-special-rights"
+      ],
+      "policy_checked_at": "2026-10-01T02:42:45.908197Z",
+      "probe_status": "passed",
+      "probe": {
+        "source_id": "nws",
+        "configured_url": "https://api.weather.gov/alerts/active",
+        "checked_at": "2026-10-01T02:37:40.960302+00:00",
+        "http_status": 200,
+        "final_url": "https://api.weather.gov/alerts/active",
+        "bytes": 1462503,
+        "items": 293,
+        "sample": [
+          {
+            "title": null,
+            "headline": "Flood Warning issued September 30 at 9:36PM CDT until October 3 at 7:00PM CDT by NWS Omaha/Valley NE",
+            "status": "Actual",
+            "sent": "2026-09-30T21:36:00-05:00",
+            "time": null,
+            "updated": null,
+            "url": null
+          }
+        ]
+      },
+      "storage_allowed": true,
+      "display_title_allowed": true,
+      "display_excerpt_allowed": true,
+      "allowed_hosts": [
+        "api.weather.gov",
+        "www.weather.gov"
+      ],
+      "license_url": null,
+      "language": "en",
+      "snapshot_key": "nws"
+    }
+  ]
+}

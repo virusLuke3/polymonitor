@@ -177,8 +177,8 @@ def bind_services(runtime: ServiceRuntime) -> None:
     get_gamma_active_market_filter = lambda: market_data_client.get_gamma_active_market_filter(
         runtime.market_data_client_context
     )
-    get_latest_content_snapshot = lambda limit=8: query_service.get_latest_content_snapshot(
-        runtime.query_context, limit=limit
+    get_latest_content_snapshot = lambda limit=8, days=7: query_service.get_latest_content_snapshot(
+        runtime.query_context, limit=limit, days=days
     )
     get_market_by_id = lambda market_id: market_service.get_market_by_id(runtime.market_context, market_id)
     get_market_chart_payload = lambda market_id, range_name="1d", interval="5m": (
@@ -227,8 +227,8 @@ def bind_services(runtime: ServiceRuntime) -> None:
         runtime.market_context, limit=limit
     )
     get_redis_client = lambda: api_cache.get_redis_client(runtime.cache)
-    get_related_content_by_market_id = lambda market_id, limit=8: query_service.get_related_content_by_market_id(
-        runtime.query_context, market_id, limit=limit
+    get_related_content_by_market_id = lambda market_id, limit=8, days=7: query_service.get_related_content_by_market_id(
+        runtime.query_context, market_id, limit=limit, days=days
     )
     get_runtime_lob_payload = lambda market_id: lob_service.get_runtime_lob_payload(runtime.lob, market_id)
     get_snapshot_payload = lambda namespace, cache_key, builder, *, ttl_seconds: api_cache.get_snapshot_payload(
@@ -978,11 +978,11 @@ def build_blueprints(runtime: ServiceRuntime):
         content_routes.create_content_blueprint(
             content_routes.ContentRouteDependencies(
                 get_market_by_id=lambda market_id: market_service.get_market_by_id(runtime.market_context, market_id),
-                get_related_content_payload=lambda market_id, limit=8: content_service.get_related_content_payload(
-                    runtime.related_content, market_id, limit=limit
+                get_related_content_payload=lambda market_id, limit=8, days=7: content_service.get_related_content_payload(
+                    runtime.related_content, market_id, limit=limit, days=days
                 ),
-                get_latest_content_payload=lambda limit=8: content_service.get_latest_content_payload(
-                    runtime.latest_content, limit=limit
+                get_latest_content_payload=lambda limit=8, days=7: content_service.get_latest_content_payload(
+                    runtime.latest_content, limit=limit, days=days
                 ),
                 get_runtime_content_latest=lambda limit=8: {
                     "items": runtime.CONTENT_RUNTIME_PROVIDER.get_latest_items(limit=limit),

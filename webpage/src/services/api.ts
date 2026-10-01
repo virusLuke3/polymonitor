@@ -204,8 +204,8 @@ export function fetchRecentOracle(limit = 24, signal?: AbortSignal) {
   return apiGet<OraclePayload['timeline']>(`/oracle/recent?limit=${limit}`, signal);
 }
 
-export function fetchLatestContent(limit = 8, signal?: AbortSignal) {
-  return apiGet<ContentPayload>(`/content/latest?limit=${limit}`, signal);
+export function fetchLatestContent(limit = 8, signal?: AbortSignal, days = 7) {
+  return apiGet<ContentPayload>(`/content/latest?limit=${limit}&days=${days}`, signal);
 }
 
 export function fetchRuntimeCommodities(signal?: AbortSignal) {
@@ -643,8 +643,8 @@ export function fetchMarketChart(
   return apiGetWithTimeout<ChartPayload>(`/markets/${marketId}/chart?${params.toString()}`, timeoutMs, signal);
 }
 
-function fetchMarketContent(marketId: number, limit = 20, timeoutMs = 5000, signal?: AbortSignal) {
-  return apiGetWithTimeout<ContentPayload>(`/content/market/${marketId}?limit=${limit}`, timeoutMs, signal);
+export function fetchMarketContent(marketId: number, limit = 20, timeoutMs = 5000, signal?: AbortSignal, days = 7) {
+  return apiGetWithTimeout<ContentPayload>(`/content/market/${marketId}?limit=${limit}&days=${days}`, timeoutMs, signal);
 }
 
 function fetchMarketLob(marketId: number, timeoutMs = 4000, signal?: AbortSignal) {
@@ -683,7 +683,7 @@ function preferLoadedBundle(primary: WorkspaceBundle, secondary: WorkspaceBundle
     chart: primary.chart?.points?.length ? primary.chart : secondary.chart,
     trades: primary.trades?.length ? primary.trades : secondary.trades,
     oracle: primaryOracle ? primaryOracle : secondaryOracle,
-    content: primary.content?.items?.length ? primary.content : secondary.content,
+    content: secondary.content ?? primary.content,
     lob: primary.lob || secondary.lob,
     servingSource: primary.servingSource || secondary.servingSource,
     servingUpdatedAt: primary.servingUpdatedAt || secondary.servingUpdatedAt,

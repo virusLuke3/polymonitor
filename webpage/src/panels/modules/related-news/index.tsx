@@ -1,108 +1,57 @@
-import type { PanelInputs } from '../../types';
+import { useEffect, useState } from 'preact/hooks';
+import type { PanelInputs, PanelRenderMap } from '../../types';
 import { Panel } from '@/components/Panel';
-import type { ContentItem } from '@/types';
-import { useMemo, useState } from 'preact/hooks';
-import type { PanelRenderMap } from '@/panels/types';
-import { contentList } from '@/panels/shared/renderers';
-import { focusedContent } from '@/panels/shared/selectors';
-import { useI18n, type MessageKey } from '@/services/i18n';
 import { panelFromRenderer } from '@/panels/definePanel';
+import { useI18n } from '@/services/i18n';
+import { useIntelFeed } from './useIntelFeed';
 
-type Inputs = PanelInputs<'bootstrap' | 'bundle' | 'latestContent' | 'selectedMarketId'>;
-
-type IntelTab = {
-  id: 'news' | 'video' | 'report' | 'research';
-  labelKey: MessageKey;
-};
-
-const INTEL_TABS: IntelTab[] = [
-  { id: 'news', labelKey: 'atlasIntel.news' },
-  { id: 'video', labelKey: 'atlasIntel.video' },
-  { id: 'report', labelKey: 'atlasIntel.reports' },
-  { id: 'research', labelKey: 'atlasIntel.research' },
-];
-
-function explicitContentType(item: ContentItem) {
-  return String(item.contentType || '').trim().toLowerCase();
-}
-
-function inferredContentType(item: ContentItem): IntelTab['id'] {
-  const explicit = explicitContentType(item);
-  if (explicit === 'video' || explicit === 'report' || explicit === 'research') return explicit;
-  const source = String(item.source || '').toLowerCase();
-  const url = String(item.url || '').toLowerCase();
-  const title = String(item.title || '').toLowerCase();
-  const haystack = `${source} ${url} ${title}`;
-  if (/youtube|youtu\.be|vimeo|twitch\.tv/.test(haystack)) return 'video';
-  if (/\.pdf($|[?#])|annual-report|whitepaper|research-report|special-report/.test(haystack)) return 'report';
-  if (/arxiv\.org|ssrn\.com|nber\.org|working paper|research paper|journal/.test(haystack)) return 'research';
-  return 'news';
-}
-
-function smartContentByType(items: ContentItem[], tab: IntelTab['id']) {
-  return items.filter((item) => inferredContentType(item) === tab);
-}
-
+type Inputs = PanelInputs<'selectedMarketId' | 'selectedMarket'>;
+const kinds = ['all', 'news_report', 'official_release', 'event'] as const;
 function RelatedIntelPanel({ ctx }: { ctx: Inputs }) {
   const i18n = useI18n();
-  const { t } = i18n;
-  const [activeTab, setActiveTab] = useState<IntelTab['id']>('news');
-  const items = focusedContent(ctx);
-  const tabItems = useMemo(() => Object.fromEntries(
-    INTEL_TABS.map((tab) => [tab.id, smartContentByType(items, tab.id)]),
-  ) as Record<IntelTab['id'], ContentItem[]>, [items]);
-  const visibleItems = tabItems[activeTab] || [];
-  const activeLabel = t(INTEL_TABS.find((tab) => tab.id === activeTab)?.labelKey || 'atlasIntel.intel');
-  const emptyMessage = activeTab === 'news'
-    ? t('atlasIntel.noNews')
-    : t('atlasIntel.noType', { type: activeLabel });
-
-  return (
-    <Panel
-      title={t('atlasIntel.title')}
-      status="live"
-      count={items.length}
-      className="wm-market-panel wm-content-feed-panel wm-related-news-panel wm-related-intel-panel"
-    >
-      <div className="wm-intel-filter-tabs" role="tablist" aria-label={t('atlasIntel.types')}>
-        {INTEL_TABS.map((tab) => (
-          <button
-            aria-selected={activeTab === tab.id}
-            className={activeTab === tab.id ? 'active' : ''}
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            role="tab"
-            type="button"
-          >
-            <span>{t(tab.labelKey)}</span>
-            <b>{i18n.formatNumber(tabItems[tab.id]?.length || 0)}</b>
-          </button>
-        ))}
-      </div>
-      {contentList(visibleItems, emptyMessage, 20, {
-        untitled: t('atlasIntel.untitled'),
-        readSource: t('atlasIntel.readSource'),
-        formatDate: (value) => value ? i18n.formatDateTime(value) : '--',
-        empty: {
-          label: t('atlasShared.standby'),
-          detail: t('atlasShared.emptyDetail'),
-        },
-      })}
-    </Panel>
-  );
+  const zh = i18n.locale.startsWith('zh');
+  const copy = (en: string, cn: string) => zh ? cn : en;
+  const [choice, setChoice] = useState({ marketId: ctx.selectedMarketId, global: ctx.selectedMarketId == null });
+  const setGlobal = (global: boolean) => setChoice({ marketId: ctx.selectedMarketId, global });
+  const global = choice.marketId === ctx.selectedMarketId ? choice.global : ctx.selectedMarketId == null;
+  const [days, setDays] = useState(7);
+  const [kind, setKind] = useState<typeof kinds[number]>('all');
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  useEffect(() => { setGlobal(ctx.selectedMarketId == null); setExpanded({}); }, [ctx.selectedMarketId]);
+  const scope = global || ctx.selectedMarketId == null ? 'global' : 'market';
+  const feed = useIntelFeed(ctx.selectedMarketId, scope, days);
+  const data = feed.data;
+  const items = data?.items || [];
+  const labels = { all: copy('All', '全部'), news_report: copy('Reports', '报道'), official_release: copy('Official', '公告'), event: copy('Events', '事件') };
+  const kindLabel = (value?: string) => value === 'alert' ? copy('Weather alert', '天气警报') : value === 'observation' ? copy('Observation', '观测更新') : value === 'official_release' ? labels.official_release : labels.news_report;
+  const filtered = (filter: typeof kinds[number]) => items.filter((item) => filter === 'all' || (filter === 'event' ? ['alert', 'observation'].includes(item.sourceKind || '') : item.sourceKind === filter));
+  return <Panel title={scope === 'global' ? copy('Global Updates', '全局资讯') : copy('Related Intelligence', '关联情报')} count={items.length} className="wm-related-intel-panel wm-free-intel-panel" loading={feed.loading}>
+    <div className="wm-intel-scope">
+      <button type="button" aria-pressed={scope === 'market'} disabled={ctx.selectedMarketId == null} onClick={() => setGlobal(false)}>{copy('Market', '市场')}</button>
+      <button type="button" aria-pressed={scope === 'global'} onClick={() => setGlobal(true)}>{copy('Global', '全局')}</button>
+      <select aria-label={copy('Content time range', '资讯时间范围')} value={days} onChange={(event) => setDays(Number(event.currentTarget.value))}><option value={7}>{copy('Past 7 days', '过去 7 天')}</option><option value={30}>{copy('Past 30 days · history', '过去 30 天 · 历史')}</option></select>
+    </div>
+    {scope === 'market' && <p className="wm-free-intel-market-caption">{ctx.selectedMarket?.title || data?.marketTitle || `Market ${ctx.selectedMarketId}`}</p>}
+    <div className="wm-intel-filter-tabs" role="tablist" aria-label={copy('Content types', '内容类型')}>{kinds.map((value) => <button type="button" role="tab" aria-selected={kind === value} className={kind === value ? 'active' : ''} onClick={() => setKind(value)} key={value}><span>{labels[value]}</span><b>{filtered(value).length}</b></button>)}</div>
+    {feed.pending && <button type="button" className="wm-intel-new" onClick={feed.accept}>{copy('New content available · show', '有新内容 · 点击查看')}</button>}
+    {(feed.error || data?.status === 'unavailable') && <p role="status">{copy('Content service unavailable.', '资讯服务暂不可用。')} {feed.data && copy('Showing the last loaded list.', '显示上次加载的列表。')}</p>}
+    {!feed.error && data && !filtered(kind).length && <p className="wm-intel-empty">{scope === 'market' ? copy('No content meeting this market’s conditions was found in the current free sources.', '当前免费来源中，暂未找到符合本市场条件的内容。') : copy('No public content in this type and time range.', '此类型和时间范围内暂无可公开展示的内容。')}</p>}
+    <div className="wm-intel-list">{filtered(kind).map((item) => {
+      const id = String(item.id);
+      return <article className="wm-free-intel-card" key={id}>
+        <div className="wm-free-intel-meta"><strong>{item.source}</strong><span>{kindLabel(item.sourceKind)}</span></div>
+        {item.author && <p>{copy('By', '作者')} {item.author}</p>}
+        <a className={`wm-news-title ${expanded[id] ? '' : 'wm-intel-clamped'}`} href={item.url || undefined} target="_blank" rel="noopener noreferrer">{item.title}</a>
+        {item.summary && <p className={`wm-intel-summary ${expanded[id] ? '' : 'wm-intel-clamped'}`}>{expanded[id] ? item.excerptFull || item.summary : item.summary} <small>{item.excerptOrigin === 'structured' ? copy('Data summary', '数据整理') : copy('Excerpt', '节选')}</small></p>}
+        <button type="button" className="wm-intel-expand" aria-expanded={!!expanded[id]} onClick={() => setExpanded((old) => ({ ...old, [id]: !old[id] }))}>{expanded[id] ? copy('Collapse', '收起') : copy('Show full card text', '展开卡片文字')}</button>
+        <div className="wm-news-meta"><time dateTime={item.publishedAt || undefined}>{item.publishedAt ? i18n.formatDateTime(item.publishedAt) : copy('Publication time unknown', '发布时间未知')}</time><a href={item.url || undefined} target="_blank" rel="noopener noreferrer">{copy('Read source', '阅读原文')}</a></div>
+        {scope === 'market' && <p className="wm-intel-relation"><b>{item.relation === 'direct' ? copy('Direct relation', '直接关联') : copy('Background only', '仅背景关联')}</b> · {item.relationReason}</p>}
+        {item.sourceStatus && !['ok', 'unchanged', 'healthy_empty'].includes(item.sourceStatus) && <p>{copy('Source temporarily unavailable or stale', '来源暂不可用或已过期')}</p>}
+        <a className="wm-intel-license" href={item.licenseUrl || item.policyUrl} target="_blank" rel="noopener noreferrer">{item.licenseUrl ? 'CC BY 3.0' : copy('Source use policy', '来源使用政策')}</a>
+      </article>;
+    })}</div>
+    {data && <details className="wm-intel-sources"><summary>{copy('Source status', '来源状态')} · {data.sources?.length || 0} {copy('feeds', '个订阅入口')} · {items.length} {scope === 'market' ? copy('matches', '条匹配') : copy('items', '条内容')}</summary><p>{copy('Last successful check', '最近成功检查')}：{data.lastSuccessfulCheckAt ? i18n.formatDateTime(data.lastSuccessfulCheckAt) : copy('Unknown', '未知')}</p>{data.sources?.map((source) => <p key={source.source_id}><b>{source.source_id}</b> · {source.status}{source.stale ? ' · stale' : ''}<br />{source.error || ''}</p>)}</details>}
+  </Panel>;
 }
-
-const renderers: PanelRenderMap<'bootstrap' | 'bundle' | 'latestContent' | 'selectedMarketId'> = {
-  'related-news': {
-    render: (ctx) => <RelatedIntelPanel ctx={ctx} />,
-  },
-};
-
-export const panel = panelFromRenderer(renderers, {
-  contextKeys: ['bootstrap', 'bundle', 'latestContent', 'selectedMarketId'],
-  id: 'related-news',
-  title: 'Related News',
-  eyebrow: 'intel',
-  description: 'News linked to focused market.',
-  defaultEnabled: true,
-});
+const renderers: PanelRenderMap<'selectedMarketId' | 'selectedMarket'> = { 'related-news': { render: (ctx) => <RelatedIntelPanel ctx={ctx} /> } };
+export const panel = panelFromRenderer(renderers, { contextKeys: ['selectedMarketId', 'selectedMarket'], id: 'related-news', title: 'Related Intelligence', eyebrow: 'intel', description: 'Reviewed free sources, explicitly scoped to a market or global updates.', defaultEnabled: true });

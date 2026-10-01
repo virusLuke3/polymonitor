@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from flask import Blueprint, jsonify, request
+from api.services.free_content.public import filter_bootstrap
 
 
 @dataclass(frozen=True)
@@ -23,7 +24,7 @@ def create_bootstrap_blueprint(dependencies: BootstrapRouteDependencies) -> Blue
 
     @bp.route("/bootstrap", methods=["GET"])
     def api_bootstrap():
-        return jsonify(dependencies.get_bootstrap_payload_cached())
+        return jsonify(filter_bootstrap(dependencies.get_bootstrap_payload_cached()))
 
     @bp.route("/search", methods=["GET"])
     def api_search():

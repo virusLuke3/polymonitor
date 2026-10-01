@@ -1427,12 +1427,11 @@ def get_related_content_by_market_id(
     ctx: Mapping[str, Any],
     market_id: int,
     limit: int = 8,
+    days: int = 7,
 ) -> Dict[str, Any]:
-    return _get_related_content_by_market_id(
-        RelatedContentQueryDependencies.from_context(ctx),
-        market_id,
-        limit=limit,
-    )
+    from api.services.free_content.public import payload
+    dependencies = RelatedContentQueryDependencies.from_context(ctx)
+    return payload(dependencies.storage, market=dependencies.get_market_by_id(market_id), market_id=market_id, limit=limit, days=days)
 
 
 def _get_related_content_by_market_id(
@@ -1640,11 +1639,11 @@ def _get_related_content_by_market_id(
 def get_latest_content_snapshot(
     ctx: Mapping[str, Any],
     limit: int = 8,
+    days: int = 7,
 ) -> Dict[str, Any]:
-    return _get_latest_content_snapshot(
-        LatestContentQueryDependencies.from_context(ctx),
-        limit=limit,
-    )
+    from api.services.free_content.public import payload
+    dependencies = LatestContentQueryDependencies.from_context(ctx)
+    return payload(dependencies.storage, limit=limit, days=days)
 
 
 def _get_latest_content_snapshot(

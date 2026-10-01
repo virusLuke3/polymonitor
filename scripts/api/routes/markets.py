@@ -34,10 +34,11 @@ def create_markets_blueprint(dependencies: MarketRouteDependencies) -> Blueprint
         return jsonify({"status": "unavailable", "error": "Market data temporarily unavailable"}), 503
 
     def sanitize(payload: Any, *, market_id: int | None = None) -> Any:
-        return dependencies.sanitize_payload(
+        from api.services.free_content.public import filter_workspace
+        return filter_workspace(dependencies.sanitize_payload(
             payload,
             market_id=market_id,
-        )
+        ))
 
     @bp.route("/markets", methods=["GET"])
     def api_markets():
