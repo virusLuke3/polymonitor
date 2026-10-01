@@ -2636,7 +2636,7 @@ html[lang='zh-CN'] .wm-promo-copy {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .wm-globe-hero {
+  .wm-map-stage[data-map-view="3d"] .wm-globe-hero {
     min-height: 420px;
   }
 

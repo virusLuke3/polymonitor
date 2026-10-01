@@ -86,6 +86,8 @@ for (const viewport of [{width:1536,height:1000},{width:2048,height:567},{width:
       if(phase!=='before') {
         if(viewport.width===1536) expect(rect!.height).toBeGreaterThanOrEqual(680);
         await expect(host).toHaveAttribute('data-map-renderer-ready','webgl');
+        const stage = (await page.locator('.wm-map-stage').boundingBox())!;
+        expect(Math.abs(rect!.height - stage.height), '2D renderer must fit its visible stage; a 3D minimum height must not crop its controls').toBeLessThanOrEqual(1);
       }
       expect(errors).toEqual([]);
     } finally {await page.goto('about:blank');await page.unrouteAll({behavior:'ignoreErrors'});await assets.dispose();}
