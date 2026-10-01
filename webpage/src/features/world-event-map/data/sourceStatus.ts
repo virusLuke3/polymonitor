@@ -8,6 +8,7 @@ export type WorldEventSourceStatus = {
   key: string;
   label: string;
   status: 'loading' | GeoEventSourceStatus;
+  phase?: 'disabled' | 'zoom-required' | 'renderer-limited' | 'loading' | 'fresh' | 'empty' | 'partial' | 'stale' | 'unavailable' | 'recovering';
   eventCount: number;
   rejectedCount: number;
   generatedAt?: string;
@@ -104,8 +105,11 @@ export function sourceStatusesFromHazardResponse(
       ...source.coverage.gaps,
       source.errorCode ? `Source condition: ${source.errorCode}` : '',
     ].filter(Boolean);
+    const geometryIncomplete = source.key === 'nws' && response.events.some(event => event.sources.some(item => names.includes(item.provider)) && (!event.geometry || Number(event.properties.unresolvedZoneCount || 0) > 0));
+    if (geometryIncomplete) details.push('Fresh catalog; optional official boundaries are incomplete or still resolving.');
     const status = source.status === 'ok' && rejectedCount > 0 ? 'partial' : source.status;
     return {
+      phase: geometryIncomplete && status === 'ok' ? 'partial' : status === 'error' ? 'unavailable' : status === 'degraded' ? 'stale' : status === 'partial' ? 'partial' : eventCount === 0 ? 'empty' : 'fresh',
       key: source.key,
       label: HAZARD_SOURCE_LABELS[source.key] || source.key.toUpperCase(),
       status,

@@ -48,6 +48,8 @@ export function parseWorldEventMapState(
     activeLayerIds: [...base.activeLayerIds],
     severities: [...base.severities],
   };
+  const presentation = params.get('presentation');
+  if (presentation === 'overview' || presentation === 'records') state.presentationMode = presentation;
   const region = params.get('region');
   if (isWorldEventRegion(region)) {
     const preset = worldEventRegionPreset(region);
@@ -115,6 +117,7 @@ export function serializeWorldEventMapUrl(state: WorldEventMapState, baseUrl: st
   url.searchParams.set('region', state.region);
   url.searchParams.set('layers', state.activeLayerIds.join(','));
   url.searchParams.set('time', state.timeRange);
+  url.searchParams.set('presentation', state.presentationMode);
   url.searchParams.set('severity', state.severities.join(','));
   if (state.selectedEventId) url.searchParams.set('event', state.selectedEventId);
   else url.searchParams.delete('event');
@@ -139,6 +142,7 @@ export function readStoredWorldEventMapState(
     if (parsed.center) params.set('center', `${parsed.center.lon},${parsed.center.lat}`);
     if (parsed.zoom != null) params.set('zoom', String(parsed.zoom));
     if (Array.isArray(parsed.activeLayerIds)) params.set('layers', parsed.activeLayerIds.join(','));
+    if (parsed.presentationMode) params.set('presentation', parsed.presentationMode);
     if (parsed.timeRange) params.set('time', parsed.timeRange);
     if (Array.isArray(parsed.severities)) params.set('severity', parsed.severities.join(','));
     if (parsed.selectedEventId) params.set('event', parsed.selectedEventId);

@@ -1,6 +1,7 @@
 import type { GeoEvent, GeoEventSeverity } from '../../domain/types';
 import type { EventCluster, LabelProjection } from './eventClusters';
 import { clusterMarkerSize, eventRepresentativePoint, markerSize, eventColor, SEVERITY_COLORS } from './shared';
+import { isMajorWorldEvent } from '../eventDisclosure';
 import { mapSymbolForEvent } from '../../config/mapSymbols';
 
 /** Screen-space stacks are presentation only: member identities and coordinates
@@ -27,7 +28,7 @@ export function screenClusterPresentation(input: { singles: GeoEvent[]; clusters
       for (const group of grid.get(`${x}:${y}`) || []) {
         const spanX = Math.max(group.bounds[2]!, item.point.x) - Math.min(group.bounds[0]!, item.point.x);
         const spanY = Math.max(group.bounds[3]!, item.point.y) - Math.min(group.bounds[1]!, item.point.y);
-        if (spanX <= 76 && spanY <= 76 && Math.hypot(group.point.x - item.point.x, group.point.y - item.point.y) < group.radius + item.radius + 3) {
+        if ((Boolean(group.items[0]?.cluster?.important || (group.items[0]?.event && isMajorWorldEvent(group.items[0].event))) === Boolean(item.cluster?.important || (item.event && isMajorWorldEvent(item.event)))) && spanX <= 76 && spanY <= 76 && Math.hypot(group.point.x - item.point.x, group.point.y - item.point.y) < group.radius + item.radius + 3) {
           if (!match || group.items[0]!.id < match.items[0]!.id) match = group;
         }
       }
@@ -51,6 +52,8 @@ export function screenClusterPresentation(input: { singles: GeoEvent[]; clusters
       for (let x = cx - 1; x <= cx + 1; x++) for (let y = cy - 1; y <= cy + 1; y++) {
         for (const other of grid.get(`${x}:${y}`) || []) {
           if (other === group || other.removed) continue;
+          const important = (item: Item) => Boolean(item.cluster?.important || (item.event && isMajorWorldEvent(item.event)));
+          if (important(group.items[0]!) !== important(other.items[0]!)) continue;
           const bounds = [Math.min(group.bounds[0]!, other.bounds[0]!), Math.min(group.bounds[1]!, other.bounds[1]!),
             Math.max(group.bounds[2]!, other.bounds[2]!), Math.max(group.bounds[3]!, other.bounds[3]!)];
           if (bounds[2]! - bounds[0]! > 76 || bounds[3]! - bounds[1]! > 76
@@ -88,15 +91,17 @@ export function screenClusterPresentation(input: { singles: GeoEvent[]; clusters
     const times = group.items.flatMap(item => item.cluster?.occurrenceRange || (item.event?.occurredAt ? [Date.parse(item.event.occurredAt)] : [])).filter(Number.isFinite);
     const mixed = Object.keys(typeCounts).length > 1;
     const severity = (['critical', 'warning', 'watch', 'info'] as const).find(level => severityCounts[level] > 0)!;
-    clusters.push({ kind: 'event-cluster', mixed, id: `stack:${anchor.id}`,
+    clusters.push({ kind: 'event-cluster', mixed, important: Boolean(anchor.cluster?.important || (anchor.event && isMajorWorldEvent(anchor.event))), id: `stack:${anchor.id}`,
       coordinates: anchor.cluster?.coordinates || eventRepresentativePoint(anchor.event!)!, members, count, typeCounts, severityCounts,
       occurrenceRange: times.length ? [Math.min(...times), Math.max(...times)] : undefined,
-      severity: mixed ? 'info' : severity,
-      color: mixed ? [157, 174, 184, 245] : anchor.event ? eventColor({ ...anchor.event, severity }) : [...SEVERITY_COLORS[severity]],
+      severity,
+      color: mixed && !(anchor.cluster?.important || (anchor.event && isMajorWorldEvent(anchor.event))) ? [157, 174, 184, 245] : anchor.event ? eventColor({ ...anchor.event, severity }) : [...SEVERITY_COLORS[severity]],
       bounds, expansionZoom: 8, symbol: mixed ? 'signal' : anchor.cluster?.symbol || mapSymbolForEvent(anchor.event!),
       label: mixed ? 'mixed events' : Object.keys(typeCounts)[0]?.replace(/-/g, ' '),
       generation: input.clusters[0]?.generation ?? 0,
     });
   }
+  // Draw protected stacks last; an ordinary coincident stack must not cover their center.
+  clusters.sort((a,b) => Number(Boolean(a.important)) - Number(Boolean(b.important)));
   return { singles, clusters };
 }

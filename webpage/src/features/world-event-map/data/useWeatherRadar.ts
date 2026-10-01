@@ -19,6 +19,7 @@ export function latestRadarFrame(payload: unknown, now = Date.now()): RadarFrame
   )).sort((a, b) => b.time - a.time);
   const latest = frames[0];
   if (!latest) throw new Error('No valid past radar frame');
+  if (now - latest.time * 1000 > 30 * 60_000) throw new Error('Radar frame exceeds the 30 minute retention budget');
   return {
     time: latest.time,
     tiles: `${data.host}${latest.path}/256/{z}/{x}/{y}/2/1_1.png`,
@@ -31,38 +32,51 @@ export function useWeatherRadar(enabled: boolean) {
   const [state, setState] = useState<WeatherRadar>({ frame: null, status: 'off' });
   useEffect(() => {
     if (!enabled || !WEATHER_RADAR_ENABLED) {
-      setState(current => ({ ...current, status: 'off' }));
+      setState({ frame: null, status: 'off' });
       return;
     }
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let expiryTimer: ReturnType<typeof setTimeout> | undefined;
     let controller: AbortController | null = null;
-    const stop = () => { clearTimeout(timer); controller?.abort(); controller = null; };
+    let lastFrame: RadarFrame | null = null;
+    const scheduleExpiry = () => {
+      clearTimeout(expiryTimer);
+      if (!lastFrame) return;
+      const remaining=lastFrame.time * 1000 + 30 * 60_000 - Date.now();
+      const expire=()=>{ lastFrame=null; if(!disposed)setState({frame:null,status:'error',error:'Radar observation expired after 30 minutes'}); };
+      if(remaining<=0)expire();else expiryTimer=setTimeout(expire,remaining);
+    };
+    const stop = () => { clearTimeout(timer); clearTimeout(expiryTimer); controller?.abort(); controller = null; };
     const refresh = async () => {
-      if (disposed || document.hidden) return;
+      if (disposed || document.hidden || navigator.onLine === false) return;
       const request = new AbortController(); controller = request;
       const deadline = setTimeout(() => request.abort(), 12_000);
-      setState(current => current.frame ? current : { frame: null, status: 'loading' });
+      setState(current => current.frame && Date.now() - current.frame.time * 1000 <= 30 * 60_000 ? current : { frame: null, status: 'loading' });
       try {
         const response = await fetch(MANIFEST, { signal: request.signal, credentials: 'omit' });
         if (!response.ok) throw new Error(`RainViewer HTTP ${response.status}`);
         const frame = latestRadarFrame(await response.json());
         if (!disposed && controller === request && !request.signal.aborted) {
-          setState({ frame, status: Date.now() - frame.time * 1000 > 30 * 60_000 ? 'stale' : 'ready' });
+          lastFrame=frame;setState({ frame, status: 'ready' });scheduleExpiry();
         }
       } catch (error) {
         if (!disposed && controller === request && !document.hidden) {
-          setState(current => ({ ...current, status: current.frame ? 'stale' : 'error', error: String(error) }));
+          setState(current => {
+            const retained = current.frame && Date.now() - current.frame.time * 1000 <= 30 * 60_000 ? current.frame : null;
+            return {frame: retained, status: retained ? 'stale' : 'error', error: String(error)};
+          });
         }
       } finally {
         clearTimeout(deadline);
         if (!disposed && controller === request && !document.hidden) timer = setTimeout(refresh, REFRESH_MS);
       }
     };
-    const visibility = () => { stop(); if (!document.hidden) void refresh(); };
+    const visibility = () => { stop(); if (!document.hidden) { scheduleExpiry(); void refresh(); } };
     document.addEventListener('visibilitychange', visibility);
+    window.addEventListener('online', visibility);window.addEventListener('offline', visibility);
     void refresh();
-    return () => { disposed = true; stop(); document.removeEventListener('visibilitychange', visibility); };
+    return () => { disposed = true; stop(); document.removeEventListener('visibilitychange', visibility);window.removeEventListener('online', visibility);window.removeEventListener('offline', visibility); };
   }, [enabled]);
   return state;
 }

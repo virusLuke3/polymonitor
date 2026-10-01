@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from concurrent.futures import wait
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from api.context import RuntimeResources
 from time import monotonic
 from typing import Any, Dict
 from urllib.parse import urlparse
+from urllib3.util import Timeout
 
 from ..contracts import ProviderResult
 from ..normalize import compact_text, iso_timestamp
@@ -15,12 +16,13 @@ from ..severity import nws_severity
 PROVIDER_KEY = "nws"
 DEFAULT_URL = "https://api.weather.gov/alerts"
 SOURCE_URL = "https://www.weather.gov/documentation/services-web-alerts"
+ZONE_SNAPSHOT_NAMESPACE = "snapshot:world:nws-zones"
 ZONE_CACHE_TTL_SECONDS = 6 * 60 * 60
 # Optional zone enrichment must finish inside the compact feed's 6.5s
 # provider deadline, including time already spent fetching the CAP catalog.
 PROVIDER_FETCH_BUDGET_SECONDS = 5.5
-MAX_ZONE_FETCHES_PER_REFRESH = 640
-ZONE_FETCH_WORKERS = 24
+MAX_ZONE_FETCHES_PER_REFRESH = 12
+ZONE_FETCH_WORKERS = 6
 MAX_RING_POINTS = 240
 
 
@@ -119,56 +121,85 @@ def _generalized_geometry(raw: Any) -> Dict[str, Any] | None:
     return {"type": "MultiPolygon", "coordinates": normalized}
 
 
-def _zone_geometry(resources, http_json_get, url: str) -> Dict[str, Any] | None:
-    now = monotonic()
-    with resources.zone_cache_lock:
-        cached = resources.zone_cache.get(url)
-        if cached and now - cached[0] <= ZONE_CACHE_TTL_SECONDS:
-            return cached[1]
-    payload = http_json_get(
-        url,
-        timeout=5,
-        headers={
-            "Accept": "application/geo+json",
-            "User-Agent": "polymonitor-world-event-map/1.0 (https://polymonitor.club)",
-        },
-    )
-    geometry = _generalized_geometry(payload.get("geometry") if isinstance(payload, dict) else None)
-    with resources.zone_cache_lock:
-        resources.zone_cache[url] = (monotonic(), geometry)
-    return geometry
+def _zone_geometry(resources, http_json_get, url: str, deadline: float, snapshot_store=None) -> Dict[str, Any] | None:
+    try:
+        shared_lock = getattr(snapshot_store, "fetch_lock", None)
+        with (shared_lock(ZONE_SNAPSHOT_NAMESPACE, url, timeout=max(0, min(.5, deadline - monotonic()))) if shared_lock else nullcontext()):
+            geometry = snapshot_store.get(ZONE_SNAPSHOT_NAMESPACE, url) if snapshot_store else None
+            if not geometry:
+                remaining = deadline - monotonic()
+                if remaining <= .1 or resources.stopped.is_set(): return None
+                payload = http_json_get(url, timeout=Timeout(total=remaining, connect=min(2., remaining), read=min(3., remaining)),
+                    headers={"Accept": "application/geo+json", "User-Agent": "polymonitor-world-event-map/1.0 (https://polymonitor.club)"})
+                geometry = _generalized_geometry(payload.get("geometry") if isinstance(payload, dict) else None)
+                if geometry is not None and snapshot_store:
+                    snapshot_store.set(ZONE_SNAPSHOT_NAMESPACE, url, geometry, ZONE_CACHE_TTL_SECONDS)
+            if geometry is not None:
+                with resources.zone_cache_lock: resources.zone_cache[url] = (monotonic(), geometry)
+            return geometry
+    except TimeoutError:
+        return None
+    finally:
+        with resources.zone_cache_lock: resources.zone_pending.pop(url, None)
 
 
-def _resolve_zone_geometries(resources, http_json_get, zone_urls: list[str], *, deadline: float) -> dict[str, Dict[str, Any]]:
-    unique_urls = list(dict.fromkeys(zone_urls))
+def _resolve_zone_geometries(resources, http_json_get, zone_urls: list[str], *, deadline: float, snapshot_store=None) -> dict[str, Dict[str, Any]]:
+    """Return cached geometry immediately. Optional enrichment never delays CAP.
+
+    The process-wide pending table is singleflight AND a hard queue bound. A
+    cancelled caller does not pretend a running blocking HTTP request stopped.
+    """
     resolved: dict[str, Dict[str, Any]] = {}
-    missing: list[str] = []
     now = monotonic()
     with resources.zone_cache_lock:
-        for url in unique_urls:
+        for url in dict.fromkeys(zone_urls):
             cached = resources.zone_cache.get(url)
             if cached and now - cached[0] <= ZONE_CACHE_TTL_SECONDS:
                 if cached[1] is not None:
                     resolved[url] = cached[1]
-            else:
-                if len(missing) < MAX_ZONE_FETCHES_PER_REFRESH:
-                    missing.append(url)
-    remaining = max(0, deadline - monotonic())
-    if not missing or not remaining:
-        return resolved
-    futures = {resources.submit(resources.zone_executor, _zone_geometry, resources, http_json_get, url): url for url in missing}
-    done, pending = wait(futures, timeout=max(0, deadline - monotonic()))
-    for future in done:
-        url = futures[future]
-        try:
-            geometry = future.result()
-        except Exception:
-            geometry = None
-        if geometry is not None:
-            resolved[url] = geometry
-    for future in pending:
-        future.cancel()
+                continue
+            if url in resources.zone_pending or len(resources.zone_pending) >= MAX_ZONE_FETCHES_PER_REFRESH:
+                continue
+            if deadline - monotonic() <= 0.1 or resources.stopped.is_set():
+                continue
+            # Mark before submit, while holding the same lock used by completion.
+            resources.zone_pending[url] = True
+            try:
+                resources.zone_pending[url] = resources.submit(resources.zone_executor, _zone_geometry,
+                    resources, http_json_get, url, deadline, snapshot_store)
+            except RuntimeError:
+                resources.zone_pending.pop(url, None)
     return resolved
+
+
+def enrich_cached_events(events: list[Dict[str, Any]], resources, *, now: datetime | None = None, snapshot_store=None) -> list[Dict[str, Any]]:
+    """Merge completed official zones into the SAME CAP revision, no new times."""
+    result = []
+    shared_read_deadline = monotonic() + .25
+    for event in events:
+        properties = event.get("properties") or {}
+        zones = properties.get("affectedZones") or []
+        expires = iso_timestamp(event.get("expiresAt"))
+        expired = bool(expires and datetime.fromisoformat(expires.replace("Z", "+00:00")) <= (now or datetime.now(timezone.utc)))
+        if (event.get("revision") or {}).get("cancelled") or event.get("lifecycle") == "ended" or expired or not zones \
+            or properties.get("geometrySource") == "nws-alert-polygon":
+            result.append(event); continue
+        geometries = []
+        with resources.zone_cache_lock:
+            for url in zones:
+                cached = resources.zone_cache.get(url)
+                if not cached and snapshot_store and monotonic() < shared_read_deadline:
+                    geometry = snapshot_store.get(ZONE_SNAPSHOT_NAMESPACE, url)
+                    if geometry:
+                        cached = (monotonic(), geometry); resources.zone_cache[url] = cached
+                if cached and monotonic() - cached[0] <= ZONE_CACHE_TTL_SECONDS and cached[1]:
+                    geometries.append(cached[1])
+        if len(geometries) <= int(properties.get("resolvedZoneCount") or 0):
+            result.append(event); continue
+        result.append({**event, "geometry": _merge_zone_geometries(geometries), "locationPrecision": "region",
+            "properties": {**properties, "geometrySource": "nws-affected-zones", "resolvedZoneCount": len(geometries),
+                "unresolvedZoneCount": max(0, len(zones) - len(geometries))}})
+    return result
 
 
 def _merge_zone_geometries(geometries: list[Dict[str, Any]]) -> Dict[str, Any] | None:
@@ -188,7 +219,8 @@ def _merge_zone_geometries(geometries: list[Dict[str, Any]]) -> Dict[str, Any] |
 def _prioritized_zone_urls(features: list[Any]) -> list[str]:
     """Round-robin zones so every alert gets a renderable area before detail fills in."""
     zones_by_alert: list[list[str]] = []
-    for feature in features:
+    for feature in sorted(features, key=lambda f: -({"Extreme": 3, "Severe": 2, "Moderate": 1}.get(
+        (f.get("properties") or {}).get("severity"), 0) if isinstance(f, dict) else 0)):
         if not isinstance(feature, dict) or _geometry(feature.get("geometry")) is not None:
             continue
         properties = feature.get("properties") if isinstance(feature.get("properties"), dict) else {}
@@ -211,15 +243,19 @@ def fetch(
     limit: int = 600,
     resources: RuntimeResources | None = None,
     previous_events: list[Dict[str, Any]] | None = None,
+    snapshot_store=None,
+    deadline: float | None = None,
     now: datetime | None = None,
 ) -> ProviderResult:
-    deadline = monotonic() + PROVIDER_FETCH_BUDGET_SECONDS
+    deadline = deadline if deadline is not None else monotonic() + PROVIDER_FETCH_BUDGET_SECONDS
+    if deadline - monotonic() <= .1:
+        raise TimeoutError("nws-catalog-deadline-before-acquisition")
     resources = resources or RuntimeResources()
     observed_now = now or datetime.now(timezone.utc)
     payload = http_json_get(
         url,
         params={"status": "actual", "message_type": "alert,update,cancel"},
-        timeout=8,
+        timeout=Timeout(total=max(0.1, deadline - monotonic() - 0.25), connect=2.0, read=max(0.1, deadline - monotonic() - 0.25)),
         headers={
             "Accept": "application/geo+json",
             "User-Agent": "polymonitor-world-event-map/1.0 (https://polymonitor.club)",
@@ -228,9 +264,13 @@ def fetch(
     features = payload.get("features") if isinstance(payload, dict) else None
     if not isinstance(features, list):
         raise ValueError("nws-schema-features")
+    if features and not any(isinstance(item, dict) and isinstance(item.get("properties"), dict)
+        and item["properties"].get("event") for item in features):
+        raise ValueError("nws-schema-alerts")
+    catalog_partial = bool((payload.get("pagination") or {}).get("next")) or len(features) > max(1, limit)
     bounded_features = features[: max(1, limit)]
     zone_urls = _prioritized_zone_urls(bounded_features)
-    resolved_zones = _resolve_zone_geometries(resources, http_json_get, zone_urls, deadline=deadline)
+    resolved_zones = _resolve_zone_geometries(resources, http_json_get, zone_urls, deadline=deadline, snapshot_store=snapshot_store)
     previous_by_id = {
         str(event.get("id")): event
         for event in (previous_events or [])
@@ -290,7 +330,11 @@ def fetch(
         previous_zone_count = int(previous_properties.get("resolvedZoneCount") or 0)
         previous_geometry = _geometry(previous.get("geometry"))
         geometry_reused = False
-        if feature.get("geometry") is None and previous_geometry is not None and previous_zone_count > resolved_zone_count:
+        same_revision = (previous.get("revision") or {}).get("nativeEventId") == native_id
+        same_zones = set(previous_properties.get("affectedZones") or []) == set(affected_zones)
+        if (not cancelled and not expired and same_revision and same_zones
+            and feature.get("geometry") is None and previous_geometry is not None
+            and previous_zone_count > resolved_zone_count):
             geometry = previous_geometry
             resolved_zone_count = previous_zone_count
             geometry_reused = True
@@ -300,6 +344,8 @@ def fetch(
             "NWS coverage is regional and does not imply global official alert coverage.",
             "Alert polygons and text may be revised, replaced or cancelled by subsequent CAP messages.",
         ]
+        if catalog_partial:
+            limitations.append("The alert catalog has further pages or exceeds the response limit; this is partial coverage.")
         if geometry is None:
             limitations.append("This alert has no resolved official zone geometry; no point location was fabricated.")
         elif resolved_zone_count:
@@ -380,4 +426,4 @@ def fetch(
                 },
             }
         )
-    return {"events": events, "data_updated_at": iso_timestamp(payload.get("updated"))}
+    return {"events": events, "data_updated_at": iso_timestamp(payload.get("updated")), "is_partial": catalog_partial}

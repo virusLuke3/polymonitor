@@ -10,7 +10,7 @@ export function MapStatus({ sources }: { sources: WorldEventSourceStatus[] }) {
           title={source.message || `${source.label}: ${source.status}`}
         >
           <b>{source.label}</b>
-          <em>{source.status.toUpperCase()}</em>
+          <em>{(source.phase || source.status).toUpperCase()}</em>
           {source.status !== 'loading' ? <small>{source.eventCount}</small> : null}
         </span>
       ))}

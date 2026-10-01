@@ -676,7 +676,24 @@ def validate_readiness_payload(kind: str, payload: Any, *, now: datetime, max_ag
         if not -5 <= age <= max_age:
             raise RuntimeError(f"Content successful check age {age:.0f}s exceeds acceptance window")
         return
-    if kind == "trades":
+    if kind.startswith("hazard-"):
+        key = kind.removeprefix("hazard-")
+        if not isinstance(payload, dict) or payload.get("schemaVersion") != "natural-hazards-map.v1" or not isinstance(payload.get("events"), list):
+            raise RuntimeError(f"{kind}: invalid map catalog")
+        source = next((s for s in payload.get("sources", []) if s.get("key") == key), {})
+        if source.get("status") not in {"ok", "partial", "empty"} or source.get("errorCode"):
+            raise RuntimeError(f"{kind}: catalog source is {source.get('status', 'missing')}")
+        # Event occurrence and response generation are not acquisition success.
+        stamp = str(source.get("lastSuccessAt") or "")
+    elif kind == "aviation":
+        if not isinstance(payload, dict) or payload.get("schemaVersion") != "aviation-viewport.v1" or not isinstance(payload.get("aircraft"), list):
+            raise RuntimeError("aviation: invalid viewport payload")
+        if payload.get("status") not in {"ok", "partial", "empty"}:
+            raise RuntimeError(f"aviation: source is {payload.get('status', 'missing')}")
+        if payload.get("aircraftCount") != len(payload["aircraft"]):
+            raise RuntimeError("aviation: returned observation count is inconsistent")
+        stamp = str(payload.get("generatedAt") or "")
+    elif kind == "trades":
         if not isinstance(payload, list) or not payload:
             raise RuntimeError("Recent trade read returned no verifiable data")
         stamps = [row.get("timestamp") for row in payload if isinstance(row, dict)]
@@ -705,6 +722,13 @@ def _command_verify(args: argparse.Namespace) -> int:
     }
     if args.scope == "related-intelligence":
         endpoints = {"health": "/health", "content": "/content/latest?limit=20&days=7"}
+    if args.scope == "world-event-map":
+        endpoints = {
+            "health": "/health",
+            "hazard-usgs": "/runtime/world/natural-hazards/map?source=usgs&limit=500&zoom=3",
+            "hazard-nws": "/runtime/world/natural-hazards/map?source=nws&limit=500&zoom=3",
+            "aviation": "/runtime/transport/aviation-viewport?bbox=-110,30,-90,45&zoom=3",
+        }
     deadline = time.monotonic() + args.wait_seconds
     while True:
         errors = []
@@ -764,7 +788,7 @@ def build_parser() -> argparse.ArgumentParser:
     verify = commands.add_parser("verify", help="check dependency health and live data freshness")
     verify.add_argument("--url", default="http://127.0.0.1:18500")
     verify.add_argument("--wait-seconds", type=int, default=180)
-    verify.add_argument("--scope", choices=["default", "related-intelligence"], default="default")
+    verify.add_argument("--scope", choices=["default", "related-intelligence", "world-event-map"], default="default")
     verify.set_defaults(handler=_command_verify)
     return parser
 

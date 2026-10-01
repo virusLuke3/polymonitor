@@ -393,3 +393,73 @@ def test_global_transport_shipping_runtime_panel_registered():
 
     assert panel is not None
     assert panel.route == "/runtime/transport/global-shipping"
+
+
+def test_v3_aviation_viewport_singleflight_uses_outward_canonical_scope(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    from api.context import RuntimeResources
+    import time
+    resources=RuntimeResources(); cache={}; calls=[]; release=Event()
+    def acquire(url, **_kwargs):
+        calls.append(url);release.wait(.2)
+        return {'ac':[{'hex':'v3-aircraft','flight':'V3 REAL FIXTURE','lat':30,'lon':-75,'seen':0.2,'seen_pos':1,'alt_baro':20000}]}
+    sampled_at=datetime.now(timezone.utc).isoformat().replace("+00:00","Z")
+    ctx={'_resources':resources,'http_json_get':acquire,'utc_now_iso':lambda:sampled_at,
+         'get_cached_json':lambda namespace,key:cache.get((namespace,key)),
+         'set_cached_json':lambda namespace,key,payload,ttl:cache.__setitem__((namespace,key),payload)}
+    monkeypatch.setenv('POLYDATA_OPENSKY_ENABLED','0')
+    try:
+        with ThreadPoolExecutor(max_workers=6) as callers:
+            futures=[callers.submit(global_transport_shipping_service.get_aviation_viewport_snapshot,ctx,bbox=(-79+i*.01,25.1,-70.1,35.1),zoom=3,limit=180) for i in range(6)]
+            time.sleep(.03);release.set();results=[f.result() for f in futures]
+        assert len(calls)<=4
+        assert all(result['aircraftCount']==1 for result in results)
+        assert len(resources.aviation_scopes)==0
+        assert resources.aviation_executor._max_workers==4
+        assert results[0]['aircraft'][0]['observedAt'] is None
+        assert results[0]['aircraft'][0]['receivedAt']==sampled_at
+        assert results[0]['aircraft'][0]['positionAgeSeconds']==1
+    finally:release.set();resources.close()
+
+
+def test_v3_invalid_aviation_catalog_is_not_a_legitimate_empty(monkeypatch):
+    from api.context import RuntimeResources
+    resources=RuntimeResources()
+    ctx={'_resources':resources,'http_json_get':lambda *_a,**_k:{'ac':{'invalid':'schema'}},'utc_now_iso':lambda:'2026-10-01T00:00:00Z',
+         'get_cached_json':lambda *_a:None,'set_cached_json':lambda *_a:None}
+    monkeypatch.setenv('POLYDATA_OPENSKY_ENABLED','0')
+    try:
+        result=global_transport_shipping_service.get_aviation_viewport_snapshot(ctx,bbox=(-79,25,-70,35),zoom=3)
+        assert result['status']!='empty'
+        assert result['aircraftCount']==0
+        assert result['limitations']
+    finally:resources.close()
+
+
+def test_v3_aviation_cold_viewport_is_shared_across_api_workers(tmp_path, monkeypatch):
+    import multiprocessing as mp
+    from api.context import RuntimeResources
+    import time
+    ctx = mp.get_context('fork'); calls = ctx.Value('i',0); start = ctx.Event(); results = ctx.Queue()
+    path = str(tmp_path / 'aviation.sqlite3'); SnapshotStore(path)._ensure_schema()
+    monkeypatch.setenv('POLYDATA_OPENSKY_ENABLED','0')
+    def worker():
+        resources = RuntimeResources()
+        def acquire(*_args, **_kwargs):
+            with calls.get_lock(): calls.value += 1
+            time.sleep(.15)
+            return {'ac':[{'hex':'native-fixture','lat':30,'lon':-75,'flight':'Controlled acquisition','seen_pos':1}]}
+        try:
+            start.wait(3)
+            result=global_transport_shipping_service.get_aviation_viewport_snapshot({'_resources':resources,
+                'SNAPSHOT_STORE':SnapshotStore(path), 'http_json_get':acquire},bbox=(-79,25,-70,35),zoom=3)
+            results.put(result)
+        finally: resources.close()
+    workers=[ctx.Process(target=worker) for _ in range(4)]
+    for worker in workers:worker.start()
+    start.set(); returned=[results.get(timeout=10) for _ in workers]
+    for worker in workers:
+        worker.join(2);assert worker.exitcode==0
+    assert 0 < calls.value <= 4
+    assert all(result['aircraftCount']==1 for result in returned)

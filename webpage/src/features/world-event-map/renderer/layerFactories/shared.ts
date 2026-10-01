@@ -20,7 +20,7 @@ export function mapLabelFontFamily() {
   return '"Noto Sans SC Variable", sans-serif';
 }
 export const markerSize = (event: GeoEvent, selected: string | null) =>
-  (event.severity === 'critical' ? 17 : event.severity === 'warning' ? 15 : 12) + (event.id === selected ? 3 : 0);
+  (event.severity === 'critical' ? 22 : event.severity === 'warning' ? 17 : 12) + (event.id === selected ? 4 : 0);
 export const clusterMarkerSize = (count: number) => Math.min(30, Math.max(20, 18 + 1.6 * Math.log2(Math.max(1, count) + 1)));
 
 export function eventColor(event: GeoEvent, alpha?: number): [number, number, number, number] {

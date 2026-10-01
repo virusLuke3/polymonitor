@@ -6,7 +6,12 @@ import { boundsIntersect, eventGeometryBounds, eventRepresentativePoint, isHazar
  * Keeping it outside the Supercluster factory lets the WebGL and SVG
  * renderers share the same visibility and context-texture contract.
  */
-function isMajorWorldEvent(event: GeoEvent) {
+export function isMajorWorldEvent(event: GeoEvent) {
+  if (isHazardEvent(event) && (event.lifecycle === 'ended' || event.revision.cancelled
+    || (event.expiresAt && Date.parse(event.expiresAt) <= Date.now()))) return false;
+  // Default overview occurrence window; older facts keep severity and record access.
+  if (isHazardEvent(event) && event.hazardKind === 'earthquake' && event.occurredAt
+    && Date.parse(event.occurredAt) < Date.now() - 7 * 24 * 60 * 60_000) return false;
   if (event.severity === 'critical') return true;
   if (event.severity !== 'warning') return false;
   if (!isHazardEvent(event)) return true;

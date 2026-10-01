@@ -148,7 +148,7 @@ for (const language of ['en', 'zh']) {
 }
 
 test('real radar: latest manifest, raster tiles, coverage, close and reopen', async ({ page }) => {
-  test.skip(phase !== 'P5' && phase !== 'round2-radar', 'Real source acceptance is separate from fixed-event comparison.');
+  test.skip(phase !== 'P5' && phase !== 'round2-radar' && phase !== 'v3-radar', 'Real source acceptance is separate from fixed-event comparison.');
   test.setTimeout(150_000);
   await page.setViewportSize({ width: 1536, height: 1100 });
   await page.clock.install({ time: new Date() });
@@ -157,14 +157,26 @@ test('real radar: latest manifest, raster tiles, coverage, close and reopen', as
   const receipts: { url: string; status: number; bytes: number }[] = [];
   let manifest: any;
   let failManifest = false;
+  let nextFrame = false;
+  let failTiles = false;
+  let frameChoice: any;
   const startedRequests: string[] = [];
   await page.route(/https:\/\/(?:api|tilecache)\.rainviewer\.com\//, async route => {
     startedRequests.push(route.request().url());
+    if (failTiles && frameChoice && route.request().url().includes(frameChoice.path)) { await route.fulfill({status:503,body:'Controlled pending-frame tile failure'}); return; }
     if (failManifest && route.request().url().endsWith('weather-maps.json')) { await route.fulfill({ status: 503, body: 'Controlled recovery check' }); return; }
     const response = await network.get(route.request().url(), { timeout: 30_000 });
     const body = await response.body();
     receipts.push({ url: route.request().url(), status: response.status(), bytes: body.length });
-    if (route.request().url().endsWith('weather-maps.json')) manifest = JSON.parse(body.toString());
+    if (route.request().url().endsWith('weather-maps.json')) {
+      manifest = JSON.parse(body.toString());
+      if(phase==='v3-radar') {
+        const past=[...manifest.radar.past].sort((a:any,b:any)=>b.time-a.time);
+        frameChoice=past[0];
+        const nativeManifest=nextFrame ? manifest : {...manifest,radar:{...manifest.radar,past:past.slice(1)}};
+        await route.fulfill({response,body:JSON.stringify(nativeManifest)});return;
+      }
+    }
     await route.fulfill({ response, body });
   });
   const url = '/?view=2d&mapPerf=1&basemap=pmtiles&center=0,20&zoom=1.5&time=all&layers=earthquakes-volcanoes,weather-alerts';
@@ -181,7 +193,7 @@ test('real radar: latest manifest, raster tiles, coverage, close and reopen', as
     await map.screenshot({ path: resolve(output, 'radar-after.png') });
     expect(receipts.some(r => r.url.includes('/v2/radar/') && r.status === 200 && r.bytes > 100)).toBe(true);
     expect(receipts.some(r => r.url.includes('/v2/coverage/') && r.status === 200)).toBe(true);
-    const latest = [...manifest.radar.past].filter((f: any) => f.time * 1000 <= Date.now()).sort((a: any,b: any) => b.time-a.time)[0];
+    const latest = [...(phase==='v3-radar'?manifest.radar.past.filter((f:any)=>f.path!==frameChoice.path):manifest.radar.past)].filter((f: any) => f.time * 1000 <= Date.now()).sort((a: any,b: any) => b.time-a.time)[0];
     expect(receipts.filter(r => r.url.includes('/v2/radar/')).every(r => r.url.includes(latest.path))).toBe(true);
     await page.getByRole('checkbox', { name: 'Hide Weather radar', exact: true }).uncheck();
     await expect(page.locator('.wm-map-radar-status summary')).toContainText('Off');
@@ -189,14 +201,26 @@ test('real radar: latest manifest, raster tiles, coverage, close and reopen', as
     await page.getByRole('checkbox', { name: 'Show Weather radar', exact: true }).check();
     await expect(page.locator('.wm-map-radar-status')).toContainText(/ready \/ ready/, { timeout: 45_000 });
     const frameTime = await page.locator('.wm-map-radar-status span').first().textContent();
+    if(phase==='v3-radar') {
+      nextFrame=true;failTiles=true;
+      await page.clock.fastForward(300_100);
+      await expect(page.locator('.wm-map-radar-status')).toContainText(/ready \/ error/,{timeout:45_000});
+      await expect(page.locator('.wm-map-radar-status')).toContainText(frameTime!);
+      await map.screenshot({path:resolve(output,'radar-pending-failed-old-visible.png')});
+      failTiles=false;await page.clock.fastForward(31_000);
+      await expect(page.locator('.wm-map-radar-status')).toContainText(/ready \/ ready/,{timeout:45_000});
+      await expect(page.locator('.wm-map-radar-status')).toContainText(new Date(frameChoice.time*1000).toISOString().slice(11,16));
+      await map.screenshot({path:resolve(output,'radar-new-frame-committed.png')});
+    }
+    const retainedFrameTime=await page.locator('.wm-map-radar-status span').first().textContent();
     failManifest = true;
     await page.clock.fastForward(300_100);
     await expect(page.locator('.wm-map-radar-status')).toContainText(/stale \/ ready/);
-    await expect(page.locator('.wm-map-radar-status')).toContainText(frameTime!);
+    await expect(page.locator('.wm-map-radar-status')).toContainText(retainedFrameTime!);
     failManifest = false;
     await page.clock.fastForward(300_100);
     await expect(page.locator('.wm-map-radar-status')).toContainText(/ready \/ ready/, { timeout: 45_000 });
-    writeFileSync(resolve(output, 'radar-evidence.json'), JSON.stringify({ recovery: '503 retains last good frame; next poll recovers', observedAt: new Date().toISOString(), latestFrame: latest, receipts }, null, 2));
+    writeFileSync(resolve(output, 'radar-evidence.json'), JSON.stringify({ recovery: 'Pending raster failure retains both old banks; cleared tile fault commits the native next frame; manifest 503 retains and recovers on next poll', observedAt: new Date().toISOString(), latestFrame: latest, receipts }, null, 2));
   } finally { await page.unrouteAll({ behavior: 'ignoreErrors' }); await page.goto('about:blank'); await network.dispose(); }
 });
 

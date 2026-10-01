@@ -120,7 +120,7 @@ const anomaly = hazard({
   },
 });
 
-const sourceEvents: Record<string, Json[]> = {
+export const sourceEvents: Record<string, Json[]> = {
   usgs: [quake, ...quakeCluster],
   'usgs-volcano-cap': [volcano],
   nhc: [cyclone],
@@ -243,6 +243,6 @@ export async function installFixtures(page: Page, climateUnavailable = false) {
       await fulfillJson(route, { items: [], pagination: { page: 1, pageSize: 80, total: 0, totalPages: 0, hasMore: false } });
       return;
     }
-    await fulfillJson(route, { generatedAt: GENERATED_AT, status: 'ok', items: [], panels: {} });
+    await fulfillJson(route, { generatedAt: GENERATED_AT, status: 'ok', items: [], lineups: [], panels: {} });
   });
 }

@@ -152,7 +152,7 @@ function WorldMonitorApp() {
   const { selectedMarketId, setSelectedMarketId, resetMarketSelection, selectedMarketGroupId, selectedMarketGroupOutcomeKey, setSelectedMarketGroupOutcomeKey,
     selectedMarketGroupDetail, selectedMarketGroupChart, selectedMarketGroupChartRange, setSelectedMarketGroupChartRange,
     bundle, bundleLoading, focusMarketGroup, prefetchMarketFocus, error: focusError } = useMarketFocus({ bootstrap, markets, marketGroups, catalogLoaded });
-  const { worldEventMap, setMapRendererKind, layers, region, mapZoom, setRegion, setMapZoom, enabledLayerIds,
+  const { worldEventMap, setRendererViewport, aviationStatus, setMapRendererKind, layers, region, mapZoom, setRegion, setMapZoom, enabledLayerIds,
     ucdpRawMapEvents, worldEventMapEvents, mapSourceStatuses } = useWorldEventMapController(runtime, viewMode === '2d');
   const { workspaceSyncStatus, workspaceSyncUpdatedAt, retryWorkspaceSync } = useWorkspaceSync(workspace, { region, mapZoom, setRegion, setMapZoom });
   const [commandQuery, setCommandQuery] = useState('');
@@ -465,7 +465,7 @@ function WorldMonitorApp() {
 
       <main className="wm-dashboard">
         <div className="wm-main-content">
-        <section className="wm-map-section">
+        <section className="wm-map-section" data-map-view={viewMode}>
           <div className="wm-map-header">
             <div className="wm-map-heading">
               <span className="wm-map-kicker">{t('atlas.kicker')}</span>
@@ -497,6 +497,7 @@ function WorldMonitorApp() {
 
           <MapToolbar
             state={worldEventMap.state}
+            onPresentationChange={worldEventMap.setPresentationMode}
             onTimeRangeChange={worldEventMap.setTimeRange}
             onSeveritiesChange={worldEventMap.setSeverities}
             onBasemapProviderChange={worldEventMap.setBasemapProvider}
@@ -504,7 +505,7 @@ function WorldMonitorApp() {
             onClearCountry={() => worldEventMap.setCountry(null)}
           />
 
-          <div className="wm-map-stage">
+          <div className="wm-map-stage" data-map-view={viewMode}>
             <div className={`wm-globe-area ${viewMode !== '3d' ? 'wm-globe-area-flat' : ''}`}>
               <LayerPanel
                 items={layers}
@@ -531,6 +532,8 @@ function WorldMonitorApp() {
                   />
                 ) : (
                   <WorldEventMapView
+                    onViewportChange={setRendererViewport}
+                    aviationStatus={aviationStatus}
                     onRendererKindChange={setMapRendererKind}
                     events={worldEventMapEvents}
                     state={worldEventMap.state}

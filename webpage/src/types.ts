@@ -2137,6 +2137,9 @@ export type RuntimeGlobalTransportShippingPayload = {
       sourceUrl?: string | null;
       registration?: string | null;
       aircraftType?: string | null;
+      observedAt?: string | null;
+      receivedAt?: string | null;
+      positionAgeSeconds?: number | null;
       updatedAt?: string | null;
     }>;
     ops?: Array<Record<string, unknown>>;
@@ -2147,6 +2150,7 @@ export type RuntimeGlobalTransportShippingPayload = {
 };
 
 export type AviationViewportPayload = {
+  coverage?: { complete?: boolean; mode?: string; sectorCount?: number };
   schemaVersion: 'aviation-viewport.v1';
   generatedAt: string;
   status: string;
@@ -2155,6 +2159,7 @@ export type AviationViewportPayload = {
   aircraft: NonNullable<NonNullable<RuntimeGlobalTransportShippingPayload['aviation']>['liveFlights']>;
   aircraftCount: number;
   availableAircraftCount?: number;
+  counts?: { returned: number; valid: number; inView: number };
   source?: string | null;
   sourceUrl?: string | null;
   errorCode?: string | null;

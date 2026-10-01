@@ -1,3 +1,5 @@
+import { isMajorWorldEvent } from './eventDisclosure';
+import { splitViewportBounds } from './MapRenderer';
 import { loadMapFonts } from '../config/mapTypography';
 import type { ScreenBox } from './layerFactories/eventClusters';
 import { mapPresentationCounts } from './eventDisclosure';
@@ -321,6 +323,8 @@ export class SvgMapRenderer implements MapRenderer {
   }
   setHoveredEvent(eventId: string | null) { this.hoveredEventId = eventId; this.scheduleRender(); }
 
+  private viewportRevision = 0;
+  private viewportKey = '';
   resize() {
     this.scheduleRender();
   }
@@ -548,6 +552,13 @@ export class SvgMapRenderer implements MapRenderer {
       const worldWidth = 2 * Math.PI * projection.scale();
       const viewport: [number, number, number, number] = width >= worldWidth
         ? [-180, sw[1], 180, ne[1]] : [sw[0], sw[1], ne[0], ne[1]];
+      const viewportKey = `${viewport.join(':')}:${width}:${height}`;
+      if (viewportKey !== this.viewportKey) {
+        this.viewportKey = viewportKey;
+        this.callbacks?.onViewportChange?.({ revision: ++this.viewportRevision,
+          bounds: splitViewportBounds(...viewport), center: [this.state?.center.lon || 0, this.state?.center.lat || 0],
+          zoom: this.state?.zoom ?? 1.25, widthCssPx: width, heightCssPx: height });
+      }
       this.callbacks?.onPresentationChange?.(mapPresentationCounts(this.events, { singles, clusters }, viewport, this.state?.zoom ?? 1.25));
     }
     const occupiedEventLabels = [...occupiedCountryLabels];
@@ -670,7 +681,8 @@ export class SvgMapRenderer implements MapRenderer {
       group.setAttribute('aria-label', `${cluster.count} ${cluster.label || 'mapped events'}. Zoom in to expand.`);
       const title = svgElement('title');
       title.textContent = `${cluster.count} ${cluster.label || 'mapped events'} · ${cluster.mixed ? 'mixed records' : cluster.severity.toUpperCase()} · click to expand`;
-      const symbolSize = clusterMarkerSize(cluster.count);
+      const quiet = this.state?.presentationMode === 'overview' && !cluster.important;
+      const symbolSize = quiet ? Math.min(18, 12 + Math.log2(cluster.count + 1)) : Math.min(24, clusterMarkerSize(cluster.count));
       if (cluster.mixed) {
         const rim = svgElement('circle'); rim.setAttribute('cx', String(x)); rim.setAttribute('cy', String(y));
         rim.setAttribute('r', String(symbolSize / 2 + 2)); rim.setAttribute('fill', 'none');
@@ -679,7 +691,7 @@ export class SvgMapRenderer implements MapRenderer {
       occupiedEventLabels.push({ left: x - symbolSize / 2, top: y - symbolSize / 2, right: x + symbolSize / 2, bottom: y + symbolSize / 2 });
       const badge = svgElement('circle');
       badge.setAttribute('cx', String(x)); badge.setAttribute('cy', String(y));
-      badge.setAttribute('r', String(symbolSize / 2)); badge.setAttribute('fill', cssColor(cluster.color));
+      badge.setAttribute('r', String(symbolSize / 2)); badge.setAttribute('fill', quiet ? '#808e9588' : cssColor(cluster.color));
       badge.setAttribute('stroke', '#0f1215');
       const label = svgElement('text');
       label.setAttribute('x', String(x)); label.setAttribute('y', String(y));
@@ -705,7 +717,8 @@ export class SvgMapRenderer implements MapRenderer {
         keyboardEvent.preventDefault();
         expand();
       });
-      group.append(title, badge, label);
+      group.append(title, badge);
+      if (!quiet || (this.state?.zoom ?? 0) >= 4) group.append(label);
       this.eventLayer.append(group);
     }
     for (const event of singles) {
@@ -718,7 +731,7 @@ export class SvgMapRenderer implements MapRenderer {
       const group = svgElement('g');
       group.classList.add('wm-world-event-svg-point');
       this.decorateEventElement(group, event, event.id === selectedId);
-      const symbolSize = markerSize(event, selectedId || null);
+      const symbolSize = this.state?.presentationMode === 'overview' && event.id !== selectedId && !isMajorWorldEvent(event) ? 6 : markerSize(event, selectedId || null);
       const eventSymbol = mapSymbolForEvent(event);
       occupiedEventLabels.push({
         left: x - symbolSize / 2 - 2,

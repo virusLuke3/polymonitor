@@ -614,20 +614,22 @@ test('shared runtime aborts analysis snapshot requests on unmount', async ({ pag
 
 
 test('aircraft refresh retains last good data, cancels hidden/unmounted requests and ignores an old viewport', async ({ page }) => {
+  const response = (generatedAt:string) => ({schemaVersion:'aviation-viewport.v1',status:'empty',source:'Controlled lifecycle fixture',generatedAt,aircraft:[],aircraftCount:0,availableAircraftCount:0,bbox:[40,20,80,60],zoom:3,coverage:{complete:true}});
+  const nextStamp='2026-08-26T03:02:00Z';
   let calls = 0;
   const held: Array<import('@playwright/test').Route> = [];
   await page.route('**/runtime/transport/aviation-viewport?**', async route => {
     calls++;
-    if (calls === 1) await route.fulfill({ json: { generatedAt: 'first', aircraft: [] } });
+    if (calls === 1) await route.fulfill({ json: response(GENERATED_AT) });
     else if (calls === 2) await route.fulfill({ status: 503, json: { error: 'provider unavailable' } });
     else held.push(route);
   });
   await harness(page, 'aviation');
-  await expect.poll(() => page.evaluate(() => window.frontendHarness.aviation?.payload?.generatedAt)).toBe('first');
+  await expect.poll(() => page.evaluate(() => window.frontendHarness.aviation?.payload?.generatedAt)).toBe(GENERATED_AT);
   await page.clock.runFor(30_200);
   await expect.poll(() => page.evaluate(() => window.frontendHarness.aviation?.error)).toBeTruthy();
-  expect(await page.evaluate(() => window.frontendHarness.aviation?.payload?.generatedAt)).toBe('first');
-  await page.clock.runFor(30_200);
+  expect(await page.evaluate(() => window.frontendHarness.aviation?.payload?.generatedAt)).toBe(GENERATED_AT);
+  await page.clock.runFor(60_200);
   await expect.poll(() => held.length).toBe(1);
   await page.evaluate(() => {
     Object.defineProperty(document, 'hidden', { configurable: true, value: true });
@@ -640,14 +642,15 @@ test('aircraft refresh retains last good data, cancels hidden/unmounted requests
     Object.defineProperty(document, 'hidden', { configurable: true, value: false });
     document.dispatchEvent(new Event('visibilitychange'));
   });
+  await page.clock.runFor(400);
   await expect.poll(() => held.length).toBe(2);
   await page.evaluate(() => window.frontendHarness.setAviationView({ center: [115, 35] }));
-  await page.clock.runFor(200);
+  await page.clock.runFor(400);
   await expect.poll(() => held.length).toBe(3);
-  await held[2]!.fulfill({ json: { generatedAt: 'new-viewport', aircraft: [] } });
-  await held[1]!.fulfill({ json: { generatedAt: 'old-viewport', aircraft: [] } }).catch(() => {});
-  await held[0]!.fulfill({ json: { generatedAt: 'hidden-result', aircraft: [] } }).catch(() => {});
-  await expect.poll(() => page.evaluate(() => window.frontendHarness.aviation?.payload?.generatedAt)).toBe('new-viewport');
+  await held[2]!.fulfill({ json: response(nextStamp) });
+  await held[1]!.fulfill({ json: response(GENERATED_AT) }).catch(() => {});
+  await held[0]!.fulfill({ json: response(GENERATED_AT) }).catch(() => {});
+  await expect.poll(() => page.evaluate(() => window.frontendHarness.aviation?.payload?.generatedAt)).toBe(nextStamp);
   await page.evaluate(() => window.frontendHarness.unmount());
   const stoppedCalls = calls;
   await page.clock.runFor(90_000);

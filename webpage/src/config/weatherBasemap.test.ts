@@ -85,7 +85,7 @@ describe('World Event Map vector basemap', () => {
       for (const key of ['filter', 'minzoom', 'maxzoom']) expect(actual[key]).toEqual((layer as any)[key]);
     }
     expect(style.sources.basemap).toMatchObject({ url: 'pmtiles://https://maps.example.test/planet.pmtiles' });
-    expect(style.layers.find(layer => layer.id === 'water')?.paint).toMatchObject({ 'fill-color': '#1b1b1d' });
+    expect(style.layers.find(layer => layer.id === 'water')?.paint).toMatchObject({ 'fill-color': '#333333' });
   });
 
   it('localizes Protomaps labels without overwriting its visual hierarchy', () => {

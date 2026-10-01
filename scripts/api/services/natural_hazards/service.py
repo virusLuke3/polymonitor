@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from concurrent.futures import wait
+from time import monotonic
 from threading import Lock
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -102,17 +103,16 @@ def _fetch_provider_results(
     with resources.hazard_lock_guard:
         for key in source_specs:
             resources.hazard_locks.setdefault(key, Lock())
-    futures = {
-        resources.submit(
-            resources.hazard_executor, fetch_with_snapshot,
-            source_lock=resources.hazard_locks[key],
-            key=key,
-            snapshot_store=dependencies.snapshot_store,
-            fetcher=fetcher,
-            ttl_seconds=ttl,
-        ): key
-        for key, (ttl, fetcher) in source_specs.items()
-    }
+    futures = {}
+    with resources.hazard_lock_guard:
+        for key, (ttl, fetcher) in source_specs.items():
+            future = resources.hazard_pending.get(key)
+            if future is None or future.done():
+                future = resources.submit(resources.hazard_executor, fetch_with_snapshot,
+                    source_lock=resources.hazard_locks[key], key=key,
+                    snapshot_store=dependencies.snapshot_store, fetcher=fetcher, ttl_seconds=ttl)
+                resources.hazard_pending[key] = future
+            futures[future] = key
     done, pending = wait(futures, timeout=max(0.01, float(deadline_seconds)))
     for future in done:
         key = futures[future]
@@ -127,12 +127,12 @@ def _fetch_provider_results(
             }
     for future in pending:
         key = futures[future]
-        future.cancel()
+        # This shared future remains owned by the source, not a timed-out caller.
         # Another worker (or this future at the deadline boundary) may have
         # published a successful snapshot while wait() returned. Use that
         # verified fresh result before declaring the source degraded.
         cached = cached_source_result(dependencies.snapshot_store, key)
-        if cached is not None and cached["status"] == "ok":
+        if cached is not None and cached["status"] in {"ok", "partial"}:
             results[key] = cached
             continue
         error_code = f"{key}-provider-deadline-exceeded"
@@ -142,6 +142,8 @@ def _fetch_provider_results(
             "status": "error",
             "events": [],
         }
+    if "nws" in results:
+        results["nws"]["events"] = nws.enrich_cached_events(results["nws"].get("events", []), dependencies.resources, snapshot_store=dependencies.snapshot_store)
     return results
 
 
@@ -149,11 +151,14 @@ def _source_specs(
     dependencies: NaturalHazardDependencies,
     bounded_limit: int,
 ) -> dict[str, tuple[int, Callable[[], Dict[str, Any]]]]:
+    # Snapshot identity is source-wide: never cache a small caller limit as the catalog.
+    bounded_limit = DEFAULT_EVENT_LIMIT
     previous_nws = stale_source_result(
         dependencies.snapshot_store,
         "nws",
         "nws-previous-snapshot",
     )
+    nws_deadline = monotonic() + nws.PROVIDER_FETCH_BUDGET_SECONDS
     specs: dict[str, tuple[int, Callable[[], Dict[str, Any]]]] = {
         "usgs": (
             60,
@@ -187,6 +192,8 @@ def _source_specs(
                 url=dependencies.nws_url,
                 limit=min(700, bounded_limit),
                 previous_events=(previous_nws or {}).get("events", []),
+                snapshot_store=dependencies.snapshot_store,
+                deadline=nws_deadline,
             ),
         ),
         "nhc": (
@@ -252,11 +259,14 @@ def get_natural_hazard_source_result(
             "events": [],
         }
     if not allow_provider_fetch:
-        return cached_source_result(dependencies.snapshot_store, key) or {
+        result = cached_source_result(dependencies.snapshot_store, key) or {
             **unavailable_source(key, f"{key}-snapshot-unavailable"),
             "status": "error",
             "events": [],
         }
+        if key == "nws":
+            result["events"] = nws.enrich_cached_events(result["events"], dependencies.resources, snapshot_store=dependencies.snapshot_store)
+        return result
     return _fetch_provider_results(
         dependencies=dependencies,
         source_specs={key: spec},
@@ -287,6 +297,8 @@ def get_natural_hazards_snapshot(
                 "status": "error",
                 "events": [],
             }
+        if "nws" in results:
+            results["nws"]["events"] = nws.enrich_cached_events(results["nws"]["events"], dependencies.resources)
 
     events = latest_revision(
         event

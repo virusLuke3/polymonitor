@@ -1,5 +1,43 @@
 # World Event Map 对齐与验收
 
+## 第三轮恢复：2026-10-01
+
+依据本轮 `POLYMONITOR_MAP_VISUAL_RECOVERY_V3/CODEX_GUIDE.md`、两张原图和 46 项 acceptance cases 实施。实际基线为 `6510c776` 加任务开始的工作区；177 个原有修改的 SHA 清单在 `webpage/artifacts/map-visual-recovery-v3/worktree-before.json`，未回退、代为提交或覆盖。对照本地 WorldMonitor `4691d9213` 的实际 viewport、稳定底图/图层、刷新及 context 生命周期；继续使用 MapLibre、deck.gl、Protomaps 和现有 feature，不复制它的全局 AppContext 或新建并行加载框架。
+
+| 需求 | 实现归属 | 当前验证与证据 |
+| --- | --- | --- |
+| 默认构图、概览、重点保护、唯一计数 | `WorldEventMap.tsx` 统一实际高度；state/URL 恢复；`eventDisclosure`、`eventClusters`、`screenClusters` 在两级聚合前分离重要记录；普通簇弱化 | 1536×1000 默认高度 501→730 CSS px；2048×567 紧凑与 390×844 小屏另测。`before/`、`after/default-*`；普通/重点身份守恒；多重点高缩放成员测试 |
+| 海陆、语言、控件和剩余字体 | `weatherBasemap.ts`、map `styles.css`、aviation scene/layers；移除旧固定高度及被替代声明 | 主/本地/SVG 共用固定海陆 token；保留比例地名；航空和正文 Noto，技术 ID 仍等宽。中英同镜头原始快照 `before-real/`→`after/real-*`，未改事件时间和等级 |
+| 航空真实范围和完整入口 | renderer viewport callback、`useAviationViewport`、既有 transport adapter 与 AviationLens；API shared bounded executor | resize 500→800、日期线两半、边缘点、迟到结果、关闭/空/部分/失败/过期/恢复；返回、有效和视野内数量分开，不用 All 声称全球完整。`after/aviation-*.json`、hook 专项 |
+| 渲染恢复 | 既有 WorldEventMap / DeckMapRenderer 生命周期、validated revision 隔离 | 小屏真实 GPU；慢下载迟到恢复；context 原位恢复与 SVG 晋级；每 5 分钟最多两次重建、稳定 60 秒才开始新 episode；一层坏数据不毁掉全图。`context-cycle`、`recovery-episodes`、`layer-cycle`、`slow-download-*` |
+| 底图局部失败 | 既有 MapLibre source / archive protocol 清理与有限重试 | 指定 PMTiles 叶 Range 503：同一个 GPU canvas 显示部分底图提示→解除→真实 206 恢复；全 Range 故障：本地几何→原主底图恢复。`after/leaf-cycle.json`、`range-cycle.json` |
+| 核心 NWS 和可选几何 | `natural_hazards/providers/nws.py`、service、snapshots、RuntimeResources、SnapshotStore 原模块 | 目录和 queue/HTTP/lock 共用绝对 deadline；目录不等待可选几何；每进程最多 6 个 zone worker/12 个 pending；source 与官方 zone 跨进程 singleflight/cache；同 CAP revision 才合并几何。`backend-final.log` 及三个 NWS 浏览器完整周期 |
+| 独立来源和雷达恢复 | `useNaturalHazards`、hazard cache、`useWeatherRadar`、DeckMapRenderer 双 bank | 认证/限流保留真实状态与成功时间；轮询暂停时 stale 也按预算过期。真实雷达新帧失败保留旧帧及 coverage，解除后原子提交新帧，关闭后无请求。`nws-retention-cycle`、`auth-throttle-cycle`、真实 `map-alignment/v3-radar` |
+| 性能/资源 | 持久 Supercluster、稳定航空层；语义相同来源发布不重建灾害索引 | 750+180 与 5000+1000 同浏览器真实矢量资源、30 秒连续交互和完整成员检查；50 次图层/来源/详情循环、卸载请求停止。原阈值 RAF P95≤32 ms / hover≤100 ms / 本地详情≤150 ms 未放宽 |
+| 发布链 | 既有 `verify-live-map.mjs` 和 GCP release 流程 | 生产验收使用正常 SW、真实 API/瓦片；非相邻 Range、If-Range/ETag、两个远距矢量瓦片；旧页面延迟 import、新页面及前后端版本单列，不以本地预检替代 |
+
+证据入口及执行矩阵：`webpage/artifacts/map-visual-recovery-v3/cases.json`。每项记录源码、具体测试和 screenshot/trace/运行记录；中间失败日志保留。实时生产验证和本地受控故障注入分别标识。固定真实输入的 `real-input/receipt.json` 保存 URL、原始时间和 SHA；它验证同数据视觉，不声称当天所有来源健康。
+
+第三轮密集对照：750+180 与 5000+1000 的拖动 P95 均为 24 ms（旧版 26/27），hover P95 为 73/80 ms（旧版 70/75），本地详情为 93/124 ms（旧版 74/136）。索引 1→1，拖动没有全量展开叶子；普通记录和航空入口一起验收。各项仍满足原 32/100/150 ms 阈值，不将微小差异解释为所有操作都更快。连续 trace 在 `map-polish-round2/after-v3-final/`。
+
+已执行前端单元 **216 passed / 1 原有 opt-in skipped**；后端相关 **94 passed**；类型/边界/locale/build 与 lazy bundle 检查通过。最终浏览器、性能及发布状态以逐项矩阵和生产 receipt 为准，不把未执行、跳过或外部不可用记 PASS。原生 Chrome 125% tab zoom、DPR 1/2、键盘/touch/reduced-motion 已独立验证；viewport 模拟项明确注明，不冒充真实 iOS/Android 设备。
+
+复现（Node 22.23.3；硬件 WebGL 测试需要能提供 GPU 的 Chrome）：
+
+```bash
+cd webpage
+npm run test:unit
+npm run build
+POLYMONITOR_E2E_PREVIEW=1 POLYMONITOR_E2E_HARDWARE_WEBGL=1 MAP_RECOVERY_PHASE=after npx playwright test e2e/map-recovery-v3.spec.ts
+POLYMONITOR_E2E_PREVIEW=1 POLYMONITOR_E2E_HARDWARE_WEBGL=1 MAP_POLISH_PHASE=after-v3-final npx playwright test e2e/map-polish.spec.ts
+POLYMONITOR_E2E_PREVIEW=1 POLYMONITOR_E2E_HARDWARE_WEBGL=1 MAP_ALIGNMENT_PHASE=v3-radar npx playwright test e2e/map-alignment.spec.ts --grep 'real radar'
+# /e2e/lifecycle.html 是 dev harness，不能用 production preview 代替。
+npx playwright test e2e/frontend-lifecycle.spec.ts --grep 'aviation|natural hazard'
+# 设置实际已推送的 40 位 SHA；正常 production 页面，无 route/fixture。
+POLYMONITOR_RELEASE_SHA=<pushed-sha> POLYMONITOR_E2E_HARDWARE_WEBGL=1 node scripts/verify-live-map.mjs
+```
+
+
 
 ## 第二轮精修：2026-09-29
 

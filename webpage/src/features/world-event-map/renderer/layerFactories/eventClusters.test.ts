@@ -69,3 +69,48 @@ describe('bounded cluster membership', () => {
     expect(index.readMembers(reference)).toBeNull();
   });
 });
+
+describe('V3 protected identities', () => {
+  it('protects one critical event before semantic and screen aggregation of 100 info records', () => {
+    const ordinary=Array.from({length:100},(_,i)=>({...events[0]!,id:`ordinary:${i}`,severity:'info' as const}));
+    const critical={...events[0]!,id:'critical:one',severity:'critical' as const};
+    const index=new EventClusterIndex();index.update([...ordinary,critical,critical]);
+    const p=index.presentation(1.5,null,undefined,()=>({x:400,y:300}));
+    expect(p.singles.map(e=>e.id)).toContain(critical.id);
+    expect(p.clusters.reduce((n,c)=>n+c.count,0)).toBe(100);
+    expect(p.clusters.every(c=>c.severityCounts?.critical===0)).toBe(true);
+    const ids=[...p.singles,...p.clusters.flatMap(c=>Array.from({length:Math.ceil(c.count/30)},(_,i)=>index.readMembers(c,i*30)||[]).flat())].map(e=>e.id);
+    expect(ids).toHaveLength(101);expect(new Set(ids).size).toBe(101);
+  });
+  it('keeps coincident critical events in their own accessible important stack',()=>{
+    const critical=Array.from({length:95},(_,i)=>({...events[0]!,id:`critical:${i}`,severity:'critical' as const}));
+    const index=new EventClusterIndex();index.update(critical);
+    const p=index.presentation(1.5,null,undefined,()=>({x:400,y:300}));
+    expect(p.clusters).toHaveLength(1);expect(p.clusters[0]!.important).toBe(true);
+    const selection=index.selection(p.clusters[0]!);
+    const all=Array.from({length:4},(_,i)=>selection.readPage(i*30)||[]).flat();
+    expect(new Set(all.map(e=>e.id)).size).toBe(95);
+    const selected=index.presentation(1.5,'critical:94',undefined,()=>({x:400,y:300}));
+    expect(selected.singles.some(e=>e.id==='critical:94')).toBe(true);
+    expect(selected.clusters.reduce((n,c)=>n+c.count,0)).toBe(94);
+  });
+});
+
+it('important coincident stacks draw after ordinary stacks without absorbing their identities',()=>{
+  const source=Array.from({length:100},(_,i)=>({...events[0]!,id:`quiet:${i}`,severity:'info' as const}));
+  const critical=Array.from({length:3},(_,i)=>({...events[0]!,id:`urgent:${i}`,severity:'critical' as const}));
+  const index=new EventClusterIndex();index.update([...critical,...source]);
+  const p=index.presentation(1.5,null,undefined,()=>({x:300,y:300}));
+  expect(p.clusters[p.clusters.length - 1]?.important).toBe(true);expect(p.clusters[p.clusters.length - 1]?.count).toBe(3);
+  expect(p.clusters.reduce((n,c)=>n+c.count,0)).toBe(103);
+});
+
+
+it('reuses the hazard index on equivalent scope receipts and aircraft-only changes while keeping every current identity',()=>{
+  const index=new EventClusterIndex();index.update(events);const initial=index.buildCount;
+  index.update(events.map(event=>JSON.parse(JSON.stringify(event))));expect(index.buildCount).toBe(initial);
+  const aircraft={...events[0]!,id:'observed:aircraft',category:'infrastructure' as const,properties:{mapEntity:'live-aircraft'}};
+  index.update([...events,aircraft]);index.presentation(3,null);expect(index.buildCount).toBe(initial);
+  expect(index.diagnostics(true).membership[aircraft.id]).toMatch(/^record-entry:/);expect(index.diagnostics().sourceCount).toBe(events.length+1);
+  index.update(events.map((event,i)=>i===0?{...event,severity:'warning' as const}:event));expect(index.buildCount).toBe(initial+1);
+});

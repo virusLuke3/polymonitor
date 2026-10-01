@@ -1,3 +1,4 @@
+import { splitViewportBounds } from './MapRenderer';
 import { loadMapFonts } from '../config/mapTypography';
 import type { ScreenBox } from './layerFactories/eventClusters';
 import { mapPresentationCounts } from './eventDisclosure';
@@ -21,6 +22,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import {
   getWeatherMapFallbackStyle,
   getWeatherMapStyle,
+  resetWorldEventPMTilesArchive,
   reinforceWorldEventBasemapLabels,
 } from '@/config/weatherBasemap';
 import type { GeoEvent } from '../domain/types';
@@ -79,6 +81,9 @@ const COUNTRY_HOVER_BORDER_LAYER = 'world-event-country-hover-border';
 const EMPTY_COUNTRY_FILTER = ['==', ['get', 'ISO3166-1-Alpha-2'], ''] as FilterSpecification;
 
 type MapPerformanceHarnessHost = HTMLElement & {
+  __polymonitorMapCamera?: (center: [number,number], zoom: number) => void;
+  __polymonitorIsolateLayer?: () => string | undefined;
+  __polymonitorLayerFuses?: () => string[];
   __polymonitorMapPresentation?: (members?: boolean) => ReturnType<EventClusterIndex['diagnostics']>;
   __polymonitorProjectGeoPoint?: (lon: number, lat: number) => { x: number; y: number };
 };
@@ -139,17 +144,25 @@ export class DeckMapRenderer implements MapRenderer {
 
   setRadar(frame: RadarFrame | null) { this.radarFrame = frame; this.applyRadar(); }
 
+  private radarActiveBank = '';
+  private radarPending: { bank: string; frame: RadarFrame } | null = null;
+  private radarRetryTimer: number | null = null;
+  private radarRetryCount = 0;
+  private removeRadarBank(bank: string) {
+    const map = this.map; if (!map) return;
+    for (const id of [bank, `${bank}-coverage`]) {
+      if (map.getLayer(id)) map.removeLayer(id);
+      if (map.getSource(id)) map.removeSource(id);
+    }
+  }
   private applyRadar = () => {
     const map = this.map;
     if (!map || this.destroyed) return;
     if (!this.radarFrame || this.paused) {
-      for (const id of ['weather-radar', 'weather-radar-coverage']) {
-        if (map.getLayer(id)) map.removeLayer(id);
-        if (map.getSource(id)) map.removeSource(id);
-      }
-      this.radarAppliedUrl = '';
-      this.callbacks?.onRadarStateChange?.('off');
-      return;
+      this.removeRadarBank('weather-radar'); this.removeRadarBank('weather-radar-next');
+      this.radarPending = null; this.radarActiveBank = ''; this.radarAppliedUrl = '';
+      if (this.radarRetryTimer != null) window.clearTimeout(this.radarRetryTimer); this.radarRetryTimer = null;
+      this.callbacks?.onRadarStateChange?.('off', null); return;
     }
     if (!map.isStyleLoaded()) {
       if (!this.radarIdlePending) {
@@ -159,27 +172,28 @@ export class DeckMapRenderer implements MapRenderer {
       return;
     }
     const frame = this.radarFrame;
-    const existing = map.getSource('weather-radar') as maplibregl.RasterTileSource | undefined;
-    if (existing) {
-      if (this.radarAppliedUrl === frame.tiles) return;
-      if (!map.isSourceLoaded('weather-radar')) {
-        if (!this.radarIdlePending) {
-          this.radarIdlePending = true;
-          map.once('idle', () => { this.radarIdlePending = false; this.applyRadar(); });
-        }
-        return;
-      }
-      existing.setTiles([frame.tiles]);
-    } else {
-      const before = map.getStyle().layers.find(layer => layer.type === 'symbol' || layer.id.includes('boundar'))?.id;
-      for (const [id, url, opacity] of [['weather-radar', frame.tiles, 0.6], ['weather-radar-coverage', frame.coverageTiles, 0.16]] as const) {
-        map.addSource(id, { type: 'raster', tiles: [url], tileSize: 256, minzoom: 0, maxzoom: 7, attribution: '© RainViewer' });
-        map.addLayer({ id, type: 'raster', source: id, paint: { 'raster-opacity': opacity, 'raster-fade-duration': 200 } }, before);
-      }
+    if (this.radarAppliedUrl === frame.tiles || this.radarPending?.frame.tiles === frame.tiles) return;
+    if (this.radarPending) this.removeRadarBank(this.radarPending.bank);
+    const bank = this.radarActiveBank === 'weather-radar' ? 'weather-radar-next' : 'weather-radar';
+    this.removeRadarBank(bank); this.radarPending = { bank, frame };
+    const before = map.getStyle().layers.find(layer => layer.type === 'symbol' || layer.id.includes('boundar'))?.id;
+    for (const [id,url] of [[bank,frame.tiles],[`${bank}-coverage`,frame.coverageTiles]]) {
+      map.addSource(id!, { type:'raster', tiles:[url!],tileSize:256,minzoom:0,maxzoom:7,attribution:'© RainViewer' });
+      map.addLayer({id:id!,type:'raster',source:id!,paint:{'raster-opacity':0,'raster-fade-duration':200}},before);
     }
-    this.radarAppliedUrl = frame.tiles;
     this.callbacks?.onRadarStateChange?.('loading');
   };
+  private commitRadarIfReady() {
+    const pending = this.radarPending, map = this.map;
+    if (!pending || !map || !map.isSourceLoaded(pending.bank) || !map.isSourceLoaded(`${pending.bank}-coverage`)) return;
+    const old = this.radarActiveBank;
+    this.radarActiveBank = pending.bank; this.radarAppliedUrl = pending.frame.tiles; this.radarPending = null;
+    map.setPaintProperty(pending.bank,'raster-opacity',0.6);
+    map.setPaintProperty(`${pending.bank}-coverage`,'raster-opacity',0.16);
+    if (old && old !== pending.bank) this.removeRadarBank(old);
+    this.radarRetryCount = 0;
+    this.callbacks?.onRadarStateChange?.('ready',pending.frame);
+  }
 
   private map: MapLibreMap | null = null;
   private overlay: MapLibreOverlay | null = null;
@@ -189,12 +203,41 @@ export class DeckMapRenderer implements MapRenderer {
   private language: 'en' | 'zh' = 'en';
   private events: GeoEvent[] = [];
   private fallbackApplied = false;
+  private primaryHasContent = false;
+  private readonly missingBaseTiles = new Map<string, {x: number; y: number; z: number}>();
+  private missingTileRetryTimer: number | null = null;
+  private missingTileAttempts = 0;
+  private readinessCancel: (() => void) | null = null;
+
+  verifyReady(): Promise<boolean> {
+    return new Promise(resolve => {
+      let frame = false;
+      let timer: number | undefined;
+      const deadline = performance.now() + 2_000;
+      const painted = () => { frame = true; };
+      const finish = (ok: boolean) => {
+        window.clearTimeout(timer); this.map?.off('render', painted);
+        this.readinessCancel = null; resolve(ok);
+      };
+      this.readinessCancel = () => finish(false);
+      const check = () => {
+        if (this.destroyed) { finish(false); return; }
+        if (frame && this.warmOverlayPicking(this.overlay)) { finish(true); return; }
+        if (performance.now() >= deadline) { finish(false); return; }
+        this.map?.triggerRepaint(); timer = window.setTimeout(check, 32);
+      };
+      this.map?.on('render', painted); check();
+    });
+  }
   private fallbackTimer: number | null = null;
   private fallbackSourceTimer: number | null = null;
   private fallbackCountryLabels: CountryBasemapLabel[] = [];
   private fallbackCountryLabelsLoading: Promise<void> | null = null;
+  private primaryRecoveryTimer: number | null = null;
+  private primaryRecoveryAttempts = 0;
   private contextRecoveryTimer: number | null = null;
   private contextRecoveryAttempts = 0;
+  private contextStableTimer: number | null = null;
   private overlayMounted = false;
   private aviationOverlayMounted = false;
   private aviationOverlayViewSync: (() => void) | null = null;
@@ -259,6 +302,9 @@ export class DeckMapRenderer implements MapRenderer {
   private manualAviationTooltip: RendererTooltip | null = null;
   private basemapStyleGeneration = 0;
   private readonly quarantinedLayerIds = new Set<string>();
+  private readonly quarantinedLayerData = new Map<string, string>();
+  private eventVersion = 0;
+  private readonly inputFingerprints = new Map<string, {version: string; value: string}>();
   private performanceHarnessHost: MapPerformanceHarnessHost | null = null;
 
   constructor() {
@@ -346,7 +392,14 @@ export class DeckMapRenderer implements MapRenderer {
     this.map = map;
     if (new URLSearchParams(window.location.search).get('mapPerf') === '1') {
       this.performanceHarnessHost = container as MapPerformanceHarnessHost;
+      this.performanceHarnessHost.__polymonitorMapCamera = (center, zoom) => map.jumpTo({center, zoom});
       this.performanceHarnessHost.__polymonitorMapPresentation = members => this.clusterIndex.diagnostics(members);
+      this.performanceHarnessHost.__polymonitorLayerFuses = () => [...this.quarantinedLayerIds];
+      this.performanceHarnessHost.__polymonitorIsolateLayer = () => {
+        const layer = (this.pointLayers as Layer[] | null)?.find(item => item?.id && item.props?.pickable);
+        if (layer) this.handleDeckLayerError(new Error('Controlled layer error from mapPerf harness'), layer);
+        return layer?.id;
+      };
       this.performanceHarnessHost.__polymonitorProjectGeoPoint = (lon, lat) => {
         const point = map.project([lon, lat]);
         return { x: point.x, y: point.y };
@@ -403,13 +456,13 @@ export class DeckMapRenderer implements MapRenderer {
       if (this.destroyed) return;
       this.mountOverlaysIfNeeded();
       if (this.state?.fitWorld) this.fitWorld();
+      this.emitViewport();
       reinforceWorldEventBasemapLabels(map, this.language);
       this.ensureCountryHoverLayers();
       if (this.fallbackApplied) {
         if (!this.markLocalFallbackReadyIfLoaded()) this.scheduleFallbackSourceTimeout();
       } else {
-        this.clearFallbackTimer();
-        this.emitBasemapState('primary-ready');
+        this.markPrimaryReady();
       }
       this.requestRender({ points: true, aviation: true, geometry: true, dynamic: true });
       this.syncAnimationLoop();
@@ -475,6 +528,7 @@ export class DeckMapRenderer implements MapRenderer {
       }
     }
     const staticLayersChanged = !previous
+      || previous.presentationMode !== state.presentationMode
       || previous.zoom !== state.zoom
       || previous.selectedEventId !== state.selectedEventId
       || previous.timeRange !== state.timeRange
@@ -534,9 +588,10 @@ export class DeckMapRenderer implements MapRenderer {
       if (!nextIds.has(eventId)) this.eventFirstSeenAt.delete(eventId);
     }
     this.events = events;
+    this.eventVersion++;
+    this.clusterIndex.update(events);
     if (nonAviationChanged) {
       this.pulseEvents = selectEventPulseCandidates(events, this.state?.selectedEventId || null);
-      this.clusterIndex.update(events);
       this.pointLayers = null;
       this.invalidateGeometry();
     }
@@ -555,9 +610,15 @@ export class DeckMapRenderer implements MapRenderer {
     this.syncAnimationLoop();
   }
 
-  resize() {
-    this.map?.resize();
+  private viewportRevision = 0;
+  private emitViewport() {
+    const map = this.map; if (!map || this.destroyed) return;
+    const b = map.getBounds(), c = map.getCenter(), host = map.getContainer();
+    this.callbacks?.onViewportChange?.({ revision: ++this.viewportRevision,
+      bounds: splitViewportBounds(b.getWest(), b.getSouth(), b.getEast(), b.getNorth()),
+      center: [c.lng, c.lat], zoom: map.getZoom(), widthCssPx: host.clientWidth, heightCssPx: host.clientHeight });
   }
+  resize() { this.map?.resize(); this.emitViewport(); }
 
   setReducedMotion(reduced: boolean) {
     this.reducedMotion = reduced;
@@ -615,6 +676,7 @@ export class DeckMapRenderer implements MapRenderer {
     if (!this.paused) return;
     this.paused = false;
     this.applyRadar();
+    this.scheduleMissingTileRecovery();
     this.resize();
     this.requestRender({ points: true, aviation: true, geometry: true, dynamic: true });
     this.syncAnimationLoop();
@@ -622,9 +684,13 @@ export class DeckMapRenderer implements MapRenderer {
 
   destroy() {
     this.destroyed = true;
+    this.readinessCancel?.();
+    if (this.missingTileRetryTimer != null) window.clearTimeout(this.missingTileRetryTimer);
     this.basemapStyleGeneration += 1;
     this.clearFallbackTimer();
     this.clearFallbackSourceTimer();
+    if (this.radarRetryTimer != null) window.clearTimeout(this.radarRetryTimer);
+    if (this.primaryRecoveryTimer != null) window.clearTimeout(this.primaryRecoveryTimer);
     this.clearContextRecoveryTimer();
     this.cancelAnimationLoop();
     this.cancelAnimationResume();
@@ -639,8 +705,11 @@ export class DeckMapRenderer implements MapRenderer {
     this.countryHoverQueryController?.cancel();
     this.clearAllHover();
     if (this.performanceHarnessHost) {
+      delete this.performanceHarnessHost.__polymonitorMapCamera;
       delete this.performanceHarnessHost.__polymonitorProjectGeoPoint;
       delete this.performanceHarnessHost.__polymonitorMapPresentation;
+      delete this.performanceHarnessHost.__polymonitorIsolateLayer;
+      delete this.performanceHarnessHost.__polymonitorLayerFuses;
       this.performanceHarnessHost = null;
     }
     const map = this.map;
@@ -702,6 +771,7 @@ export class DeckMapRenderer implements MapRenderer {
     this.hoveredCountryIso2 = null;
     this.callbacks = null;
     this.quarantinedLayerIds.clear();
+    if (this.contextStableTimer != null) window.clearTimeout(this.contextStableTimer);
   }
 
   private requestRender(invalidation: Partial<MapRenderInvalidation> = {}) {
@@ -762,11 +832,15 @@ export class DeckMapRenderer implements MapRenderer {
             const screen = project?.(coordinates);
             if (!screen) continue;
             const properties = feature.properties || {};
-            const text = String(properties.name_en || properties.name || properties.name_int || '');
+            const evaluated = (map as unknown as { style?: { getLayer: (id: string) => { getValueAndResolveTokens?: (name: string, feature: unknown, canonical: unknown, images: string[]) => unknown; layout?: {get: (name: string) => {evaluate?: (feature: unknown, state: object) => unknown}} } } }).style?.getLayer(feature.layer.id);
+            const formatted = evaluated?.getValueAndResolveTokens?.('text-field', feature, undefined, []);
+            const text = formatted != null ? String(formatted) : String(this.language === 'zh' ? properties['name:zh'] || properties.name_zh || properties['name:zh-Hans'] || properties.name || properties.name_en || '' : properties.name_en || properties['name:en'] || properties.name || properties.name_int || '');
             if (!text) continue;
-            const width = measureLabel(text, 12);
+            const size = Number(evaluated?.layout?.get('text-size')?.evaluate?.(feature, {}) ?? map.getLayoutProperty(feature.layer.id, 'text-size'));
+            const fontSize = Number.isFinite(size) ? size : feature.layer.id.includes('country') ? 13 : 11;
+            const width = measureLabel(text, fontSize);
             occupiedScreenBoxes.push([
-              screen.x - width / 2, screen.y - 9, screen.x + width / 2, screen.y + 9,
+              screen.x - width / 2, screen.y - fontSize / 2 - 3, screen.x + width / 2, screen.y + fontSize / 2 + 3,
             ]);
           }
         } catch {
@@ -838,10 +912,10 @@ export class DeckMapRenderer implements MapRenderer {
     const aviationDynamicLayers = this.aviationDynamicLayers || [];
     const pointLayerList = (this.pointLayers || []).filter(
       (layer): layer is Layer => Boolean(layer) && !Array.isArray(layer),
-    ).filter((layer) => !this.quarantinedLayerIds.has(layer.id));
+    ).filter((layer) => this.acceptLayerVersion(layer));
     const aviationDynamicLayerList = aviationDynamicLayers.filter(
       (layer): layer is Layer => Boolean(layer) && !Array.isArray(layer),
-    ).filter((layer) => !this.quarantinedLayerIds.has(layer.id));
+    ).filter((layer) => this.acceptLayerVersion(layer));
     const pointLabels = pointLayerList.filter((layer) => (
       layer?.id === 'world-event-labels' || layer?.id === 'world-event-cluster-counts'
     ));
@@ -874,7 +948,7 @@ export class DeckMapRenderer implements MapRenderer {
     const staticBaseLayers = [
       ...this.geometryLayers.filter(
         (layer): layer is Layer => Boolean(layer) && !Array.isArray(layer),
-      ).filter((layer) => !this.quarantinedLayerIds.has(layer.id)),
+      ).filter((layer) => this.acceptLayerVersion(layer)),
       ...(aviationSections?.routeLayers || []),
       ...pointBaseLayers,
       // Keep genuinely static aviation objects and text out of the animation
@@ -888,7 +962,7 @@ export class DeckMapRenderer implements MapRenderer {
       ...pointLabels,
       ...(aviationSections?.labelLayers || []),
     ].filter((layer): layer is Layer => Boolean(layer) && !Array.isArray(layer))
-      .filter((layer) => !this.quarantinedLayerIds.has(layer.id));
+      .filter((layer) => this.acceptLayerVersion(layer));
     const aviationMotionLayers = [
       ...routeRunnerLayers,
       ...seededAircraftLayers,
@@ -989,6 +1063,7 @@ export class DeckMapRenderer implements MapRenderer {
     // request and persist the constructor's provisional camera.
     if (this.state?.fitWorld && !this.fittingWorld) return;
     this.fittingWorld = false;
+    this.emitViewport();
     const zoomChanged = Math.abs(map.getZoom() - (this.state?.zoom ?? map.getZoom())) > 0.001;
     this.mapDragging = false;
     this.interacting = false;
@@ -1193,14 +1268,26 @@ export class DeckMapRenderer implements MapRenderer {
     }
     reinforceWorldEventBasemapLabels(this.map, this.language);
     this.ensureCountryHoverLayers();
-    this.radarAppliedUrl = ''; this.applyRadar();
+    this.radarAppliedUrl = ''; this.radarActiveBank = ''; this.radarPending = null; this.applyRadar();
     if (this.fallbackApplied) this.markLocalFallbackReadyIfLoaded();
     this.invalidateGeometry();
     this.requestRender({ points: true, aviation: true, geometry: true, dynamic: true });
   };
 
   private handleSourceData = (event: MapSourceDataEvent) => {
-    if (event.sourceId === 'weather-radar' && event.isSourceLoaded) this.callbacks?.onRadarStateChange?.('ready');
+    if (!this.fallbackApplied && event.sourceId === 'basemap') {
+      // MapLibre considers an errored tile "loaded" too. Metadata/load/idle
+      // alone therefore cannot prove that a vector basemap actually painted.
+      const tile = (event as MapSourceDataEvent & { tile?: { state?: string; tileID?: {canonical?: {x: number; y: number; z: number}} } }).tile;
+      if (tile?.state === 'loaded') {
+        this.primaryHasContent = true;
+        const id = tile.tileID?.canonical;
+        if (id) this.missingBaseTiles.delete(`${id.z}/${id.x}/${id.y}`);
+        if (!this.missingBaseTiles.size) this.callbacks?.onBasemapIssueChange?.(null);
+      }
+      this.markPrimaryReady();
+    }
+    if (event.sourceId?.startsWith('weather-radar') && event.isSourceLoaded) this.commitRadarIfReady();
     if (!this.fallbackApplied || event.sourceId !== FALLBACK_COUNTRY_SOURCE) return;
     if (!this.markLocalFallbackReadyIfLoaded()) return;
     this.mountOverlaysIfNeeded();
@@ -1216,9 +1303,14 @@ export class DeckMapRenderer implements MapRenderer {
     // `load` only fires for the first style. A user-selected replacement must
     // also cancel its deadline once its sources/tiles have finished loading.
     if (!this.map.isStyleLoaded() || !this.map.areTilesLoaded()) return;
+    this.markPrimaryReady();
+  };
+
+  private markPrimaryReady() {
+    if (!this.primaryHasContent || this.fallbackApplied || !this.map || this.destroyed) return;
     this.clearFallbackTimer();
     this.emitBasemapState('primary-ready');
-  };
+  }
 
   private mountOverlaysIfNeeded() {
     const map = this.map;
@@ -1486,12 +1578,39 @@ export class DeckMapRenderer implements MapRenderer {
     );
   }
 
-  private handleMapError = (event: { sourceId?: string; error?: { message?: string }; message?: string }) => {
+  private scheduleMissingTileRecovery() {
+    if (this.missingTileRetryTimer != null || this.missingTileAttempts >= 2 || this.destroyed || this.paused
+      || this.fallbackApplied || !this.missingBaseTiles.size) return;
+    this.missingTileRetryTimer = window.setTimeout(() => {
+      this.missingTileRetryTimer = null;
+      if (this.destroyed || this.paused || this.fallbackApplied || !this.missingBaseTiles.size) return;
+      this.missingTileAttempts++;
+      void resetWorldEventPMTilesArchive().then(() => {
+        if (!this.destroyed && !this.paused && !this.fallbackApplied) this.map?.refreshTiles('basemap', [...this.missingBaseTiles.values()]);
+      }).catch(error => this.callbacks?.onBasemapIssueChange?.(String(error)));
+    }, 30_000 * (this.missingTileAttempts + 1));
+  }
+
+  private handleMapError = (event: { sourceId?: string; tile?: { tileID?: {canonical?: {x: number; y: number; z: number}} }; error?: { message?: string }; message?: string }) => {
     const message = event.error?.message || event.message || 'Unknown MapLibre error';
     if (event.sourceId?.startsWith('weather-radar') || /rainviewer/i.test(message)) {
-      this.callbacks?.onRadarStateChange?.('error'); return;
+      if (this.radarPending) { this.removeRadarBank(this.radarPending.bank); this.radarPending = null; }
+      this.callbacks?.onRadarStateChange?.('error');
+      if (this.radarRetryTimer == null && this.radarRetryCount < 2) {
+        this.radarRetryCount++;
+        this.radarRetryTimer = window.setTimeout(() => { this.radarRetryTimer = null; this.applyRadar(); }, 30_000 * this.radarRetryCount);
+      }
+      return;
     }
-    if (!this.fallbackApplied && /fetch|ajax|cors|network|403|forbidden|tile|style/i.test(message)) {
+    if (!this.fallbackApplied && /fetch|ajax|cors|network|bad response|403|forbidden|tile|style/i.test(message)) {
+      const tile = event.tile?.tileID?.canonical;
+      if (tile && event.sourceId === 'basemap') {
+        if (!this.missingBaseTiles.size) this.missingTileAttempts = 0;
+        this.missingBaseTiles.set(`${tile.z}/${tile.x}/${tile.y}`, tile);
+        this.callbacks?.onBasemapIssueChange?.(`Missing base tiles: ${this.missingBaseTiles.size} · ${message}`);
+        this.scheduleMissingTileRecovery();
+        return; // This is a leaf/source issue, not a renderer failure.
+      }
       // MapLibre emits transient tile/glyph errors before the first `load`
       // event as well as after it. Counting two resource errors as a fatal
       // style failure made a healthy same-origin PMTiles basemap downgrade
@@ -1510,6 +1629,8 @@ export class DeckMapRenderer implements MapRenderer {
 
   private handleContextLost = (event: Event) => {
     event.preventDefault();
+    if (this.contextStableTimer != null) window.clearTimeout(this.contextStableTimer);
+    this.contextStableTimer = null;
     this.paused = true;
     this.cancelAnimationLoop();
     this.cancelAnimationResume();
@@ -1522,13 +1643,13 @@ export class DeckMapRenderer implements MapRenderer {
     this.geometryNeedsCommit = true;
     this.overlay?.setProps({ layers: [] });
     this.aviationOverlay?.setProps({ layers: [] });
-    this.emitBasemapState('renderer-fallback-ready');
+    this.emitBasemapState('initializing');
     this.callbacks?.onError(new Error('WebGL context lost. Waiting for one bounded recovery attempt.'));
     this.clearContextRecoveryTimer();
     this.contextRecoveryTimer = window.setTimeout(() => {
       this.contextRecoveryTimer = null;
-      this.requestRendererFallback(new Error('WebGL context did not recover within 1.5 seconds.'));
-    }, 1_500);
+      this.requestRendererFallback(new Error('WebGL context did not recover within 4 seconds.'));
+    }, 4_000);
   };
 
   private handleContextRestored = () => {
@@ -1539,7 +1660,22 @@ export class DeckMapRenderer implements MapRenderer {
       return;
     }
     this.paused = false;
-    this.emitBasemapState(this.fallbackApplied ? 'local-fallback-ready' : 'primary-ready');
+    // A restored context is accepted only after a real frame AND picking.
+    const recovered = () => {
+      this.clearContextRecoveryTimer();
+      this.emitBasemapState(this.fallbackApplied ? 'local-fallback-ready' : 'primary-ready');
+      if (this.contextStableTimer != null) window.clearTimeout(this.contextStableTimer);
+      this.contextStableTimer = window.setTimeout(() => { this.contextRecoveryAttempts = 0; this.contextStableTimer = null; }, 60_000);
+    };
+    this.map?.once('render', () => {
+      if (this.destroyed) return;
+      if (!this.warmOverlayPicking(this.overlay)) {
+        this.contextRecoveryTimer = window.setTimeout(() => {
+          if (!this.warmOverlayPicking(this.overlay)) this.requestRendererFallback(new Error('Restored context did not regain picking.'));
+          else recovered();
+        }, 1_000);
+      } else recovered();
+    });
     this.requestRender({ points: true, aviation: true, geometry: true, dynamic: true });
     this.syncAnimationLoop();
   };
@@ -1553,9 +1689,24 @@ export class DeckMapRenderer implements MapRenderer {
     try {
       this.map.setStyle(getWeatherMapFallbackStyle(this.state?.basemapTheme ?? 'dark'), { diff: false });
       this.scheduleFallbackSourceTimeout();
+      this.schedulePrimaryRecovery();
     } catch (caught) {
       this.requestRendererFallback(caught instanceof Error ? caught : new Error(String(caught)));
     }
+  }
+
+  private schedulePrimaryRecovery() {
+    if (this.destroyed || this.primaryRecoveryTimer != null || this.primaryRecoveryAttempts >= 2) return;
+    this.primaryRecoveryTimer = window.setTimeout(() => {
+      this.primaryRecoveryTimer = null;
+      if (this.destroyed || !this.state || !this.fallbackApplied) return;
+      if (this.paused || document.hidden) { this.schedulePrimaryRecovery(); return; }
+      this.primaryRecoveryAttempts++;
+      void (async () => {
+        if (this.state?.basemapProvider === 'pmtiles' || this.state?.basemapProvider === 'auto') await resetWorldEventPMTilesArchive();
+        if (!this.destroyed && this.state) await this.replaceBasemapStyle(this.state);
+      })().catch(error => this.callbacks?.onError(error instanceof Error ? error : new Error(String(error))));
+    }, this.primaryRecoveryAttempts === 0 ? 30_000 : 120_000);
   }
 
   private async replaceBasemapStyle(state: WorldEventMapState) {
@@ -1563,6 +1714,9 @@ export class DeckMapRenderer implements MapRenderer {
     if (!map || this.destroyed) return;
     const generation = ++this.basemapStyleGeneration;
     this.fallbackApplied = false;
+    this.primaryHasContent = false;
+    this.missingBaseTiles.clear(); this.missingTileAttempts = 0;
+    this.callbacks?.onBasemapIssueChange?.(null);
     this.clearFallbackTimer();
     this.clearFallbackSourceTimer();
     this.emitBasemapState('initializing');
@@ -1580,6 +1734,28 @@ export class DeckMapRenderer implements MapRenderer {
     }
   }
 
+  private acceptLayerVersion(layer: Layer): boolean {
+    if (!this.quarantinedLayerIds.has(layer.id)) return true;
+    if (this.quarantinedLayerData.get(layer.id) === this.layerInputFingerprint(layer)) return false;
+    this.quarantinedLayerIds.delete(layer.id); this.quarantinedLayerData.delete(layer.id);
+    this.callbacks?.onLayerRecovered?.(layer.id);
+    return true;
+  }
+
+  private layerInputFingerprint(layer: Layer): string {
+    // Camera-dependent cluster data is NOT a new source version. Otherwise
+    // zooming immediately re-enables the same toxic input. Compute only while
+    // quarantined, once per validated event/style version.
+    if (!this.events.length) return JSON.stringify(layer.props?.data ?? null);
+    const group = layer.id.startsWith('aviation-') ? 'aviation' : 'events';
+    const version = `${this.eventVersion}:${this.basemapStyleGeneration}`;
+    const cached = this.inputFingerprints.get(group);
+    if (cached?.version === version) return cached.value;
+    const value = JSON.stringify([this.basemapStyleGeneration,
+      this.events.filter(event => isAviationEvent(event) === (group === 'aviation'))]);
+    this.inputFingerprints.set(group, {version, value}); return value;
+  }
+
   private handleDeckLayerError(error: Error, layer?: Layer) {
     const layerId = layer?.id;
     if (!layerId) {
@@ -1588,6 +1764,7 @@ export class DeckMapRenderer implements MapRenderer {
     }
     if (this.quarantinedLayerIds.has(layerId)) return;
     this.quarantinedLayerIds.add(layerId);
+    this.quarantinedLayerData.set(layerId, this.layerInputFingerprint(layer!));
     this.callbacks?.onLayerDegraded?.(layerId, error);
     this.callbacks?.onError(new Error(`Map layer ${layerId} was isolated after a render error: ${error.message}`));
     if (layerId.startsWith('aviation-')) {

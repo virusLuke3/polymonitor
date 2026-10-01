@@ -52,6 +52,7 @@ function createWorldEventStaticLayerSections(
     geometry: createEventGeometryLayers(events, state.selectedEventId, state.zoom, undefined, viewport),
     points: createEventPointLayers({
       events,
+      presentationMode: state.presentationMode,
       zoom: state.zoom,
       selectedEventId: state.selectedEventId,
       showLabels,
@@ -83,6 +84,7 @@ export function createWorldEventPointLayers(
 ) {
   return createEventPointLayers({
     events,
+    presentationMode: state.presentationMode,
     zoom: state.zoom,
     selectedEventId: state.selectedEventId,
     showLabels: true,

@@ -4,7 +4,7 @@ import Supercluster from 'supercluster';
 import { worldEventLayerById, worldEventLayerIdForEvent } from '../../config/layerRegistry';
 import { mapSymbolForEvent, type MapSymbolKey } from '../../config/mapSymbols';
 import type { GeoEvent, GeoEventSeverity } from '../../domain/types';
-import { disclosureTierForZoom, eventVisibleAtZoom } from '../eventDisclosure';
+import { disclosureTierForZoom, eventVisibleAtZoom, isMajorWorldEvent } from '../eventDisclosure';
 import { boundsIntersect, eventGeometryBounds, eventRepresentativePoint, isHazardEvent, eventColor, clusterMarkerSize, markerSize, SEVERITY_COLORS } from './shared';
 export { eventDisclosureTier, eventVisibleAtZoom } from '../eventDisclosure';
 
@@ -15,6 +15,7 @@ export type EventCluster = {
   members: ClusterMemberReference[];
   generation: number;
   mixed?: boolean;
+  important?: boolean;
   occurrenceRange?: [number, number];
   typeCounts: Record<string, number>;
   count: number;
@@ -155,6 +156,8 @@ function isClusterableMarker(event: GeoEvent) {
 /** Persistent source index. Viewport/zoom queries never rebuild Supercluster. */
 export class EventClusterIndex {
   private source: GeoEvent[] | null = null;
+  private indexedEvents: GeoEvent[] = [];
+  private indexedSignature = '';
   private eventById = new Map<string, GeoEvent>();
   private unclustered: UnclusteredBucket[] = [];
   private buckets: ClusterBucket[] = [];
@@ -172,6 +175,14 @@ export class EventClusterIndex {
   update(events: GeoEvent[]) {
     if (events === this.source) return;
     this.source = events;
+    const indexed = events.filter(event => isClusterableMarker(event)
+      && event.properties.mapEntity !== 'air-hub' && event.properties.mapEntity !== 'live-aircraft'
+      && eventRepresentativePoint(event) && worldEventLayerIdForEvent(event));
+    if(indexed.length===this.indexedEvents.length && indexed.every((event,i)=>event===this.indexedEvents[i]))return;
+    // Only source publication reaches here, never a camera query. Identical
+    // records from a new scope/cache receipt must not rebuild Supercluster.
+    const signature=JSON.stringify(indexed);this.indexedEvents=indexed;
+    if(signature===this.indexedSignature)return;this.indexedSignature=signature;
     this.eventById = new Map();
     this.unclustered = [];
     this.buckets = [];
@@ -182,14 +193,16 @@ export class EventClusterIndex {
     this.selectedAncestors.clear();
     this.ordinalCache.clear();
     const grouped = new Map<string, GeoEvent[]>();
+    const seen = new Set<string>();
     for (const event of events) {
+      if (seen.has(event.id)) continue; seen.add(event.id);
       if (!isClusterableMarker(event)) continue;
       if (event.properties.mapEntity === 'air-hub' || event.properties.mapEntity === 'live-aircraft') continue;
       if (!eventRepresentativePoint(event)) continue;
       const layerId = worldEventLayerIdForEvent(event);
       if (!layerId) continue;
       this.eventById.set(event.id, event);
-      const bucketId = `${layerId}:${eventSemanticKey(event)}`;
+      const bucketId = `${layerId}:${isMajorWorldEvent(event) ? "important" : "ordinary"}:${eventSemanticKey(event)}`;
       const bucket = grouped.get(bucketId) || [];
       bucket.push(event);
       grouped.set(bucketId, bucket);
@@ -314,6 +327,7 @@ export class EventClusterIndex {
         membership[event.id] = !bounds ? 'unlocatable:no valid geometry'
           : !boundsIntersect(bounds, this.presentationViewport) ? 'offscreen:geometry outside query bounds'
           : !layer || this.presentationZoom < layer.minZoom ? 'explicitly-disabled:layer zoom requirement'
+          : event.category === 'infrastructure' && ['air-route','air-hub','air-flight','live-aircraft'].includes(String(event.properties.mapEntity || '')) ? 'record-entry:separate aviation scene and complete event list'
           : isHazardEvent(event) && event.hazardKind === 'fire-detection' && this.presentationZoom < 4 ? 'observation:raw satellite texture'
           : !eventVisibleAtZoom(event, this.presentationZoom, null) ? 'explicitly-disabled:zoom disclosure'
           : 'single:geometry or aviation layer';
@@ -386,7 +400,7 @@ export class EventClusterIndex {
         }
         const severityCounts = Object.fromEntries(SEVERITIES.map(level => [level, properties[level] - Number(excluded && selected?.severity === level)])) as Record<GeoEventSeverity, number>;
         const severity = [...SEVERITIES].reverse().find(level => severityCounts[level] > 0) || 'info';
-        clusters.push({ kind: 'event-cluster', id: `cluster:${bucket.id}:${clusterId}`,
+        clusters.push({ kind: 'event-cluster', important: bucket.id.includes(':important:'), id: `cluster:${bucket.id}:${clusterId}`,
           coordinates: feature.geometry.coordinates as [number, number],
           members: [{ bucketId: bucket.id, clusterId, generation: this.buildCount, count, excludedId: excluded ? selectedEventId : null }],
           generation: this.buildCount, typeCounts: { [eventSemanticKey(representative)]: count }, count, severityCounts, severity,

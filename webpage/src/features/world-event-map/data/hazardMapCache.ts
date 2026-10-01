@@ -12,6 +12,19 @@ export const HAZARD_MAP_SOURCE_KEYS = [
 ] as const;
 
 export type HazardMapSourceKey = typeof HAZARD_MAP_SOURCE_KEYS[number];
+const MAX_STALE_MS: Record<HazardMapSourceKey, number> = {
+  usgs: 3_600_000, 'usgs-volcano-cap': 21_600_000, nws: 900_000, nhc: 3_600_000,
+  eonet: 21_600_000, gdacs: 21_600_000, firms: 5_400_000, 'climate-anomaly': 604_800_000,
+};
+
+export function hazardSnapshotExpiresAt(source: HazardMapSourceKey, payload: HazardMapResponse) {
+  const fetched = Date.parse(payload.sources.find(item => item.key === source)?.fetchedAt || '');
+  return Number.isFinite(fetched) ? fetched + MAX_STALE_MS[source] : null;
+}
+export function hazardSnapshotRetainable(source: HazardMapSourceKey, payload: HazardMapResponse, now = Date.now()) {
+  const deadline=hazardSnapshotExpiresAt(source,payload);
+  return deadline!==null && now >= deadline-MAX_STALE_MS[source] && now <= deadline;
+}
 
 type HazardCacheEntry = {
   cacheKey: string;
@@ -90,7 +103,7 @@ function writeLocalFallback(entry: HazardCacheEntry) {
   }
 }
 
-export async function readHazardMapSnapshot(
+async function readRawSnapshot(
   source: HazardMapSourceKey,
   geometryZoom: number,
   scope = '',
@@ -121,6 +134,11 @@ export async function readHazardMapSnapshot(
     transaction.oncomplete = () => database.close();
     transaction.onabort = () => database.close();
   });
+}
+
+export async function readHazardMapSnapshot(source: HazardMapSourceKey, geometryZoom: number, scope = '') {
+  const entry = await readRawSnapshot(source, geometryZoom, scope);
+  return entry && hazardSnapshotRetainable(source, entry.payload) ? entry : null;
 }
 
 export async function writeHazardMapSnapshot(

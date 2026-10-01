@@ -214,3 +214,20 @@ describe('World Event Map state', () => {
     expect(filterWorldEventMapEventsForLayers([expired, ended, cancelled], state, now)).toHaveLength(0);
   });
 });
+
+it('V3 presentation mode preserves old saved camera/filter/selection without a storage reset',()=>{
+  const saved=readStoredWorldEventMapState(JSON.stringify({center:{lon:12,lat:20},zoom:3,activeLayerIds:['ucdp'],selectedEventId:'chosen',presentationMode:'records'}));
+  expect(saved.presentationMode).toBe('records');
+  const explicit=parseWorldEventMapState('?presentation=overview',saved);
+  expect(explicit).toMatchObject({presentationMode:'overview',center:saved.center,severities:saved.severities,selectedEventId:'chosen'});
+  const roundtrip=parseWorldEventMapState(new URL(serializeWorldEventMapUrl(explicit,'https://example.test')).search);
+  expect(roundtrip.presentationMode).toBe('overview');
+  expect(readStoredWorldEventMapState(JSON.stringify({center:{lon:12,lat:20},zoom:3})).presentationMode).toBe('overview');
+});
+
+it('a revised old earthquake retains occurrence time and cannot enter a recent time window',()=>{
+  const now=Date.parse('2026-10-01T00:00:00Z');
+  const event={id:'historical-earthquake',category:'natural-hazard',hazardKind:'earthquake',severity:'critical',occurredAt:'2026-09-01T00:00:00Z',updatedAt:'2026-09-30T23:59:00Z',revision:{cancelled:false},lifecycle:'unknown',properties:{},sources:[],limitations:[],relatedMarketIds:[]} as unknown as HazardEvent;
+  expect(filterWorldEventMapEvents([event],{timeRange:'7d',severities:['critical']},now)).toEqual([]);
+  expect(filterWorldEventMapEvents([event],{timeRange:'all',severities:['critical']},now)).toEqual([event]);
+});

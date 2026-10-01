@@ -1,3 +1,5 @@
+import type { RendererViewport } from '../renderer/MapRenderer';
+import type { AviationPhase } from '../data/useAviationViewport';
 import type { ClusterSelection, ScreenBox } from '../renderer/layerFactories/eventClusters';
 import { observeMapOcclusion } from '../renderer/mapOcclusion';
 import type { MapPresentationCounts } from '../renderer/eventDisclosure';
@@ -37,6 +39,8 @@ import { MapSymbolIcon } from './MapSymbolIcon';
 import { useI18n } from '@/services/i18n';
 
 export type WorldEventMapProps = {
+  onViewportChange?: (viewport: RendererViewport) => void;
+  aviationStatus?: {phase: AviationPhase; error: string | null; payload: import('@/types').AviationViewportPayload | null};
   onRendererKindChange?: (kind: 'webgl' | 'svg') => void;
   events: GeoEvent[];
   state: WorldEventMapState;
@@ -47,11 +51,12 @@ export type WorldEventMapProps = {
   onAviationRiskSourceChange?: (source: AviationRiskSource) => void;
   onAviationClose?: () => void;
   onCountryChange?: (countryCode: string | null) => void;
-  height?: number;
   onWeatherPreset?: () => void;
 };
 
 export function WorldEventMap({
+  onViewportChange,
+  aviationStatus,
   onRendererKindChange,
   events,
   state,
@@ -62,7 +67,6 @@ export function WorldEventMap({
   onAviationRiskSourceChange,
   onAviationClose,
   onCountryChange,
-  height = 620,
   onWeatherPreset,
 }: WorldEventMapProps) {
   const { locale } = useI18n();
@@ -72,10 +76,11 @@ export function WorldEventMap({
   const legendToggleRef = useRef<HTMLButtonElement>(null);
   const focusToggleRef = useRef<HTMLButtonElement>(null);
   const [legendOpen, setLegendOpen] = useState(false);
-  const [rendererKind, setRendererKind] = useState<'webgl' | 'svg'>('webgl');
+  const [rendererKind, setRendererKind] = useState<'webgl' | 'svg'>(() => new URLSearchParams(window.location.search).get('renderer') === 'svg' ? 'svg' : 'webgl');
   const [mapVisible, setMapVisible] = useState(true);
   const radar = useWeatherRadar(mapVisible && rendererKind === 'webgl' && state.activeLayerIds.includes('weather-radar'));
   const radarRef = useRef(radar); radarRef.current = radar;
+  const [committedRadarFrame, setCommittedRadarFrame] = useState<import('../data/useWeatherRadar').RadarFrame | null>(null);
   const [radarTiles, setRadarTiles] = useState<'off' | 'loading' | 'ready' | 'error'>('off');
   const [clusterSelection, setClusterSelection] = useState<ClusterSelection | null>(null);
   const languageRef = useRef(locale);
@@ -85,10 +90,12 @@ export function WorldEventMap({
   const rendererRef = useRef<MapRenderer | null>(null);
   const stateRef = useRef(state);
   const eventsRef = useRef(events);
-  const callbackRef = useRef({ onCameraChange, onEventSelect, onRendererKindChange });
+  const callbackRef = useRef({ onViewportChange, onCameraChange, onEventSelect, onRendererKindChange });
   const [basemapState, setBasemapState] = useState<BasemapState>('idle');
   const [rendererError, setRendererError] = useState<string | null>(null);
   const [rendererLayerError, setRendererLayerError] = useState<string | null>(null);
+  const [basemapIssue, setBasemapIssue] = useState<string | null>(null);
+  const retryRendererRef = useRef<(() => void) | null>(null);
   const [countryTarget, setCountryTarget] = useState<{
     country: MapCountryTarget;
     position?: MapHoverPosition;
@@ -188,7 +195,7 @@ export function WorldEventMap({
     rendererRef.current?.setRadar?.(radar.status === 'off' ? null : radar.frame);
   }, [radar.frame, radar.status]);
 
-  callbackRef.current = { onCameraChange, onEventSelect, onRendererKindChange };
+  callbackRef.current = { onViewportChange, onCameraChange, onEventSelect, onRendererKindChange };
   stateRef.current = state;
   eventsRef.current = events;
 
@@ -225,6 +232,27 @@ export function WorldEventMap({
     };
 
     let rendererGeneration = 0;
+    let committedGeneration = 0;
+    let candidate: MapRenderer | null = null;
+    let cancelCandidateReadiness: (() => void) | null = null;
+    let preferredLoading = false;
+    let candidateHost: HTMLDivElement | null = null;
+    let recoveryTimer: number | null = null;
+    let stableTimer: number | null = null;
+    let recoveryAttempts = 0;
+    let episodeStarted = 0;
+    const lightweight = new URLSearchParams(window.location.search).get('renderer') === 'svg';
+    const support = inspectWebGL2Support({ allowSoftware: new URLSearchParams(window.location.search).get('mapPerf') === '1' });
+    const scheduleRecovery = () => {
+      if (disposed || lightweight || !support.supported || recoveryTimer != null || recoveryAttempts >= 2) return;
+      if (!episodeStarted) episodeStarted = Date.now();
+      recoveryTimer = window.setTimeout(() => {
+        recoveryTimer = null;
+        if (disposed || document.hidden || !inViewport) { scheduleRecovery(); return; }
+        recoveryAttempts++;
+        void loadPreferredRenderer();
+      }, recoveryAttempts === 0 ? 30_000 : 120_000);
+    };
     let preferredLoadGeneration = 0;
     let slowLoadTimer: number | null = null;
     let rendererDeadline: number | null = null;
@@ -237,20 +265,30 @@ export function WorldEventMap({
     ): Promise<void> => {
       if (disposed) return;
       const generation = ++rendererGeneration;
-      const isCurrent = () => !disposed && generation === rendererGeneration;
+      if (kind === 'svg' && stableTimer != null) { window.clearTimeout(stableTimer); stableTimer = null; }
+      const isCurrent = () => !disposed && (generation === rendererGeneration || generation === committedGeneration);
       clearRendererDeadline();
-      rendererRef.current?.destroy();
-      rendererRef.current = null;
-      delete host.dataset.mapRendererReady;
-      setRendererKind(kind);
-      callbackRef.current.onRendererKindChange?.(kind);
+      cancelCandidateReadiness?.(); cancelCandidateReadiness = null;
+      candidate?.destroy(); candidate = null; candidateHost?.remove(); candidateHost = null;
+      const previous = rendererRef.current;
+      let failed = false;
+      let readyResolve: ((ready: boolean) => void) | null = null;
+      const ready = new Promise<boolean>(resolve => { readyResolve = resolve; });
+      cancelCandidateReadiness = () => readyResolve?.(false);
+      const staging = document.createElement('div');
+      staging.style.cssText = 'position:absolute;inset:0;visibility:hidden;pointer-events:none';
+      host.append(staging); candidateHost = staging;
       setRendererLayerError(null);
       setRendererError(reason?.message ?? null);
 
       const fail = (error: unknown) => {
-        if (!isCurrent()) return;
+        if (!isCurrent() || failed) return;
+        failed = true; readyResolve?.(false);
         const failure = error instanceof Error ? error : new Error(String(error));
         clearRendererDeadline();
+        candidate?.destroy(); candidate = null; candidateHost?.remove(); candidateHost = null;
+        if (stableTimer != null) window.clearTimeout(stableTimer); stableTimer = null;
+        if (previous) { ++rendererGeneration; setRendererError(failure.message); scheduleRecovery(); return; }
         if (kind === 'webgl') {
           void installRenderer('svg', failure);
         } else {
@@ -264,8 +302,11 @@ export function WorldEventMap({
         }
       };
       const callbacks: MapRendererCallbacks = {
+        onBasemapIssueChange: message => { if (isCurrent()) setBasemapIssue(message); },
+        onViewportChange: viewport => { if(isCurrent()) callbackRef.current.onViewportChange?.(viewport); },
+        onLayerRecovered: () => { if(isCurrent()) setRendererLayerError(null); },
         onPresentationChange: counts => { if (isCurrent()) setPresentation(counts); },
-        onRadarStateChange: status => { if (isCurrent()) setRadarTiles(status); },
+        onRadarStateChange: (status, frame) => { if (isCurrent()) { setRadarTiles(status); if (frame !== undefined) setCommittedRadarFrame(frame); } },
         onCameraChange: (camera) => { if (isCurrent()) callbackRef.current.onCameraChange(camera); },
         onClusterSelect: (ids) => { if (isCurrent()) setClusterSelection(ids); },
         onEventSelect: (eventId) => { if (isCurrent()) callbackRef.current.onEventSelect(eventId); },
@@ -275,7 +316,7 @@ export function WorldEventMap({
         onCountryContextMenu: (country, position) => {
           if (isCurrent()) setCountryTarget({ country, position, context: true });
         },
-        onBasemapStateChange: (nextState) => { if (isCurrent()) setBasemapState(nextState); },
+        onBasemapStateChange: (nextState) => { if (isCurrent() && !failed) { if (nextState.endsWith('-ready')) { readyResolve?.(true); setRendererError(null); } setBasemapState(nextState); } },
         onRendererFallbackRequested: fail,
         onLayerDegraded: (layerId, error) => {
           if (isCurrent()) setRendererLayerError(`${layerId}: ${error.message}`);
@@ -302,17 +343,40 @@ export function WorldEventMap({
           `${kind === 'webgl' ? 'WebGL' : 'SVG'} map renderer loading timed out.`,
         )), 12_000);
         const renderer: MapRenderer = new Renderer();
-        rendererRef.current = renderer;
+        candidate = renderer;
         renderer.setLanguage?.(languageRef.current);
         renderer.setReducedMotion(motionQuery.matches);
         renderer.setState(stateRef.current);
         renderer.setEvents(eventsRef.current);
         renderer.setRadar?.(radarRef.current.status === 'off' ? null : radarRef.current.frame);
-        await renderer.mount(host, callbacks);
-        if (!isCurrent()) return;
+        await renderer.mount(staging, callbacks);
+        const usable = await ready;
+        if (!usable || failed || !isCurrent()) { renderer.destroy(); staging.remove(); return; }
+        if (renderer.verifyReady && !await renderer.verifyReady()) {
+          fail(new Error('Map candidate did not paint a frame with working picking.')); return;
+        }
+        if (failed || !isCurrent()) { renderer.destroy(); staging.remove(); return; }
+        previous?.destroy();
+        committedGeneration = generation;
+        rendererRef.current = renderer; candidate = null; candidateHost = null; cancelCandidateReadiness = null;
+        staging.style.visibility = ''; staging.style.pointerEvents = '';
+        setRendererKind(kind); callbackRef.current.onRendererKindChange?.(kind);
+        renderer.setState(stateRef.current); renderer.setEvents(eventsRef.current);
+        if (kind === 'svg') scheduleRecovery();
+        else {
+          if (recoveryTimer != null) window.clearTimeout(recoveryTimer); recoveryTimer = null;
+          if (stableTimer != null) window.clearTimeout(stableTimer);
+          stableTimer = window.setTimeout(() => { recoveryAttempts = 0; episodeStarted = 0; stableTimer = null; }, 60_000);
+        }
         clearRendererDeadline();
         renderer.setOcclusions?.(occlusionsRef.current);
         host.dataset.mapRendererReady = kind;
+        if (new URLSearchParams(window.location.search).get('mapPerf') === '1') {
+          for (const key of ['__polymonitorProjectGeoPoint', '__polymonitorMapCamera', '__polymonitorMapPresentation', '__polymonitorIsolateLayer', '__polymonitorLayerFuses']) {
+            const testHost = host as unknown as Record<string, unknown>, stagedHost = staging as unknown as Record<string, unknown>;
+            testHost[key] = stagedHost[key];
+          }
+        }
         updatePauseState();
       } catch (error) {
         fail(error);
@@ -320,6 +384,8 @@ export function WorldEventMap({
     };
 
     const loadPreferredRenderer = async () => {
+      if (preferredLoading || disposed) return;
+      preferredLoading = true;
       const generation = ++preferredLoadGeneration;
       const isCurrent = () => !disposed && generation === preferredLoadGeneration;
       // SVG is a temporary usable surface while the same download continues.
@@ -342,7 +408,16 @@ export function WorldEventMap({
         if (slowLoadTimer != null) window.clearTimeout(slowLoadTimer);
         slowLoadTimer = null;
         void installRenderer('svg', error instanceof Error ? error : new Error(String(error)));
+      } finally { preferredLoading = false; }
+    };
+    retryRendererRef.current = () => {
+      if (lightweight || !support.supported || preferredLoading || host.dataset.mapRendererReady === 'webgl') return;
+      if (recoveryAttempts >= 2 && Date.now() - episodeStarted < 300_000) {
+        setRendererError('The recovery budget is exhausted. Try again after five minutes.'); return;
       }
+      if (Date.now() - episodeStarted >= 300_000) { recoveryAttempts = 0; episodeStarted = Date.now(); }
+      if (recoveryTimer != null) window.clearTimeout(recoveryTimer); recoveryTimer = null;
+      recoveryAttempts++; void loadPreferredRenderer();
     };
 
     // Deterministic browser harness for the same fallback path used by real
@@ -374,14 +449,9 @@ export function WorldEventMap({
           secondInstallFrame = null;
           if (disposed || rendererInstallStarted || document.hidden || !inViewport) return;
           rendererInstallStarted = true;
-          const compactDevice = window.matchMedia('(max-width: 720px)').matches
-            || Boolean((navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData);
-          const support = inspectWebGL2Support({
-            allowSoftware: new URLSearchParams(window.location.search).get('mapPerf') === '1',
-          });
-          if (support.supported && !compactDevice) void loadPreferredRenderer();
-          else void installRenderer('svg', new Error(compactDevice
-            ? 'Compact devices start with the lightweight SVG renderer.'
+          if (support.supported && !lightweight) void loadPreferredRenderer();
+          else void installRenderer('svg', new Error(lightweight
+            ? 'Lightweight SVG renderer explicitly selected.'
             : support.reason || 'WebGL2 is unavailable.'));
         });
       });
@@ -393,12 +463,23 @@ export function WorldEventMap({
     };
 
     const observer = new ResizeObserver(() => {
+      measureHeight();
       rendererRef.current?.resize();
       if (!rendererInstallStarted && !inViewport) {
         inViewport = hostIntersectsViewport();
         if (inViewport) scheduleRendererInstall();
       }
     });
+    const stage = host.closest<HTMLElement>('.wm-map-stage');
+    const measureHeight = () => {
+      if (!stage || stage.classList.contains('is-map-focused')) return;
+      const available = Math.max(260, window.innerHeight - stage.getBoundingClientRect().top - 16);
+      const target = window.innerWidth <= 720 ? Math.min(640, Math.max(300, available))
+        : Math.min(available, Math.max(560, Math.min(1000, stage.clientWidth / 2.1)));
+      stage.style.setProperty('--wm-map-height', `${Math.round(target)}px`);
+    };
+    measureHeight();
+    window.addEventListener('resize', measureHeight);
     observer.observe(host);
     const intersectionObserver = typeof IntersectionObserver === 'undefined'
       ? null
@@ -444,10 +525,15 @@ export function WorldEventMap({
     }, 2_500);
     return () => {
       disposed = true;
+      retryRendererRef.current = null;
       ++rendererGeneration;
       ++preferredLoadGeneration;
       if (slowLoadTimer != null) window.clearTimeout(slowLoadTimer);
       clearRendererDeadline();
+      if (recoveryTimer != null) window.clearTimeout(recoveryTimer);
+      if (stableTimer != null) window.clearTimeout(stableTimer);
+      cancelCandidateReadiness?.(); cancelCandidateReadiness = null;
+      candidate?.destroy(); candidateHost?.remove();
       if (installFrame != null) window.cancelAnimationFrame(installFrame);
       if (secondInstallFrame != null) window.cancelAnimationFrame(secondInstallFrame);
       if (idleHandle != null) {
@@ -461,6 +547,7 @@ export function WorldEventMap({
       host.removeEventListener('wheel', markInteractionReady);
       host.removeEventListener('keydown', markInteractionReady);
       host.removeEventListener('polymonitor:map-renderer-failure', handleHarnessRendererFailure);
+      window.removeEventListener('resize', measureHeight);
       observer.disconnect();
       intersectionObserver?.disconnect();
       delete host.dataset.mapRendererReady;
@@ -478,7 +565,7 @@ export function WorldEventMap({
   return (
     <div
       className={`wm-weather-deck-map map-ready ${events.length ? 'has-screen-points' : 'no-screen-points'} map-state-${basemapState}`}
-      style={{ height: expanded ? '100%' : `${height}px`, '--wm-map-ocean': state.basemapTheme === 'positron' ? '#e6e9eb' : '#1b1b1d' }}
+      style={{ '--wm-map-ocean': state.basemapTheme === 'positron' ? '#e6e9eb' : '#333333' }}
     >
       <div
         ref={hostRef}
@@ -545,6 +632,7 @@ export function WorldEventMap({
         && onAviationClose ? (
           <AviationLens
             events={events}
+            status={aviationStatus}
             state={state}
             onLensChange={onAviationLensChange}
             onRiskSourceChange={onAviationRiskSourceChange}
@@ -555,10 +643,10 @@ export function WorldEventMap({
       <details className="wm-map-radar-status">
         <summary>{locale === 'zh' ? '雷达' : 'Radar'} · {!state.activeLayerIds.includes('weather-radar') ? mt('Off')
           : rendererKind === 'svg' ? (locale === 'zh' ? 'SVG 不支持' : 'Unavailable in SVG')
-          : radar.frame ? `${new Date(radar.frame.time * 1000).toISOString().slice(11, 16)} UTC${radar.status === 'stale' ? ' · stale' : radarTiles === 'error' ? ' · error' : radarTiles === 'loading' ? ' · loading' : ''}` : radar.status}</summary>
+          : committedRadarFrame ? `${new Date(committedRadarFrame.time * 1000).toISOString().slice(11, 16)} UTC${radar.status === 'stale' ? ' · stale' : radarTiles === 'error' ? ' · error' : radarTiles === 'loading' ? ' · loading' : ''}` : radar.status}</summary>
         <div>
           <a href="https://www.rainviewer.com/" target="_blank" rel="noreferrer">© RainViewer</a>
-          <span>{locale === 'zh' ? '最新雷达合成帧' : 'Latest radar composite'} · {radar.frame ? new Date(radar.frame.time * 1000).toISOString().replace('T', ' ').replace('.000Z', ' UTC') : '—'}</span>
+          <span>{locale === 'zh' ? '最新雷达合成帧' : 'Latest radar composite'} · {committedRadarFrame ? new Date(committedRadarFrame.time * 1000).toISOString().replace('T', ' ').replace('.000Z', ' UTC') : '—'}</span>
           <span>{locale === 'zh' ? '清单 / 瓦片' : 'Manifest / tiles'}: {radar.status} / {rendererKind === 'svg' ? 'unavailable (SVG)' : radarTiles}</span>
           <span>{locale === 'zh' ? '覆盖不完整；透明不代表无降水。灰暗遮罩表示无雷达覆盖。' : 'Partial coverage; transparent does not mean dry. Shaded areas lack radar coverage.'}</span>
           {radar.error ? <span>{radar.error}</span> : null}
@@ -598,14 +686,19 @@ export function WorldEventMap({
           {legendContext.coverageGap ? <b><i className="is-coverage" />{mt('Coverage gap')}</b> : null}
         </span>
       </div>
-      <div className="wm-weather-deck-status" hidden={basemapState === 'primary-ready'} title={rendererError || undefined}>
+      <div className="wm-weather-deck-status" hidden={basemapState === 'primary-ready' && !basemapIssue} title={basemapIssue || rendererError || undefined}>
         {rendererKind === 'svg'
           ? 'SVG FALLBACK'
           : basemapState === 'local-fallback-ready'
             ? 'LOCAL BASEMAP'
             : basemapState === 'primary-ready'
-              ? 'PRIMARY BASEMAP'
+              ? basemapIssue ? (locale === 'zh' ? '底图部分缺失' : 'PARTIAL BASEMAP') : 'PRIMARY BASEMAP'
               : basemapState.replace(/-/g, ' ').toUpperCase()}
+      {rendererKind === 'svg' && new URLSearchParams(window.location.search).get('renderer') !== 'svg' ? (
+        <button className="wm-map-renderer-retry" type="button" onClick={() => retryRendererRef.current?.()} title={rendererError || undefined}>
+          {locale === 'zh' ? '重试详细地图' : 'Retry detailed map'}
+        </button>
+      ) : null}
       </div>
       <div className="wm-world-event-attribution">
         {rendererKind === 'webgl' && basemapState === 'primary-ready'
@@ -618,6 +711,7 @@ export function WorldEventMap({
       {rendererLayerError ? (
         <div className="wm-banner notice" role="status">MAP DEGRADED · ISOLATED {rendererLayerError}</div>
       ) : null}
+
     </div>
   );
 }

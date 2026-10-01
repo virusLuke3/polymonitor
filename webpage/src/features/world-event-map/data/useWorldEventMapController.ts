@@ -1,3 +1,4 @@
+import type { RendererViewport } from '../renderer/MapRenderer';
 import { clampWorldEventZoom } from '../state/mapState';
 import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { RuntimeBreakingEventRadarPayload, RuntimeGeoSanctionsShockPayload, RuntimeGlobalTransportShippingPayload } from '@/types';
@@ -61,6 +62,7 @@ type SharedRuntime = Pick<ReturnType<typeof usePanelRuntime>, 'runtimeData' | 'g
 /** Owns map state and source composition. Shared snapshots stay in Panel Runtime. */
 export function useWorldEventMapController({ runtimeData, getStatus: getPanelRuntimeStatus, refreshIds, setConsumerPanels, suspended }: SharedRuntime, mapActive = true) {
   const worldEventMap = useWorldEventMapState();
+  const [rendererViewport, setRendererViewport] = useState<RendererViewport | null>(null);
   const [mapRendererKind, setMapRendererKind] = useState<'webgl' | 'svg'>('webgl');
   const naturalHazards = useNaturalHazards({
     sourceKeys: worldEventMap.state.activeLayerIds.flatMap((id) => worldEventLayerById(id)?.sourceKeys || []),
@@ -71,8 +73,7 @@ export function useWorldEventMapController({ runtimeData, getStatus: getPanelRun
   const airRoutesRequested = worldEventMap.state.activeLayerIds.includes('air-routes');
   const aviationViewport = useAviationViewport(
     airRoutesRequested && mapActive && !suspended,
-    [worldEventMap.state.center.lon, worldEventMap.state.center.lat],
-    worldEventMap.state.zoom,
+    rendererViewport,
   );
   const layers = useMemo<LayerToggle[]>(() => {
     const statuses = new Map(naturalHazards.sources.map((source) => [source.key, source]));
@@ -116,6 +117,7 @@ export function useWorldEventMapController({ runtimeData, getStatus: getPanelRun
   }, [
     mapRendererKind,
     aviationViewport.error,
+    aviationViewport.phase,
     aviationViewport.payload,
     naturalHazards.sources,
     worldEventMap.state.activeLayerIds,
@@ -306,6 +308,7 @@ export function useWorldEventMapController({ runtimeData, getStatus: getPanelRun
       else if (aviationViewport.payload?.limitations?.length) {
         status.message = aviationViewport.payload.limitations.join(' · ');
       }
+      status.phase = aviationViewport.phase === 'OFF' ? 'disabled' : aviationViewport.phase === 'ZOOM_REQUIRED' ? 'zoom-required' : aviationViewport.phase === 'LOADING' ? 'loading' : aviationViewport.phase === 'EMPTY' ? 'empty' : aviationViewport.phase === 'PARTIAL' ? 'partial' : aviationViewport.phase === 'STALE' ? 'stale' : aviationViewport.phase === 'UNAVAILABLE' ? 'unavailable' : 'fresh';
       statuses.push(status);
     }
     return statuses;
@@ -324,6 +327,7 @@ export function useWorldEventMapController({ runtimeData, getStatus: getPanelRun
     naturalHazards.sources,
     showAirRoutes,
     aviationViewport.error,
+    aviationViewport.phase,
     aviationViewport.payload,
     transportPayload,
     airReferenceAdapterResult,
@@ -344,6 +348,6 @@ export function useWorldEventMapController({ runtimeData, getStatus: getPanelRun
     if (missingSources) void refreshIds(missingSources.split(','), { reason: 'refresh' });
   }, [missingSources, refreshIds]);
   useEffect(() => { writeWorldEventMapSeed(geoShockPayload); }, [geoShockPayload]);
-  return { worldEventMap, setMapRendererKind, layers, region, mapZoom, setRegion, setMapZoom, enabledLayerIds,
+  return { worldEventMap, setRendererViewport, aviationStatus: aviationViewport, setMapRendererKind, layers, region, mapZoom, setRegion, setMapZoom, enabledLayerIds,
     ucdpRawMapEvents, worldEventMapEvents, mapSourceStatuses };
 }
