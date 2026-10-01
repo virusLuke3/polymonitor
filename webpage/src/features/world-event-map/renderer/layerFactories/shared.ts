@@ -7,6 +7,17 @@ import type {
 } from '../../domain/types';
 import { MAP_SEVERITY_STYLES, HAZARD_SEVERITY_COLORS } from '../../config/mapSymbols';
 
+export function isCountryRiskArea(event: GeoEvent) {
+  return event.category === 'country-risk'
+    || event.category === 'sanctions'
+    || event.properties.mapEntity === 'country-risk-area';
+}
+
+/** Evidence presence has one quiet contextual tone, never a count-based risk scale. */
+export function countryRiskColor(_event: GeoEvent, alpha: number): [number, number, number, number] {
+  return [156, 146, 116, alpha];
+}
+
 export const SEVERITY_COLORS: Record<GeoEventSeverity, [number, number, number, number]> = {
   info: [...MAP_SEVERITY_STYLES.info.rgba],
   watch: [...MAP_SEVERITY_STYLES.watch.rgba],

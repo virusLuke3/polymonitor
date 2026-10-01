@@ -204,12 +204,11 @@ describe('renderer hover lifecycle', () => {
 
     expect(renderer.hoveredDeckEventId).toBeNull();
     expect(renderer.deckHoverActive).toBe(false);
-    // The stock render listener is removed at mount; camera synchronization is
-    // one-shot after moveend, so drag start must not register another frame
-    // listener or trigger a redraw.
+    // Drag start stops the motion clock but preserves the mounted camera
+    // listener and the last observed aircraft positions.
     expect(off).not.toHaveBeenCalled();
     expect(sync).not.toHaveBeenCalled();
-    expect(canvas.style.visibility).toBe('hidden');
+    expect(canvas.style.visibility).toBe('');
   });
 
   it('does not require App hover state during Deck destruction', () => {
@@ -576,4 +575,44 @@ it('V3 a single missing tile has a bounded source retry, pauses, then recovers w
   renderer.markPrimaryReady=vi.fn();renderer.handleSourceData({sourceId:'basemap',tile:{state:'loaded',tileID:{canonical:tile}}});
   expect(renderer.missingBaseTiles.size).toBe(0);expect(renderer.callbacks.onBasemapIssueChange).toHaveBeenLastCalledWith(null);
   renderer.map=null;renderer.destroy();reset.mockRestore();vi.useRealTimers();vi.unstubAllGlobals();
+});
+
+
+it('keeps committed geometry alive across repeated offscreen pauses and resumes the aircraft clock', () => {
+  const renderer = new DeckMapRenderer() as any;
+  const layers = [{ id: 'world-event-paths' }, { id: 'world-event-country-risk' }];
+  const setProps = vi.fn();
+  const stop = vi.fn(), start = vi.fn(), sync = vi.fn();
+  renderer.overlay = { setProps };
+  renderer.geometryLayers = layers;
+  renderer.aviationOverlay = { getCanvas: () => ({ style: {} }), _deck: { animationLoop: { stop, start } } };
+  renderer.aviationOverlayViewSync = sync;
+  renderer.resize = vi.fn(); renderer.applyRadar = vi.fn();
+  renderer.requestRender = vi.fn(); renderer.syncAnimationLoop = vi.fn();
+  for (let i = 0; i < 3; i++) {
+    renderer.pause(); renderer.pause();
+    expect(renderer.geometryLayers).toBe(layers);
+    expect(setProps).not.toHaveBeenCalled(); // Removing layers finalizes their GPU instances.
+    renderer.resume();
+  }
+  expect(stop).toHaveBeenCalledTimes(3);
+  expect(start).toHaveBeenCalledTimes(3);
+  expect(sync).toHaveBeenCalledTimes(3);
+  renderer.overlay = null; renderer.aviationOverlay = null; renderer.destroy();
+});
+
+
+it('discards finalized geometry instances after actual context loss', () => {
+  const renderer = new DeckMapRenderer() as any;
+  vi.stubGlobal('window', globalThis); vi.useFakeTimers();
+  renderer.geometryLayers = [{ id: 'world-event-paths' }];
+  renderer.pointLayers = [{ id: 'world-event-points' }];
+  renderer.aviationLayerSections = { routes: [] };
+  renderer.overlay = { setProps: vi.fn() };
+  renderer.handleContextLost({ preventDefault: vi.fn() });
+  expect(renderer.overlay.setProps).toHaveBeenCalledWith({ layers: [] });
+  expect(renderer.geometryLayers).toEqual([]);
+  expect(renderer.pointLayers).toBeNull();
+  expect(renderer.aviationLayerSections).toBeNull();
+  renderer.overlay = null; renderer.destroy(); vi.useRealTimers(); vi.unstubAllGlobals();
 });

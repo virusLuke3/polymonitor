@@ -542,7 +542,7 @@ function WorldMonitorApp() {
                     onOpenMarket={focusRelatedMarket}
                     onAviationLensChange={worldEventMap.setAviationLens}
                     onAviationRiskSourceChange={worldEventMap.setAviationRiskSource}
-                    onAviationClose={() => worldEventMap.toggleLayer('air-routes')}
+                    onAviationToggle={() => worldEventMap.toggleLayer('air-routes')}
                     onCountryChange={worldEventMap.setCountry}
                     onWeatherPreset={() => { for (const id of ['weather-alerts', 'weather-radar']) if (!worldEventMap.state.activeLayerIds.includes(id)) worldEventMap.toggleLayer(id); }}
                   />

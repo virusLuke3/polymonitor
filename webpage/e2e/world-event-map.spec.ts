@@ -335,6 +335,11 @@ test('mobile aviation keeps the map controls and event list unobstructed', async
   await page.locator('.wm-world-event-list-close').click();
   await page.getByRole('button', { name: 'Hide aviation layer', exact: true }).click();
   await expect(page.locator('.wm-aviation-lens')).toHaveCount(0);
+  const rectangles = await page.locator('.wm-map-context-controls button, .wm-map-radar-status summary, .wm-map-controls button').evaluateAll(elements => elements.map(e => e.getBoundingClientRect().toJSON()));
+  for (let i = 0; i < rectangles.length; i++) for (let j = i + 1; j < rectangles.length; j++) {
+    const a = rectangles[i]!, b = rectangles[j]!;
+    expect(Math.min(a.right, b.right) > Math.max(a.left, b.left) && Math.min(a.bottom, b.bottom) > Math.max(a.top, b.top)).toBe(false);
+  }
 });
 
 test('live aircraft supports viewport loading, hover, click and inspector details', async ({ page }) => {
@@ -580,4 +585,66 @@ test('edge tooltip stays inside the map and legend retains geometry semantics', 
   for (const selector of ['.is-observed' , '.is-forecast', '.is-coverage']) {
     await expect(page.locator(`.wm-map-legend-context ${selector}`)).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
   }
+});
+
+test('saved seven-layer scene survives repeated offscreen returns with identical geometry pixels', async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const seven = 'weather-alerts,earthquakes-volcanoes,wildfires,extreme-temperature,climate-anomalies,ucdp,sanctions-country-risk';
+  const payload = { generatedAt: GENERATED_AT, status: 'ok', items: [],
+    sanctionsTargetBreakdown: [{ label: 'Ukraine', count: 30, latestOccurredAt: GENERATED_AT, latestSource: 'Fixture authority' }], countryRiskBreakdown: [] };
+  await page.route('**/wm-api/runtime/world/geo-sanctions-shock?**', route => route.fulfill({ json: payload }));
+  await gotoMap(page, `center=0,24&zoom=1.5&layers=${seven}`);
+  const host = page.locator('[data-map-renderer-ready]');
+  await expect(page.locator('.wm-map-aviation-toggle')).toBeVisible();
+  await expect(page.locator('.wm-aviation-lens')).toHaveCount(0);
+  await page.reload(); await waitForMapPaint(page);
+  await expect(page.locator('.wm-map-aviation-toggle')).toBeVisible();
+  await host.scrollIntoViewIfNeeded(); await page.mouse.move(0, 0);
+  await page.waitForTimeout(1500);
+  const before = await host.screenshot();
+  const count = await page.locator('.wm-world-event-list-toggle strong').innerText();
+  mkdirSync(ARTIFACT_DIR, { recursive: true });
+  writeFileSync(resolve(ARTIFACT_DIR, 'offscreen-scene-before.png'), before);
+  for (let cycle = 0; cycle < 3; cycle++) {
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await expect.poll(() => host.evaluate(el => el.getBoundingClientRect().bottom)).toBeLessThanOrEqual(0);
+    await page.waitForTimeout(350);
+    await host.scrollIntoViewIfNeeded(); await waitForMapPaint(page);
+    await expect(page.getByText(/MAP DEGRADED.*ISOLATED/)).toHaveCount(0);
+    await expect(page.locator('.wm-world-event-list-toggle strong')).toHaveText(count);
+    // Zero tolerance: no masks and no baseline update can hide missing geometry.
+    await expect(async () => expect((await host.screenshot()).equals(before)).toBe(true)).toPass({ timeout: 15_000 });
+  }
+  await host.screenshot({ path: resolve(ARTIFACT_DIR, 'offscreen-scene-after.png') });
+  await page.locator('.wm-map-aviation-toggle').click();
+  await expect(page.locator('.wm-aviation-lens')).toBeVisible();
+  await expect(page.locator('.wm-map-aviation-zoom')).toBeVisible();
+  await page.reload(); await waitForMapPaint(page);
+  await expect(page.locator('.wm-aviation-lens')).toBeVisible();
+});
+
+test('aircraft canvas remains sharp and camera aligned during drag and repeated visibility changes', async ({ page }) => {
+  await gotoMap(page, 'layers=air-routes&center=-30,40&zoom=2.5');
+  const host = page.locator('[data-map-renderer-ready]');
+  const motion = page.locator('.maplibregl-control-container canvas').last();
+  await expect(motion).toBeVisible();
+  const canvas = await motion.evaluate((el: HTMLCanvasElement) => ({ width: el.width, css: el.getBoundingClientRect().width }));
+  expect(canvas.width).toBeGreaterThanOrEqual(canvas.css - 1);
+  const box = (await host.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 120, box.y + box.height / 2 + 10, { steps: 10 });
+  await expect(motion).toBeVisible();
+  const alignment = await host.evaluate((el: any) => {
+    const project = el.__polymonitorProjectGeoPoint;
+    return { base: project(-70,43), air: project(-70,43,'aviation') };
+  });
+  expect(Math.abs(alignment.base.x - alignment.air.x)).toBeLessThan(0.1);
+  expect(Math.abs(alignment.base.y - alignment.air.y)).toBeLessThan(0.1);
+  await page.mouse.up();
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await page.waitForTimeout(350); await host.scrollIntoViewIfNeeded();
+  await expect(motion).toBeVisible();
+  await expect(page.getByText(/MAP DEGRADED.*ISOLATED/)).toHaveCount(0);
 });

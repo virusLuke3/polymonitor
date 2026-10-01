@@ -174,7 +174,7 @@ function countryRiskModel(event: GeoEvent): WorldEventTooltipModel {
   const sanctions = numberProperty(event, 'sanctionsEvidenceCount');
   const countryRisk = numberProperty(event, 'countryRiskEvidenceCount');
   return {
-    kicker: `${event.severity} Country Risk`,
+    kicker: 'Country evidence · not a risk rating',
     title: event.title,
     details: compact([
       compact([

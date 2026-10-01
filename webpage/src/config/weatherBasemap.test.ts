@@ -132,3 +132,14 @@ describe('World Event Map vector basemap', () => {
     expect(updates.every(([, property]) => property === 'text-field' || property === 'text-font')).toBe(true);
   });
 });
+
+it('retains the provider boundary paint instead of dimming ordinary countries below context evidence', async () => {
+  const { layers, namedFlavor } = await import('@protomaps/basemaps');
+  const original = layers('basemap', namedFlavor('black'), { lang: 'en' });
+  const actual = await buildWorldEventPMTilesStyle('https://example.test/planet.pmtiles');
+  const borders = original.filter(layer => layer.id.startsWith('boundaries'));
+  expect(borders.length).toBeGreaterThan(0);
+  for (const border of borders) {
+    expect(actual.layers.find(layer => layer.id === border.id)?.paint).toEqual(border.paint);
+  }
+});

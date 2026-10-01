@@ -61,6 +61,10 @@ export function AviationLens({
       <p role="status" data-aviation-phase={status?.phase}>{status?.phase ? labels[status.phase] : labels.LOADING} · {status?.payload?.source || (zh ? '尚无区域观测' : 'No viewport observation')}
         {status?.payload?.generatedAt ? ` · ${zh ? '接收' : 'received'} ${status.payload.generatedAt}` : ''}
         {status?.error ? ` · ${status.error}` : ''}</p>
+      {(state.zoom < 2 || (state.zoom < 12 && status?.payload?.coverage?.complete === false)) ? <button type="button" className="wm-map-aviation-zoom" onClick={onZoomToAircraft}>
+        {state.zoom < 2 ? (zh ? '放大以加载当前区域飞机' : 'Zoom in for aircraft in this region')
+          : (zh ? '放大以缩小查询覆盖缺口' : 'Zoom in to reduce query coverage gaps')}
+      </button> : null}
       {!folded ? <>
       <div className="wm-aviation-lens-stats" aria-label="Aviation reference counts">
         <span><i className="routes" /><b>{stats.visibleRoutes}</b><em>/{stats.routes} {zh ? '航线' : 'routes'}</em></span>
@@ -101,10 +105,6 @@ export function AviationLens({
           ))}
         </div>
       ) : null}
-      {(state.zoom < 2 || (state.zoom < 12 && status?.payload?.coverage?.complete === false)) ? <button type="button" className="wm-map-aviation-zoom" onClick={onZoomToAircraft}>
-        {state.zoom < 2 ? (zh ? '放大以加载当前区域飞机' : 'Zoom in for aircraft in this region')
-          : (zh ? '放大以缩小查询覆盖缺口' : 'Zoom in to reduce query coverage gaps')}
-      </button> : null}
       <p>{zh ? '飞机位置来自 ADS-B 观测；航线动画仅为拓扑示意，不代表航班运行。' : 'Aircraft positions are ADS-B observations. Route animation illustrates topology, not operating flights.'}</p>
 
       </> : null}

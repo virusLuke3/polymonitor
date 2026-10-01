@@ -159,10 +159,12 @@ describe('World Event Map adapters', () => {
     expect(result.events[0]).toMatchObject({
       id: 'geo-sanctions-shock:UA',
       category: 'sanctions',
+      severity: 'info',
       countryCode: 'UA',
       geometry: { type: 'Polygon' },
       properties: {
         riskMappingVersion: 'geo-shock-country-risk.v1',
+        severityBasis: 'evidence-context-only',
         sanctionsEvidenceCount: 18,
         countryRiskEvidenceCount: 0,
         sourceContract: 'geo-shock-split-evidence.v1',

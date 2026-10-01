@@ -40,6 +40,8 @@ import {
 } from './layerFactories/eventEmphasis';
 import { eventObservationTextureCandidates } from './layerFactories/eventObservations';
 import {
+  countryRiskColor,
+  isCountryRiskArea,
   eventColor,
   markerSize,
   clusterMarkerSize,
@@ -619,6 +621,12 @@ export class SvgMapRenderer implements MapRenderer {
       shape.setAttribute('d', data);
       shape.classList.add('wm-world-event-svg-shape');
       this.decorateEventElement(shape, event, event.id === selectedId);
+      if (isArea && isCountryRiskArea(event)) {
+        const selected = event.id === selectedId;
+        shape.style.fill = cssColor(countryRiskColor(event, selected ? 64 : 25));
+        shape.style.stroke = cssColor(countryRiskColor(event, selected ? 230 : 80));
+        shape.style.strokeWidth = selected ? '1.8px' : '0.5px';
+      }
       if (areaPresentation) {
         shape.classList.add('wm-world-event-svg-hazard-area', `is-${areaPresentation.mode}`);
         shape.setAttribute('fill', cssColor(eventSeverityColor(event, areaPresentation.fillAlpha)));
@@ -682,7 +690,7 @@ export class SvgMapRenderer implements MapRenderer {
       const title = svgElement('title');
       title.textContent = `${cluster.count} ${cluster.label || 'mapped events'} · ${cluster.mixed ? 'mixed records' : cluster.severity.toUpperCase()} · click to expand`;
       const quiet = this.state?.presentationMode === 'overview' && !cluster.important;
-      const symbolSize = quiet ? Math.min(18, 12 + Math.log2(cluster.count + 1)) : Math.min(24, clusterMarkerSize(cluster.count));
+      const symbolSize = quiet ? 20 : Math.min(26, clusterMarkerSize(cluster.count));
       if (cluster.mixed) {
         const rim = svgElement('circle'); rim.setAttribute('cx', String(x)); rim.setAttribute('cy', String(y));
         rim.setAttribute('r', String(symbolSize / 2 + 2)); rim.setAttribute('fill', 'none');
@@ -691,11 +699,11 @@ export class SvgMapRenderer implements MapRenderer {
       occupiedEventLabels.push({ left: x - symbolSize / 2, top: y - symbolSize / 2, right: x + symbolSize / 2, bottom: y + symbolSize / 2 });
       const badge = svgElement('circle');
       badge.setAttribute('cx', String(x)); badge.setAttribute('cy', String(y));
-      badge.setAttribute('r', String(symbolSize / 2)); badge.setAttribute('fill', quiet ? '#808e9588' : cssColor(cluster.color));
-      badge.setAttribute('stroke', '#0f1215');
+      badge.setAttribute('r', String(symbolSize / 2)); badge.setAttribute('fill', '#11161a');
+      badge.setAttribute('stroke', cssColor(cluster.color));
       const label = svgElement('text');
-      label.setAttribute('x', String(x)); label.setAttribute('y', String(y));
-      label.setAttribute('fill', '#0c0f12'); label.setAttribute('font-size', '12');
+      label.setAttribute('x', String(x + 12)); label.setAttribute('y', String(y - 12));
+      label.setAttribute('fill', '#e1e8ed'); label.setAttribute('font-size', '10');
       label.setAttribute('text-anchor', 'middle'); label.setAttribute('dominant-baseline', 'central');
       label.textContent = String(cluster.count);
       const expand = () => {
@@ -717,7 +725,9 @@ export class SvgMapRenderer implements MapRenderer {
         keyboardEvent.preventDefault();
         expand();
       });
-      group.append(title, badge);
+      const typeIcon = mapSymbolMarker(x, y, cluster.mixed ? 'signal' : cluster.symbol, cluster.important ? 16 : 13);
+      typeIcon.setAttribute('fill', cssColor(cluster.color));
+      group.append(title, badge, typeIcon);
       if (!quiet || (this.state?.zoom ?? 0) >= 4) group.append(label);
       this.eventLayer.append(group);
     }
@@ -731,7 +741,7 @@ export class SvgMapRenderer implements MapRenderer {
       const group = svgElement('g');
       group.classList.add('wm-world-event-svg-point');
       this.decorateEventElement(group, event, event.id === selectedId);
-      const symbolSize = this.state?.presentationMode === 'overview' && event.id !== selectedId && !isMajorWorldEvent(event) ? 6 : markerSize(event, selectedId || null);
+      const symbolSize = this.state?.presentationMode === 'overview' && event.id !== selectedId && !isMajorWorldEvent(event) ? 10 : markerSize(event, selectedId || null);
       const eventSymbol = mapSymbolForEvent(event);
       occupiedEventLabels.push({
         left: x - symbolSize / 2 - 2,
@@ -747,7 +757,7 @@ export class SvgMapRenderer implements MapRenderer {
       group.append(hit, symbol);
       this.eventLayer.append(group);
       const mapZoom = this.state?.zoom || 1.25;
-      if (event.id === selectedId || (mapZoom >= 3 && ( event.severity === 'critical'
+      if (event.id === selectedId || isMajorWorldEvent(event) || (mapZoom >= 3 && ( event.severity === 'critical'
         || (mapZoom >= 4 && event.severity === 'warning')
       ))) eventLabelCandidates.push({ event, x, y, size: event.id === selectedId ? 13 : 11 });
     }
@@ -759,7 +769,7 @@ export class SvgMapRenderer implements MapRenderer {
     ));
     occupiedEventLabels.push(...this.occupiedScreenBoxes.map(([left, top, right, bottom]) => ({ left, top, right, bottom })));
 
-    for (const candidate of eventLabelCandidates.slice(0, (this.state?.zoom || 0) < 4 ? 24 : 100)) {
+    for (const candidate of eventLabelCandidates.slice(0, (this.state?.zoom || 0) < 2.5 ? 8 : (this.state?.zoom || 0) < 4 ? 24 : 100)) {
       const label = svgElement('text');
       label.classList.add('wm-world-event-svg-event-label');
       label.setAttribute('font-size', String(candidate.size));

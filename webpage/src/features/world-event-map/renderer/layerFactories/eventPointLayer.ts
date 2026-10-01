@@ -51,8 +51,8 @@ export function createEventPointLayers({
   const index = clusterIndex || new EventClusterIndex();
   index.update(events);
   const { singles, clusters } = index.presentation(zoom, selectedEventId, viewport, project);
-  const clusterSize = (cluster: EventCluster) => presentationMode === 'overview' && !cluster.important ? Math.min(18, 12 + Math.log2(cluster.count + 1)) : Math.min(24, clusterMarkerSize(cluster.count));
-  const pointSize = (event: GeoEvent) => presentationMode === 'overview' && event.id !== selectedEventId && !isMajorWorldEvent(event) ? 6 : markerSize(event, selectedEventId);
+  const clusterSize = (cluster: EventCluster) => presentationMode === 'overview' && !cluster.important ? 20 : Math.min(26, clusterMarkerSize(cluster.count));
+  const pointSize = (event: GeoEvent) => presentationMode === 'overview' && event.id !== selectedEventId && !isMajorWorldEvent(event) ? 10 : markerSize(event, selectedEventId);
   const layers: Layer[] = [
     ...createEventObservationLayer(events, zoom, selectedEventId, viewport),
   ].filter((layer): layer is Layer => Boolean(layer) && !Array.isArray(layer));
@@ -70,15 +70,25 @@ export function createEventPointLayers({
       id: 'world-event-clusters', data: clusters,
       getPosition: cluster => cluster.coordinates,
       getRadius: cluster => clusterSize(cluster) / 2,
-      getFillColor: cluster => presentationMode === 'overview' && !cluster.important ? [128, 142, 149, 135] : [...cluster.color.slice(0, 3), 235] as [number, number, number, number],
-      getLineColor: [15, 18, 21, 255], getLineWidth: 1,
+      getFillColor: [17, 22, 26, 230],
+      getLineColor: cluster => [...cluster.color.slice(0, 3), cluster.important ? 220 : 100] as [number, number, number, number], getLineWidth: 1,
       radiusUnits: 'pixels', lineWidthUnits: 'pixels', filled: true, stroked: true,
       pickable: true, autoHighlight: false,
+    }));
+    layers.push(new IconLayer<EventCluster>({
+      id: 'world-event-cluster-symbols', data: clusters,
+      iconAtlas: MAP_SYMBOL_MASK_ATLAS, iconMapping: MAP_SYMBOL_MASK_ICON_MAPPING,
+      getIcon: cluster => cluster.mixed ? 'signal' : cluster.symbol,
+      getPosition: cluster => cluster.coordinates,
+      getSize: cluster => cluster.important ? 16 : 13,
+      getColor: cluster => [...cluster.color.slice(0, 3), cluster.important ? 255 : 190] as [number, number, number, number],
+      sizeUnits: 'pixels', alphaCutoff: 0.05, pickable: false,
     }));
     layers.push(new TextLayer<EventCluster>({
       id: 'world-event-cluster-counts', data: clusters.filter(cluster => presentationMode === 'records' || cluster.important || zoom >= 4),
       getPosition: cluster => cluster.coordinates, getText: cluster => String(cluster.count),
-      getSize: 11, getColor: [12, 15, 18, 255], getTextAnchor: 'middle', getAlignmentBaseline: 'center',
+      getPixelOffset: [12, -12], getSize: 10, getColor: [225, 232, 237, 255], getTextAnchor: 'middle', getAlignmentBaseline: 'center',
+      background: true, getBackgroundColor: [17, 22, 26, 235], backgroundPadding: [2, 1],
       fontFamily: mapLabelFontFamily(), fontWeight: 600, characterSet: 'auto', pickable: false,
     }));
   }
@@ -99,7 +109,7 @@ export function createEventPointLayers({
       .filter((event) => {
         const layerId = worldEventLayerIdForEvent(event);
         const labelMinZoom = layerId ? worldEventLayerById(layerId)?.labelMinZoom ?? 3 : 3;
-        return event.id === selectedEventId || (zoom >= labelMinZoom
+        return event.id === selectedEventId || isMajorWorldEvent(event) || (zoom >= labelMinZoom
           && ( event.severity === 'critical'
             || (event.category === 'natural-hazard' && (zoom >= 4 || event.severity === 'warning'))));
       })
@@ -117,7 +127,9 @@ export function createEventPointLayers({
       const screen = project(cluster.coordinates);
       if (!screen) continue;
       const radius = clusterSize(cluster) / 2 + 5;
-      boxes.push([screen.x - radius, screen.y - radius, screen.x + radius, screen.y + radius]);
+      const badge = presentationMode === 'records' || cluster.important || zoom >= 4;
+      boxes.push([screen.x - radius, screen.y - (badge ? Math.max(radius, 20) : radius),
+        screen.x + (badge ? Math.max(radius, 24) : radius), screen.y + radius]);
     }
   }
   const overlaps = (candidate: ScreenBox) => boxes.some((box) => !(
@@ -171,7 +183,7 @@ export function createEventPointLayers({
       }
       return false;
     })
-    .slice(0, zoom < 4 ? 24 : zoom < 5 ? 60 : 120);
+    .slice(0, zoom < 2.5 ? 8 : zoom < 4 ? 24 : zoom < 5 ? 60 : 120);
   if (labeled.length) {
     layers.push(new TextLayer<GeoEvent>({
       id: 'world-event-labels',

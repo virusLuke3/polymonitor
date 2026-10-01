@@ -17,7 +17,7 @@ export function WorldEventMapView({
   onOpenMarket,
   onAviationLensChange,
   onAviationRiskSourceChange,
-  onAviationClose,
+  onAviationToggle,
   onCountryChange,
   onWeatherPreset,
 }: {
@@ -31,7 +31,7 @@ export function WorldEventMapView({
   onOpenMarket: (marketId: number) => void;
   onAviationLensChange: (lens: AviationLensMode) => void;
   onAviationRiskSourceChange: (source: AviationRiskSource) => void;
-  onAviationClose: () => void;
+  onAviationToggle: () => void;
   onCountryChange: (countryCode: string | null) => void;
   onWeatherPreset?: () => void;
 }) {
@@ -50,7 +50,7 @@ export function WorldEventMapView({
           onOpenMarket={onOpenMarket}
           onAviationLensChange={onAviationLensChange}
           onAviationRiskSourceChange={onAviationRiskSourceChange}
-          onAviationClose={onAviationClose}
+          onAviationToggle={onAviationToggle}
           onCountryChange={onCountryChange}
           onWeatherPreset={onWeatherPreset}
         />

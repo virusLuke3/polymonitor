@@ -49,7 +49,7 @@ export type WorldEventMapProps = {
   onOpenMarket?: (marketId: number) => void;
   onAviationLensChange?: (lens: AviationLensMode) => void;
   onAviationRiskSourceChange?: (source: AviationRiskSource) => void;
-  onAviationClose?: () => void;
+  onAviationToggle?: () => void;
   onCountryChange?: (countryCode: string | null) => void;
   onWeatherPreset?: () => void;
 };
@@ -65,7 +65,7 @@ export function WorldEventMap({
   onOpenMarket,
   onAviationLensChange,
   onAviationRiskSourceChange,
-  onAviationClose,
+  onAviationToggle,
   onCountryChange,
   onWeatherPreset,
 }: WorldEventMapProps) {
@@ -82,6 +82,16 @@ export function WorldEventMap({
   const radarRef = useRef(radar); radarRef.current = radar;
   const [committedRadarFrame, setCommittedRadarFrame] = useState<import('../data/useWeatherRadar').RadarFrame | null>(null);
   const [radarTiles, setRadarTiles] = useState<'off' | 'loading' | 'ready' | 'error'>('off');
+  const radarEnabled = state.activeLayerIds.includes('weather-radar');
+  const radarSummary = !radarEnabled ? mt('Off')
+    : rendererKind === 'svg' ? (locale === 'zh' ? '渲染器不支持' : 'Renderer unavailable')
+    : radar.status === 'error' ? (locale === 'zh' ? '来源失败' : 'Source failed')
+    : radarTiles === 'error' ? (locale === 'zh' ? '瓦片失败' : 'Tiles failed')
+    : committedRadarFrame && radarTiles === 'ready'
+      ? `${new Date(committedRadarFrame.time * 1000).toISOString().slice(11, 16)} UTC${radar.status === 'stale' ? ' · stale' : ''}`
+      : radar.status === 'ready' || radar.status === 'stale'
+        ? (locale === 'zh' ? '瓦片加载中' : 'Loading tiles')
+        : (locale === 'zh' ? '清单加载中' : 'Loading manifest');
   const [clusterSelection, setClusterSelection] = useState<ClusterSelection | null>(null);
   const languageRef = useRef(locale);
   languageRef.current = locale;
@@ -93,7 +103,7 @@ export function WorldEventMap({
   const callbackRef = useRef({ onViewportChange, onCameraChange, onEventSelect, onRendererKindChange });
   const [basemapState, setBasemapState] = useState<BasemapState>('idle');
   const [rendererError, setRendererError] = useState<string | null>(null);
-  const [rendererLayerError, setRendererLayerError] = useState<string | null>(null);
+  const [rendererLayerErrors, setRendererLayerErrors] = useState<Record<string, string>>({});
   const [basemapIssue, setBasemapIssue] = useState<string | null>(null);
   const retryRendererRef = useRef<(() => void) | null>(null);
   const [countryTarget, setCountryTarget] = useState<{
@@ -278,7 +288,7 @@ export function WorldEventMap({
       const staging = document.createElement('div');
       staging.style.cssText = 'position:absolute;inset:0;visibility:hidden;pointer-events:none';
       host.append(staging); candidateHost = staging;
-      setRendererLayerError(null);
+      setRendererLayerErrors({});
       setRendererError(reason?.message ?? null);
 
       const fail = (error: unknown) => {
@@ -304,7 +314,9 @@ export function WorldEventMap({
       const callbacks: MapRendererCallbacks = {
         onBasemapIssueChange: message => { if (isCurrent()) setBasemapIssue(message); },
         onViewportChange: viewport => { if(isCurrent()) callbackRef.current.onViewportChange?.(viewport); },
-        onLayerRecovered: () => { if(isCurrent()) setRendererLayerError(null); },
+        onLayerRecovered: layerId => { if (isCurrent()) setRendererLayerErrors(previous => {
+          const next = { ...previous }; delete next[layerId]; return next;
+        }); },
         onPresentationChange: counts => { if (isCurrent()) setPresentation(counts); },
         onRadarStateChange: (status, frame) => { if (isCurrent()) { setRadarTiles(status); if (frame !== undefined) setCommittedRadarFrame(frame); } },
         onCameraChange: (camera) => { if (isCurrent()) callbackRef.current.onCameraChange(camera); },
@@ -319,7 +331,7 @@ export function WorldEventMap({
         onBasemapStateChange: (nextState) => { if (isCurrent() && !failed) { if (nextState.endsWith('-ready')) { readyResolve?.(true); setRendererError(null); } setBasemapState(nextState); } },
         onRendererFallbackRequested: fail,
         onLayerDegraded: (layerId, error) => {
-          if (isCurrent()) setRendererLayerError(`${layerId}: ${error.message}`);
+          if (isCurrent()) setRendererLayerErrors(previous => ({ ...previous, [layerId]: error.message }));
         },
         onError: (error) => { if (isCurrent()) setRendererError(error.message); },
       };
@@ -633,21 +645,24 @@ export function WorldEventMap({
       {state.activeLayerIds.includes('air-routes')
         && onAviationLensChange
         && onAviationRiskSourceChange
-        && onAviationClose ? (
+        && onAviationToggle ? (
           <AviationLens
             events={events}
             status={aviationStatus}
             state={state}
             onLensChange={onAviationLensChange}
             onRiskSourceChange={onAviationRiskSourceChange}
-            onClose={onAviationClose}
+            onClose={onAviationToggle}
             onZoomToAircraft={() => onCameraChange({ center: state.center, zoom: Math.min(12, Math.max(2.5, state.zoom + 1)) })}
           />
         ) : null}
-      <details className="wm-map-radar-status">
-        <summary>{locale === 'zh' ? '雷达' : 'Radar'} · {!state.activeLayerIds.includes('weather-radar') ? mt('Off')
-          : rendererKind === 'svg' ? (locale === 'zh' ? 'SVG 不支持' : 'Unavailable in SVG')
-          : committedRadarFrame ? `${new Date(committedRadarFrame.time * 1000).toISOString().slice(11, 16)} UTC${radar.status === 'stale' ? ' · stale' : radarTiles === 'error' ? ' · error' : radarTiles === 'loading' ? ' · loading' : ''}` : radar.status}</summary>
+      <div className="wm-map-context-controls">
+      <button ref={legendToggleRef} type="button" className="wm-map-legend-toggle" aria-controls="wm-map-legend" aria-expanded={legendOpen} onClick={() => setLegendOpen(value => !value)}>{mt('Legend')}</button>
+      {!state.activeLayerIds.includes('air-routes') && onAviationToggle ? <button type="button" className="wm-map-aviation-toggle" onClick={onAviationToggle} aria-label={locale === 'zh' ? '启用航空图层' : 'Enable aviation layer'}>
+        {locale === 'zh' ? '航空 · 未开启 ＋' : 'Aviation · Off +'}
+      </button> : null}
+      <details className="wm-map-radar-status" data-radar-tiles={radarTiles}>
+        <summary>{locale === 'zh' ? '雷达' : 'Radar'} · {radarSummary}</summary>
         <div>
           <a href="https://www.rainviewer.com/" target="_blank" rel="noreferrer">© RainViewer</a>
           <span>{locale === 'zh' ? '最新雷达合成帧' : 'Latest radar composite'} · {committedRadarFrame ? new Date(committedRadarFrame.time * 1000).toISOString().replace('T', ' ').replace('.000Z', ' UTC') : '—'}</span>
@@ -658,7 +673,7 @@ export function WorldEventMap({
           {onWeatherPreset ? <button type="button" onClick={onWeatherPreset}>{locale === 'zh' ? '启用天气视图' : 'Enable weather view'}</button> : null}
         </div>
       </details>
-      <button ref={legendToggleRef} type="button" className="wm-map-legend-toggle" aria-controls="wm-map-legend" aria-expanded={legendOpen} onClick={() => setLegendOpen(value => !value)}>{mt('Legend')}</button>
+      </div>
       <div
         id="wm-map-legend"
         onWheel={event => event.stopPropagation()}
@@ -682,6 +697,9 @@ export function WorldEventMap({
             </b>
           ))}
         </span>
+        <h3>{locale === 'zh' ? '聚合与国家背景' : 'Clusters and country context'}</h3>
+        <p>{locale === 'zh' ? '带圈符号代表同类事件聚合；双圈菱形代表混合记录。角标是事件数，点击可展开全部成员。' : 'A ringed symbol groups events of one type; a double-ring diamond groups mixed records. The badge counts events. Click to access every member.'}</p>
+        {state.activeLayerIds.includes('sanctions-country-risk') ? <p>{locale === 'zh' ? '浅褐色国家背景表示存在来源证据，不是风险等级；制裁和冲突记录数量在详情中分别列出。' : 'Muted country shading indicates source evidence, not a threat rating. Sanctions and conflict record counts remain separate in details.'}</p> : null}
         <h3>{locale === 'zh' ? '观测、预测与数据状态' : 'Observation, forecast and data'}</h3>
         <span className="wm-map-legend-context" aria-label="Observation and coverage states">
           {legendContext.observed ? <b><i className="is-observed" />{mt('Observed')}</b> : null}
@@ -712,8 +730,8 @@ export function WorldEventMap({
       {rendererError && basemapState === 'failed' ? (
         <div className="wm-banner error" role="alert">{rendererError}</div>
       ) : null}
-      {rendererLayerError ? (
-        <div className="wm-banner notice" role="status">MAP DEGRADED · ISOLATED {rendererLayerError}</div>
+      {Object.keys(rendererLayerErrors).length > 0 ? (
+        <div className="wm-banner notice" role="status">MAP DEGRADED · ISOLATED {Object.entries(rendererLayerErrors).map(([id, error]) => `${id}: ${error}`).join(' · ')}</div>
       ) : null}
 
     </div>

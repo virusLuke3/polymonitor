@@ -86,6 +86,7 @@ describe('world event layer factories', () => {
     )), state);
     expect((layers as Layer[]).map((layer) => layer.id)).toEqual([
       'world-event-clusters',
+      'world-event-cluster-symbols',
       'world-event-cluster-counts',
     ]);
     const clusterCounts = (layers as Layer[]).find((layer) => layer.id === 'world-event-cluster-counts');

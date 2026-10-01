@@ -110,9 +110,12 @@ export function EventInspector({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
+  const evidenceContext = event.properties.severityBasis === 'evidence-context-only';
+  const severityLabel = evidenceContext ? (locale === 'zh' ? '证据背景 · 非风险评级' : 'Evidence context · not a risk rating') : mt(event.severity);
+
   const commonFields: InspectorField[] = [
     { label: 'Report ID', value: event.id },
-    { label: 'Severity', value: event.severity.toUpperCase() },
+    { label: evidenceContext ? 'Color meaning' : 'Severity', value: severityLabel },
     ...(hazard ? [{ label: 'Lifecycle', value: hazard.lifecycle.toUpperCase() }] : []),
     { label: 'Location', value: event.locationLabel || 'Location label unavailable' },
     { label: 'Precision', value: event.locationPrecision.toUpperCase() },
@@ -141,7 +144,7 @@ export function EventInspector({
         {outsideFilters ? <p className="wm-map-selection-retained" role="status">{locale === 'zh' ? '所选事件不在当前筛选结果中' : 'Selected event is outside the current filters'}</p> : null}
         <div className="wm-event-inspector-kickers">
           <span>{mt(hazard ? hazardLabel(hazard) : event.category)}</span>
-          <span>{mt(event.severity)}</span>
+          <span>{severityLabel}</span>
           {hazard ? <span>{mt(hazard.lifecycle)}</span> : null}
         </div>
         <div className="wm-event-inspector-titleline">
@@ -154,7 +157,7 @@ export function EventInspector({
           />
           <h2 id="wm-event-inspector-title" ref={titleRef} tabIndex={-1}>{event.title}</h2>
         </div>
-        <p>{event.locationLabel} · {mt(event.severity)}</p>
+        <p>{event.locationLabel} · {severityLabel}</p>
         <p>{event.sources.map(source => `${source.provider} · ${mt(source.freshness || 'unknown')}`).join(' / ')}</p>
         {hazard && !hazard.coverage.isComplete ? <p className="wm-event-inspector-coverage">{mt('Coverage gap')} · {hazard.coverage.label}</p> : null}
       </header>

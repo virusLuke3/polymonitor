@@ -106,7 +106,7 @@ export function createEventGeometryLayers(
   ));
   const layers: LayersList = [];
 
-  layers.push(...createCountryRiskLayers(visibleEvents, selectedEventId));
+  layers.push(...createCountryRiskLayers(visibleEvents, selectedEventId, beforeId));
 
   if (cycloneCones.length) {
     layers.push(new GeoJsonLayer({

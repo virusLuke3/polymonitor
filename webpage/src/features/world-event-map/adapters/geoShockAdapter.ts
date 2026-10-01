@@ -77,11 +77,6 @@ export function adaptGeoShockPayload(payload?: RuntimeGeoSanctionsShockPayload |
   return { events: validated.events, rejected: [...missingId, ...validated.rejected] };
 }
 
-function countryRiskSeverity(count: number) {
-  if (count >= 25) return 'warning' as const;
-  return 'watch' as const;
-}
-
 export function adaptGeoShockCountryRiskPayload(
   payload: RuntimeGeoSanctionsShockPayload | null | undefined,
   countries: CountryGeometryIndex | null,
@@ -176,7 +171,8 @@ export function adaptGeoShockCountryRiskPayload(
         .filter((headline): headline is string => Boolean(headline))
         .filter((headline, index, values) => values.indexOf(headline) === index)
         .join(' · ') || nonEmpty(payload.summary?.targetSummary),
-      severity: countryRiskSeverity(Math.max(sanctionsCount, countryRiskCount)),
+      // This feed supplies evidence counts, not a country threat assessment.
+      severity: 'info',
       occurredAt: isoTimestamp(latest?.latestOccurredAt),
       updatedAt: isoTimestamp(payload.generatedAt),
       geometry: country.geometry,
@@ -192,6 +188,7 @@ export function adaptGeoShockCountryRiskPayload(
       })),
       limitations: [
         'The polygon is country-level evidence, not an incident footprint.',
+        'Background shading indicates available evidence, not risk severity. Record counts do not determine a threat level.',
         'Sanctions evidence and conflict evidence use separate counts; the values are not added or compared as one metric.',
         'Sanctions records are source monitoring evidence and are not legal advice.',
         ...(legacyMixedEvidence
@@ -201,6 +198,7 @@ export function adaptGeoShockCountryRiskPayload(
       relatedMarketIds: [],
       properties: {
         mapEntity: 'country-risk-area',
+        severityBasis: 'evidence-context-only',
         country: country.name,
         countryCode: country.iso2,
         evidenceCount: Math.max(sanctionsCount, countryRiskCount),

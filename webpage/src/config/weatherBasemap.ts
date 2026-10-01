@@ -84,9 +84,8 @@ export async function buildWorldEventPMTilesStyle(url: string, language: 'en' | 
     if (layer.id === 'background') return { ...layer, paint: { ...layer.paint, 'background-color': '#333333' } };
     if (layer.id === 'earth') return { ...layer, paint: { ...layer.paint, 'fill-color': '#141414' } };
     if (layer.id === 'water') return { ...layer, paint: { ...layer.paint, 'fill-color': '#333333' } };
-    if (layer.type === 'line' && layer.id.startsWith('boundaries')) {
-      return { ...layer, paint: { ...layer.paint, 'line-color': layer.id === 'boundaries_country' ? '#35383b' : '#292d30' } };
-    }
+    // Keep the provider's neutral country/subnational borders and zoom widths.
+    // Darkening these separately made evidence outlines look like new borders.
     if (layer.type === 'symbol' && layer['source-layer'] === 'places') {
       return { ...layer, paint: { ...layer.paint,
         'text-color': layer.id === 'places_country' ? '#a3a8ad' : '#858d95',

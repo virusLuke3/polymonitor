@@ -1,6 +1,6 @@
 import type { ScreenBox } from './layerFactories/eventClusters';
 
-export const MAP_OCCLUDERS = '.wm-event-inspector, .wm-world-event-list > section, .wm-world-event-list-toggle, .wm-weather-deck-legend.is-open, .wm-map-legend-toggle, .wm-layer-sidebar, .wm-map-controls, .wm-map-radar-status, .wm-map-radar-status[open] > div, .wm-world-event-attribution, .wm-map-focus-toggle, .wm-aviation-lens, .wm-country-context-card';
+export const MAP_OCCLUDERS = '.wm-event-inspector, .wm-world-event-list > section, .wm-world-event-list-toggle, .wm-weather-deck-legend.is-open, .wm-map-context-controls, .wm-layer-sidebar, .wm-map-controls, .wm-map-radar-status, .wm-map-radar-status[open] > div, .wm-world-event-attribution, .wm-map-focus-toggle, .wm-aviation-lens, .wm-country-context-card';
 export const boxesOverlap = (a: ScreenBox, b: ScreenBox) => a[0] < b[2] && a[2] > b[0] && a[1] < b[3] && a[3] > b[1];
 
 /** Nearest available rectangle, shared by tooltips and selection reveal. */

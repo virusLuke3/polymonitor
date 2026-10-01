@@ -637,7 +637,9 @@ export class DeckMapRenderer implements MapRenderer {
 
   private fitWorld() {
     this.fittingWorld = true;
-    this.map?.fitBounds([[-180, -58], [180, 76]], { padding: 40, maxZoom: 1.5, duration: this.reducedMotion ? 0 : 350 });
+    // Fit the populated world to the actual canvas. A fixed zoom ceiling left
+    // most of wide desktop maps unused; saved/user cameras never enter here.
+    this.map?.fitBounds([[-180, -56], [180, 72]], { padding: 24, maxZoom: 3, duration: this.reducedMotion ? 0 : 350 });
   }
 
   setOcclusions(boxes: ScreenBox[]) {
@@ -666,6 +668,7 @@ export class DeckMapRenderer implements MapRenderer {
   }
 
   pause() {
+    if (this.paused) return;
     this.paused = true;
     this.applyRadar();
     this.clearAllHover();
@@ -677,8 +680,10 @@ export class DeckMapRenderer implements MapRenderer {
     this.renderScheduler.cancel();
     this.heavyGeometryCommit.cancel();
     this.geometryNeedsCommit = true;
-    this.overlay?.setProps({ layers: [] });
-    this.aviationOverlay?.setProps({ layers: [] });
+    // Removing layers finalizes their instances. Keep the last committed
+    // scene attached while clocks/commits are suspended, as WorldMonitor does.
+    // In particular, cached geometry must survive until its yielded rebuild.
+    this.pauseAviationOverlayViewSync();
   }
 
   resume() {
@@ -687,6 +692,7 @@ export class DeckMapRenderer implements MapRenderer {
     this.applyRadar();
     this.scheduleMissingTileRecovery();
     this.resize();
+    this.resumeAviationOverlayViewSync();
     this.requestRender({ points: true, aviation: true, geometry: true, dynamic: true });
     this.syncAnimationLoop();
   }
@@ -1123,10 +1129,9 @@ export class DeckMapRenderer implements MapRenderer {
     this.interacting = true;
     this.cancelAnimationLoop();
     this.cancelAnimationResume();
-    // The non-interleaved motion canvas otherwise performs a synchronous deck
-    // redraw on every MapLibre drag frame even though its animation clock is
-    // paused. Freeze and hide it until moveend; the labelled basemap, routes
-    // and stable events remain visible in the interleaved canvas.
+    // Stop advancing aircraft during interaction, but keep their last observed
+    // positions attached to the moving camera. The native view sync redraws
+    // only when MapLibre renders; there is no independent motion loop.
     this.renderScheduler.cancel();
     this.cancelStagedAviationCommit();
     this.pauseAviationOverlayViewSync();
@@ -1339,7 +1344,7 @@ export class DeckMapRenderer implements MapRenderer {
         layers: [],
         // Only moving aircraft and 2-4px route runners use this canvas. The
         // labelled basemap and all static objects keep their full DPR.
-        useDevicePixels: Math.min(1, Math.max(0.6, window.devicePixelRatio * 0.6)),
+        useDevicePixels: Math.min(2, window.devicePixelRatio),
         onError: (error: Error, layer?: Layer) => this.handleDeckLayerError(error, layer),
       });
       this.aviationDeckSuspended = false;
@@ -1353,8 +1358,10 @@ export class DeckMapRenderer implements MapRenderer {
       if (nativeViewSync) {
         map.off('render', nativeViewSync);
         this.aviationOverlayViewSync = () => {
-          if (!this.interacting && !this.paused && !this.destroyed) nativeViewSync();
+          // Follow camera movement even while the motion clock is stopped.
+          if (!this.paused && !this.destroyed) nativeViewSync();
         };
+        map.on('render', this.aviationOverlayViewSync);
       }
     }
     return this.aviationOverlay;
@@ -1367,6 +1374,7 @@ export class DeckMapRenderer implements MapRenderer {
     this.clearManualAviationHover();
     const overlay = this.aviationOverlay;
     const map = this.map;
+    if (map && this.aviationOverlayViewSync) map.off('render', this.aviationOverlayViewSync);
     if (overlay) overlay.setProps({ layers: [] });
     if (map && overlay && this.aviationOverlayMounted) {
       try {
@@ -1386,7 +1394,7 @@ export class DeckMapRenderer implements MapRenderer {
     this.aviationOverlayViewSyncPaused = true;
     this.suspendAviationDeckLoop();
     const canvas = this.aviationOverlay?.getCanvas();
-    if (canvas) canvas.style.visibility = 'hidden';
+    if (canvas) canvas.style.visibility = '';
   }
 
   private cancelStagedAviationCommit() {
@@ -1652,6 +1660,11 @@ export class DeckMapRenderer implements MapRenderer {
     this.geometryNeedsCommit = true;
     this.overlay?.setProps({ layers: [] });
     this.aviationOverlay?.setProps({ layers: [] });
+    // Context loss really releases GPU layers, unlike a visibility pause.
+    // Drop every cached instance so the recovery commit cannot reinsert it.
+    this.geometryLayers = [];
+    this.pointLayers = null;
+    this.aviationLayerSections = null;
     this.emitBasemapState('initializing');
     this.callbacks?.onError(new Error('WebGL context lost. Waiting for one bounded recovery attempt.'));
     this.clearContextRecoveryTimer();
