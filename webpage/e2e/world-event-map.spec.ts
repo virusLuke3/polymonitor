@@ -46,6 +46,30 @@ function screenshot(page: Page, name: string) {
   return page.screenshot({ path: resolve(ARTIFACT_DIR, name), fullPage: false });
 }
 
+test('a saved wide world fills the viewport through resize, zoom-out, pan and reload', async ({ page }) => {
+  await page.setViewportSize({width:1920,height:1080});
+  await gotoMap(page,'center=-1.7883,37.2465&zoom=1.21&layers=earthquakes-volcanoes,weather-alerts');
+  const host=page.locator('[data-map-renderer-ready]');
+  const covered=async()=>{
+    await expect(async()=>{
+      const b=await host.evaluate((el:any)=>{
+        const p=el.__polymonitorProjectGeoPoint;
+        return {west:p(-180,0).x,east:p(180,0).x,north:p(0,85.0511287798).y,south:p(0,-85.0511287798).y,
+          width:el.clientWidth,height:el.clientHeight};
+      });
+      expect(b.west).toBeLessThanOrEqual(0.01);expect(b.east).toBeGreaterThanOrEqual(b.width-0.01);
+      expect(b.north).toBeLessThanOrEqual(0.01);expect(b.south).toBeGreaterThanOrEqual(b.height-0.01);
+    }).toPass();
+  };
+  await covered();await page.reload();await waitForMapPaint(page);await covered();
+  for (const viewport of [{width:2560,height:1440},{width:390,height:844},{width:2048,height:567}]) {
+    await page.setViewportSize(viewport);await covered();
+    await host.evaluate((el:any)=>el.__polymonitorMapCamera([179,80],-1));await covered();
+    await host.evaluate((el:any)=>el.__polymonitorMapCamera([-179,-80],2.5));await covered();
+  }
+  await screenshot(page,'world-viewport-coverage.png');
+});
+
 test('basemap and both overlays share a world at the positive dateline endpoint', async ({ page }) => {
   test.setTimeout(120_000);
   await page.setViewportSize({ width: 2537, height: 1286 });

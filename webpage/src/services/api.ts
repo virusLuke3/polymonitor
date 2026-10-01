@@ -88,7 +88,7 @@ function isAbortLikeError(error: unknown) {
     || String(maybe.message || '').toLowerCase().includes('signal is aborted');
 }
 
-async function apiGetWithTimeout<T>(path: string, timeoutMs = 12000, externalSignal?: AbortSignal): Promise<T> {
+async function apiGetWithTimeout<T>(path: string, timeoutMs = 12000, externalSignal?: AbortSignal, cache?: RequestCache): Promise<T> {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   const abortFromExternal = () => controller.abort();
@@ -98,6 +98,7 @@ async function apiGetWithTimeout<T>(path: string, timeoutMs = 12000, externalSig
     const response = await fetch(`${API_BASE}${path}`, {
       headers: { Accept: 'application/json' },
       signal: controller.signal,
+      ...(cache ? { cache } : {}),
     });
     if (!response.ok) throw new ApiHttpError(response.status, path, response.headers.get('Retry-After'));
     // Keep timeout and cancellation ownership until the body is consumed.
@@ -382,6 +383,9 @@ export function fetchNaturalHazardMapSource(
     `/runtime/world/natural-hazards/map?${params.toString()}`,
     10_000,
     signal,
+    // The source's absolute staleAfter can precede an intermediary HTTP cache
+    // deadline. Revalidate scheduled refreshes; retain ETag/cache reuse.
+    'no-cache',
   );
 }
 

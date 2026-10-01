@@ -323,15 +323,17 @@ export function useNaturalHazards({ sourceKeys, zoom, center, suspended }: {
       const schedule = (failed: boolean) => {
         if (!isCurrent() || blocked) return;
         const expiresAt = Date.parse(records.current.get(source)?.parsed.response.sources[0]?.staleAfter || '');
-        // A successful response can be a cache hit near its original deadline.
-        // Starting a full interval here would leave it stale for most of the
-        // next minute. Keep the server deadline, without rewriting freshness
-        // or aggressively polling an already degraded source.
+        // A retained/deadline response is HTTP-successful but not fresh. Check
+        // again with bounded backoff instead of waiting FIRMS' 15 min / climate's
+        // 6 h interval. This polls our shared snapshot, not the external provider.
+        const sourceState = records.current.get(source)?.parsed.response.sources[0];
+        const stale = sourceState?.status === 'degraded' || sourceState?.status === 'error'
+          || (Number.isFinite(expiresAt) && expiresAt <= Date.now());
         const refreshDelay = Number.isFinite(expiresAt) && expiresAt > Date.now()
           ? Math.min(REFRESH_INTERVAL_MS[source], Math.max(1000, expiresAt - Date.now()))
           : REFRESH_INTERVAL_MS[source];
         const delay = failed ? RETRY_DELAYS_MS[Math.min(RETRY_DELAYS_MS.length - 1, Math.max(0, failures - 1))]!
-          : refreshDelay;
+          : stale ? Math.min(60_000, 30_000 * Math.max(1, failures)) : refreshDelay;
         const jitter = Math.floor(Math.random() * (failed ? 1000 : 3000));
         task.timer = window.setTimeout(() => {
           task.timer = null; task.queued = true; pump();
@@ -349,13 +351,15 @@ export function useNaturalHazards({ sourceKeys, zoom, center, suspended }: {
             const parsed = parseNaturalHazardsResponse(payload);
             const upstream = payload.sources[0] as typeof payload.sources[number] & {condition?: string; retryAfterSeconds?: number};
             blocked = upstream?.condition === 'blocked';
-            retryAfterMs = upstream?.condition === 'throttled' && Number.isFinite(upstream.retryAfterSeconds) ? Number(upstream.retryAfterSeconds) * 1000 : null;
+            retryAfterMs = Number.isFinite(upstream?.retryAfterSeconds) ? Math.max(0, Number(upstream.retryAfterSeconds) * 1000) : null;
             if (!parsed.events.length && (parsed.rejected.length || parsed.response.sources.some(item => item.status === 'error'))) {
               throw new Error(parsed.response.errors.map(item=>item.code).join(' · ') || 'Source response was invalid or unavailable');
             }
             recordMapDataPhase('parse', source, parseStartedAt, parsed.events.length);
             commit(parsed, 'network');
-            failures = 0;
+            const expiresAt = Date.parse(upstream?.staleAfter || '');
+            failures = upstream?.status === 'degraded' || upstream?.status === 'error'
+              || (Number.isFinite(expiresAt) && expiresAt <= Date.now()) ? failures + 1 : 0;
             void writeHazardMapSnapshot(source, geometryZoom, parsed.response, source === 'firms' ? firmsViewportKey : '');
             schedule(false);
           }).catch((error) => {

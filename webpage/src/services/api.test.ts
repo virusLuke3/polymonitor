@@ -1,9 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiTimeoutError, fetchAllActiveMarkets, fetchAviationViewport, fetchMarketWideAiSnapshot, fetchRuntimeGlobalTemperatureMonitor, fetchSystemHealth, fetchWorkspaceBundle } from './api';
+import { ApiTimeoutError, fetchAllActiveMarkets, fetchAviationViewport, fetchMarketWideAiSnapshot, fetchNaturalHazardMapSource, fetchRuntimeGlobalTemperatureMonitor, fetchSystemHealth, fetchWorkspaceBundle } from './api';
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('HTTP lifecycle', () => {
+  it('revalidates hazard snapshots instead of accepting a browser-fresh but source-expired body', async () => {
+    vi.stubGlobal('window', globalThis);
+    const payload = { sources: [{ key: 'nhc', staleAfter: '2026-10-01T12:00:00Z' }], events: [] };
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => payload })));
+    expect(await fetchNaturalHazardMapSource('nhc', 2)).toEqual(payload);
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining('source=nhc'), expect.objectContaining({ cache: 'no-cache' }));
+  });
   it('uses redacted public health for anonymous consumers and preserves degraded status', async () => {
     vi.stubGlobal('window', globalThis);
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({
@@ -29,6 +36,7 @@ describe('HTTP lifecycle', () => {
     ['temperature', (signal: AbortSignal) => fetchRuntimeGlobalTemperatureMonitor(60, signal)],
     ['AI snapshot', (signal: AbortSignal) => fetchMarketWideAiSnapshot('overview', 8000, signal)],
     ['aviation', (signal: AbortSignal) => fetchAviationViewport([-10, 30, 10, 50], 3, signal)],
+    ['hazards', (signal: AbortSignal) => fetchNaturalHazardMapSource('nhc', 2, undefined, signal)],
   ] as const)('keeps %s cancellation connected while consuming the response body', async (_name, requestData) => {
     vi.stubGlobal('window', globalThis);
     let requestSignal!: AbortSignal;

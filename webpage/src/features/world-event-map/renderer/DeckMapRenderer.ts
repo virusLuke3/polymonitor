@@ -26,7 +26,7 @@ import {
   reinforceWorldEventBasemapLabels,
 } from '@/config/weatherBasemap';
 import type { GeoEvent } from '../domain/types';
-import { clampLatitude, clampLongitude, clampWorldEventZoom } from '../state/mapState';
+import { clampWorldEventZoom } from '../state/mapState';
 import type { WorldEventMapState } from '../state/mapState';
 import type { BasemapState, MapCountryTarget, MapRenderer, MapRendererCallbacks } from './MapRenderer';
 import {
@@ -370,12 +370,8 @@ export class DeckMapRenderer implements MapRenderer {
       center: state ? [state.center.lon, state.center.lat] : [20, 24],
       zoom: state?.zoom ?? 1.25,
       renderWorldCopies: false,
-      // Keep one world while permitting a complete world in a wide/short
-      // viewport. MapLibre's default constraint otherwise forces zoom up.
-      transformConstrain: (center, zoom) => ({
-        center: new maplibregl.LngLat(clampLongitude(center.lng), clampLatitude(center.lat)),
-        zoom: clampWorldEventZoom(zoom),
-      }),
+      // Native single-world constraints keep the viewport inside the world on
+      // restore, zoom-out, pan and resize (the same policy as WorldMonitor).
       minZoom: -1,
       maxZoom: 8,
       attributionControl: false,
@@ -494,6 +490,7 @@ export class DeckMapRenderer implements MapRenderer {
     // Camera fitting only needs the container, not loaded tiles or optional
     // radar/country sources. Their pending requests can hold `load` indefinitely.
     if (this.state?.fitWorld) this.fitWorld();
+    else this.handleMoveEnd(); // Publish any constraint applied to an old URL camera.
 
     this.fallbackTimer = window.setTimeout(() => {
       if (!this.map || this.fallbackApplied || this.destroyed) return;
@@ -640,8 +637,8 @@ export class DeckMapRenderer implements MapRenderer {
 
   private fitWorld() {
     this.fittingWorld = true;
-    // Fit the populated world to the actual canvas. A fixed zoom ceiling left
-    // most of wide desktop maps unused; saved/user cameras never enter here.
+    // Start from the populated world; native constraints enlarge/clamp this
+    // camera to cover the canvas rather than expose space outside the world.
     this.map?.fitBounds([[-180, -56], [180, 72]], { padding: 24, maxZoom: 3, duration: this.reducedMotion ? 0 : 350 });
   }
 

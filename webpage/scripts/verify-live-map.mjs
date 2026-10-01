@@ -43,7 +43,11 @@ async function verifyDateline(page, host, width, record) {
   const layers='weather-alerts,earthquakes-volcanoes,wildfires,extreme-temperature,climate-anomalies,ucdp,sanctions-country-risk';
   await page.goto(`${base}/?view=2d&center=180,20&zoom=0.93&time=7d&layers=${layers}&theme=dark&basemap=auto&presentation=overview&severity=info,watch,warning,critical`,{waitUntil:'domcontentloaded',timeout:60_000});
   await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready',{timeout:60_000});
-  await expect.poll(() => Number(new URL(page.url()).searchParams.get('center')?.split(',')[0])).toBe(-180);
+  // A single-world map clamps the endpoint camera inside the actual viewport;
+  // forcing -180 would expose half a blank world again.
+  await expect.poll(() => Number(new URL(page.url()).searchParams.get('center')?.split(',')[0])).toBeGreaterThan(-180);
+  const restoredCenter=new URL(page.url()).searchParams.get('center');
+  const restoredZoom=new URL(page.url()).searchParams.get('zoom');
   await expect(page.locator('.wm-map-source-status').filter({has:page.locator('b',{hasText:/^COUNTRY RISK$/})})).toHaveClass(/is-ok/,{timeout:45_000});
   await expect(page.locator('.wm-world-event-list-toggle strong')).toContainText(/[1-9]/);
   assert.equal(new URL(page.url()).searchParams.get('theme'),'dark');
@@ -55,7 +59,8 @@ async function verifyDateline(page, host, width, record) {
   record.states.push({name:'dateline',url:page.url(),rect:await host.boundingBox()});
   await page.reload({waitUntil:'domcontentloaded'});
   await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready',{timeout:60_000});
-  assert.equal(Number(new URL(page.url()).searchParams.get('center')?.split(',')[0]),-180);
+  assert.equal(new URL(page.url()).searchParams.get('center'),restoredCenter);
+  assert.equal(new URL(page.url()).searchParams.get('zoom'),restoredZoom);
   await capture(page,`dateline-reload-${actualWidth}`);
   assert.deepEqual(record.errors,[]);
 }

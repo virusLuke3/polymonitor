@@ -8,6 +8,60 @@ const phase = process.env.MAP_RECOVERY_PHASE;
 const root = resolve('artifacts/map-visual-recovery-v3', phase || 'unrequested');
 test.skip(!phase, 'Explicit V3 comparison captures.');
 test.use({ trace: 'on', reducedMotion: 'reduce' });
+test('an expired successful climate snapshot recovers without waiting six hours', async ({page}) => {
+  test.skip(phase === 'before'); mkdirSync(root, {recursive:true});
+  await page.clock.install({time:new Date(GENERATED_AT)}); await installFixtures(page);
+  const {mapResponse,sourceEvents} = await import('./fixtures/world-event-map');
+  const bodies:any[] = [];
+  await page.route('**/wm-api/runtime/world/natural-hazards/map?**', async route => {
+    const key = new URL(route.request().url()).searchParams.get('source')!;
+    const body = mapResponse(key, sourceEvents[key] || []);
+    if (key === 'climate-anomaly') {
+      const fresh = bodies.length >= 2;
+      const now = await page.evaluate(() => Date.now());
+      body.sources[0].fetchedAt = new Date(fresh ? now : Date.parse(GENERATED_AT)-21_601_000).toISOString();
+      body.sources[0].lastSuccessAt = body.sources[0].fetchedAt;
+      body.sources[0].staleAfter = new Date(fresh ? now+21_600_000 : Date.parse(GENERATED_AT)-1_000).toISOString();
+      bodies.push(body);
+    }
+    await route.fulfill({json:body});
+  });
+  try {
+    await page.goto('/?view=2d&renderer=svg&time=all&layers=climate-anomalies');
+    const status=page.locator('.wm-map-source-status').filter({has:page.locator('b',{hasText:/^ANOMALY$/})});
+    await expect(status).toHaveClass(/is-degraded/); expect(bodies).toHaveLength(1);
+    const count=await page.getByRole('button',{name:/^All events/i}).textContent();
+    await page.clock.fastForward(29_000); expect(bodies).toHaveLength(1);
+    await page.clock.fastForward(5_000); await expect.poll(()=>bodies.length).toBe(2);
+    await expect(status).toHaveClass(/is-degraded/);
+    expect(await page.getByRole('button',{name:/^All events/i}).textContent()).toBe(count);
+    await page.clock.fastForward(55_000); expect(bodies).toHaveLength(2);
+    await page.clock.fastForward(10_000); await expect.poll(()=>bodies.length).toBe(3);
+    await expect(status).toHaveClass(/is-ok/);
+    expect(bodies[0].sources[0].lastSuccessAt).toBe(bodies[1].sources[0].lastSuccessAt);
+    writeFileSync(resolve(root,'expired-snapshot-recovery.json'),JSON.stringify({bodies,count}));
+  } finally {await page.goto('about:blank');await page.unrouteAll({behavior:'ignoreErrors'});}
+});
+
+for (const condition of ['throttled','blocked']) test(`retained source ${condition} respects the provider retry condition`, async ({page})=>{
+  test.skip(phase==='before'); await page.clock.install({time:new Date(GENERATED_AT)});await installFixtures(page);
+  const {mapResponse,sourceEvents}=await import('./fixtures/world-event-map');let attempts=0;
+  await page.route('**/wm-api/runtime/world/natural-hazards/map?**',async route=>{
+    const key=new URL(route.request().url()).searchParams.get('source')!;
+    const body=mapResponse(key,sourceEvents[key]||[]);
+    if(key==='climate-anomaly') {attempts++;Object.assign(body.sources[0],{status:'degraded',condition,retryAfterSeconds:90});}
+    await route.fulfill({json:body});
+  });
+  try {
+    await page.goto('/?view=2d&renderer=svg&time=all&layers=climate-anomalies');
+    await expect.poll(()=>attempts).toBe(1);
+    await expect(page.locator('.wm-map-source-status').filter({has:page.locator('b',{hasText:/^ANOMALY$/})})).toHaveClass(/is-degraded/);
+    await page.clock.fastForward(89_000);expect(attempts).toBe(1);
+    await page.clock.fastForward(condition==='blocked'?300_000:5_000);
+    await expect.poll(()=>attempts).toBe(condition==='blocked'?1:2);
+  } finally {await page.goto('about:blank');await page.unrouteAll({behavior:'ignoreErrors'});}
+});
+
 test('a cached hazard response refreshes at its original server deadline', async ({page}) => {
   test.skip(phase === 'before'); mkdirSync(root, {recursive:true});
   await page.clock.install({time:new Date(GENERATED_AT)}); await installFixtures(page);
@@ -88,7 +142,8 @@ test('initial world fit does not wait for optional geometry or override saved ca
       const west = el.__polymonitorProjectGeoPoint(-180, 0);
       const east = el.__polymonitorProjectGeoPoint(180, 0);
       const mercator = (lat: number) => (1 - Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360)) / Math.PI) / 2;
-      const expectedWidth = Math.min(el.clientWidth - 48, (el.clientHeight - 48) / (mercator(-56) - mercator(72)));
+      const expectedWidth = Math.max(el.clientWidth, el.clientHeight,
+        Math.min(el.clientWidth - 48, (el.clientHeight - 48) / (mercator(-56) - mercator(72))));
       return Math.abs(east.x - west.x - expectedWidth);
     });
     await expect.poll(worldFitError).toBeLessThan(3);
