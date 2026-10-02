@@ -26,7 +26,7 @@ describe('country geometry identity', () => {
     const real = JSON.parse(readFileSync(new URL('../../../../public/map-data/world-countries.geojson', import.meta.url), 'utf8')) as FeatureCollection;
     const index = buildCountryGeometryIndex(real);
     const event: GeoEvent = {id:'country-risk:MX', category:'country-risk', title:'Mexico evidence', summary:'',
-      severity:'watch', countryCode:'MX', geometry:index.resolve('MX')!.geometry,
+      severity:'watch', countryCode:'MX', locationPrecision:'country', geometry:index.resolve('MX')!.geometry,
       sources:[], limitations:[], relatedMarketIds:[], properties:{}};
     expect(index.intersects('US', event.geometry!)).toBe(true);
     expect(eventMatchesCountry(event, 'US', index)).toBe(false);
