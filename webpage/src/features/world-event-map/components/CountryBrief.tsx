@@ -4,14 +4,15 @@ import type { CountryGeometryIndex } from '../domain/countryGeometry';
 import type { GeoEvent } from '../domain/types';
 import type { MapCountryTarget } from '../renderer/MapRenderer';
 import { InspectorFrame } from './InspectorFrame';
+import { eventMatchesCountry } from '../state/selectors';
 
 export function CountryBrief({ country, index, events, onClose, onEvent, onFit, onFilter, returnFocusTarget }: {
   country: MapCountryTarget; index?: CountryGeometryIndex | null; events: GeoEvent[]; onClose: () => void;
   onEvent: (id: string) => void; onFit: () => void; onFilter: () => void; returnFocusTarget?: HTMLElement | null;
 }) {
   const { locale } = useI18n(); const zh = locale === 'zh';
-  const records = useMemo(() => [...new Map(events.filter(e => e.countryCode === country.iso2 ||
-    (e.geometry && index?.intersects(country.iso2, e.geometry))).map(e => [e.id, e])).values()]
+  const records = useMemo(() => [...new Map(events.filter(e => eventMatchesCountry(e, country.iso2, index ?? null))
+    .map(e => [e.id, e])).values()]
     .sort((a, b) => (b.updatedAt || b.occurredAt || '').localeCompare(a.updatedAt || a.occurredAt || '')), [events, country.iso2, index]);
   const categories = [...new Set(records.map(e => e.category))];
   const sources = [...new Set(records.flatMap(e => e.sources.map(s => s.provider)))];

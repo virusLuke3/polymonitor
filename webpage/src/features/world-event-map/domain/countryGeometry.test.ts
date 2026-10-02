@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { FeatureCollection } from 'geojson';
 import { buildCountryGeometryIndex, normalizeCountryIdentity } from './countryGeometry';
+import { eventMatchesCountry, filterWorldEventMapEvents } from '../state/selectors';
+import type { GeoEvent } from './types';
 
 const collection: FeatureCollection = {
   type: 'FeatureCollection',
@@ -20,6 +22,19 @@ const collection: FeatureCollection = {
 };
 
 describe('country geometry identity', () => {
+  it('keeps a neighbouring national polygon out of the brief and filter despite a shared border', () => {
+    const real = JSON.parse(readFileSync(new URL('../../../../public/map-data/world-countries.geojson', import.meta.url), 'utf8')) as FeatureCollection;
+    const index = buildCountryGeometryIndex(real);
+    const event: GeoEvent = {id:'country-risk:MX', category:'country-risk', title:'Mexico evidence', summary:'',
+      severity:'watch', countryCode:'MX', geometry:index.resolve('MX')!.geometry,
+      sources:[], limitations:[], relatedMarketIds:[], properties:{}};
+    expect(index.intersects('US', event.geometry!)).toBe(true);
+    expect(eventMatchesCountry(event, 'US', index)).toBe(false);
+    expect(eventMatchesCountry(event, 'MX', index)).toBe(true);
+    expect(filterWorldEventMapEvents([event], {timeRange:'all',severities:['watch'],countryCode:'US'}, Date.now(), index)).toEqual([]);
+    expect(eventMatchesCountry({...event,countryCode:undefined,properties:{countryCodes:['US','MX']}}, 'US', index)).toBe(true);
+    expect(eventMatchesCountry({...event,countryCode:undefined,geometry:{type:'Point',coordinates:[-100,38]}}, 'US', index)).toBe(true);
+  });
   it('resolves names, ISO codes and conservative aliases to the same polygon', () => {
     const index = buildCountryGeometryIndex(collection);
     expect(index.resolve('US')?.iso3).toBe('USA');

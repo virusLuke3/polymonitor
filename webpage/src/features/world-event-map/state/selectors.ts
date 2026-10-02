@@ -11,6 +11,17 @@ const TIME_RANGE_MS: Record<Exclude<WorldEventTimeRange, 'all'>, number> = {
   '7d': 7 * 24 * 60 * 60 * 1000,
 };
 
+export function eventMatchesCountry(event: GeoEvent, countryCode: string, countryGeometry: CountryGeometryIndex | null = null): boolean {
+  const properties = event.properties || {};
+  const codes = [event.countryCode, properties.countryCode, properties.countryIso2, properties.iso2,
+    properties['ISO3166-1-Alpha-2'], ...(Array.isArray(properties.countryCodes) ? properties.countryCodes : [])]
+    .filter(Boolean).map(value => String(value).toUpperCase());
+  // A neighbouring country's polygon can touch this country's border. Explicit
+  // source attribution takes precedence; geometry resolves unassigned records.
+  return codes.length ? codes.includes(countryCode.toUpperCase())
+    : Boolean(event.geometry && countryGeometry?.intersects(countryCode, event.geometry));
+}
+
 export function filterWorldEventMapEvents(
   events: GeoEvent[],
   state: Pick<WorldEventMapState, 'timeRange' | 'severities'> & Partial<Pick<WorldEventMapState, 'countryCode'>>,
@@ -22,24 +33,7 @@ export function filterWorldEventMapEvents(
   const countryCode = state.countryCode?.toUpperCase() || null;
   return events.filter((event) => {
     if (!severities.has(event.severity)) return false;
-    if (countryCode) {
-      const properties = event.properties || {};
-      const directCodes = [
-        event.countryCode,
-        properties.countryCode,
-        properties.countryIso2,
-        properties.iso2,
-        properties['ISO3166-1-Alpha-2'],
-      ].filter(Boolean).map((value) => String(value).toUpperCase());
-      const listCodes = Array.isArray(properties.countryCodes)
-        ? properties.countryCodes.map((value) => String(value).toUpperCase())
-        : [];
-      const explicitlyMatches = directCodes.includes(countryCode) || listCodes.includes(countryCode);
-      const spatiallyMatches = event.geometry && countryGeometry
-        ? countryGeometry.intersects(countryCode, event.geometry)
-        : false;
-      if (!explicitlyMatches && !spatiallyMatches) return false;
-    }
+    if (countryCode && !eventMatchesCountry(event, countryCode, countryGeometry)) return false;
     if (isHazardGeoEvent(event)) {
       if (event.lifecycle === 'ended' || event.revision.cancelled) return false;
       const expiresAt = event.expiresAt ? Date.parse(event.expiresAt) : Number.NaN;
