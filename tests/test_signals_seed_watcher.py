@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 
-from api.services import signal_service
+from api.services import signal_service, alpha_signal_service
 from runtime import signals_watcher
 from runtime.snapshot_store import SnapshotStore
 
@@ -205,95 +205,53 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
             "utc_date_days_ago": lambda days: "2026-05-01",
         }
 
-        with patch.object(signal_service.clickhouse_orderfilled_service, "get_volume_whale_rows", return_value=None):
+        with patch.object(alpha_signal_service, "_candidates", return_value=None):
             payload = signal_service.fetch_live_alpha_signal_payload(ctx, limit=3)
 
         self.assertEqual("degraded", payload["status"])
         self.assertEqual([], payload["items"])
 
-    def test_alpha_live_payload_uses_clickhouse_volume_rows_without_address_profiles(self):
-        ctx = {
-            "app": SimpleNamespace(
-                logger=SimpleNamespace(exception=lambda *args, **kwargs: None, warning=lambda *args, **kwargs: None)
-            ),
-            "utc_now_iso": lambda: "2026-06-06T02:00:00Z",
-            "query_all": lambda sql, params=(): [],
-            "get_recent_trades": lambda limit=24: [],
-            "_safe_decimal": lambda value: signal_service.Decimal(str(value)) if value is not None else None,
-            "format_trade_decimal": lambda value: str(value) if value is not None else None,
-            "format_trade_address": lambda value: value,
-            "parse_iso_datetime": lambda value: None,
-            "utc_date_days_ago": lambda days: "2026-05-30T02:00:00Z",
-        }
-        volume_rows = [
-            {
-                "market_id": 10,
-                "market_title": "High flow market",
-                "timestamp": "2026-06-06T01:59:58Z",
-                "outcome": "YES",
-                "side": "BUY",
-                "flow_notional": "15000",
-                "net_flow_notional": "14000",
-                "bullish_notional": "15000",
-                "bearish_notional": "1000",
-                "opposite_flow_notional": "1000",
-                "net_direction_strength": "0.875",
-                "churn_ratio": "0.125",
-                "max_trade_notional": "8000",
-                "market_baseline_notional": "50000",
-                "market_share": "0.30",
-                "unique_trader_count": 6,
-                "price_health": "0.75",
-                "entry_yes_price": "0.62",
-                "price_after_1m": "0.64",
-                "price_after_5m": "0.67",
-                "price_after_15m": "0.66",
-                "edge_after_fees": "0.04",
-                "edge_fee_probability": "0.01",
-                "trade_count": 12,
-                "avg_price": "0.62",
-                "score": "88",
-                "threshold_flow_notional": "1000",
-                "severity": "critical",
-                "source_mode": "clickhouse-volume-alpha",
-                "window_minutes": 15,
-                "logicalOutcome": "YES",
-                "sourceOutcomeLabel": "Up",
-                "outcome": "Up",
-                "semanticMode": "up_down_labels",
-                "outcomeSemanticsStatus": "projected",
-                "outcomeSemanticsValid": True,
-                "supports_directional_semantics": True,
-            }
-        ]
-        with (
-            patch.object(
-                signal_service.outcome_semantics_service,
-                "annotate_trade_rows",
-                side_effect=lambda _ctx, rows, *, identity_mode: [
-                    {**row, "outcomeSemanticsIdentityMode": identity_mode} for row in rows
-                ],
-            ),
-            patch.object(
-                signal_service.clickhouse_orderfilled_service,
-                "get_alpha_volume_signal_rows",
-                return_value=volume_rows,
-            ),
-            patch.object(
-                signal_service.clickhouse_orderfilled_service,
-                "get_volume_whale_rows",
-                return_value=[],
-            ),
-        ):
-            payload = signal_service.fetch_live_alpha_signal_payload(ctx, limit=3)
+    def test_alpha_compatibility_entrypoint_uses_its_owned_token_service(self):
+        expected = {"items": [], "status": "empty"}
+        with patch.object(alpha_signal_service, "fetch_live_alpha_signal_payload", return_value=expected) as fetcher:
+            self.assertEqual(expected, signal_service.fetch_live_alpha_signal_payload({}, limit=3))
+        fetcher.assert_called_once_with({}, limit=3)
 
-        self.assertEqual("ok", payload["status"])
-        self.assertEqual("clickhouse-volume-alpha", payload["items"][0]["sourceMode"])
-        self.assertEqual("volume-flow", payload["items"][0]["kind"])
-        self.assertIn("High flow market", payload["items"][0]["title"])
-        self.assertEqual("0.875", payload["items"][0]["metrics"]["netDirectionStrength"])
-        self.assertEqual("0.67", payload["items"][0]["metrics"]["priceAfter5m"])
-        self.assertEqual("0.04", payload["items"][0]["metrics"]["edgeAfterFees"])
+    def test_alpha_worker_exposes_failed_verification_without_faking_empty(self):
+        watcher, fake_redis = self.make_watcher(component="alpha", limit=8)
+        failed = {"items": [], "generatedAt": "new", "status": "degraded",
+                  "coverage": {"candidateCount": 25, "verifiedCount": 0}, "error": "Identity unavailable"}
+        with patch.object(watcher, "fetch_payload", return_value=failed):
+            result = watcher.run_once()
+        stored = json.loads(fake_redis.get(watcher.redis_key()))
+        self.assertEqual("degraded", result["status"])
+        self.assertEqual(25, stored["coverage"]["candidateCount"])
+        self.assertEqual("degraded", stored["freshness"])
+
+    def test_alpha_worker_preserves_good_cards_and_failure_diagnostics(self):
+        watcher, fake_redis = self.make_watcher(component="alpha", limit=8)
+        previous = {"items": [{"id": "good"}], "generatedAt": "old", "status": "ok"}
+        watcher.store_payload(previous)
+        failed = {"items": [], "generatedAt": "new", "status": "degraded", "coverage": {"rejectedCount": 3}}
+        with patch.object(watcher, "fetch_payload", return_value=failed):
+            watcher.run_once()
+        stored = json.loads(fake_redis.get(watcher.redis_key()))
+        self.assertEqual(previous["items"], stored["items"])
+        self.assertEqual("old", stored["generatedAt"])
+        self.assertEqual("new", stored["lastAttemptAt"])
+        self.assertEqual(3, stored["coverage"]["rejectedCount"])
+
+    def test_alpha_worker_preserves_neutral_candidates_on_source_failure(self):
+        watcher, fake_redis = self.make_watcher(component="alpha", limit=8)
+        previous = {"items": [], "candidates": [{"id": "observed"}], "generatedAt": "old", "status": "partial"}
+        watcher.store_payload(previous)
+        failed = {"items": [], "candidates": [], "generatedAt": "new", "status": "degraded"}
+        with patch.object(watcher, "fetch_payload", return_value=failed):
+            watcher.run_once()
+        stored = json.loads(fake_redis.get(watcher.redis_key()))
+        self.assertEqual(previous["candidates"], stored["candidates"])
+        self.assertEqual("old", stored["generatedAt"])
+        self.assertEqual("stale", stored["status"])
 
     def test_whale_live_payload_uses_clickhouse_volume_rows(self):
         ctx = {

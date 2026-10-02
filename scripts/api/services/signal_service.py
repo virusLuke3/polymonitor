@@ -172,86 +172,6 @@ def _format_trade_item(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
     return item
 
 
-def _format_alpha_volume_signal(ctx: dict, row: Dict[str, Any]) -> Dict[str, Any]:
-    if not outcome_semantics_service.directional_semantics_allowed(row):
-        raise ValueError("directional outcome semantics required for alpha volume signal")
-    flow = ctx["format_trade_decimal"](row.get("flow_notional"))
-    net_flow = ctx["format_trade_decimal"](row.get("net_flow_notional"))
-    max_trade = ctx["format_trade_decimal"](row.get("max_trade_notional"))
-    market_share = _format_percent(ctx, row.get("market_share"))
-    net_strength = _format_percent(ctx, row.get("net_direction_strength"))
-    side = str(row.get("side") or "FLOW").upper()
-    outcome = str(row.get("outcome") or "--").strip()
-    logical_outcome = str(row.get("logicalOutcome") or row.get("logical_outcome") or "").upper()
-    direction = str(row.get("direction") or ("bearish" if logical_outcome == "NO" else "bullish")).lower()
-    market_title = row.get("market_title") or "Market flow"
-    window_minutes = row.get("window_minutes") or 15
-    score = ctx["format_trade_decimal"](row.get("score"))
-    max_trade_text = _money_text(ctx, row.get("max_trade_notional"))
-    edge = ctx["format_trade_decimal"](row.get("edge_after_fees"))
-    post_5m = ctx["format_trade_decimal"](row.get("price_after_5m"))
-    post_summary = f"; 5m edge {edge}" if edge is not None else ""
-    return {
-        "kind": "volume-flow",
-        "severity": row.get("severity") or _severity_for_notional(ctx, row.get("flow_notional")),
-        "bias": "bearish" if direction == "bearish" else "bullish",
-        "sourceLabel": "FLOW+$",
-        "sourceTag": "FLOW",
-        "headline": f"{window_minutes}m net directional flow",
-        "action": {
-            "label": "Sell" if side == "SELL" else "Buy",
-            "outcome": outcome,
-        },
-        "title": f"{side} {outcome} flow {_money_text(ctx, row.get('flow_notional'))}: {market_title}",
-        "summary": f"net {net_strength}; {row.get('trade_count') or 0} fills; max fill {max_trade_text}; {market_share} of market baseline{post_summary}",
-        "timestamp": row.get("timestamp"),
-        "marketId": row.get("market_id"),
-        "localMarketId": row.get("market_id"),
-        "marketTitle": market_title,
-        "txHash": row.get("tx_hash"),
-        "side": side,
-        "outcome": outcome,
-        "logicalOutcome": row.get("logicalOutcome") or row.get("logical_outcome"),
-        "sourceOutcomeLabel": row.get("sourceOutcomeLabel") or row.get("source_outcome_label"),
-        "semanticMode": row.get("semanticMode") or row.get("semantic_mode"),
-        "outcomeSemanticsStatus": row.get("outcomeSemanticsStatus") or row.get("outcome_semantics_status"),
-        "outcomeSemanticsValid": True,
-        "outcomeSemanticsCapabilities": {
-            "supportsYesNoWording": bool(row.get("supports_yes_no_wording")),
-            "supportsDirectionalSemantics": True,
-        },
-        "price": ctx["format_trade_decimal"](row.get("avg_price")),
-        "notional": flow,
-        "contributors": ["clickhouse", "volume", "flow"],
-        "relatedContent": [],
-        "sourceMode": row.get("source_mode") or "clickhouse-volume-alpha",
-        "metrics": {
-            "flowNotional": flow,
-            "netFlowNotional": net_flow,
-            "bullishNotional": ctx["format_trade_decimal"](row.get("bullish_notional")),
-            "bearishNotional": ctx["format_trade_decimal"](row.get("bearish_notional")),
-            "oppositeFlowNotional": ctx["format_trade_decimal"](row.get("opposite_flow_notional")),
-            "netDirectionStrength": ctx["format_trade_decimal"](row.get("net_direction_strength")),
-            "churnRatio": ctx["format_trade_decimal"](row.get("churn_ratio")),
-            "maxTradeNotional": max_trade,
-            "marketBaselineNotional": ctx["format_trade_decimal"](row.get("market_baseline_notional")),
-            "marketShare": ctx["format_trade_decimal"](row.get("market_share")),
-            "uniqueTraderCount": row.get("unique_trader_count"),
-            "priceHealth": ctx["format_trade_decimal"](row.get("price_health")),
-            "entryYesPrice": ctx["format_trade_decimal"](row.get("entry_yes_price")),
-            "priceAfter1m": ctx["format_trade_decimal"](row.get("price_after_1m")),
-            "priceAfter5m": post_5m,
-            "priceAfter15m": ctx["format_trade_decimal"](row.get("price_after_15m")),
-            "edgeAfterFees": edge,
-            "edgeFeeProbability": ctx["format_trade_decimal"](row.get("edge_fee_probability")),
-            "tradeCount": row.get("trade_count"),
-            "score": score,
-            "volumeScore": ctx["format_trade_decimal"](row.get("volume_score")),
-            "thresholdFlowNotional": ctx["format_trade_decimal"](row.get("threshold_flow_notional")),
-        },
-    }
-
-
 def _query_whale_rows(ctx: dict, *, limit: int) -> List[Dict[str, Any]]:
     rows = clickhouse_orderfilled_service.get_volume_whale_rows(ctx, limit=max(limit * 2, limit))
     if rows is None:
@@ -307,11 +227,20 @@ def _sanitize_signal_payload(ctx: dict, namespace: str, payload: Dict[str, Any])
             item
             for index, item in enumerate(items)
             if index in currently_verified_positions
-            and outcome_semantics_service.directional_semantics_allowed(item)
+            and item.get("outcomeSemanticsValid")
+            and (outcome_semantics_service.directional_semantics_allowed(item)
+                 or (item.get("kind") == "token-flow" and item.get("tokenId")
+                     and (item.get("outcomeSemanticsCapabilities") or {}).get("supportsYesNoWording")))
             and item.get("outcomeSemanticsIdentityMode") in {"raw", "aggregate"}
         ]
     sanitized["items"] = items
-    if not items and sanitized.get("status") == "ok":
+    if namespace == SIGNAL_SNAPSHOT_NAMESPACE_ALPHA and payload.get("policyVersion") == "token-flow-v1":
+        removed = len(payload.get("items") or []) - len(items)
+        if removed:
+            sanitized["coverage"] = {**(payload.get("coverage") or {}), "lastReadRejectedCount": removed}
+            sanitized["status"] = "partial" if items or payload.get("candidates") else "degraded"
+            sanitized["error"] = "Cached Alpha labels could not be revalidated"
+    elif not items and sanitized.get("status") == "ok":
         sanitized["status"] = "empty"
     return sanitized
 
@@ -531,112 +460,25 @@ def _build_suspicious_trade_items(ctx: dict, limit: int = 12) -> List[Dict[str, 
     return fallback_items
 
 
-def _append_signal(
-    signals: List[Dict[str, Any]],
-    *,
-    kind: str,
-    severity: str,
-    title: Any,
-    summary: str,
-    timestamp: Any,
-    contributors: Iterable[str] | None = None,
-) -> None:
-    signals.append(
-        {
-            "kind": kind,
-            "severity": severity,
-            "title": title,
-            "summary": summary,
-            "timestamp": timestamp,
-            "contributors": list(contributors or []),
-        }
-    )
+def fetch_live_alpha_signal_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
+    # Compatibility entrypoint for the existing worker and bindings.
+    from .alpha_signal_service import fetch_live_alpha_signal_payload as fetch_alpha
+
+    return fetch_alpha(ctx, limit=limit)
 
 
 def _build_alpha_signal_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
-    trade_source_status = "ok"
-    signals: List[Dict[str, Any]] = []
-    volume_rows = None
-    if _clickhouse_signal_queries_available(ctx):
-        try:
-            volume_rows = clickhouse_orderfilled_service.get_alpha_volume_signal_rows(ctx, limit=limit)
-        except Exception:
-            logger = getattr(ctx.get("app"), "logger", None)
-            if logger is not None:
-                logger.exception("alpha volume source failed")
-            trade_source_status = "degraded"
-    if volume_rows is not None:
-        signals.extend(
-            _format_alpha_volume_signal(ctx, row)
-            for row in volume_rows[:limit]
-            if outcome_semantics_service.directional_semantics_allowed(row)
-        )
-    else:
-        trade_source_status = "degraded"
-
-    try:
-        whale_rows = _query_whale_rows(ctx, limit=6)[:6] if len(signals) < limit else []
-    except TimeoutError:
-        whale_rows = []
-        trade_source_status = "degraded"
-    if any(not _is_live_signal_source(str(row.get("source_mode") or "")) for row in whale_rows):
-        trade_source_status = "degraded"
-    whales = [
-        _format_trade_item(ctx, row)
-        for row in whale_rows
-        if outcome_semantics_service.directional_semantics_allowed(row)
-    ]
-    for trade in whales[:3]:
-        if len(signals) >= limit:
-            break
-        _append_signal(
-            signals,
-            kind="whale",
-            severity=trade.get("severity") or "elevated",
-            title=trade.get("marketTitle") or "Whale flow",
-            summary=f"{str(trade.get('side') or 'trade').upper()} {trade.get('outcome') or '--'} at {trade.get('price') or '--'} on-chain, notional {trade.get('notional') or '--'}",
-            timestamp=trade.get("timestamp"),
-            contributors=["whale", "onchain"],
-        )
-
-    deduped: List[Dict[str, Any]] = []
-    seen = set()
-    for signal in signals:
-        key = (signal.get("kind"), signal.get("title"))
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(signal)
-        if len(deduped) >= limit:
-            break
-    status = "degraded" if trade_source_status != "ok" else "ok" if deduped else "empty"
-    source_rows = volume_rows or whale_rows
-    source_state_status = "ok" if trade_source_status == "ok" else trade_source_status
-    return normalize_signal_payload(
-        {
-            "items": deduped,
-            "generatedAt": ctx["utc_now_iso"](),
-            "status": status,
-            "sourceMode": trade_source_status,
-            "sourceStates": _clickhouse_source_states(ctx, source_state_status, rows=source_rows),
-        },
-        generated_at=ctx["utc_now_iso"](),
-    )
-
-
-def fetch_live_alpha_signal_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
-    return _sanitize_signal_payload(
-        ctx,
-        SIGNAL_SNAPSHOT_NAMESPACE_ALPHA,
-        normalize_signal_payload(
-            _build_alpha_signal_payload(ctx, limit=limit),
-            generated_at=ctx["utc_now_iso"](),
-        ),
-    )
+    """Legacy builder entrypoint; Alpha implementation belongs to its service."""
+    return fetch_live_alpha_signal_payload(ctx, limit=limit)
 
 
 def get_alpha_signal_snapshot(ctx: dict, limit: int = DEFAULT_ALPHA_SIGNAL_LIMIT) -> Dict[str, Any]:
-    return get_signal_snapshot(
+    from .alpha_signal_service import revalidate_cached_observations
+
+    payload = get_signal_snapshot(
         ctx, namespace=SIGNAL_SNAPSHOT_NAMESPACE_ALPHA,
         cache_key=build_alpha_signal_cache_key(), limit=limit,
     )
+    payload = revalidate_cached_observations(ctx, payload)
+    payload["candidates"] = payload.get("candidates", [])[:max(0, int(limit))]
+    return payload

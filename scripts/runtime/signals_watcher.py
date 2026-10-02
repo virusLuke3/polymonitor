@@ -287,11 +287,29 @@ class SignalsWatcher:
 
     def run_once(self) -> Dict[str, Any]:
         previous = self.load_previous_payload()
+        payload = None
         try:
             payload = self.fetch_payload()
             if payload.get("status") in {"error", "unavailable", "degraded"}:
                 raise RuntimeError("Signal sources unavailable")
         except Exception as exc:
+            if self.component == "alpha" and isinstance(payload, dict):
+                # Preserve valid cards, but publish the latest failed assessment.
+                # An unverified candidate set is not a successful empty result.
+                retained = bool(previous and (previous.get("items") or previous.get("candidates")))
+                failed = {**(previous if retained else payload), "cacheMode": "seeded",
+                          "status": "stale" if retained else "degraded",
+                          "freshness": "stale" if retained else "degraded",
+                          "lastAttemptAt": payload.get("generatedAt"),
+                          "coverage": payload.get("coverage"),
+                          "sourceStates": payload.get("sourceStates"),
+                          "error": payload.get("error") or "Alpha source unavailable"}
+                self.store_payload(failed)
+                self.store_seed_meta(status="preserved" if retained else "error",
+                                     record_count=_record_count(failed),
+                                     error_summary=failed["error"], preserve_last_success=True,
+                                     source_states=failed.get("sourceStates"), payload_status=failed["status"])
+                return {"status": failed["status"], "recordCount": _record_count(failed), "error": type(exc).__name__}
             if previous:
                 preserved = {**previous, "cacheMode": "seeded", "status": "stale"}
                 self.store_payload(preserved)
@@ -318,7 +336,7 @@ class SignalsWatcher:
         stats = _payload_timestamp_stats(payload, stale_after_seconds=self.stale_after_seconds())
         payload_status = str(payload.get("status") or "").strip().lower()
         status = "ok" if record_count > 0 else "empty"
-        if payload_status in {"degraded", "stale", "empty", "error"}:
+        if payload_status in {"degraded", "stale", "empty", "error", "partial"}:
             status = payload_status
         data_age = stats.get("dataAgeSeconds")
         if record_count > 0 and isinstance(data_age, int) and data_age > self.stale_after_seconds():

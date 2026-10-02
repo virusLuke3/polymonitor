@@ -1,0 +1,18 @@
+.wm-alpha-signal-panel .wm-alpha-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.wm-alpha-signal-panel button { font: inherit; color: var(--accent, #70d9f5); background: #152028; border: 1px solid #425a69; padding: 6px 10px; cursor: pointer; }
+.wm-alpha-signal-panel button:disabled { opacity: .55; cursor: wait; }
+.wm-alpha-signal-panel button:focus-visible { outline: 2px solid #70d9f5; outline-offset: 2px; }
+.wm-alpha-signal-panel .wm-alpha-help, .wm-alpha-signal-panel .wm-alpha-clock { color: #a7b2b5; font-size: 11px; line-height: 1.5; }
+.wm-alpha-signal-panel .wm-alpha-clock span { display: block; }
+.wm-alpha-signal-panel .wm-alpha-card { border: 1px solid #283a40; border-left: 3px solid #39d982; padding: 10px; margin: 10px 0; background: #111b1d; overflow-wrap: anywhere; }
+.wm-alpha-signal-panel .wm-alpha-card.is-sell { border-left-color: #f07179; }
+.wm-alpha-signal-panel .wm-alpha-card-heading { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; color: #70d9f5; font-size: 11px; }
+.wm-alpha-signal-panel .wm-alpha-card-heading time { color: #a7b2b5; }
+.wm-alpha-signal-panel .wm-alpha-market { display: block; text-align: left; width: 100%; padding: 8px 0; border: 0; background: transparent; font-weight: bold; line-height: 1.5; }
+.wm-alpha-signal-panel .wm-alpha-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.wm-alpha-signal-panel .wm-alpha-metrics dt { color: #a7b2b5; font-size: 10px; }
+.wm-alpha-signal-panel .wm-alpha-metrics dd { margin: 3px 0 0; }
+.wm-alpha-signal-panel .wm-alpha-source { margin-top: 12px; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.wm-alpha-signal-panel .wm-alpha-source summary { cursor: pointer; color: #70d9f5; }
+
+.wm-alpha-signal-panel .wm-alpha-card.is-pending { border-left-color: #a7b2b5; }
