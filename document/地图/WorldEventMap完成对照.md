@@ -12,7 +12,7 @@
 |---|---|---|---|---|
 | 可执行图层注册表 | `map-layer-definitions.ts:isLayerExecutable()` | `layerRegistry.ts:isWorldEventLayerExecutable()`；registry 同时定义 renderer、source、availability、alias、capability、legend/presentation token；`LayerPanel.tsx` 禁用 unavailable 并排除 active count | `layerRegistry.test.ts`；Playwright `required source failure...` | 完成 |
 | Basemap provider/theme | `basemap-styles.ts`、`map-locale.ts`、style reload | `mapState.ts`/`urlState.ts` 保存 provider/theme；`weatherBasemap.ts` 提供 PMTiles primary 和 OpenFreeMap/CARTO fallback；`DeckMapRenderer.reloadStyle()` 重建 country/overlay | `mapState.test.ts`；Playwright provider/theme reload | 完成 |
-| Demand gate | `MapContainer.afterFirstPaint()`、`waitForDeckRendererDemand()` | `WorldEventMap.tsx:scheduleRendererInstall()`：shell → first paint → 15% visible → idle/input；有最大等待；移动/省流模式优先 SVG | `rendererVisibility.test.ts`；桌面/移动 Playwright | 完成 |
+| Demand gate | `MapContainer.afterFirstPaint()`、`waitForDeckRendererDemand()` | `WorldEventMap.tsx:scheduleRendererInstall()`：shell → first paint → 15% visible → idle/input；有最大等待；小屏也按 WebGL 能力探测，明确能力失败或显式 SVG 选择才用 fallback | `rendererVisibility.test.ts`；桌面/移动 Playwright | 完成 |
 | 单图层错误隔离 | `DeckGLMap` overlay error/quarantine | `DeckMapRenderer.handleDeckLayerError()` 记录 layer id、只剔除失败 layer；renderer/context 级失败才切 SVG | `rendererHoverLifecycle.test.ts`；context failure Playwright | 完成 |
 | 国家交互 | `country-interactive`、rAF feature query、fit bounds/context menu | `DeckMapRenderer` 透明命中、rAF hover、click、context menu、fit；`SvgMapRenderer` 等价操作；country 进入 URL 和事件过滤 | `countryGeometry.test.ts`；WebGL/SVG country Playwright | 完成 |
 | 屏幕空间标签 | WorldMonitor SVG 的矩形碰撞；MapLibre symbol occupancy | `DeckMapRenderer` 使用投影 bbox、MapLibre symbol bbox 和优先级；`SvgMapRenderer` 复用相同优先级并计算文字 bbox | map layer factory tests；高密度视觉截图 | 完成 |
@@ -98,6 +98,12 @@ Polymonitor 工作区和本项目实施契约，不能把上游 registry 的声�
 | 字体与视觉密度 | Protomaps 角色字体、symbol 排序和标签碰撞；不同业务 layer 自有语义 | 本地比例地图字体已保留 Regular/Medium/Bold/Italic，控件/报告用 body，代码字段用 mono；语言跟随当前 EN/中文 | **P2** 继续做全开状态的地名/事件/航线遮挡预算、全屏与普通高度、桌面/小屏验收。英文截图不能直接按中文字形判断渲染失败 |
 | 更多空间情报 | 上游 registry 有 AIS、tradeRoutes、水道、军事实体、海缆、管道、outages、GPS、cyber、displacement 等 | 当前地图 registry 没有这些执行链；面板存在类似主题不等于已经进入地图 | **P2/后续需求** 按本项目 §4.3/4.4 先做运输中断、重要基础设施及市场联动；每项要来源→规范化→layer→详情→测试闭环，不一次性复制全部变体/付费层 |
 | 生产可靠性 | 上游也受来源配额、覆盖、缓存与网络影响，声明能力不等于实时健康 | 全开只修启用策略；NWS/其他来源 ERROR/STALE，目录 REFRESH FAILED 等需要各自运行证据 | **P0** 按前端请求、CDN/cache、API deadline、provider 获取逐层定位；不隐藏 ERROR，不把 HTTP 200 算作 fresh，不用截图证明长期稳定 |
+
+边界数据额外核对：两份基础 GeoJSON 都有 240 个要素，但当前更新后的上游已非历史所说的逐字相同。
+RU/UA 的 geometry 有差异；本地仍用 `CN-TW`，上游已用 `TW`。本地 `countryGeometry.ts:countryFeature`
+要求严格两字母 ISO2，因此 `CN-TW` 要素不会进入国家命中/适配索引（不等于矢量底图不画该地区）。
+这是 **P1 的地区标识归一化缺口**；应保留原始来源信息和几何，统一索引标识，补命中与报告测试。
+边界几何的差异则需核对来源版本和表达口径，不应为追求截图一致直接改坐标或悄悄替换地域边界。
 
 已有且不应重建：MapLibre/deck/Protomaps、2D/3D、SVG fallback、国家点击/过滤、10 层 registry、
 灾害点线面、两级聚合与重要事件保护、完整记录列表、来源详情、真实雷达最新帧、航空视口

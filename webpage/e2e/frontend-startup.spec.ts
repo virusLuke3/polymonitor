@@ -135,7 +135,9 @@ test('a slow WebGL download shows temporary SVG then restores the primary map an
   await installDashboard(page);
   let pending: Route | undefined;
   await page.route(deckModule, route => { pending = route; });
-  await gotoMapScene(page, mapURL);
+  // A camera valid in both renderers must survive unchanged. The separate
+  // world-coverage case verifies native clamping of too-wide saved cameras.
+  await gotoMapScene(page, `${mapURL}&center=0,20&zoom=3`);
   await expect.poll(() => Boolean(pending)).toBe(true);
   await readyFallback(page);
   await expect(page.locator('.wm-weather-deck-status')).toHaveAttribute('title', /still downloading/);
@@ -186,7 +188,9 @@ for (const leave of [false, true]) {
     page.on('pageerror', error => errors.push(error.message));
     let pending: Route | undefined;
     await page.route(svgModule, route => { pending = route; });
-    await gotoMapScene(page, mapURL);
+    // Explicitly exercise SVG failure; small WebGL-capable screens no longer
+    // downgrade merely because of their width.
+    await gotoMapScene(page, `${mapURL}&renderer=svg`);
     await expect(page.locator('.wm-weather-deck-map [role="alert"]')).toContainText('still downloading', { timeout: 20_000 });
     expect(pending).toBeDefined();
     if (leave) await page.getByRole('tab', { name: '3D Globe', exact: true }).click();
@@ -212,7 +216,9 @@ test('failed SVG download reports failure instead of an endless loading shell', 
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.route(svgModule, route => route.abort('failed'));
-  await gotoMapScene(page, mapURL);
+  // Explicitly exercise SVG failure; small WebGL-capable screens no longer
+    // downgrade merely because of their width.
+    await gotoMapScene(page, `${mapURL}&renderer=svg`);
   await expect(page.locator('.wm-weather-deck-map')).toHaveClass(/map-state-failed/);
   await expect(page.locator('.wm-weather-deck-map [role="alert"]')).toBeVisible();
   expect(errors).toEqual([]);
@@ -232,7 +238,7 @@ test.describe('production service worker startup', () => {
       if (request.isNavigationRequest() && request.frame() === page.mainFrame()) documents.push(request.url());
     });
     const origin = `http://127.0.0.1:${process.env.POLYMONITOR_E2E_PORT || '4174'}`;
-    await gotoMapScene(page, `${origin}/?view=2d&time=all&layers=earthquakes-volcanoes`);
+    await gotoMapScene(page, `${origin}/?view=2d&renderer=svg&time=all&layers=earthquakes-volcanoes`);
     await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(true);
     await readyFallback(page);
     await page.waitForTimeout(500);

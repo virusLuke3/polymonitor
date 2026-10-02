@@ -51,7 +51,7 @@ test('every entry opens all layers, while manual off survives in-session updates
   // Use ordinary navigation: this acceptance test must NOT select a fixture
   // scene after entry, unlike isolated rendering cases below.
   await page.addInitScript(() => { if (location.protocol.startsWith('http')) localStorage.setItem('polydata:world-event-map:v8', JSON.stringify({ activeLayerIds: [], center: { lon: 12, lat: 35 }, zoom: 3, timeRange: '24h' })); });
-  await page.goto('/?view=2d&basemap=openfreemap&center=12,35&zoom=3&layers=&time=all');
+  await page.goto('/?view=2d&mapPerf=1&basemap=openfreemap&center=12,35&zoom=3&layers=&time=all');
   const requested = () => new URL(page.url()).searchParams.get('layers')!.split(',');
   await expect.poll(() => requested().length).toBe(10);
   expect(requested()).toEqual(expect.arrayContaining(['air-routes', 'weather-radar', 'intel-hotspots']));
