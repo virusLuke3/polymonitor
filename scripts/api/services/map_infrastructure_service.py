@@ -38,8 +38,10 @@ def infrastructure_snapshot(context, *, bbox):
                     'nativeId':str(way['id']), 'ingestedAt':updated, 'freshness':'unknown','status':'partial'}],
                 'limitations':['Mapped infrastructure reference, not operational status. OSM coverage is incomplete; the database timestamp is not an observation time.'],
                 'relatedMarketIds':[], 'properties':{'mapLayer':kind,'datasetUpdatedAt':updated,'attribution':'© OpenStreetMap contributors · ODbL'}})
-        payload = {'status':'partial','events':events,'updatedAt':updated,'rejectedCount':rejected,
-            'message':raw.get('remark') or 'OSM mapped infrastructure in the current viewport; incomplete coverage, not operational status.'}
+        failed_empty = bool(raw.get('remark')) and not events
+        payload = {'status':'unavailable' if failed_empty else 'partial','events':events,'updatedAt':updated,'rejectedCount':rejected,
+            'message':('OSM query failed; zoom in to reduce the area or retry later. ' + str(raw['remark'])) if failed_empty
+                else raw.get('remark') or 'OSM mapped infrastructure in the current viewport; incomplete coverage, not operational status.'}
         if store:store.set(NAMESPACE,key,payload,86400 if not raw.get('remark') else 60)
         return payload
 

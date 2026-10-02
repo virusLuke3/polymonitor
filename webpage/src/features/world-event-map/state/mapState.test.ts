@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { worldEventMapReducer } from './mapReducer';
 import { executableWorldEventLayers } from '../config/layerRegistry';
-import { clampLongitude, defaultWorldEventMapState } from './mapState';
+import { clampLongitude, clampWorldEventZoom, defaultWorldEventMapState } from './mapState';
 import { filterWorldEventMapEvents, filterWorldEventMapEventsForLayers } from './selectors';
 import {
   parseWorldEventMapState,
@@ -12,6 +12,11 @@ import {
 import type { GeoEvent, HazardEvent } from '../domain/types';
 
 describe('World Event Map state', () => {
+  it('allows local infrastructure inspection beyond global overview zoom while keeping a finite bound', () => {
+    expect(parseWorldEventMapState('?zoom=10').zoom).toBe(10);
+    expect(clampWorldEventZoom(99)).toBe(14);
+    expect(worldEventMapReducer(defaultWorldEventMapState(), {type:'set-zoom',zoom:10}).zoom).toBe(10);
+  });
   it('uses the same dateline endpoint for camera updates, links and saved state', () => {
     const defaults = defaultWorldEventMapState();
     for (const longitude of [180,181,540]) {

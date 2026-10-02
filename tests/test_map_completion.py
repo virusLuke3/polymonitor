@@ -121,6 +121,16 @@ def test_gpsjam_uses_official_denoising_and_real_h3_boundary():
     assert 'not real-time jamming' in event['summary']
 
 
+def test_infrastructure_timeout_is_not_a_successful_empty_catalog():
+    from api.services.map_infrastructure_service import infrastructure_snapshot
+    failed = infrastructure_snapshot({'http_json_get': lambda *a, **kw: {
+        'elements': [], 'remark': 'runtime error: Query timed out after 8 seconds.'}}, bbox=[0,0,1,1])
+    assert failed['status'] == 'unavailable' and not failed['events']
+    assert 'zoom in' in failed['message']
+    empty = infrastructure_snapshot({'http_json_get': lambda *a, **kw: {'elements': []}}, bbox=[0,0,1,1])
+    assert empty['status'] == 'partial' and not empty['events']
+
+
 def test_ioda_retains_country_measurement_without_fabricated_point():
     from api.services.map_infrastructure_service import parse_ioda
     result=parse_ioda({'data':[{'entity':{'type':'country','code':'US','name':'United States'},'from':1000000000,'until':1000000100,'score':123,'datasource':'bgp','method':'median'}]})

@@ -21,6 +21,8 @@ export function useMapInfrastructure(enabled: boolean, viewport: RendererViewpor
       try {
         const parts = await Promise.all((JSON.parse(key) as number[][]).map(b => fetchMapInfrastructure(b, request.signal)));
         if (disposed || request.signal.aborted || controller!==request)return;
+        const failed = parts.find(p => p.status === 'unavailable' || p.status === 'error');
+        if (failed) throw new Error(failed.message || 'Infrastructure source unavailable');
         const parsed=validateGeoEvents(parts.flatMap(p=>p.events));
         setResult({key,events:[...new Map(parsed.events.map(e=>[e.id,e])).values()],updatedAt:parts[0]?.updatedAt,
           message: [...new Set(parts.map(p=>p.message))].join(' · ') + (parsed.rejected.length ? ` · ${parsed.rejected.length} invalid records rejected` : '')});failures=0;

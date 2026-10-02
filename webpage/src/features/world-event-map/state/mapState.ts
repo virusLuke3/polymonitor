@@ -33,6 +33,7 @@ export interface WorldEventMapState {
 // Full topology and live-aircraft detail remain Aviation Lens choices, while
 // the default retains low-contrast route runners and illustrative aircraft.
 export const WORLD_EVENT_MAP_STORAGE_KEY = 'polydata:world-event-map:v8';
+export const WORLD_EVENT_MAP_MAX_ZOOM = 14;
 export const WORLD_EVENT_TIME_RANGES: readonly WorldEventTimeRange[] = ['1h', '6h', '24h', '48h', '7d', 'all'];
 export const WORLD_EVENT_SEVERITIES: readonly GeoEventSeverity[] = ['info', 'watch', 'warning', 'critical'];
 export const AVIATION_LENS_MODES: readonly AviationLensMode[] = ['all', 'trunk', 'watch'];
@@ -61,7 +62,7 @@ export function defaultWorldEventMapState(): WorldEventMapState {
 
 export function clampWorldEventZoom(value: unknown) {
   const numeric = Number(value);
-  return Number.isFinite(numeric) ? Math.max(-1, Math.min(8, numeric)) : 1.25;
+  return Number.isFinite(numeric) ? Math.max(-1, Math.min(WORLD_EVENT_MAP_MAX_ZOOM, numeric)) : 1.25;
 }
 
 export function clampLongitude(value: unknown) {

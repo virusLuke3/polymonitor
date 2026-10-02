@@ -99,14 +99,20 @@ test('turning off one supplemental layer keeps the other source requests owned',
 });
 
 test('timeless infrastructure is rendered and inspectable with the default seven-day filter', async ({page}) => {
-  await page.route('**/runtime/world/infrastructure?**',r=>r.fulfill({json:{status:'partial',events:[{
+  let requests = 0;
+  await page.route('**/runtime/world/infrastructure?**',r=> {
+    if (++requests === 1) return r.fulfill({json:{status:'unavailable',events:[],message:'OSM query failed; retry later'}});
+    return r.fulfill({json:{status:'partial',events:[{
     id:'osm:way:test',category:'infrastructure',title:'Fixture mapped river',summary:'Native reference geometry',severity:'info',
     locationPrecision:'exact',geometry:{type:'LineString',coordinates:[[-.15,51.5],[-.1,51.5]]},
     sources:[{provider:'OpenStreetMap contributors',nativeId:'test',status:'partial',freshness:'unknown'}],
     limitations:['Reference geometry; observation time unknown'],relatedMarketIds:[],properties:{mapLayer:'waterways'},
-  }]}}));
-  await gotoMapScene(page,'/?view=2d&basemap=openfreemap&mapPerf=1&center=-0.125,51.5&zoom=8&layers=waterways&time=7d');
+  }]}});
+  });
+  await gotoMapScene(page,'/?view=2d&basemap=openfreemap&mapPerf=1&center=-0.125,51.5&zoom=10&layers=waterways&time=7d');
   await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready','webgl');
+  await expect(page).toHaveURL(/zoom=10/);
+  await expect.poll(()=>requests).toBeGreaterThanOrEqual(2);
   await expect(page.getByRole('button',{name:/^All events/i})).toContainText('1');
   await page.getByRole('button',{name:/^All events/i}).click();
   await page.locator('#wm-event-list-search').fill('Fixture mapped river');

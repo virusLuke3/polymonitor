@@ -26,7 +26,7 @@ import {
   reinforceWorldEventBasemapLabels,
 } from '@/config/weatherBasemap';
 import type { GeoEvent } from '../domain/types';
-import { clampWorldEventZoom } from '../state/mapState';
+import { clampWorldEventZoom, WORLD_EVENT_MAP_MAX_ZOOM } from '../state/mapState';
 import type { WorldEventMapState } from '../state/mapState';
 import type { BasemapState, MapCountryTarget, MapRenderer, MapRendererCallbacks } from './MapRenderer';
 import {
@@ -375,7 +375,7 @@ export class DeckMapRenderer implements MapRenderer {
       // Native single-world constraints keep the viewport inside the world on
       // restore, zoom-out, pan and resize (the same policy as WorldMonitor).
       minZoom: -1,
-      maxZoom: 8,
+      maxZoom: WORLD_EVENT_MAP_MAX_ZOOM,
       attributionControl: false,
       interactive: true,
       pitchWithRotate: false,
@@ -429,7 +429,7 @@ export class DeckMapRenderer implements MapRenderer {
         if (cluster) {
           const [west, south, east, north] = cluster.bounds;
           const expansion = clampWorldEventZoom(cluster.expansionZoom);
-          if (cluster.mixed || (west === east && south === north) || expansion <= map.getZoom() || map.getZoom() >= 8) {
+          if (cluster.mixed || (west === east && south === north) || expansion <= map.getZoom() || map.getZoom() >= WORLD_EVENT_MAP_MAX_ZOOM) {
             callbacks.onClusterSelect?.(this.clusterIndex.selection(cluster));
           } else {
             map.fitBounds([[west, south], [east, north]], {
