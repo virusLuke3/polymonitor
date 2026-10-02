@@ -61,3 +61,31 @@ for (const [id, routePath, kind] of [['whale-tracker', 'whales', 'whale-trades']
     expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
   });
 }
+
+for (const width of [1440, 390]) test(`cold dashboard ${width} mounts deferred trade panels and displays their first fill`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 844 });
+  await installDashboard(page, 'en', ['whale-tracker', 'suspicious-flow']);
+  for (const [path, kind] of [['whales', 'whale-trades'], ['suspicious', 'flow-watch']]) {
+    await page.route(`**/wm-api/runtime/trades/${path}?*`, route => route.fulfill({ json: {
+      schemaVersion: 'trade-watch-v1', kind, generatedAt: GENERATED_AT, status: 'ok',
+      items: [{ marketId: 7, tokenId: 'token-a', txHash: 'a'.repeat(64), timestamp: GENERATED_AT,
+        marketTitle: 'Visible first fill', side: 'BUY', price: '.64', notional: '25000' }],
+    } }));
+  }
+  await page.goto('/?view=2d&renderer=svg');
+  for (const id of ['whale-tracker', 'suspicious-flow']) {
+    const slot = page.locator(`[data-workspace-panel-id="${id}"]`);
+    await expect(slot).toBeVisible();
+    await slot.scrollIntoViewIfNeeded();
+    await expect(slot.getByRole('button', { name: 'Visible first fill' })).toBeVisible();
+    expect(await slot.evaluate(el => {
+      const body = el.querySelector('.wm-panel-body')!.getBoundingClientRect();
+      const first = el.querySelector('.wm-trade-watch-card-head')!.getBoundingClientRect();
+      return first.top >= body.top && first.bottom <= body.bottom;
+    })).toBe(true);
+    await slot.locator('summary').click();
+    await expect(slot.locator('details')).toHaveAttribute('open', '');
+    await slot.locator('summary').click();
+    await expect(slot.locator('details')).not.toHaveAttribute('open', '');
+  }
+});

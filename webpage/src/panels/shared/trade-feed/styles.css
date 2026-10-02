@@ -5,6 +5,9 @@
 .wm-trade-watch-toolbar button:disabled { opacity: .6; cursor: wait; }
 .wm-trade-watch-clock, .wm-trade-watch-time, .wm-trade-watch-identities, .wm-trade-watch-help { color: var(--wm-text-dim); font-size: .75rem; line-height: 1.5; }
 .wm-trade-watch-clock span { display: block; }
+.wm-trade-watch-clock .wm-trade-watch-stamps { display: flex; flex-wrap: wrap; gap: .2rem .65rem; }
+.wm-trade-watch-help summary { cursor: pointer; }
+.wm-trade-watch-help p { margin: .4rem 0; }
 .wm-trade-watch-tabs { display: flex; flex-wrap: wrap; gap: .35rem; }
 .wm-trade-watch-tabs button[aria-pressed="true"] { border-color: #65d3ef; color: #65d3ef; }
 .wm-trade-watch-warning { color: #efcb78; padding: .55rem; border: 1px solid #6c5529; margin-bottom: .7rem; overflow-wrap: anywhere; }
@@ -20,3 +23,11 @@
 .wm-trade-watch-type { margin: .35rem 0 0; color: #65d3ef; font-size: .75rem; }
 .wm-trade-watch-identities { display: grid; gap: .15rem; overflow-wrap: anywhere; }
 .wm-trade-watch-identities a { color: #65d3ef; }
+/* Deferred bodies need real geometry before IntersectionObserver can mount them. */
+@media (max-width: 760px) {
+  .wm-dashboard .wm-panels-grid > .wm-panel-slot[data-workspace-panel-id='whale-tracker'],
+  .wm-dashboard .wm-panels-grid > .wm-panel-slot[data-workspace-panel-id='suspicious-flow'] {
+    height: 380px;
+    min-height: 380px;
+  }
+}

@@ -10,6 +10,7 @@ Both panels show a bounded global sample of canonical OrderFilled fills, indepen
 - Validated public browser snapshots speed repeat visits. Old snapshots can be displayed with a stale warning for at most 15 minutes; overdue, malformed or incompatible caches are rejected. Failed assessments cannot overwrite the saved successful snapshot.
 - Checked time is the most recent successful frontend response; snapshot time remains the producer's actual generation time. A failed producer records its attempt and error without advancing snapshot time.
 - Hidden pages pause requests and cancel pending work. Returning to visibility resumes the shared scheduler. Network timeouts cover response-body parsing; automatic retry uses bounded backoff.
+- Mobile grid slots reserve 380px before their deferred bodies mount, avoiding zero-height visibility deadlock. Explanations collapse so the first observation is visible in a dense desktop cell; opening them is a real disclosure control.
 
 ## Whale Tracker
 
