@@ -94,6 +94,10 @@ export const MAP_SYMBOL_DEFINITIONS = {
     label: 'Conflict-exposed corridor',
     paths: ['M21 3h6v12l8.5-8.5 4 4L31 19h12v6H31l8.5 8.5-4 4L27 29v16h-6V29l-8.5 8.5-4-4L17 25H5v-6h12L8.5 10.5l4-4L21 15Z'],
   },
+  vessel: {
+    label: 'Vessel observation',
+    paths: ['M21 4h6v8h9v12l9 4-8 13H11L3 28l9-4V12h9Zm-3 14v9l6-3 6 3v-9Zm-7 26h26v3H11Z'],
+  },
   aircraft: {
     label: 'Aircraft',
     paths: ['M24 3 28 17 43 25v5l-15-4 1 11 6 5v3l-11-3-11 3v-3l6-5 1-11-15 4v-5l15-8Z'],
@@ -136,6 +140,7 @@ export const MAP_SYMBOL_PALETTES: Record<MapSymbolKey, MapSymbolPalette> = {
   'air-route': { primary: '#58dcef', secondary: '#ddfbff', surface: '#06161a', rgba: [88, 220, 239, 255] },
   'weather-exposure': { primary: '#3ed5bd', secondary: '#dcfff9', surface: '#061713', rgba: [62, 213, 189, 255] },
   'conflict-exposure': { primary: '#ff6a58', secondary: '#ffe4df', surface: '#1b0907', rgba: [255, 106, 88, 255] },
+  vessel: { primary: '#69d4d0', secondary: '#d4f7f6', surface: '#081c21', rgba: [105,212,208,255] },
   aircraft: { primary: '#ffd45a', secondary: '#fff5c8', surface: '#191405', rgba: [255, 212, 90, 255] },
 };
 
@@ -157,6 +162,7 @@ export const HAZARD_SEVERITY_COLORS = {
 } satisfies Record<GeoEventSeverity, [number, number, number, number]>;
 
 const HAZARD_SYMBOLS: Record<HazardKind, MapSymbolKey> = {
+  'weather-alert': 'signal',
   'severe-storm': 'storm',
   tornado: 'tornado',
   'tropical-cyclone': 'cyclone',
@@ -174,6 +180,9 @@ const HAZARD_SYMBOLS: Record<HazardKind, MapSymbolKey> = {
 };
 
 export function mapSymbolForEvent(event: GeoEvent): MapSymbolKey {
+  if (event.properties.mapLayer === 'ais-vessels') return 'vessel';
+  if (event.properties.mapLayer === 'airport-disruptions') return 'aircraft';
+  if (['gnss-interference','internet-outages','waterways','pipelines','submarine-cables'].includes(String(event.properties.mapLayer))) return 'signal';
   if ((event.category === 'weather' || event.category === 'natural-hazard') && 'hazardKind' in event) {
     return HAZARD_SYMBOLS[event.hazardKind as HazardKind] || 'signal';
   }

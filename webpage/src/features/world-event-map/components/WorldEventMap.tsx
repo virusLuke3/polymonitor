@@ -1,3 +1,5 @@
+import { MapExplore } from './MapExplore';
+import { CountryBrief } from './CountryBrief';
 import type { RendererViewport } from '../renderer/MapRenderer';
 import { MAP_RENDERER_TIMEOUTS } from '../renderer/MapRenderer';
 import type { AviationPhase } from '../data/useAviationViewport';
@@ -40,6 +42,7 @@ import { MapSymbolIcon } from './MapSymbolIcon';
 import { useI18n } from '@/services/i18n';
 
 export type WorldEventMapProps = {
+  countryIndex?: import('../domain/countryGeometry').CountryGeometryIndex | null;
   onViewportChange?: (viewport: RendererViewport) => void;
   aviationStatus?: {phase: AviationPhase; error: string | null; payload: import('@/types').AviationViewportPayload | null};
   onRendererKindChange?: (kind: 'webgl' | 'svg') => void;
@@ -56,6 +59,7 @@ export type WorldEventMapProps = {
 };
 
 export function WorldEventMap({
+  countryIndex,
   onViewportChange,
   aviationStatus,
   onRendererKindChange,
@@ -72,6 +76,7 @@ export function WorldEventMap({
 }: WorldEventMapProps) {
   const { locale } = useI18n();
   const mt = (text: string) => mapText(locale, text);
+  const [brief, setBrief] = useState<MapCountryTarget | null>(null);
   const [presentation, setPresentation] = useState<MapPresentationCounts | null>(null);
   const [expanded, setExpanded] = useState(false);
   const legendToggleRef = useRef<HTMLButtonElement>(null);
@@ -608,6 +613,9 @@ export function WorldEventMap({
       />
       <button ref={focusToggleRef} type="button" className="wm-map-focus-toggle" aria-pressed={expanded}
         onClick={() => setExpanded(value => !value)} aria-label={locale === 'zh' ? '展开或收起地图' : 'Expand or restore map'}><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d={expanded ? 'M3 9h6V3m12 6h-6V3M3 15h6v6m12-6h-6v6' : 'M9 3H3v6m12-6h6v6M3 15v6h6m6 0h6v-6'} /></svg></button>
+      {brief && !selectedEvent ? <CountryBrief country={brief} index={countryIndex} events={events}
+        onClose={() => setBrief(null)} onEvent={id => {setBrief(null); onEventSelect(id);}}
+        onFit={() => rendererRef.current?.fitCountry(brief)} onFilter={() => onCountryChange?.(brief.iso2)} returnFocusTarget={hostRef.current} /> : null}
       {selectedEvent ? (
         <EventInspector
           key={selectedEvent.id}
@@ -635,8 +643,8 @@ export function WorldEventMap({
         <div
           className={`wm-country-context-card ${countryTarget.context ? 'is-context' : ''}`}
           style={countryTarget.position ? {
-            left: `${Math.max(12, countryTarget.position.x + 12)}px`,
-            top: `${Math.max(12, countryTarget.position.y + 12)}px`,
+            left: `${Math.max(12, Math.min(countryTarget.position.x + 12, (hostRef.current?.clientWidth || 360) - 332))}px`,
+            top: `${Math.max(12, Math.min(countryTarget.position.y + 12, (hostRef.current?.clientHeight || 420) - 240))}px`,
           } : undefined}
           role="dialog"
           aria-label={`${countryTarget.country.name} map actions`}
@@ -652,6 +660,7 @@ export function WorldEventMap({
               onCountryChange?.(countryTarget.country.iso2);
               setCountryTarget(null);
             }}>{mt('Filter events')}</button>
+            <button type="button" onClick={() => {setBrief(countryTarget.country); onEventSelect(null); setCountryTarget(null);}}>{locale === 'zh' ? '国家简报' : 'Country brief'}</button>
             <button type="button" aria-label="Close country actions" onClick={() => setCountryTarget(null)}>×</button>
           </div>
         </div>
@@ -670,6 +679,9 @@ export function WorldEventMap({
             onZoomToAircraft={() => onCameraChange({ center: state.center, zoom: Math.min(12, Math.max(2.5, state.zoom + 1)) })}
           />
         ) : null}
+      <MapExplore countries={countryIndex} events={events} center={state.center} onEvent={onEventSelect}
+        onCountry={country => {rendererRef.current?.fitCountry(country); setBrief(country); onEventSelect(null);}}
+        onLocate={([lon, lat]) => onCameraChange({center: {lon, lat}, zoom: Math.max(5, state.zoom)})} />
       <div className="wm-map-context-controls">
       <button ref={legendToggleRef} type="button" className="wm-map-legend-toggle" aria-controls="wm-map-legend" aria-expanded={legendOpen} onClick={() => setLegendOpen(value => !value)}>{mt('Legend')}</button>
       {!state.activeLayerIds.includes('air-routes') && onAviationToggle ? <button type="button" className="wm-map-aviation-toggle" onClick={onAviationToggle} aria-label={locale === 'zh' ? '启用航空图层' : 'Enable aviation layer'}>
@@ -683,6 +695,7 @@ export function WorldEventMap({
           <span>{locale === 'zh' ? '清单 / 瓦片' : 'Manifest / tiles'}: {radar.status} / {rendererKind === 'svg' ? 'unavailable (SVG)' : radarTiles}</span>
           <span>{locale === 'zh' ? '覆盖不完整；透明不代表无降水。灰暗遮罩表示无雷达覆盖。' : 'Partial coverage; transparent does not mean dry. Shaded areas lack radar coverage.'}</span>
           {radar.error ? <span>{radar.error}</span> : null}
+          {radarEnabled && rendererKind === 'webgl' ? <button type="button" onClick={radar.retry} disabled={radar.status === 'loading'}>{locale === 'zh' ? '刷新雷达' : 'Refresh radar'}</button> : null}
           <span>{rendererKind === 'svg' ? 'SVG FALLBACK' : basemapState.replace(/-/g, ' ').toUpperCase()}</span>
           {onWeatherPreset ? <button type="button" onClick={onWeatherPreset}>{locale === 'zh' ? '启用天气视图' : 'Enable weather view'}</button> : null}
         </div>

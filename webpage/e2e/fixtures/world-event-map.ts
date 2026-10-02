@@ -207,6 +207,11 @@ export async function installFixtures(page: Page, climateUnavailable = false) {
   await page.route('https://basemaps.cartocdn.com/gl/**', (route) => fulfillJson(route, minimalStyle));
   await page.route('**/wm-api/**', async (route) => {
     const url = new URL(route.request().url());
+    if (/\/runtime\/(transport\/map|world\/(signals|infrastructure))$/.test(url.pathname)) {
+      return fulfillJson(route, {status:'partial', events:[], places:[], message:'Deterministic source fixture; limited coverage.'});
+    }
+    if (url.pathname.endsWith('/runtime/weather/map-query')) return fulfillJson(route, {status:'ok',places:[]});
+
     const path = url.pathname.replace(/^\/wm-api/, '');
     if (path === '/bootstrap') {
       await fulfillJson(route, {

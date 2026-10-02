@@ -1,3 +1,5 @@
+import { useMapInfrastructure } from './useMapInfrastructure';
+import { useMapSignals } from './useMapSignals';
 import type { RendererViewport } from '../renderer/MapRenderer';
 import { clampWorldEventZoom } from '../state/mapState';
 import { useEffect, useMemo, useState } from 'preact/hooks';
@@ -64,6 +66,8 @@ export function useWorldEventMapController({ runtimeData, getStatus: getPanelRun
   const worldEventMap = useWorldEventMapState();
   const [rendererViewport, setRendererViewport] = useState<RendererViewport | null>(null);
   const [mapRendererKind, setMapRendererKind] = useState<'webgl' | 'svg'>('webgl');
+  const infrastructure = useMapInfrastructure(!suspended && mapActive && worldEventMap.state.activeLayerIds.some(id => ['waterways','pipelines','submarine-cables'].includes(id)), rendererViewport);
+  const mapSignals = useMapSignals(worldEventMap.state.activeLayerIds, suspended || !mapActive);
   const naturalHazards = useNaturalHazards({
     sourceKeys: worldEventMap.state.activeLayerIds.flatMap((id) => worldEventLayerById(id)?.sourceKeys || []),
     zoom: worldEventMap.state.zoom,
@@ -136,7 +140,7 @@ export function useWorldEventMapController({ runtimeData, getStatus: getPanelRun
   const intelLayerEnabled = enabledLayerIds.includes('intel-hotspots');
   const countryRiskLayerEnabled = enabledLayerIds.includes('sanctions-country-risk');
   const countryGeometry = useCountryGeometry(
-    mapActive && !suspended && (intelLayerEnabled || countryRiskLayerEnabled || Boolean(worldEventMap.state.countryCode)),
+    mapActive && !suspended,
   );
   const breakingEventPayload = runtimeData['breaking-event-radar'] as RuntimeBreakingEventRadarPayload | undefined;
   const ucdpRawMapEvents = useMemo(
@@ -227,6 +231,11 @@ export function useWorldEventMapController({ runtimeData, getStatus: getPanelRun
     [showAirRoutes, mapTransportPayload],
   );
   const airReferenceEvents = airReferenceAdapterResult.events;
+  const supplementalEvents = useMemo(() => mapSignals.events.map(event => {
+    if (event.properties.mapLayer !== 'internet-outages' || !event.countryCode) return event;
+    const country = countryGeometry.index?.resolve(event.countryCode);
+    return country ? {...event, geometry: country.geometry, locationPrecision: 'country' as const} : event;
+  }), [mapSignals.events, countryGeometry.index]);
   const worldEventMapEvents = useMemo(
     () => [
       ...hazardMapEvents,
@@ -234,8 +243,9 @@ export function useWorldEventMapController({ runtimeData, getStatus: getPanelRun
       ...ucdpMapEvents,
       ...countryRiskMapEvents,
       ...airReferenceEvents,
+      ...filterWorldEventMapEventsForLayers([...supplementalEvents, ...infrastructure.events], worldEventFilterState, Date.now(), countryGeometry.index),
     ],
-    [airReferenceEvents, countryRiskMapEvents, hazardMapEvents, intelMapEvents, ucdpMapEvents],
+    [infrastructure.events, supplementalEvents, worldEventFilterState, countryGeometry.index, airReferenceEvents, countryRiskMapEvents, hazardMapEvents, intelMapEvents, ucdpMapEvents],
   );
   const mapSourceStatuses = useMemo(() => {
     const activeSourceKeys = new Set(
@@ -348,6 +358,6 @@ export function useWorldEventMapController({ runtimeData, getStatus: getPanelRun
     if (missingSources) void refreshIds(missingSources.split(','), { reason: 'refresh' });
   }, [missingSources, refreshIds]);
   useEffect(() => { writeWorldEventMapSeed(geoShockPayload); }, [geoShockPayload]);
-  return { worldEventMap, setRendererViewport, aviationStatus: aviationViewport, setMapRendererKind, layers, region, mapZoom, setRegion, setMapZoom, enabledLayerIds,
-    ucdpRawMapEvents, worldEventMapEvents, mapSourceStatuses };
+  return { countryIndex: countryGeometry.index, worldEventMap, setRendererViewport, aviationStatus: aviationViewport, setMapRendererKind, layers, region, mapZoom, setRegion, setMapZoom, enabledLayerIds,
+    ucdpRawMapEvents, worldEventMapEvents, mapSourceStatuses: [...mapSourceStatuses, ...mapSignals.sources, ...infrastructure.sources] };
 }

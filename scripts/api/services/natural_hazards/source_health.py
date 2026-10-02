@@ -33,6 +33,8 @@ SOURCE_COVERAGE: dict[str, Dict[str, Any]] = {
             "International discovery coverage does not replace local official warnings.",
         ],
     ),
+    "swic": coverage(scope="global", label="WMO member CAP warning catalog outside US and Canada", complete=False, gaps=["Participating members only; catalog has no native hazard geometry. Use event list and country brief."]),
+    "eccc": coverage(scope="provider-area", label="Canadian official ECCC weather alerts", complete=False, gaps=["Canada only; not global warning coverage."]),
     "nws": coverage(
         scope="provider-area",
         label="United States and NWS responsibility areas",

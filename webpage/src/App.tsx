@@ -153,7 +153,7 @@ function WorldMonitorApp() {
     selectedMarketGroupDetail, selectedMarketGroupChart, selectedMarketGroupChartRange, setSelectedMarketGroupChartRange,
     bundle, bundleLoading, focusMarketGroup, prefetchMarketFocus, error: focusError } = useMarketFocus({ bootstrap, markets, marketGroups, catalogLoaded });
   const { worldEventMap, setRendererViewport, aviationStatus, setMapRendererKind, layers, region, mapZoom, setRegion, setMapZoom, enabledLayerIds,
-    ucdpRawMapEvents, worldEventMapEvents, mapSourceStatuses } = useWorldEventMapController(runtime, viewMode === '2d');
+    countryIndex, ucdpRawMapEvents, worldEventMapEvents, mapSourceStatuses } = useWorldEventMapController(runtime, viewMode === '2d');
   const { workspaceSyncStatus, workspaceSyncUpdatedAt, retryWorkspaceSync } = useWorkspaceSync(workspace, { region, mapZoom, setRegion, setMapZoom });
   const [commandQuery, setCommandQuery] = useState('');
   const [commandTab, setCommandTab] = useState<CommandPaletteTab>('markets');
@@ -532,6 +532,7 @@ function WorldMonitorApp() {
                   />
                 ) : (
                   <WorldEventMapView
+                    countryIndex={countryIndex}
                     onViewportChange={setRendererViewport}
                     aviationStatus={aviationStatus}
                     onRendererKindChange={setMapRendererKind}

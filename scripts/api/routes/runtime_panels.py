@@ -43,6 +43,10 @@ class RuntimePanelRouteDependencies:
     natural_hazard_event_detail: Callable[..., dict[str, Any] | None] | None
     natural_hazard_related_markets: Callable[..., dict[str, Any] | None] | None
     aviation_viewport_snapshot: Callable[..., dict[str, Any]] | None
+    map_weather_query: Callable[..., dict[str, Any]] | None = None
+    transport_map_source: Callable[..., dict[str, Any]] | None = None
+    spatial_map_source: Callable[..., dict[str, Any]] | None = None
+    map_infrastructure: Callable[..., dict[str, Any]] | None = None
 
 
 def _get_panel_snapshot(panel, panel_context: RuntimePanelContext, limit: int | None):
@@ -269,6 +273,64 @@ def create_runtime_panels_blueprint(dependencies: RuntimePanelRouteDependencies)
         response.headers["X-Map-Event-Count"] = str((payload.get("counts") or {}).get("events") or 0)
         response.headers["Server-Timing"] = f"hazard-map;dur={(time.perf_counter() - started_at) * 1000:.1f}"
         return response
+
+    @bp.route("/runtime/world/signals", methods=["GET"])
+    def api_map_signals():
+        source = request.args.get("source", "")
+        if source not in {"gpsjam", "ioda"}: return jsonify({"error": "unsupported-source"}), 400
+        if dependencies.spatial_map_source is None: return jsonify({"error": "source-unavailable"}), 503
+        try:
+            payload = dependencies.spatial_map_source(source=source)
+            response = jsonify(payload)
+            response.headers['Cache-Control'] = 'public, max-age=30' if payload.get('status') != 'degraded' else 'no-store'
+            return response
+        except Exception:
+            current_app.logger.exception("map signal failed source=%s", source)
+            return jsonify({"status": "unavailable", "events": [], "message": source + " source unavailable"}), 503
+
+    @bp.route("/runtime/world/infrastructure", methods=["GET"])
+    def api_map_infrastructure():
+        if dependencies.map_infrastructure is None:
+            return jsonify({"status": "unavailable", "events": [], "message": "Infrastructure source unavailable"}), 503
+        try:
+            bbox = tuple(float(v) for v in request.args.get("bbox", "").split(","))
+            if len(bbox) != 4: raise ValueError("invalid-infrastructure-bbox")
+            payload = dependencies.map_infrastructure(bbox=bbox)
+        except ValueError as exc:
+            return jsonify({"status":"error", "error":str(exc)}), 400
+        except Exception:
+            current_app.logger.warning("Infrastructure provider unavailable", exc_info=True)
+            return jsonify({"status":"unavailable", "events":[], "message":"OSM infrastructure source unavailable"}), 503
+        return _public_conditional_json(payload, "public, max-age=300, must-revalidate")
+
+    @bp.route("/runtime/transport/map", methods=["GET"])
+    def api_transport_map():
+        if dependencies.transport_map_source is None:
+            return jsonify({"status": "error", "error": "transport-map-unavailable"}), 503
+        try:
+            payload = dependencies.transport_map_source(source=request.args.get("source", ""), query=request.args.get("q", ""))
+        except ValueError as exc:
+            return jsonify({"status": "error", "error": str(exc)}), 400
+        except Exception:
+            current_app.logger.warning("Transport map source failed", exc_info=True)
+            return jsonify({"status": "error", "error": "transport-source-unavailable"}), 503
+        return _public_conditional_json(payload, "public, max-age=30, must-revalidate" if payload.get("status") != "unavailable" else "no-store")
+
+    @bp.route("/runtime/weather/map-query", methods=["GET"])
+    def api_map_weather_query():
+        if dependencies.map_weather_query is None:
+            return jsonify({"status": "error", "error": "weather-query-unavailable"}), 503
+        try:
+            kwargs = {"query": request.args.get("q", ""), "language": request.args.get("language", "en")}
+            if "lat" in request.args or "lon" in request.args:
+                kwargs.update(latitude=float(request.args.get("lat", "")), longitude=float(request.args.get("lon", "")))
+            payload = dependencies.map_weather_query(**kwargs)
+        except ValueError:
+            return jsonify({"status": "error", "error": "invalid-weather-query"}), 400
+        except Exception:
+            current_app.logger.warning("Map weather query source unavailable", exc_info=True)
+            return jsonify({"status": "error", "error": "weather-source-unavailable"}), 503
+        return _public_conditional_json(payload, "public, max-age=60, must-revalidate")
 
     @bp.route("/runtime/transport/aviation-viewport", methods=["GET"])
     def api_aviation_viewport_snapshot():

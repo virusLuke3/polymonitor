@@ -59,3 +59,13 @@ describe('country geometry identity', () => {
     expect(index.intersects('US', { type: 'Point', coordinates: [10, 10] })).toBe(false);
   });
 });
+
+ it('indexes the source regional identifier without changing boundary coordinates', () => {
+  const data = JSON.parse(readFileSync(new URL('../../../../public/map-data/world-countries.geojson', import.meta.url), 'utf8')) as FeatureCollection;
+  const original = data.features.find(f => f.properties?.['ISO3166-1-Alpha-2'] === 'CN-TW')!;
+  expect(original).toBeDefined();
+  const index = buildCountryGeometryIndex(data);
+  expect(index.resolve('CN-TW')?.iso2).toBe('TW');
+  expect(index.resolve('TW')?.geometry).toEqual(original.geometry);
+  expect(index.locate([121, 23.5])?.iso2).toBe('TW');
+});

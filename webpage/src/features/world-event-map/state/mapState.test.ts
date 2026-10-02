@@ -59,6 +59,13 @@ describe('World Event Map state', () => {
       'intel-hotspots',
       'ucdp',
       'sanctions-country-risk',
+      'waterways',
+      'pipelines',
+      'submarine-cables',
+      'gnss-interference',
+      'internet-outages',
+      'airport-disruptions',
+      'ais-vessels',
       'weather-radar',
     ]);
     expect(defaults.activeLayerIds).toContain('air-routes');

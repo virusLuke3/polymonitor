@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'preact/hooks';
 import { useI18n } from '@/services/i18n';
 import { mapText } from '@/locales/map';
 import {
@@ -38,12 +39,19 @@ export function MapToolbar({
 }) {
   const { locale, t } = useI18n();
   const mt = (text: string) => mapText(locale, text);
+  const [compact, setCompact] = useState(() => window.matchMedia('(max-width: 720px)').matches);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  useEffect(() => { const media = window.matchMedia('(max-width: 720px)'); const update = () => setCompact(media.matches);
+    media.addEventListener('change', update); return () => media.removeEventListener('change', update); }, []);
   const selected = new Set(state.severities);
   return (
     <div className="wm-world-event-map-toolbar" aria-label={mt("World Event Map filters")}>
       {onPresentationChange ? <div className="wm-map-time-segments" role="group" aria-label={locale === 'zh' ? '地图展示模式' : 'Map presentation'}>
         {(['overview', 'records'] as const).map(mode => <button type="button" aria-pressed={state.presentationMode === mode} onClick={() => onPresentationChange(mode)}>{locale === 'zh' ? mode === 'overview' ? '态势概览' : '完整记录' : mode === 'overview' ? 'Overview' : 'Records'}</button>)}
       </div> : null}
+      <details className="wm-map-filter-details" open={!compact || filtersOpen} onToggle={e => {if (compact) setFiltersOpen(e.currentTarget.open);}}>
+      <summary>{locale === 'zh' ? '筛选' : 'Filters'} · {state.timeRange} · {state.severities.length}/4</summary>
+      <div className="wm-map-filter-options">
       <label>
         <span>{mt("Time")}</span>
         <div className="wm-map-time-segments" role="group" aria-label={mt('Map time range')}>
@@ -100,6 +108,8 @@ export function MapToolbar({
           ))}
         </select>
       </label>
+      </div>
+      </details>
       {state.countryCode ? (
         <button type="button" className="wm-world-event-country-filter" onClick={onClearCountry}>
           {mt('Country')} · {state.countryCode} ×

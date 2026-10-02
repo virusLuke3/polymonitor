@@ -68,6 +68,8 @@ const HAZARD_SOURCE_LABELS: Record<string, string> = {
   eonet: 'EONET',
   gdacs: 'GDACS',
   nws: 'NWS',
+  eccc: 'ECCC',
+  swic: 'WMO SWIC',
   firms: 'FIRMS',
   'climate-anomaly': 'ANOMALY',
 };
@@ -75,7 +77,7 @@ const HAZARD_SOURCE_LABELS: Record<string, string> = {
 const HAZARD_PROVIDERS: Record<string, readonly string[]> = {
   usgs: ['USGS'], 'usgs-volcano-cap': ['USGS Volcano Hazards Program HANS CAP'],
   nhc: ['NOAA National Hurricane Center', 'NHC'], eonet: ['NASA EONET'],
-  gdacs: ['GDACS'], nws: ['NWS', 'NOAA National Weather Service'], firms: ['NASA FIRMS'],
+  gdacs: ['GDACS'], eccc: ['ECCC'], swic: ['WMO SWIC'], nws: ['NWS', 'NOAA National Weather Service'], firms: ['NASA FIRMS'],
   'climate-anomaly': ['NOAA NCEI Climate at a Glance'],
 };
 
@@ -86,7 +88,7 @@ export function sourceStatusesFromHazardResponse(
 ): WorldEventSourceStatus[] {
   if (!response) {
     return loading
-      ? ['usgs', 'usgs-volcano-cap', 'nhc', 'eonet', 'gdacs', 'nws', 'firms', 'climate-anomaly'].map((key) => ({
+      ? ['usgs', 'usgs-volcano-cap', 'nhc', 'eonet', 'gdacs', 'nws', 'eccc', 'swic', 'firms', 'climate-anomaly'].map((key) => ({
           key,
           label: HAZARD_SOURCE_LABELS[key] || key.toUpperCase(),
           status: 'loading' as const,

@@ -431,3 +431,6 @@ yarl==1.24.5
     # via aiohttp
 zstandard==0.25.0
     # via langsmith
+
+# Native GPSJAM H3 cell boundaries, not invented coordinates.
+h3==4.3.1

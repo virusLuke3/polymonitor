@@ -84,7 +84,7 @@ Polymonitor 工作区和本项目实施契约，不能把上游 registry 的声�
 
 本轮回归另修正两处就绪语义：替代底图按真实 source id 判断内容就绪，不能只识别 PMTiles 的 `basemap`；SVG/本地降级成功保留原故障原因，直到 primary-ready 才清除。
 
-### 6.2 仍需完成的产品差距
+### 6.2 本轮实施前的产品差距（2026-10-02 基线）
 
 | 领域 | 上游当前源码 | Polymonitor 当前事实 | 下一步与优先级 |
 |---|---|---|---|
@@ -116,3 +116,34 @@ RU/UA 的 geometry 有差异；本地仍用 `CN-TW`，上游已用 `TW`。本地
 桌面/窄视口 Chrome、手动关闭/刷新、请求与 SW/release 身份、trace/video。
 本轮测试明确区分 all-on 入场验收与用户手动选择的单图层回归场景。
 实际执行结果及未通过项以该目录 README 为准；本节不提前声称发布或全功能对齐完成。
+
+
+## 7. 2026-10-02 地图业务补齐与服务稳定性
+
+沿用既有 renderer、图层 registry、hazard snapshot、服务缓存和 AIS 采集所有权。
+本轮不是 WorldMonitor 全功能复制；下表分别说明实现与真实来源限制。
+
+| 需求 | 实现归属 | 验证入口 / 覆盖边界 |
+|---|---|---|
+| P0 API 断连 | `gcp_serving_healthcheck.py`、`routes/system.py`、healthcheck unit | 新增无依赖 `/health/live`；依赖 readiness 失败不重启仍响应的 API；重启前持久化次数；oneshot 预算覆盖有界恢复。Oct2 03:24 的 GCP 日志确认旧健康检查因内容查询超时重启 API，引发请求重置。不是把上游异常改成成功。09:26 日志另证实认证 DB 连接超时导致轮换 worker 启动失败并终止 master；`auth_service.validate_runtime_config` 现保留公共 API 启动，认证操作仍 fail-closed，静态配置错误/缺表仍阻止启动。 |
+| NWS/USGS 缓存返回 | `natural_hazards/service.py`、`snapshots.py` | fresh 直接返回；保留期内 stale 立即返回，后台 singleflight 刷新；缓存 IO 不占调度锁；保留 429、blocked 和原成功时间；NWS deadline 从真正执行时起算。 |
+| 雷达恢复 | `useWeatherRadar.ts`、现有雷达状态面板 | 失败后 5/15/45 秒有限快速重试，再回正常周期；手动刷新、过期退出；401/403/429 冷却不能被按钮和可见性变化绕过。不是历史帧播放。 |
+| 地区温度 | 现有 `global_weather_map_service.py` 的 map-query、`MapExplore` | 国家/地点/机场/已加载飞机搜索，选择真实坐标定位；Open-Meteo 当前模式温度、湿度、风速、24 小时及七天温度。请求可取消，缓存/singleflight 复用；标注模式估计，不当作官方灾害预警。 |
+| 国家详情 | `CountryBrief`、既有事件详情 | 当前已加载且符合筛选的唯一记录、分类、来源、时间线、定位/筛选/事件详情。覆盖不足明确显示；不声称完整国家新闻档案或生成式国家研判。 |
+| 地区索引 | `countryGeometry.ts` | CN-TW 仅归一化索引到 TW，保留原几何；单测与搜索→国家简报→筛选浏览器测试。 |
+| 机场运行 | 现有运输 service 的 map source `faa` | 真实 FAA NAS 延误/限制/关闭通告，保留适用机型等原始条件；机场坐标来自现有 OpenFlights。不是全球机场正常状态目录。 |
+| 官方天气覆盖 | 既有 hazard pipeline 新增 ECCC / SWIC provider | ECCC 加拿大原生区域、更新及取消/过期；WMO 成员国 CAP 目录保留时间/级别/国家。SWIC 没有原生灾害几何，保留完整返回目录供事件列表和国家简报，不造中心点；US/CA 仍由原生来源负责。 |
+| 船舶 | 现有 AIS sampler/cache → `ais-vessels` | 保存真实 PositionReport 坐标、MMSI、时间和速度；修正订阅 bbox 的纬经顺序；不扩大原采样频次/配额，不由浏览器另开采集；低频最后观测，不标实时全球覆盖。 |
+| 水道/管道/海缆 | `map_infrastructure_service.py` → 现有路径 renderer | OSM 原始 way 几何，实际 renderer bbox（日期变更线分片）；需放大到 25 平方度内，ODbL 归属及覆盖提示。不是全球完整基础设施数据库。 |
+| GNSS / 网络 | 同 service 的 GPSJAM / IODA → 现有面 renderer | GPSJAM 原始 H3 边界、官方去噪比例 `100*max(0,bad-1)/(good+bad)`；显示 >=2% 的异常精度格，保留完整源目录及分母。IODA 24h 国家测量信号；均不直接断言干扰原因或全国断网。 |
+| 全开视觉 | `weatherBasemap.ts`、地图组件样式、航空路径工厂 | 删除额外底图文字颜色/描边覆盖，使用 WorldMonitor 同类 Protomaps palette/rank；保留本地比例字体。来源状态折叠但异常数量可见，小屏过滤折叠，航空面板默认紧凑，普通航线减弱，国家菜单避让且可点击。事件列表首次打开后保留 DOM，避免移除焦点输入框导致原生节点持续保留；关闭时 hidden 并退出可访问树。 |
+
+### 7.1 验证与来源限制
+
+- 单测入口：`tests/test_map_completion.py`、自然灾害/运输现有测试；前端 map unit tests 与 `weatherBasemap.test.ts`。
+- 浏览器入口：`e2e/map-completion.spec.ts`、`world-event-map.spec.ts`；覆盖重试、取消/需求隔离、温度查询、TW 简报、小屏、SVG/2D、离屏恢复与 50 次交互资源检查。3D 既有专项单独记录，不计入本轮地图 24 项结果。测试失败必须修复，不能更新阈值掩盖。
+- 本轮证据目录：`webpage/artifacts/map-completion-20261002/`。生产截图/trace、来源响应、同制品 SHA 和实际运行结果以其中验收记录为准；候选测试成功不等同于已经上线。
+- **全球 NOTAM 仍受真实授权来源约束**：WorldMonitor 自身通过 `ICAO_API_KEY` 获取 ICAO 通告。当前未发现对应可用配置。FAA 美国限制通告不能当作全球 NOTAM，也不能从静态航线推断运行正常。
+- 实际来源可能为空、stale、partial 或 unavailable；保留这些状态。实机 iOS/Android 验收由用户明确排除；窄视口 Chrome 不替代实机结论。
+
+- 布局基线修订：原首页截图仍为旧矮地图/旧工具栏。本轮按实际概览、紧凑控件和搜索入口复核，原图与新图保存在证据目录 `reviewed-baselines/`；布局截图固定 SVG 分支，WebGL 几何、恢复及生产真实底图分别验收。仍使用零像素差异，不放宽容差。冷来源失败场景明确清空测试缓存，避免把上一场景保留的 stale 误判为 unavailable；中文冷/热字体复跑保持相同图层选择。

@@ -84,7 +84,7 @@ function createAviationRouteLayers(
       data: data.routes,
       getPath: (event) => event.geometry?.type === 'LineString' ? event.geometry.coordinates : [],
       getColor: (event) => aviationRouteTone(event, routeAlpha(
-        event, state.selectedEventId, selectedGroupId, 112, 235,
+        event, state.selectedEventId, selectedGroupId, state.zoom < 3 ? 72 : 112, 235,
       )),
       getWidth: (event) => routeWidth(event, selectedGroupId),
       widthMinPixels: 0.65,

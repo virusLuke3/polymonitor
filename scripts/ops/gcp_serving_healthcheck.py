@@ -180,15 +180,20 @@ def _api_healthy() -> tuple[bool, bool, str]:
     if not _unit_active(API_UNIT):
         return False, False, f"{API_UNIT} is not active"
     try:
+        live = _probe_json("/health/live")
+        if live.get("status") != "ok":
+            return False, False, "API liveness probe failed"
+    except Exception as exc:
+        return False, False, f"API liveness probe failed: {exc}"
+    # A dependency outage is not a dead process. Restarting healthy workers here
+    # interrupts every map request without repairing the unavailable dependency.
+    try:
         health = _probe_json("/health")
-        status = str(health.get("status") or "").lower()
-        if status not in {"ok", "degraded"}:
-            return False, False, f"/health returned status={status!r}"
-        if status == "degraded":
+        if health.get("status") != "ok":
             return True, False, "API responsive; dependency health is degraded"
         _probe_json("/content/latest", params={"limit": 1})
     except Exception as exc:
-        return False, False, f"API probe failed: {exc}"
+        return True, False, f"API responsive; readiness probe failed: {exc}"
     return True, True, "liveness and latest-content probes passed"
 
 
@@ -319,10 +324,13 @@ def _recover(
         f"(attempt {len(attempts) + 1}/{MAX_RESTARTS_PER_WINDOW}): {reason}"
     )
     _record_recovery_incident(key, "warning", f"bounded restart attempt for {unit}")
-    result = _systemctl("restart", unit)
     current["restart_attempts"] = [*attempts, now]
     current["last_recovery_at"] = now
     current["consecutive_failures"] = 0
+    # Persist the budget before a blocking command: a killed healthcheck must
+    # not forget that it already attempted a restart.
+    _save_state(state)
+    result = _systemctl("restart", unit)
     if result.returncode != 0:
         current["start_limit_blocked"] = True
         current["backoff_until"] = now + BACKOFF_SECONDS
@@ -349,7 +357,7 @@ def run_once(*, now: int | None = None) -> int:
     disk_ok, disk_detail = _disk_ready()
     if api_ok:
         _mark_healthy(api_state, timestamp)
-        _record_recovery_incident("api", "healthy", "API recovery path healthy")
+        _record_recovery_incident("api", "healthy" if dependencies_ready else "warning", api_detail)
         _log(f"api healthy: {api_detail}")
     elif not disk_ok:
         _mark_dependency_blocked(

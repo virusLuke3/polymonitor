@@ -30,6 +30,11 @@ def create_system_blueprint(dependencies: SystemRouteDependencies) -> Blueprint:
         dependencies.authenticate_request(request, required_role="admin", required_scope="operations:read")
         return jsonify(dependencies.build_seed_health_payload())
 
+    @bp.route("/health/live", methods=["GET"])
+    def liveness():
+        # No database, Redis, or upstream work on the process liveness path.
+        return jsonify({"status": "ok"})
+
     @bp.route("/health", methods=["GET"])
     def health():
         try:

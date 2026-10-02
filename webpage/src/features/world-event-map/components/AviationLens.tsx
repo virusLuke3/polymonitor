@@ -49,19 +49,19 @@ export function AviationLens({
     [events, state],
   );
   return (
-    <aside className="wm-aviation-lens" aria-label="Aviation reference lens">
+    <aside className={`wm-aviation-lens ${folded ? 'is-folded' : ''}`} aria-label="Aviation reference lens">
       <header>
         <div>
-          <span>{zh ? '航空 · 观测与参考航线' : 'Aviation · observations & reference routes'}</span>
-          <strong>{zh ? ({all:'全部',trunk:'干线',watch:'关注'}[state.aviationLens]) : LENS_LABELS[state.aviationLens]} {zh ? '航空' : 'aviation'}</strong>
+          <span>{folded ? (zh ? '航空' : 'Aviation') : (zh ? '航空 · 观测与参考航线' : 'Aviation · observations & reference routes')}</span>
+          {!folded ? <strong>{zh ? ({all:'全部',trunk:'干线',watch:'关注'}[state.aviationLens]) : LENS_LABELS[state.aviationLens]} {zh ? '航空' : 'aviation'}</strong> : null}
         </div>
         <button type="button" aria-expanded={!folded} onClick={()=>setFolded(v=>!v)} aria-label={zh ? '展开航空详情' : 'Expand aviation details'}>{folded ? '▾' : '▴'}</button>
         <button type="button" onClick={onClose} aria-label="Hide aviation layer">×</button>
       </header>
       <p role="status" data-aviation-phase={status?.phase}>{status?.phase ? labels[status.phase] : labels.LOADING} · {status?.payload?.source || (zh ? '尚无区域观测' : 'No viewport observation')}
-        {status?.payload?.generatedAt ? ` · ${zh ? '接收' : 'received'} ${status.payload.generatedAt}` : ''}
-        {status?.error ? ` · ${status.error}` : ''}</p>
-      {(state.zoom < 2 || (state.zoom < 12 && status?.payload?.coverage?.complete === false)) ? <button type="button" className="wm-map-aviation-zoom" onClick={onZoomToAircraft}>
+        {!folded && status?.payload?.generatedAt ? ` · ${zh ? '接收' : 'received'} ${status.payload.generatedAt}` : ''}
+        {!folded && status?.error ? ` · ${status.error}` : ''}</p>
+      {!folded && (state.zoom < 2 || (state.zoom < 12 && status?.payload?.coverage?.complete === false)) ? <button type="button" className="wm-map-aviation-zoom" onClick={onZoomToAircraft}>
         {state.zoom < 2 ? (zh ? '放大以加载当前区域飞机' : 'Zoom in for aircraft in this region')
           : (zh ? '放大以缩小查询覆盖缺口' : 'Zoom in to reduce query coverage gaps')}
       </button> : null}

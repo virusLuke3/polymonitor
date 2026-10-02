@@ -15,7 +15,7 @@ from .providers import firms
 
 MAP_SCHEMA_VERSION = "natural-hazards-map.v1"
 DETAIL_SCHEMA_VERSION = "natural-hazard-detail.v1"
-MAP_SOURCE_KEYS = ("usgs", "usgs-volcano-cap", "nhc", "eonet", "gdacs", "nws", "firms", "climate-anomaly")
+MAP_SOURCE_KEYS = ("usgs", "usgs-volcano-cap", "nhc", "eonet", "gdacs", "nws", "eccc", "swic", "firms", "climate-anomaly")
 
 _RENDER_PROPERTY_KEYS = {
     "observationType",
@@ -369,9 +369,13 @@ def get_natural_hazard_map_snapshot(
             source=key,
             limit=bounded_limit,
         )
+    # Country-only SWIC records do not consume geometry/GPU capacity. Keep the
+    # complete returned catalog accessible through the virtualized event list.
+    source_events = list(result.get("events") or [])
+    displayed_events = source_events if key == "swic" else source_events[:bounded_limit]
     events = [
         compact_hazard_event(event, zoom=zoom)
-        for event in list(result.get("events") or [])[:bounded_limit]
+        for event in displayed_events
         if isinstance(event, Mapping)
         and not bool((event.get("revision") or {}).get("cancelled"))
         and str(event.get("lifecycle") or "").lower() not in {"cancelled", "expired", "ended"}

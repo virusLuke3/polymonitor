@@ -144,6 +144,8 @@ describe('map source status', () => {
       'eonet',
       'gdacs',
       'nws',
+      'eccc',
+      'swic',
       'firms',
       'climate-anomaly',
     ]);

@@ -18,3 +18,10 @@ describe('RainViewer manifest contract', () => {
     ]) expect(() => latestRadarFrame(payload, 200_000)).toThrow();
   });
 });
+
+import { radarRetryDelay } from './useWeatherRadar';
+it('separates prompt failure retries from five-minute refresh and respects provider backoff', () => {
+  expect([1,2,3,4].map(n=>radarRetryDelay(n))).toEqual([5000,15000,45000,300000]);
+  expect(radarRetryDelay(1,429,60000)).toBe(60000);
+  expect(radarRetryDelay(1,403)).toBe(300000);
+});

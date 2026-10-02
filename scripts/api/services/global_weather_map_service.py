@@ -1866,3 +1866,64 @@ def get_global_weather_map_snapshot(
         ctx=dependencies,
         limit=limit,
     )
+
+
+def query_map_weather(ctx: GlobalWeatherMapContext, *, query: str = "", language: str = "en", latitude: float | None = None, longitude: float | None = None) -> Dict[str, Any]:
+    """On-demand place lookup/forecast; shares the weather service and snapshot store.
+
+    It does not load markets, infer a hazard from a temperature, or fetch a
+    caller-supplied URL. Coordinates come from the selected geocoder result.
+    """
+    from contextlib import nullcontext
+    from math import isfinite
+    dependencies = _dependencies(ctx)
+    store = dependencies.snapshot_store
+    namespace = "snapshot:weather:map-query"
+    query = " ".join(str(query).split())[:100]
+    language = "zh" if language == "zh" else "en"
+    if latitude is None or longitude is None:
+        if len(query) < 2:
+            return {"status": "empty", "places": []}
+        key = f"places:{language}:{query.casefold()}"
+        ttl = 86400
+    else:
+        if not (isfinite(latitude) and isfinite(longitude) and -90 <= latitude <= 90 and -180 <= longitude <= 180):
+            raise ValueError("invalid-weather-coordinates")
+        key = f"forecast:{latitude:.4f}:{longitude:.4f}"
+        ttl = 600
+    cached = store.get(namespace, key) if store else None
+    if cached is not None:
+        return cached
+    locker = getattr(store, "fetch_lock", None)
+    with locker(namespace, key, timeout=8) if locker else nullcontext():
+        cached = store.get(namespace, key) if store else None
+        if cached is not None:
+            return cached
+        if latitude is None or longitude is None:
+            raw = dependencies.http_json_get("https://geocoding-api.open-meteo.com/v1/search",
+                params={"name": query, "count": 12, "language": language, "format": "json"}, timeout=7)
+            if not isinstance(raw, dict) or raw.get("error"):
+                raise RuntimeError("invalid-geocoding-response")
+            places = [{"id": str(p["id"]), "name": p["name"], "country": p.get("country", ""),
+                "countryCode": p.get("country_code"), "region": p.get("admin1", ""),
+                "lat": p["latitude"], "lon": p["longitude"]} for p in raw.get("results", [])
+                if isinstance(p, dict) and all(k in p for k in ("id", "name", "latitude", "longitude"))
+                and -90 <= p["latitude"] <= 90 and -180 <= p["longitude"] <= 180]
+            payload = {"status": "ok" if places else "empty", "places": places,
+                "source": "Open-Meteo / GeoNames", "sourceUrl": "https://open-meteo.com/en/docs/geocoding-api"}
+        else:
+            raw = dependencies.http_json_get(
+                getattr(dependencies.settings, "open_meteo_api_url", "") or "https://api.open-meteo.com/v1/forecast",
+                params={"latitude": latitude, "longitude": longitude, "current": "temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m",
+                    "hourly": "temperature_2m", "daily": "temperature_2m_max,temperature_2m_min", "forecast_days": 7,
+                    "timezone": "UTC"}, timeout=7)
+            if not isinstance(raw, dict) or raw.get("error") or not isinstance(raw.get("current"), dict):
+                raise RuntimeError("invalid-weather-response")
+            payload = {"status": "ok", "latitude": latitude, "longitude": longitude,
+                "current": raw["current"], "hourly": raw.get("hourly", {}), "daily": raw.get("daily", {}),
+                "units": raw.get("current_units", {}), "timezone": "UTC", "source": "Open-Meteo",
+                "sourceUrl": "https://open-meteo.com/", "fetchedAt": _utc_now_iso(dependencies),
+                "limitations": ["Weather model estimate and forecast; not an official hazard warning."]}
+        if store:
+            store.set(namespace, key, payload, ttl)
+        return payload

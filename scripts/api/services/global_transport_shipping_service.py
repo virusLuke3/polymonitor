@@ -867,13 +867,14 @@ async def _sample_aisstream(api_key: str, *, timeout_seconds: int) -> Dict[str, 
     import websockets
 
     uri = os.environ.get("POLYDATA_AISSTREAM_WS_URL", "wss://stream.aisstream.io/v0/stream")
-    bbox = json.loads(os.environ.get("POLYDATA_AISSTREAM_BBOX_JSON", "[[[-180,-90],[180,90]]]"))
+    bbox = json.loads(os.environ.get("POLYDATA_AISSTREAM_BBOX_JSON", "[[[-90,-180],[90,180]]]"))
     subscription = {
         "APIKey": api_key,
         "BoundingBoxes": bbox,
         "FilterMessageTypes": ["PositionReport"],
     }
     vessels = 0
+    positions = {}
     countries: Counter[str] = Counter()
     started = datetime.now(timezone.utc)
     async with websockets.connect(uri, open_timeout=timeout_seconds) as websocket:
@@ -887,13 +888,21 @@ async def _sample_aisstream(api_key: str, *, timeout_seconds: int) -> Dict[str, 
             try:
                 payload = json.loads(message)
                 meta = payload.get("MetaData") if isinstance(payload, dict) else {}
+                report = ((payload.get("Message") or {}).get("PositionReport") or {})
+                mmsi = str(report.get("UserID") or (meta or {}).get("MMSI") or "")
+                lat, lon = _float(report.get("Latitude")), _float(report.get("Longitude"))
+                observed_date = _parse_iso(str((meta or {}).get("time_utc") or "").replace(" +0000 UTC", "+00:00"))
+                observed = observed_date.isoformat() if observed_date else None
+                if mmsi and lat is not None and lon is not None and -90 <= lat <= 90 and -180 <= lon <= 180:
+                    positions[mmsi] = {"mmsi": mmsi, "name": str((meta or {}).get("ShipName") or mmsi).strip(),
+                        "lat": lat, "lon": lon, "observedAt": observed, "speedKnots": report.get("Sog"), "course": report.get("Cog")}
                 country = str((meta or {}).get("ShipName") or "AIS").strip()[:3] or "AIS"
                 countries[country] += 1
             except Exception:
                 continue
             if vessels >= int(os.environ.get("POLYDATA_AISSTREAM_SAMPLE_LIMIT", "12") or 12):
                 break
-    return {"status": "ok", "messageCount": vessels, "topShipHints": dict(countries.most_common(5))}
+    return {"status": "ok", "messageCount": vessels, "topShipHints": dict(countries.most_common(5)), "vessels": list(positions.values())}
 
 
 def _aisstream_api_key() -> str:
@@ -2134,3 +2143,105 @@ def get_global_transport_shipping_snapshot(
         ctx=dependencies,
         limit=limit,
     )
+
+
+FAA_STATUS_URL = "https://nasstatus.faa.gov/api/airport-status-information"
+TRANSPORT_MAP_NAMESPACE = "snapshot:transport:map"
+
+
+def _airport_index(ctx):
+    store = _dependencies(ctx).snapshot_store
+    cached = store.get(TRANSPORT_MAP_NAMESPACE, "airports") if store else None
+    if cached: return cached
+    locker = getattr(store, 'fetch_lock', None)
+    with locker(TRANSPORT_MAP_NAMESPACE, "airports", timeout=2) if locker else nullcontext():
+        cached = store.get(TRANSPORT_MAP_NAMESPACE, "airports") if store else None
+        if cached: return cached
+        local_path = _local_openflights_path("airports.dat")
+        raw = local_path.read_text(encoding="utf-8", errors="replace") if local_path else _http_text(ctx, OPENFLIGHTS_AIRPORTS_URL, timeout=6)
+        airports = _parse_airports(raw)
+        if store: store.set(TRANSPORT_MAP_NAMESPACE, "airports", airports, 86400)
+        return airports
+
+
+def parse_faa_status(xml_text, airports):
+    from xml.etree import ElementTree
+    from email.utils import parsedate_to_datetime
+    root = ElementTree.fromstring(xml_text)
+    if root.tag != "AIRPORT_STATUS_INFORMATION": raise ValueError("invalid-faa-schema")
+    try: updated = parsedate_to_datetime(root.findtext("Update_Time")).isoformat()
+    except (TypeError, ValueError): raise ValueError("invalid-faa-update-time")
+    events = []
+    for kind in root.findall("Delay_type"):
+        kind_name = kind.findtext("Name") or "Airport restriction"
+        for record in kind.iter():
+            code = record.findtext("ARPT")
+            if not code: continue
+            airport = airports.get(code, {})
+            lat, lon = airport.get("lat"), airport.get("lon")
+            geometry = {"type": "Point", "coordinates": [lon, lat]} if lat is not None and lon is not None else None
+            reason = record.findtext("Reason") or kind_name
+            facts = {}
+            def collect_fields(node, prefix=''):
+                for child in node:
+                    if child.tag == 'ARPT': continue
+                    name = f'{prefix}/{child.tag}' if prefix else child.tag
+                    if len(child): collect_fields(child, name)
+                    elif (child.text or '').strip(): facts[name] = child.text.strip()
+            collect_fields(record)
+            events.append({"id": f"faa:{code}:{_source_hash(kind_name + reason)}", "category": "transport-disruption",
+                "title": f"{code} · {kind_name}", "summary": reason + '\n' + '\n'.join(f'{k}: {v}' for k,v in facts.items() if k != 'Reason'),
+                "severity": "watch", "updatedAt": updated, "geometry": geometry, "countryCode": "US",
+                "locationPrecision": "exact" if geometry else "unknown", "locationLabel": airport.get("name") or code,
+                "sources": [{"provider": "FAA NAS", "url": FAA_STATUS_URL, "nativeId": code, "observedAt": updated, "freshness": "fresh", "status": "ok"}],
+                "limitations": ["US NAS notices only, not a global NOTAM service.", "Restrictions may apply only to certain aircraft; read the original conditions. Absence does not mean normal airport operations."],
+                "relatedMarketIds": [], "properties": {"mapLayer": "airport-disruptions", "iata": code, "conditions": facts}})
+    return {"status": "partial", "events": events, "updatedAt": updated,
+        "message": "FAA US NAS notices; global airport operations and ICAO NOTAM are not covered."}
+
+
+def get_transport_map_source(ctx, *, source, query=""):
+    """Small map read path, independent of the full shipping/news panel build."""
+    dependencies = _dependencies(ctx); store = dependencies.snapshot_store
+    if source == "airports":
+        q = str(query).strip().casefold()[:100]
+        if len(q) < 2: return {"places": []}
+        matches = {a['id']: a for a in _airport_index(ctx).values() if any(q in str(a.get(k, '')).casefold() for k in ('name','iata','icao','city'))}
+        return {"places": [{"id": 'airport:'+a['id'], "name": f"{a['iata'] or a['icao']} · {a['name']}",
+            "country": a['country'], "region": a['city'], "lat": a['lat'], "lon": a['lon']} for a in list(matches.values())[:20]
+            if a['lat'] is not None and a['lon'] is not None]}
+    if source == "ais":
+        # Acquisition stays in the existing AIS watcher. A browser never opens
+        # another websocket or advances its quota-controlled sampling schedule.
+        sample = _read_aisstream_cache(ctx, max_age_seconds=86400)
+        if not sample or not sample.get('vessels'):
+            return {"status": "unavailable", "events": [], "message": "No retained AIS positions. The configured low-frequency sampler owns acquisition."}
+        events = []
+        for vessel in sample['vessels']:
+            events.append({"id": 'ais:'+vessel['mmsi'], "category": "infrastructure", "title": vessel['name'],
+                "summary": f"MMSI {vessel['mmsi']} · SOG {vessel.get('speedKnots')} kn · COG {vessel.get('course')}",
+                "severity": "info", "updatedAt": vessel.get("observedAt"),
+                "geometry": {"type": "Point", "coordinates": [vessel['lon'], vessel['lat']]}, "locationPrecision": "exact",
+                "sources": [{"provider": "AISStream", "url": AISSTREAM_DOC_URL, "nativeId": vessel['mmsi'],
+                    "observedAt": vessel.get('observedAt'), "freshness": "stale" if sample.get('ageSeconds',0)>120 else "fresh", "status": "partial"}],
+                "limitations": ["Low-frequency AIS sample; these are last reported positions, not live global vessel coverage."],
+                "relatedMarketIds": [], "properties": {"mapLayer": "ais-vessels", "sampledAt": sample.get('sampledAt')}})
+        return {"status": "partial", "events": events, "updatedAt": sample.get('sampledAt'), "message": "Low-frequency AIS sample; not live vessel tracking."}
+    if source != "faa": raise ValueError("unsupported-transport-map-source")
+    cached = store.get(TRANSPORT_MAP_NAMESPACE, source) if store else None
+    if cached is not None: return cached
+    locker = getattr(store, 'fetch_lock', None)
+    with locker(TRANSPORT_MAP_NAMESPACE, source, timeout=2) if locker else nullcontext():
+        cached = store.get(TRANSPORT_MAP_NAMESPACE, source) if store else None
+        if cached is not None: return cached
+        try:
+            payload = parse_faa_status(_http_text(ctx, FAA_STATUS_URL, timeout=6), _airport_index(ctx))
+            payload['fetchedAt'] = _utc_now_iso(ctx)
+            if store: store.set(TRANSPORT_MAP_NAMESPACE, source, payload, 120)
+            return payload
+        except Exception:
+            stale = store.get_stale(TRANSPORT_MAP_NAMESPACE, source) if store else None
+            age = _age_seconds(stale.get('fetchedAt')) if stale else None
+            if age is not None and 0 <= age <= 900:
+                return {**stale, "status": "degraded", "message": "FAA refresh failed; retaining snapshot within 15 minute budget."}
+            return {"status": "unavailable", "events": [], "message": "FAA source unavailable"}

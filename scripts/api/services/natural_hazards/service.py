@@ -12,7 +12,7 @@ from api.context import RuntimeResources, runtime_resources, resolve_optional_se
 
 from .contracts import SCHEMA_VERSION, SourceFetchResult
 from .dedupe import latest_revision
-from .providers import eonet, firms, gdacs, nhc, ncei, nws, usgs, usgs_volcano_cap
+from .providers import eccc, swic, eonet, firms, gdacs, nhc, ncei, nws, usgs, usgs_volcano_cap
 from .snapshots import cached_source_result, fetch_with_snapshot, stale_source_result
 from .source_health import unavailable_source
 
@@ -104,15 +104,23 @@ def _fetch_provider_results(
         for key in source_specs:
             resources.hazard_locks.setdefault(key, Lock())
     futures = {}
+    # Never hold the scheduler lock during external cache I/O.
+    cached_results = {key: cached_source_result(dependencies.snapshot_store, key) for key in source_specs}
     with resources.hazard_lock_guard:
         for key, (ttl, fetcher) in source_specs.items():
+            cached = cached_results[key]
+            if cached is not None:
+                results[key] = cached
+                if cached["status"] in {"ok", "partial"}:
+                    continue
             future = resources.hazard_pending.get(key)
             if future is None or future.done():
                 future = resources.submit(resources.hazard_executor, fetch_with_snapshot,
                     source_lock=resources.hazard_locks[key], key=key,
                     snapshot_store=dependencies.snapshot_store, fetcher=fetcher, ttl_seconds=ttl)
                 resources.hazard_pending[key] = future
-            futures[future] = key
+            if cached is None:
+                futures[future] = key
     done, pending = wait(futures, timeout=max(0.01, float(deadline_seconds)))
     for future in done:
         key = futures[future]
@@ -154,12 +162,15 @@ def _source_specs(
 ) -> dict[str, tuple[int, Callable[[], Dict[str, Any]]]]:
     # Snapshot identity is source-wide: never cache a small caller limit as the catalog.
     bounded_limit = DEFAULT_EVENT_LIMIT
-    previous_nws = stale_source_result(
-        dependencies.snapshot_store,
-        "nws",
-        "nws-previous-snapshot",
-    )
-    nws_deadline = monotonic() + nws.PROVIDER_FETCH_BUDGET_SECONDS
+    def fetch_nws():
+        # Start the deadline when this worker actually runs, not while a caller
+        # builds the source catalog or waits for an executor slot.
+        previous = stale_source_result(dependencies.snapshot_store, "nws", "nws-previous-snapshot")
+        return nws.fetch(dependencies.http_json_get, resources=dependencies.resources,
+            url=dependencies.nws_url, limit=min(700, bounded_limit),
+            previous_events=(previous or {}).get("events", []),
+            snapshot_store=dependencies.snapshot_store,
+            deadline=monotonic() + nws.PROVIDER_FETCH_BUDGET_SECONDS)
     specs: dict[str, tuple[int, Callable[[], Dict[str, Any]]]] = {
         "usgs": (
             60,
@@ -185,18 +196,9 @@ def _source_specs(
                 limit=min(160, bounded_limit),
             ),
         ),
-        "nws": (
-            60,
-            lambda: nws.fetch(
-                dependencies.http_json_get,
-                resources=dependencies.resources,
-                url=dependencies.nws_url,
-                limit=min(700, bounded_limit),
-                previous_events=(previous_nws or {}).get("events", []),
-                snapshot_store=dependencies.snapshot_store,
-                deadline=nws_deadline,
-            ),
-        ),
+        "nws": (60, fetch_nws),
+        "eccc": (120, lambda: eccc.fetch(dependencies.http_json_get)),
+        "swic": (120, lambda: swic.fetch(dependencies.http_json_get)),
         "nhc": (
             120,
             lambda: nhc.fetch(
@@ -247,7 +249,7 @@ def get_natural_hazard_source_result(
     """Load exactly one provider so slow sources never head-of-line block peers."""
 
     key = str(source or "").strip().lower()
-    if key not in {"usgs", "usgs-volcano-cap", "eonet", "gdacs", "nws", "nhc", "firms", "climate-anomaly"}:
+    if key not in {"usgs", "usgs-volcano-cap", "eonet", "gdacs", "nws", "eccc", "swic", "nhc", "firms", "climate-anomaly"}:
         raise ValueError("unsupported-natural-hazard-source")
     dependencies = NaturalHazardDependencies.from_context(context)
     bounded_limit = max(1, min(DEFAULT_EVENT_LIMIT, int(limit)))

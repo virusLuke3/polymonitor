@@ -49,6 +49,7 @@ const COUNTRY_ALIASES: Record<string, string> = {
   'south korea': 'KR',
   syria: 'SY',
   taiwan: 'TW',
+  'cn tw': 'TW',
   tanzania: 'TZ',
   'the gambia': 'GM',
   turkey: 'TR',
@@ -85,7 +86,9 @@ function countryFeature(feature: Feature): CountryGeometry | null {
   if (feature.geometry?.type !== 'Polygon' && feature.geometry?.type !== 'MultiPolygon') return null;
   const properties = (feature.properties || {}) as CountryProperties;
   const name = text(properties.name);
-  const iso2 = text(properties['ISO3166-1-Alpha-2']).toUpperCase();
+  const sourceCode = text(properties['ISO3166-1-Alpha-2']).toUpperCase();
+  // Normalize identifiers for joins only; preserve the source's actual geometry.
+  const iso2 = sourceCode === 'CN-TW' ? 'TW' : sourceCode;
   const iso3 = text(properties['ISO3166-1-Alpha-3']).toUpperCase();
   if (!name || !/^[A-Z]{2}$/.test(iso2) || !/^[A-Z]{3}$/.test(iso3)) return null;
   return {

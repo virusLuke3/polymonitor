@@ -49,6 +49,24 @@ export type MapLayerDefinition = {
 };
 
 export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
+  ...([['waterways', 'Waterways', 'waterways', '🌊'], ['pipelines', 'Pipelines', 'pipelines', '🛢️'], ['submarine-cables', 'Submarine cables', 'submarineCables', '🔌']] as const).map(([id, label, message, emoji]): MapLayerDefinition => ({
+    id, label, messageKey: `atlas.layer.${message}`, legendLabel: label, panelEmoji: emoji, icon: 'signal', categories: ['infrastructure'],
+    sourceKeys: ['osm-infrastructure'], requiredSources: [], supportedRenderers: ['webgl','svg'], availability: 'ready', isExecutable: () => true,
+    aliases: [label, id, 'OSM'], capabilities: ['paths','details'], defaultEnabled: true, selectable: true, minZoom: 0, labelMinZoom: 8,
+    cluster: false, clusterRadius: 0, clusterMinPoints: 0, timeFilter: false, severities: ['info'], legend: [{label,symbol:'signal'}],
+    explanation: {purpose: 'Mapped infrastructure in the current viewport.', sources: ['OpenStreetMap contributors · ODbL'],
+      freshness: 'Cached up to 24 hours; dataset update time is not an observation time.', confidence: 'Native mapped way geometry; no operating-status inference.',
+      limitations: ['Zoom in to a query area under 25 square degrees.', 'OSM coverage is incomplete; no line does not mean no infrastructure.']},
+  })),
+  ...([['gnss-interference', 'GNSS accuracy signals', 'GPSJAM', 'gpsjam'], ['internet-outages', 'Internet signals', 'IODA', 'ioda'], ['airport-disruptions', 'Airport restrictions', 'FAA NAS', 'faa'], ['ais-vessels', 'Vessel observations', 'AISStream', 'ais']] as const).map(([id, label, source, key]): MapLayerDefinition => ({
+    id, label, messageKey: `atlas.layer.${({'ais-vessels':'aisVessels','airport-disruptions':'airportDisruptions','gnss-interference':'gnssInterference','internet-outages':'internetOutages'} as const)[id]}`, legendLabel: label, panelEmoji: ({'ais-vessels':'🚢','airport-disruptions':'✈','gnss-interference':'🛰️','internet-outages':'🌐'} as const)[id], icon: id === 'ais-vessels' ? 'vessel' : id === 'airport-disruptions' ? 'aircraft' : 'signal', categories: ['transport-disruption', 'infrastructure'],
+    sourceKeys: [key], requiredSources: [], supportedRenderers: ['webgl', 'svg'], availability: 'ready', isExecutable: () => true,
+    aliases: [source, key, label], capabilities: id === 'gnss-interference' || id === 'internet-outages' ? ['areas', 'details'] : ['points', 'details'], defaultEnabled: true, selectable: true,
+    minZoom: 0, labelMinZoom: 4, cluster: false, clusterRadius: 0, clusterMinPoints: 0, timeFilter: false,
+    severities: ['info','watch','warning','critical'], legend: [{label, symbol: id === 'ais-vessels' ? 'vessel' : id === 'airport-disruptions' ? 'aircraft' : 'signal'}],
+    explanation: {purpose: label, sources: [source], freshness: id === 'gnss-interference' ? 'Daily UTC observations; not live.' : id === 'internet-outages' ? 'Measured signals in the previous 24 hours.' : id === 'ais-vessels' ? 'Low-frequency retained samples; timestamps shown in reports.' : 'Checked every two minutes.',
+      confidence: 'Source-native measurements and notices; coverage and limitations remain visible.', limitations: [id === 'gnss-interference' ? 'GPSJAM denoised fraction >=2%; not confirmed jamming. All source cells linked in source status.' : id === 'internet-outages' ? 'Country-level IODA anomalies, not confirmed nationwide outages.' : id === 'ais-vessels' ? 'Sampled coverage, not global live tracking.' : 'US NAS only; not a global NOTAM catalog. Read restriction conditions.']},
+  })),
   {
     id: 'weather-radar', label: 'Weather radar', legendLabel: 'Radar reflectivity', messageKey: 'atlas.layer.weatherRadar',
     panelEmoji: '📡', icon: 'storm', categories: [], sourceKeys: ['rainviewer'], requiredSources: [],
@@ -73,7 +91,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     icon: 'storm',
     hint: 'ALERTS',
     categories: ['weather', 'natural-hazard'],
-    sourceKeys: ['nws', 'nhc', 'eonet', 'gdacs'],
+    sourceKeys: ['nws', 'eccc', 'swic', 'nhc', 'eonet', 'gdacs'],
     requiredSources: [],
     supportedRenderers: ['webgl', 'svg'],
     availability: 'ready',
@@ -98,10 +116,10 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     ],
     explanation: {
       purpose: 'Active severe storms, tornadoes, tropical cyclones, floods and tsunamis.',
-      sources: ['NOAA NWS active alerts', 'NOAA NHC advisories and GIS products', 'NASA EONET', 'GDACS international alerts'],
+      sources: ['WMO SWIC member CAP catalog', 'ECCC Canadian weather alerts', 'NOAA NWS active alerts', 'NOAA NHC advisories and GIS products', 'NASA EONET', 'GDACS international alerts'],
       freshness: 'NWS refreshes every 60 seconds; NHC every two minutes; EONET every five minutes.',
       confidence: 'Provider-native alert geometry, advisory identity and event tracks.',
-      limitations: ['NWS coverage is United States focused.', 'EONET is a discovery feed, not an exhaustive global alert service.'],
+      limitations: ['SWIC catalog records lack native geometry; available in the event list and country briefs.', 'NWS coverage is United States focused.', 'EONET is a discovery feed, not an exhaustive global alert service.'],
     },
   },
   {
@@ -187,7 +205,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     icon: 'heat',
     hint: 'TEMP',
     categories: ['weather', 'natural-hazard'],
-    sourceKeys: ['nws', 'eonet'],
+    sourceKeys: ['nws', 'eccc', 'swic', 'eonet'],
     requiredSources: [],
     supportedRenderers: ['webgl', 'svg'],
     availability: 'ready',
@@ -441,7 +459,7 @@ export function worldEventLayerById(id: string) {
 }
 
 const HAZARD_LAYER_KINDS: Record<string, readonly HazardKind[]> = {
-  'weather-alerts': ['severe-storm', 'tornado', 'tropical-cyclone', 'flood', 'tsunami'],
+  'weather-alerts': ['weather-alert', 'severe-storm', 'tornado', 'tropical-cyclone', 'flood', 'tsunami'],
   'earthquakes-volcanoes': ['earthquake', 'volcano'],
   wildfires: ['wildfire', 'fire-detection'],
   'extreme-temperature': ['extreme-heat', 'extreme-cold'],
@@ -454,6 +472,7 @@ export function isHazardGeoEvent(event: GeoEvent): event is HazardEvent {
 }
 
 export function worldEventLayerIdForEvent(event: GeoEvent): string | null {
+  if (typeof event.properties.mapLayer === 'string' && worldEventLayerById(event.properties.mapLayer)) return event.properties.mapLayer;
   if (isHazardGeoEvent(event)) {
     return Object.entries(HAZARD_LAYER_KINDS)
       .find(([, kinds]) => kinds.includes(event.hazardKind))?.[0] || null;

@@ -58,6 +58,7 @@ const TIME_RANGE_MS: Record<Exclude<EventListTimeFilter, 'all'>, number> = {
   '7d': 7 * 24 * 60 * 60 * 1000,
 };
 const EVENT_TYPE_LABELS: Record<string, string> = {
+  'weather-alert': 'Weather alert',
   'severe-storm': 'Severe storm',
   tornado: 'Tornado',
   'tropical-cyclone': 'Tropical cyclone',
@@ -78,7 +79,7 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   sanctions: 'Sanctions',
   'country-risk': 'Country risk',
   'transport-disruption': 'Transport disruption',
-  infrastructure: 'Aviation reference',
+  infrastructure: 'Infrastructure / spatial signal',
   weather: 'Weather event',
   'natural-hazard': 'Natural hazard',
 };
@@ -278,6 +279,8 @@ export function EventList({
   const { locale } = useI18n();
   const mt = (text: string) => mapText(locale, text);
   const [open, setOpen] = useState(false);
+  const [initialized, setInitialized] = useState(false);
+  useEffect(() => { if (open) setInitialized(true); }, [open]);
   const [scope, setScope] = useState<'all' | 'view'>('all');
   const [readingEvents, setReadingEvents] = useState(events);
   const [filters, setFilters] = useState<EventListFilters>(DEFAULT_FILTERS);
@@ -386,8 +389,9 @@ export function EventList({
       >
         <span>{detailVisible ? (locale === 'zh' ? '返回事件列表' : 'Back to events') : mt("All events")}</span><b aria-hidden="true">·</b><strong>{events.length}</strong>
       </button>
-      {open && !detailVisible ? (
+      {open || initialized ? (
         <section
+          hidden={!open || detailVisible}
           id="wm-world-event-list-panel"
           aria-labelledby="wm-world-event-list-heading"
           aria-describedby="wm-world-event-list-summary"

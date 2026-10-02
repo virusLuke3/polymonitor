@@ -13,7 +13,7 @@ from .source_health import SOURCE_COVERAGE
 SNAPSHOT_NAMESPACE = "snapshot:world:natural-hazards"
 CONDITION_NAMESPACE = SNAPSHOT_NAMESPACE + ":condition"
 MAX_STALE_SECONDS = {
-    "usgs": 3600, "usgs-volcano-cap": 21600, "nws": 900,
+    "usgs": 3600, "usgs-volcano-cap": 21600, "nws": 900, "eccc": 900, "swic": 900,
     "nhc": 3600, "eonet": 21600, "gdacs": 21600,
     "firms": 5400, "climate-anomaly": 7 * 86400,
 }
@@ -63,7 +63,14 @@ def cached_source_result(snapshot_store: Any, key: str) -> SourceFetchResult | N
             "lastSuccessAt": fresh.get("fetchedAt"),
             "errorCode": None,
         }
-    return stale_source_result(snapshot_store, key, f"{key}-cached-stale")
+    stale = stale_source_result(snapshot_store, key, f"{key}-cached-stale")
+    if stale:
+        condition = snapshot_store.get_stale(CONDITION_NAMESPACE, key) or {}
+        remaining = float(condition.get("retryAt", 0)) - utc_now().timestamp()
+        if remaining > 0:
+            stale.update(errorCode=condition.get("errorCode"), retryAfterSeconds=remaining)
+            if condition.get("condition"): stale["condition"] = condition["condition"]
+    return stale
 
 
 def fetch_with_snapshot(

@@ -30,6 +30,8 @@ const INITIAL_SOURCE_PRIORITY: readonly HazardMapSourceKey[] = [
   'nhc',
   'eonet',
   'nws',
+  'eccc',
+  'swic',
   'gdacs',
   'firms',
   'climate-anomaly',
@@ -42,6 +44,8 @@ const REFRESH_INTERVAL_MS: Record<HazardMapSourceKey, number> = {
   eonet: 300_000,
   gdacs: 300_000,
   nws: 60_000,
+  eccc: 120_000,
+  swic: 120_000,
   firms: 900_000,
   'climate-anomaly': 6 * 60 * 60_000,
 };

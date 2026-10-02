@@ -20,6 +20,7 @@ const VALID_CATEGORIES = new Set([
 const VALID_SEVERITIES = new Set(['info', 'watch', 'warning', 'critical']);
 const VALID_PRECISIONS = new Set(['exact', 'city', 'region', 'country', 'unknown']);
 const VALID_HAZARD_KINDS = new Set([
+  'weather-alert',
   'severe-storm',
   'tornado',
   'tropical-cyclone',
@@ -109,7 +110,8 @@ function hazardMetricsMatch(event: HazardEvent) {
   if (event.hazardKind === 'tropical-cyclone') {
     return event.metrics.kind === 'tropical-cyclone' || event.metrics.kind === 'weather-alert';
   }
-  if (event.hazardKind === 'severe-storm'
+  if (event.hazardKind === 'weather-alert'
+    || event.hazardKind === 'severe-storm'
     || event.hazardKind === 'tornado'
     || event.hazardKind === 'flood'
     || event.hazardKind === 'extreme-heat'

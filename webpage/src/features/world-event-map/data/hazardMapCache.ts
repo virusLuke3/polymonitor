@@ -7,13 +7,15 @@ export const HAZARD_MAP_SOURCE_KEYS = [
   'eonet',
   'gdacs',
   'nws',
+  'eccc',
+  'swic',
   'firms',
   'climate-anomaly',
 ] as const;
 
 export type HazardMapSourceKey = typeof HAZARD_MAP_SOURCE_KEYS[number];
 const MAX_STALE_MS: Record<HazardMapSourceKey, number> = {
-  usgs: 3_600_000, 'usgs-volcano-cap': 21_600_000, nws: 900_000, nhc: 3_600_000,
+  usgs: 3_600_000, 'usgs-volcano-cap': 21_600_000, nws: 900_000, eccc: 900_000, swic: 900_000, nhc: 3_600_000,
   eonet: 21_600_000, gdacs: 21_600_000, firms: 5_400_000, 'climate-anomaly': 604_800_000,
 };
 

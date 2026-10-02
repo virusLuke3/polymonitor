@@ -1,6 +1,6 @@
 import { useI18n } from '@/services/i18n';
 import { mapText } from '@/locales/map';
-import { useEffect, useLayoutEffect, useRef } from 'preact/hooks';
+import { InspectorFrame } from './InspectorFrame';
 import type { GeoEvent, GeoEventSource } from '../domain/types';
 import { isHazardGeoEvent } from '../config/layerRegistry';
 import {
@@ -75,40 +75,11 @@ export function EventInspector({
 }: EventInspectorProps) {
   const { locale } = useI18n();
   const mt = (text: string) => mapText(locale, text);
-  const titleRef = useRef<HTMLHeadingElement | null>(null);
-  const restoreFocusRef = useRef<HTMLElement | null>(null);
   const mapHazard = isHazardGeoEvent(mapEvent) ? mapEvent : null;
   const detail = useNaturalHazardDetail(mapHazard);
   const event = detail.event || mapEvent;
   const hazard = isHazardGeoEvent(event) ? event : null;
   const relatedMarkets = useRelatedWeatherMarkets(hazard?.id || null);
-
-  useLayoutEffect(() => {
-    const active = document.activeElement;
-    restoreFocusRef.current = active instanceof HTMLElement && active !== document.body
-      ? active
-      : returnFocusTarget || null;
-    // Keep a useful map strip above the fixed mobile report. Do this before
-    // the renderer measures its safe area; focusing the title must not undo it.
-    if (window.matchMedia('(max-width: 720px)').matches) {
-      titleRef.current?.closest('.wm-weather-deck-map')?.scrollIntoView({ block: 'start', behavior: 'instant' });
-    }
-    titleRef.current?.focus({ preventScroll: true });
-    return () => {
-      const target = restoreFocusRef.current;
-      if (target?.isConnected) target.focus({ preventScroll: true });
-    };
-  }, [event.id, returnFocusTarget]);
-
-  useEffect(() => {
-    const handleKeyDown = (keyboardEvent: KeyboardEvent) => {
-      if (keyboardEvent.key !== 'Escape' || keyboardEvent.defaultPrevented) return;
-      keyboardEvent.preventDefault();
-      onClose();
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
 
   const evidenceContext = event.properties.severityBasis === 'evidence-context-only';
   const severityLabel = evidenceContext ? (locale === 'zh' ? '证据背景 · 非风险评级' : 'Evidence context · not a risk rating') : mt(event.severity);
@@ -126,19 +97,7 @@ export function EventInspector({
   ];
 
   return (
-    <aside
-      className={`wm-event-inspector level-${event.severity}`}
-      aria-labelledby="wm-event-inspector-title"
-      data-event-id={event.id}
-    >
-      <button
-        type="button"
-        className="wm-event-inspector-close"
-        aria-label={mt("Close event details")}
-        onClick={onClose}
-      >
-        ×
-      </button>
+    <InspectorFrame identity={event.id} level={event.severity} onClose={onClose} returnFocusTarget={returnFocusTarget}>
       <header className="wm-event-inspector-header">
         <button type="button" className="wm-map-back-to-events" onClick={onBackToEvents || onClose}>{locale === 'zh' ? '← 返回事件' : '← Back to events'}</button>
         {outsideFilters ? <p className="wm-map-selection-retained" role="status">{locale === 'zh' ? '所选事件不在当前筛选结果中' : 'Selected event is outside the current filters'}</p> : null}
@@ -155,7 +114,7 @@ export function EventInspector({
             size={36}
             label={`${mt(event.severity)} ${mt(hazard ? hazardLabel(hazard) : event.category)}`}
           />
-          <h2 id="wm-event-inspector-title" ref={titleRef} tabIndex={-1}>{event.title}</h2>
+          <h2 id="wm-event-inspector-title" tabIndex={-1}>{event.title}</h2>
         </div>
         <p>{event.locationLabel} · {severityLabel}</p>
         <p>{event.sources.map(source => `${source.provider} · ${mt(source.freshness || 'unknown')}`).join(' / ')}</p>
@@ -325,6 +284,6 @@ export function EventInspector({
       ) : null}
 
       </details>
-    </aside>
+    </InspectorFrame>
   );
 }

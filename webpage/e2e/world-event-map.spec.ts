@@ -53,7 +53,7 @@ test('every entry opens all layers, while manual off survives in-session updates
   await page.addInitScript(() => { if (location.protocol.startsWith('http')) localStorage.setItem('polydata:world-event-map:v8', JSON.stringify({ activeLayerIds: [], center: { lon: 12, lat: 35 }, zoom: 3, timeRange: '24h' })); });
   await page.goto('/?view=2d&mapPerf=1&basemap=openfreemap&center=12,35&zoom=3&layers=&time=all');
   const requested = () => new URL(page.url()).searchParams.get('layers')!.split(',');
-  await expect.poll(() => requested().length).toBe(10);
+  await expect.poll(() => requested().length).toBe(17);
   expect(requested()).toEqual(expect.arrayContaining(['air-routes', 'weather-radar', 'intel-hotspots']));
   await expect(page.locator('.wm-aviation-lens')).toBeVisible();
   await selectMapLayers(page, requested().filter(id => id !== 'air-routes' && id !== 'weather-radar'));
@@ -64,7 +64,7 @@ test('every entry opens all layers, while manual off survives in-session updates
   expect(requested()).not.toContain('air-routes');
   expect(requested()).not.toContain('weather-radar');
   await page.reload();
-  await expect.poll(() => requested().length).toBe(10);
+  await expect.poll(() => requested().length).toBe(17);
   await expect(page.locator('.wm-aviation-lens')).toBeVisible();
   expect(new URL(page.url()).searchParams.get('time')).toBe('24h');
   await screenshot(page, 'entry-all-layers.png');
@@ -280,6 +280,7 @@ test('WebGL map covers layered hazards, details, URL state, provider reload and 
   await screenshot(page, '07-country-filter.png');
 
   await gotoMapScene(page, `/?view=2d&mapPerf=1&basemap=openfreemap&time=all&center=-73,42&zoom=3.2&layers=air-routes&air=all`);
+  await page.getByRole('button', {name:'Expand aviation details',exact:true}).click();
   await expect(page.getByText('All aviation', {exact:true})).toBeVisible();
   await expect.poll(async () => page.evaluate(() => (
     window.__POLYMONITOR_MAP_PERF__?.snapshot().phases['dynamic-commit'].count || 0
@@ -382,8 +383,8 @@ test('mobile aviation keeps the map controls and event list unobstructed', async
   ) }));
   await gotoMap(page, 'layers=air-routes&air=watch&zoom=1.5');
   const lens = (await page.locator('.wm-aviation-lens').boundingBox())!;
-  const zoomAction = (await page.locator('.wm-map-aviation-zoom').boundingBox())!;
-  expect(zoomAction.y + zoomAction.height, 'the folded aviation action must not be clipped inside its card').toBeLessThanOrEqual(lens.y + lens.height);
+  expect(lens.height, 'folded aviation leaves the mobile map visible').toBeLessThan(100);
+  await expect(page.locator('.wm-map-aviation-zoom')).toHaveCount(0);
   for (const selector of ['.wm-map-controls', '.wm-map-focus-toggle', '.wm-world-event-list-toggle', '.wm-map-radar-status', '.wm-map-legend-toggle', '.wm-world-event-attribution']) {
     const control = (await page.locator(selector).boundingBox())!;
     const overlap = Math.min(lens.x + lens.width, control.x + control.width) > Math.max(lens.x, control.x)
@@ -418,6 +419,7 @@ test('mobile aviation keeps the map controls and event list unobstructed', async
 
 test('live aircraft supports viewport loading, hover, click and inspector details', async ({ page }) => {
   await gotoMap(page, 'center=-70,43&zoom=5&layers=air-routes&air=all');
+  await page.getByRole('button', {name:'Expand aviation details',exact:true}).click();
   await expect(page.getByText('All aviation', {exact:true})).toBeVisible();
   const expand = (await page.locator('.wm-map-focus-toggle').boundingBox())!;
   const lens = (await page.locator('.wm-aviation-lens').boundingBox())!;
@@ -507,7 +509,7 @@ test('required source failure makes the affected layer unavailable instead of a 
   await expect(anomalyRow).toHaveClass(/is-unavailable/);
   await expect(anomalyRow.locator('input[type="checkbox"]')).toBeDisabled();
   await expect(anomalyRow.locator('input[type="checkbox"]')).not.toBeChecked();
-  await expect(page.locator('.wm-sidebar-footer')).toHaveText('3/9 LAYERS ACTIVE');
+  await expect(page.locator('.wm-sidebar-footer')).toHaveText('3/16 LAYERS ACTIVE');
 });
 
 test('country risk evidence reaches a selectable polygon in both primary and SVG renderers', async ({ page }) => {
@@ -694,6 +696,7 @@ test('manually selected seven-layer scene survives repeated offscreen returns wi
   await host.screenshot({ path: resolve(ARTIFACT_DIR, 'offscreen-scene-after.png') });
   await page.locator('.wm-map-aviation-toggle').click();
   await expect(page.locator('.wm-aviation-lens')).toBeVisible();
+  await page.getByRole('button', {name:'Expand aviation details',exact:true}).click();
   await expect(page.locator('.wm-map-aviation-zoom')).toBeVisible();
   await page.reload(); await waitForMapPaint(page);
   await expect(page.locator('.wm-aviation-lens')).toBeVisible();

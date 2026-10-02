@@ -54,6 +54,7 @@ export interface GeoEvent {
 }
 
 export type HazardKind =
+  | 'weather-alert'
   | 'severe-storm'
   | 'tornado'
   | 'tropical-cyclone'

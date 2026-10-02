@@ -1,10 +1,17 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 
 export type RadarFrame = { time: number; tiles: string; coverageTiles: string };
 export type WeatherRadar = { frame: RadarFrame | null; status: 'off' | 'loading' | 'ready' | 'stale' | 'error'; error?: string };
 import { WEATHER_RADAR_ENABLED } from '../config/layerRegistry';
 const MANIFEST = 'https://api.rainviewer.com/public/weather-maps.json';
 const REFRESH_MS = 300_000;
+
+/** Three prompt retries, then the normal poll. Never hammer blocked sources. */
+export function radarRetryDelay(failures: number, status = 0, retryAfterMs = 0) {
+  const delay = status === 401 || status === 403 ? REFRESH_MS
+    : [5_000, 15_000, 45_000][failures - 1] ?? REFRESH_MS;
+  return Math.max(delay, retryAfterMs);
+}
 
 /** The public product currently supplies past radar only, native zoom <= 7. */
 export function latestRadarFrame(payload: unknown, now = Date.now()): RadarFrame {
@@ -30,6 +37,9 @@ export function latestRadarFrame(payload: unknown, now = Date.now()): RadarFrame
 /** One bounded manifest poll, owned by actual map demand. Tiles stay MapLibre-owned. */
 export function useWeatherRadar(enabled: boolean) {
   const [state, setState] = useState<WeatherRadar>({ frame: null, status: 'off' });
+  const blockedUntil = useRef(0);
+  const [attempt, setAttempt] = useState(0);
+  const retry = useCallback(() => setAttempt(value => value + 1), []);
   useEffect(() => {
     if (!enabled || !WEATHER_RADAR_ENABLED) {
       setState({ frame: null, status: 'off' });
@@ -39,7 +49,8 @@ export function useWeatherRadar(enabled: boolean) {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let expiryTimer: ReturnType<typeof setTimeout> | undefined;
     let controller: AbortController | null = null;
-    let lastFrame: RadarFrame | null = null;
+    let lastFrame: RadarFrame | null = state.frame;
+    let failures = 0;
     const scheduleExpiry = () => {
       clearTimeout(expiryTimer);
       if (!lastFrame) return;
@@ -50,17 +61,29 @@ export function useWeatherRadar(enabled: boolean) {
     const stop = () => { clearTimeout(timer); clearTimeout(expiryTimer); controller?.abort(); controller = null; };
     const refresh = async () => {
       if (disposed || document.hidden || navigator.onLine === false) return;
+      if (blockedUntil.current > Date.now()) { timer = setTimeout(refresh, blockedUntil.current - Date.now()); return; }
       const request = new AbortController(); controller = request;
       const deadline = setTimeout(() => request.abort(), 12_000);
+      let failureDelay: number | undefined;
       setState(current => current.frame && Date.now() - current.frame.time * 1000 <= 30 * 60_000 ? current : { frame: null, status: 'loading' });
       try {
         const response = await fetch(MANIFEST, { signal: request.signal, credentials: 'omit' });
-        if (!response.ok) throw new Error(`RainViewer HTTP ${response.status}`);
+        if (!response.ok) {
+          const header = response.headers.get('Retry-After');
+          const seconds = Number(header);
+          const retryAfter = header ? (Number.isFinite(seconds) ? seconds * 1000 : Date.parse(header) - Date.now()) : 0;
+          failureDelay = radarRetryDelay(failures + 1, response.status, Math.max(0, retryAfter || 0));
+          if ([401,403,429].includes(response.status)) blockedUntil.current = Date.now() + failureDelay;
+          throw new Error(`RainViewer HTTP ${response.status}`);
+        }
         const frame = latestRadarFrame(await response.json());
         if (!disposed && controller === request && !request.signal.aborted) {
           lastFrame=frame;setState({ frame, status: 'ready' });scheduleExpiry();
+          failures = 0;
         }
       } catch (error) {
+        failures += 1;
+        failureDelay ??= radarRetryDelay(failures);
         if (!disposed && controller === request && !document.hidden) {
           setState(current => {
             const retained = current.frame && Date.now() - current.frame.time * 1000 <= 30 * 60_000 ? current.frame : null;
@@ -69,14 +92,15 @@ export function useWeatherRadar(enabled: boolean) {
         }
       } finally {
         clearTimeout(deadline);
-        if (!disposed && controller === request && !document.hidden) timer = setTimeout(refresh, REFRESH_MS);
+        if (!disposed && controller === request && !document.hidden) timer = setTimeout(refresh, failureDelay ?? REFRESH_MS);
       }
     };
     const visibility = () => { stop(); if (!document.hidden) { scheduleExpiry(); void refresh(); } };
     document.addEventListener('visibilitychange', visibility);
     window.addEventListener('online', visibility);window.addEventListener('offline', visibility);
+    scheduleExpiry();
     void refresh();
     return () => { disposed = true; stop(); document.removeEventListener('visibilitychange', visibility);window.removeEventListener('online', visibility);window.removeEventListener('offline', visibility); };
-  }, [enabled]);
-  return state;
+  }, [enabled, attempt]);
+  return { ...state, retry };
 }

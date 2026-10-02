@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import secrets
@@ -14,6 +15,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping
 
 from db import dict_from_row, get_backend, get_connection
+from db.db import psycopg
 
 from api.auth_schema import schema_is_ready
 
@@ -100,12 +102,24 @@ def validate_runtime_config() -> None:
     if get_backend().strip().lower() not in {"postgres", "postgresql"}:
         raise RuntimeError("product authentication requires PostgreSQL")
     _audit_pepper()
-    conn = get_connection()
+    conn = None
     try:
+        conn = get_connection()
         if not schema_is_ready(conn):
             raise RuntimeError("product authentication schema is missing; run `python -m api.manage_auth migrate`")
+    except Exception as exc:
+        if psycopg is None or not isinstance(exc, psycopg.OperationalError):
+            raise
+        # A transient auth database outage must not kill a recycled Gunicorn
+        # worker and then its master/public map API. Static config/schema errors
+        # still fail startup; protected operations still require the database.
+        logging.getLogger(__name__).warning(
+            "Authentication database unavailable at worker startup (%s); protected operations remain fail-closed",
+            type(exc).__name__,
+        )
     finally:
-        conn.close()
+        if conn is not None:
+            conn.close()
 
 
 def normalize_username(value: Any) -> str:

@@ -74,24 +74,13 @@ export async function buildWorldEventPMTilesStyle(url: string, language: 'en' | 
   const { layers, namedFlavor } = await import('@protomaps/basemaps');
   const archiveUrl = resolveWorldEventPMTilesUrl(url);
   const rankedLayers = layers('basemap', namedFlavor(theme === 'positron' ? 'light' : 'black'), { lang: language }) as StyleSpecification['layers'];
-  // Preserve provider order, rank, collision and zoom rules. Alignment changes
-  // paint and the bundled page font; provider label hierarchy is preserved.
+  // Use the WorldMonitor provider palette, boundaries and collision rules.
+  // Only the bundled proportional font and language are product-specific.
   const tunedLayers = rankedLayers.map((originalLayer) => {
     const layer = originalLayer.type === 'symbol'
       ? { ...originalLayer, layout: { ...originalLayer.layout, 'text-font': mapBasemapFonts(language, originalLayer.layout?.['text-font']) } }
       : originalLayer;
-    if (theme === 'positron') return layer;
-    if (layer.id === 'background') return { ...layer, paint: { ...layer.paint, 'background-color': '#333333' } };
-    if (layer.id === 'earth') return { ...layer, paint: { ...layer.paint, 'fill-color': '#141414' } };
-    if (layer.id === 'water') return { ...layer, paint: { ...layer.paint, 'fill-color': '#333333' } };
-    // Keep the provider's neutral country/subnational borders and zoom widths.
-    // Darkening these separately made evidence outlines look like new borders.
-    if (layer.type === 'symbol' && layer['source-layer'] === 'places') {
-      return { ...layer, paint: { ...layer.paint,
-        'text-color': layer.id === 'places_country' ? '#a3a8ad' : '#858d95',
-        'text-halo-color': '#141414', 'text-halo-width': 0.6, 'text-halo-blur': 0.1,
-      } };
-    }
+
     return layer;
   }) as StyleSpecification['layers'];
   return {

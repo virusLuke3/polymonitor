@@ -7,6 +7,7 @@ export type InspectorField = {
 };
 
 const HAZARD_LABELS: Record<HazardEvent['hazardKind'], string> = {
+  'weather-alert': 'Weather alert',
   'severe-storm': 'Severe storm',
   tornado: 'Tornado',
   'tropical-cyclone': 'Tropical cyclone',

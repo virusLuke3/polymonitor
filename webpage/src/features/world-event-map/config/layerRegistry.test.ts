@@ -22,6 +22,13 @@ describe('World Event Map layer registry', () => {
       'intel-hotspots',
       'ucdp',
       'sanctions-country-risk',
+      'waterways',
+      'pipelines',
+      'submarine-cables',
+      'gnss-interference',
+      'internet-outages',
+      'airport-disruptions',
+      'ais-vessels',
       'weather-radar',
     ]);
     expect(selectableWorldEventLayers().filter((layer) => layer.defaultEnabled).map((layer) => layer.id)).toEqual([
@@ -34,6 +41,13 @@ describe('World Event Map layer registry', () => {
       'intel-hotspots',
       'ucdp',
       'sanctions-country-risk',
+      'waterways',
+      'pipelines',
+      'submarine-cables',
+      'gnss-interference',
+      'internet-outages',
+      'airport-disruptions',
+      'ais-vessels',
       'weather-radar',
     ]);
   });

@@ -92,18 +92,19 @@ describe('World Event Map vector basemap', () => {
     }
   });
 
-  it('preserves every provider layer, rank and layout while applying one paint palette', async () => {
+  it('preserves every provider layer, rank and layout and provider paint while applying bundled fonts', async () => {
     const { layers, namedFlavor } = await import('@protomaps/basemaps');
     const original = layers('basemap', namedFlavor('black'), { lang: 'en' });
     const style = await buildWorldEventPMTilesStyle('https://maps.example.test/planet.pmtiles');
     expect(style.layers.map(layer => layer.id)).toEqual(original.map(layer => layer.id));
     for (const [index, layer] of original.entries()) {
       const actual = style.layers[index] as any;
+      expect(actual.paint).toEqual(layer.paint);
       expect(actual.layout).toEqual(layer.type === 'symbol' ? { ...layer.layout, 'text-font': mapBasemapFonts('en', layer.layout?.['text-font']) } : (layer as any).layout);
       for (const key of ['filter', 'minzoom', 'maxzoom']) expect(actual[key]).toEqual((layer as any)[key]);
     }
     expect(style.sources.basemap).toMatchObject({ url: 'pmtiles://https://maps.example.test/planet.pmtiles' });
-    expect(style.layers.find(layer => layer.id === 'water')?.paint).toMatchObject({ 'fill-color': '#333333' });
+    expect(style.layers.find(layer => layer.id === 'water')?.paint).toEqual(original.find(layer => layer.id === 'water')?.paint);
   });
 
   it('localizes Protomaps labels without overwriting its visual hierarchy', () => {

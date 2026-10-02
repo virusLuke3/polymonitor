@@ -80,6 +80,15 @@
   text-transform: none;
 }
 
+.wm-map-filter-details { min-width: 0; }
+.wm-map-filter-details > summary { display: none; cursor: pointer; }
+.wm-map-filter-options { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.wm-map-source-details { position: relative; font: 500 12px/1.4 var(--font-body); }
+.wm-map-source-notes { flex-basis: 100%; max-height: 30vh; overflow: auto; margin: 4px 0; padding-left: 20px; font: 12px/1.5 var(--font-body); }
+.wm-map-source-details > summary { cursor: pointer; padding: 4px 6px; border: 1px solid #343b40; border-radius: 3px; color: #bdc7cf; }
+.wm-map-source-details[open] { flex-basis: 100%; }
+.wm-map-source-details .wm-map-source-statuses { display: flex; flex-wrap: wrap; padding: 8px 0; }
+
 .wm-world-event-map-toolbar label,
 .wm-world-event-severity-filters {
   display: inline-flex;
@@ -172,7 +181,10 @@
     padding: 5px 8px;
   }
 
-  .wm-world-event-map-toolbar > label:first-child { flex-basis: 100%; }
+  .wm-map-filter-details > summary { display: block; min-height: 44px; padding: 12px; box-sizing: border-box; }
+  .wm-map-filter-details[open] { flex-basis: 100%; }
+  .wm-map-filter-options { padding: 6px 0; }
+  .wm-map-filter-options > label:first-child { flex-basis: 100%; }
   .wm-world-event-map-toolbar select { min-width: 0; width: 100px; }
   .wm-world-event-severity-filters {
     flex: 1 1 70%;
@@ -395,6 +407,12 @@
   box-shadow: none;
   backdrop-filter: blur(10px);
 }
+
+.wm-aviation-lens.is-folded { grid-template-columns: auto 1fr; align-items: center; gap: 6px; min-width: 0; width: auto; max-width: 360px; padding: 6px 8px; }
+.wm-aviation-lens.is-folded header { display: contents; }
+.wm-aviation-lens.is-folded header > div { grid-column: 1; grid-row: 1; }
+.wm-aviation-lens.is-folded header > button { grid-row: 1; }
+.wm-aviation-lens.is-folded p { grid-column: 1 / -1; margin: 0; font-size: 11px; color: #a7b4bc; }
 
 .wm-map-aviation-zoom { width: 100%; padding: 6px; border: 1px solid #39444b; background: #172229; color: inherit; font: inherit; cursor: pointer; }
 
@@ -654,6 +672,8 @@
   box-shadow: 0 28px 80px rgba(0, 0, 0, 0.68), inset 0 1px rgba(255, 255, 255, 0.05);
   backdrop-filter: blur(14px);
 }
+
+.wm-world-event-list > section[hidden] { display: none; }
 
 .wm-world-event-list.is-open > section {
   height: calc(100% - 52px);
@@ -1012,6 +1032,20 @@
 @keyframes wm-map-panel-enter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 .wm-weather-deck-legend p { margin: 0; color: #aab5be; font: 12px/1.5 var(--font-body); }
 .wm-weather-deck-legend h3 { margin: 0; font: 600 12px/1.5 var(--font-body); color: #e2e6e8; }
+.wm-map-explore { position: absolute; left: var(--map-tools-left); top: 12px; z-index: 18; color: #bdc7cf; font: 12px/1.5 var(--font-body); max-width: calc(100% - 140px); }
+.wm-map-explore > summary { cursor: pointer; padding: 8px 10px; background: #171b1eee; border: 1px solid #343b40; border-radius: 4px; }
+.wm-map-explore > section { width: min(360px, calc(100vw - 36px)); max-height: min(65vh, 600px); overflow: auto; margin-top: 5px; padding: 12px; background: #141a1ff5; border: 1px solid #343b40; border-radius: 4px; }
+.wm-map-explore input { box-sizing: border-box; width: 100%; padding: 9px; margin: 5px 0; background: #080d12; color: inherit; border: 1px solid #52606b; font: inherit; }
+.wm-map-explore button, .wm-country-timeline button { text-align: left; padding: 7px; border: 1px solid #343b40; border-radius: 3px; background: #1e272e; color: inherit; font: inherit; cursor: pointer; }
+.wm-map-search-results { display: grid; gap: 4px; max-height: 220px; overflow: auto; margin: 8px 0; }
+.wm-map-temperature > strong { font-size: 28px; font-weight: 500; color: #e2e8ed; }
+.wm-map-temperature table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+.wm-map-temperature td { padding: 3px; border-bottom: 1px solid #29323a; }
+.wm-map-temperature a { color: #a7c4d2; }
+.wm-country-timeline { list-style: none; padding: 0; }
+.wm-country-timeline li { display: grid; gap: 5px; margin-bottom: 12px; }
+.wm-country-timeline time, .wm-country-timeline small { color: #929ea7; font-size: 11px; }
+
 .wm-map-context-controls { position: absolute; left: var(--map-tools-left); bottom: 24px; z-index: 17; display: flex; flex-wrap: wrap; gap: 6px; max-width: calc(100% - var(--map-tools-left) - 170px); }
 .wm-map-radar-status { position: relative; color: #bbc4cb; font: 12px/1.4 var(--font-body); }
 .wm-map-radar-status summary { cursor: pointer; min-height: 36px; padding: 9px 10px; box-sizing: border-box; border: 1px solid #343b40; border-radius: 4px; background: #171b1eee; }
@@ -1034,7 +1068,7 @@
 
 .wm-country-context-card {
   position: absolute;
-  z-index: 14;
+  z-index: 36;
   display: grid;
   min-width: 220px;
   max-width: min(320px, calc(100% - 24px));
@@ -1060,6 +1094,7 @@
 
 .wm-country-context-card > div {
   display: flex;
+  flex-wrap: wrap;
   gap: 5px;
 }
 
@@ -1507,6 +1542,12 @@
 }
 
 @media (max-width: 860px) {
+  .wm-weather-deck-map:has(> .wm-weather-deck-status:not([hidden])) { --wm-map-top-offset: 64px; }
+  .wm-map-explore { top: calc(12px + var(--wm-map-top-offset, 0px)); left: 10px; }
+  .wm-map-explore > summary { min-height: 44px; box-sizing: border-box; padding: 12px 8px; }
+  .wm-aviation-lens.is-folded { bottom: auto; top: calc(64px + var(--wm-map-top-offset, 0px)); left: 10px; right: auto; max-width: calc(100% - 80px); }
+  .wm-map-explore:has(> section) { z-index: 35; }
+
   .wm-world-event-attribution { max-width: calc(100% - 16px); bottom: 1px; font-size: 9px; line-height: 10px; letter-spacing: 0; }
   .wm-globe-area-flat .wm-map-controls { bottom: 16px; }
   .wm-weather-deck-status { top: 8px; bottom: auto; left: 8px; right: auto; max-width: calc(100% - 140px); }

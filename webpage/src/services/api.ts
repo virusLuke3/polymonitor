@@ -804,3 +804,31 @@ export async function fetchWorkspaceBundle(
   }
   return request;
 }
+
+export type MapPlace = { id: string; name: string; country: string; countryCode?: string; region: string; lat: number; lon: number };
+export type MapForecast = {
+  status: string; current: { time?: string; temperature_2m?: number; relative_humidity_2m?: number; wind_speed_10m?: number };
+  hourly: { time?: string[]; temperature_2m?: Array<number | null> };
+  daily: { time?: string[]; temperature_2m_max?: Array<number | null>; temperature_2m_min?: Array<number | null> };
+  units: Record<string, string>; sourceUrl: string; source: string; fetchedAt: string; limitations: string[];
+};
+export function searchMapPlaces(query: string, language: string, signal: AbortSignal) {
+  return apiGetWithTimeout<{status: string; places: MapPlace[]}>(`/runtime/weather/map-query?${new URLSearchParams({q: query, language})}`, 16000, signal);
+}
+export function fetchMapForecast(lat: number, lon: number, signal: AbortSignal) {
+  return apiGetWithTimeout<MapForecast>(`/runtime/weather/map-query?${new URLSearchParams({lat: String(lat), lon: String(lon)})}`, 16000, signal);
+}
+
+export function fetchTransportMapSource(source: 'faa' | 'ais', signal: AbortSignal) {
+  return apiGetWithTimeout<{status: string; events: unknown[]; updatedAt?: string; message?: string}>(`/runtime/transport/map?source=${source}`, 18000, signal);
+}
+export function searchMapAirports(query: string, signal: AbortSignal) {
+  return apiGetWithTimeout<{places: MapPlace[]}>(`/runtime/transport/map?${new URLSearchParams({source: 'airports', q: query})}`, 20000, signal);
+}
+export function fetchMapInfrastructure(bbox: number[], signal: AbortSignal) {
+  return apiGetWithTimeout<{status: string; events: unknown[]; updatedAt?: string; message?: string}>(`/runtime/world/infrastructure?${new URLSearchParams({bbox: bbox.join(',')})}`, 15000, signal);
+}
+
+export function fetchMapSignalSource(source: string, signal?: AbortSignal) {
+  return apiGetWithTimeout<{status: string; events: unknown[]; message?: string; updatedAt?: string}>(`/runtime/world/signals?source=${encodeURIComponent(source)}`, 18000, signal);
+}

@@ -910,14 +910,14 @@ def test_v3_nws_catalog_is_independent_of_blocked_geometry_and_recovers_same_rev
             started.set(); release.wait(1);return {'geometry':geometry}
         return catalog
     try:
-        start=time.monotonic();first=nws.fetch(get,resources=resources)['events'];assert time.monotonic()-start < .1
+        start=time.monotonic();first=nws.fetch(get,resources=resources,now=datetime(2026,10,1,2,tzinfo=timezone.utc))['events'];assert time.monotonic()-start < .1
         assert first[0]['geometry'] is None;assert started.wait(.5)
         for _ in range(10):nws.fetch(get,resources=resources)
         assert sum('/zones/' in url for url,_ in calls)==1
         release.set()
         deadline=time.monotonic()+1
         while resources.zone_pending and time.monotonic()<deadline:time.sleep(.005)
-        enhanced=nws.enrich_cached_events(first,resources)[0]
+        enhanced=nws.enrich_cached_events(first,resources,now=datetime(2026,10,1,2,tzinfo=timezone.utc))[0]
         assert enhanced['geometry']==geometry
         assert enhanced['id']==first[0]['id'] and enhanced['updatedAt']==first[0]['updatedAt']
         revised={**catalog['features'][0], 'properties':{**catalog['features'][0]['properties'], 'id':'cap-v4','messageType':'Cancel',

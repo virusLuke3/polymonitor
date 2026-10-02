@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from api.services import map_infrastructure_service
+
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -1304,6 +1306,10 @@ def build_blueprints(runtime: ServiceRuntime):
                     runtime.natural_hazards_context, event_id=event_id
                 ),
                 natural_hazard_related_markets=runtime.get_natural_hazard_related_markets,
+                spatial_map_source=lambda **kwargs: map_infrastructure_service.spatial_signal_snapshot(runtime.natural_hazards_context, **kwargs),
+                map_infrastructure=lambda **kwargs: map_infrastructure_service.infrastructure_snapshot(runtime.natural_hazards_context, **kwargs),
+                transport_map_source=lambda **kwargs: global_transport_shipping_service.get_transport_map_source(runtime.global_transport_shipping_context, **kwargs),
+                map_weather_query=lambda **kwargs: global_weather_map_service.query_map_weather(runtime.global_weather_map, **kwargs),
                 aviation_viewport_snapshot=lambda bbox, zoom, limit=180: (
                     global_transport_shipping_service.get_aviation_viewport_snapshot(
                         runtime.global_transport_shipping_context, bbox=bbox, zoom=zoom, limit=limit
