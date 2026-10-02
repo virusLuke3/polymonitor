@@ -1,3 +1,4 @@
+import { gotoMapScene } from './fixtures/browser';
 import { expect, test, type Page } from '@playwright/test';
 import { fixtureBundle, installDashboard } from './fixtures/dashboard';
 import { installFixtures } from './fixtures/world-event-map';
@@ -28,7 +29,7 @@ for (const width of [1440, 390]) {
       page.on('pageerror', (error) => errors.push(error.message));
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
       await installDashboard(page, locale);
-      await page.goto('/?view=2d&time=all&layers=earthquakes-volcanoes,wildfires&center=-98,39&zoom=2.2');
+      await gotoMapScene(page, '/?view=2d&time=all&layers=earthquakes-volcanoes,wildfires&center=-98,39&zoom=2.2');
       await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', /webgl|svg/, { timeout: 60_000 });
       await expect(page.locator('.wm-banner')).toHaveCount(0);
       await visual(page, `home-${width}-${locale}.png`);
@@ -59,7 +60,7 @@ for (const path of ['/login', '/account', '/watchlist', '/briefings', '/develope
       await installDashboard(page);
       // The login entry is characterized independently of authenticated pages.
       if (path === '/login') await page.route('**/auth/session', (route) => route.fulfill({ json: { enabled: true, authenticated: false, user: null, csrfToken: null, allowedScopes: [] } }));
-      await page.goto(path);
+      await gotoMapScene(page, path);
       const readySelector: Record<string, string> = {
         '/login': '.auth-login-layout', '/account': '.auth-account',
         '/watchlist': '.watchlist-main', '/briefings': '.brief-manager-main',
@@ -83,7 +84,7 @@ for (const width of [1440, 390]) {
       await new Promise(resolve => setTimeout(resolve, 1000));
       await route.fallback();
     });
-    await page.goto('/?view=2d&time=all&layers=earthquakes-volcanoes');
+    await gotoMapScene(page, '/?view=2d&time=all&layers=earthquakes-volcanoes');
     const controls = page.locator('.wm-world-event-basemap-control');
     await expect(controls).toHaveCount(2);
     await settled(page);
@@ -108,7 +109,7 @@ for (const width of [1440, 390]) {
   test(`Chinese market sort keeps its caption with warm fonts ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     await installDashboard(page, 'zh');
-    await page.goto('/?view=2d&time=all&layers=earthquakes-volcanoes,wildfires&center=-98,39&zoom=2.2');
+    await gotoMapScene(page, '/?view=2d&time=all&layers=earthquakes-volcanoes,wildfires&center=-98,39&zoom=2.2');
     await expect(page.locator('.wm-market-sort')).toBeVisible();
     await settled(page);
     const caption = page.locator('.wm-market-sort-caption');
@@ -136,7 +137,7 @@ for (const width of [1440, 390]) {
   test(`map details and source failure ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     await installDashboard(page);
-    await page.goto('/?view=2d&time=all&layers=earthquakes-volcanoes,wildfires&center=-98,39&zoom=2.2');
+    await gotoMapScene(page, '/?view=2d&time=all&layers=earthquakes-volcanoes,wildfires&center=-98,39&zoom=2.2');
     await expect(page.getByRole('button', { name: /^All events/i })).toContainText('9');
     await page.getByRole('button', { name: /^All events/i }).click();
     await page.getByRole('button', { name: /M6.4 Test Ridge Earthquake/ }).click();
@@ -152,7 +153,7 @@ for (const width of [1440, 390]) {
     await visual(page, `map-focus-${width}.png`);
     await page.unrouteAll({ behavior: 'wait' });
     await installFixtures(page, true);
-    await page.goto('/?view=2d&time=all&layers=weather-alerts,earthquakes-volcanoes,climate-anomalies');
+    await gotoMapScene(page, '/?view=2d&time=all&layers=weather-alerts,earthquakes-volcanoes,climate-anomalies');
     await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', /webgl|svg/, { timeout: 60_000 });
     const layersButton = page.getByRole('button', { name: 'Open layers panel' });
     if (await layersButton.isVisible()) await layersButton.click();
@@ -174,7 +175,7 @@ for (const width of [1440, 390]) {
     const texture = page.waitForResponse(response => response.url().endsWith('/textures/earth-topo-bathy.jpg') && response.ok());
     // Development enables telemetry by default; production does not. Use the
     // existing debug query so the keyboard toggle starts from the same state.
-    await page.goto('/?view=3d&layers=earthquakes-volcanoes&globePerf=1');
+    await gotoMapScene(page, '/?view=3d&layers=earthquakes-volcanoes&globePerf=1');
     await expect(page.locator('.wm-globe-runtime canvas')).toBeAttached();
     await texture;
     await expect.poll(() => page.workers().filter(worker => worker.url().includes('worldGlobeMarkers')).length).toBe(1);
@@ -231,7 +232,7 @@ for (const width of [1440, 390]) {
 test('effective panel sizes at every breakpoint', async ({ page }) => {
   const ids = ['market-tv-wire', 'market-youtube-channels', 'breaking-event-radar', 'global-transport-shipping', 'global-temperature-monitor', 'market-summary'];
   await installDashboard(page, 'en', ids);
-  await page.goto('/?view=2d&layers=earthquakes-volcanoes');
+  await gotoMapScene(page, '/?view=2d&layers=earthquakes-volcanoes');
   await expect(page.locator('[data-workspace-panel-id="market-tv-wire"]')).toBeAttached();
   const layouts = [];
   for (const width of [1600, 1501, 1500, 1101, 1100, 761, 760, 390]) {
@@ -274,7 +275,7 @@ for (const state of ['loading', 'empty', 'error', 'stale', 'closed'] as const) {
         if (state === 'closed') bundle.market = { ...bundle.market, status: 'closed' };
         await route.fulfill({ json: path.includes('/runtime/lob/token/') ? bundle.lob : bundle });
       });
-      await page.goto('/?view=2d&time=all&layers=earthquakes-volcanoes&center=-98,39&zoom=2.2');
+      await gotoMapScene(page, '/?view=2d&time=all&layers=earthquakes-volcanoes&center=-98,39&zoom=2.2');
       if (state === 'loading') {
         for (let frame = 0; frame < 10; frame++) {
           await page.clock.runFor(50);
@@ -298,7 +299,7 @@ for (const width of [1440, 390]) {
   test(`market hover, keyboard, selected and disabled controls ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     await installDashboard(page);
-    await page.goto('/?view=2d&time=all&layers=earthquakes-volcanoes');
+    await gotoMapScene(page, '/?view=2d&time=all&layers=earthquakes-volcanoes');
     const market = page.locator('.wm-poly-market-card').filter({ hasText: 'Fixture market 2' });
     await expect(market).toBeVisible({ timeout: 60_000 });
     await market.scrollIntoViewIfNeeded();
@@ -329,7 +330,7 @@ test('panel drag, constrained resize, enable and remote layout restore', async (
     if (route.request().method() === 'PUT') saved = { ...saved, ...route.request().postDataJSON(), revision: saved.revision + 1 };
     await route.fulfill({ json: saved });
   });
-  await page.goto('/?view=2d&layers=earthquakes-volcanoes');
+  await gotoMapScene(page, '/?view=2d&layers=earthquakes-volcanoes');
   const source = page.locator('[data-workspace-panel-id="breaking-event-radar"]');
   const target = page.locator('[data-workspace-panel-id="global-transport-shipping"]');
   await source.scrollIntoViewIfNeeded();
@@ -365,7 +366,7 @@ for (const width of [1440, 390]) for (const kind of ['detail', 'book']) {
   test(`${kind === 'detail' ? 'focus' : 'book'} drag preview preserves detached panel styles ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     await installDashboard(page);
-    await page.goto('/?view=2d&layers=earthquakes-volcanoes');
+    await gotoMapScene(page, '/?view=2d&layers=earthquakes-volcanoes');
     const panel = page.locator(`.wm-focus-${kind}-panel`);
     await expect(panel).toContainText('Fixture market 1');
     if (kind === 'book') await expect(panel.locator('.wm-focus-book-row')).toHaveCount(2);
@@ -387,7 +388,7 @@ test('anonymous homepage renders a saved empty panel list without restoring defa
   await installDashboard(page, 'en', []);
   await page.route('**/wm-api/auth/session', route => route.fulfill({ json: { enabled: true, authenticated: false, user: null } }));
   for (let visit = 0; visit < 2; visit += 1) {
-    await page.goto('/?view=2d&time=all&layers=earthquakes-volcanoes,wildfires&center=-98,39&zoom=2.2');
+    await gotoMapScene(page, '/?view=2d&time=all&layers=earthquakes-volcanoes,wildfires&center=-98,39&zoom=2.2');
     await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', /webgl|svg/, { timeout: 60_000 });
     await expect(page.locator('.wm-focused-market-list .wm-poly-market-card')).toHaveCount(2);
     await expect(page.locator('.wm-panels-grid [data-workspace-panel-id]')).toHaveCount(0);

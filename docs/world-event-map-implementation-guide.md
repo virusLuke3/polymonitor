@@ -727,7 +727,9 @@ interface WorldEventMapState {
 规则：
 
 - MapLibre camera 与 state 双向同步，避免循环更新。
-- URL 状态优先于 localStorage。
+- 相机、时间、severity、选中事件及其他调查条件：URL 状态优先于 localStorage。
+- **2026-10-02 用户确认的图层入场策略**：每次进入、刷新或打开旧链接时，启用现有 registry 中全部可执行图层；不恢复旧 URL 或 localStorage 的关闭列表。进入后可手动关闭，后续数据刷新、相机移动及筛选变更不得擅自重新开启。能力限制、无凭据和来源错误仍如实展示，不用“已启用”冒充“已渲染/数据新鲜”。
+- Copy Link 仍记录当前图层集合供定位与诊断；重新打开时明确按上述全开策略入场，其余字段照常恢复。
 - 无 URL 参数时才使用 localStorage。
 - 未知或过期 URL 参数必须安全忽略。
 - Copy Link 必须序列化当前 MapState。

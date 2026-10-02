@@ -211,6 +211,7 @@ export function LayerPanel({
                   <label className="wm-layer-toggle" title={actionLabel}>
                     <input
                       type="checkbox"
+                      value={item.id}
                       checked={visiblyEnabled}
                       disabled={unavailable}
                       onChange={() => onToggle(item.id)}

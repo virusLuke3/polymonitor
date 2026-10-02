@@ -2,7 +2,6 @@ import { useEffect, useMemo, useReducer } from 'preact/hooks';
 import type { GeoEventSeverity } from '../domain/types';
 import type { WorldEventRegion } from '../config/regions';
 import {
-  defaultWorldEventMapState,
   WORLD_EVENT_MAP_STORAGE_KEY,
   type WorldEventTimeRange,
   type AviationLensMode,
@@ -12,17 +11,13 @@ import {
 } from './mapState';
 import { worldEventMapReducer } from './mapReducer';
 import {
-  parseWorldEventMapState,
-  readStoredWorldEventMapState,
+  initialWorldEventMapState,
   serializeWorldEventMapUrl,
 } from './urlState';
 
 function initialState() {
-  const defaults = { ...defaultWorldEventMapState(), fitWorld: true };
-  if (typeof window === 'undefined') return defaults;
-  const stored = readStoredWorldEventMapState(window.localStorage.getItem(WORLD_EVENT_MAP_STORAGE_KEY), defaults);
-  const state = parseWorldEventMapState(window.location.search, stored);
-  return state;
+  if (typeof window === 'undefined') return initialWorldEventMapState('', null);
+  return initialWorldEventMapState(window.location.search, window.localStorage.getItem(WORLD_EVENT_MAP_STORAGE_KEY));
 }
 
 export function useWorldEventMapState() {

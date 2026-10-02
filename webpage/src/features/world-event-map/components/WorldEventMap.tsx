@@ -329,7 +329,16 @@ export function WorldEventMap({
         onCountryContextMenu: (country, position) => {
           if (isCurrent()) setCountryTarget({ country, position, context: true });
         },
-        onBasemapStateChange: (nextState) => { if (isCurrent() && !failed) { if (nextState.endsWith('-ready')) { readyResolve?.(true); setRendererError(null); } setBasemapState(nextState); } },
+        onBasemapStateChange: (nextState) => {
+          if (!isCurrent() || failed) return;
+          if (nextState.endsWith('-ready')) {
+            readyResolve?.(true);
+            // A usable SVG fallback does not resolve the WebGL failure or a
+            // pending module download. Clear that reason only on recovery.
+            if (nextState === 'primary-ready') setRendererError(null);
+          }
+          setBasemapState(nextState);
+        },
         onRendererFallbackRequested: fail,
         onLayerDegraded: (layerId, error) => {
           if (isCurrent()) setRendererLayerErrors(previous => ({ ...previous, [layerId]: error.message }));

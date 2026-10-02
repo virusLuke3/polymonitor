@@ -189,6 +189,15 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
 
 export async function installFixtures(page: Page, climateUnavailable = false) {
   await installLocalAssets(page);
+  // Entry now requests every layer. Keep even the brief initial radar demand
+  // deterministic; individual recovery tests can override these routes.
+  await page.route('https://api.rainviewer.com/public/weather-maps.json', route => route.fulfill({ json: {
+    host: 'https://tilecache.rainviewer.com', radar: { past: [{ time: Date.parse(GENERATED_AT) / 1000, path: '/v2/radar/fixture' }] },
+  } }));
+  await page.route('https://tilecache.rainviewer.com/**', route => route.fulfill({ contentType: 'image/png', body: Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64',
+  ) }));
+
   await page.addInitScript(() => {
     if (location.protocol === 'http:' || location.protocol === 'https:') {
       localStorage.setItem('polydata:panel-library-open:v1', JSON.stringify(innerWidth > 720));

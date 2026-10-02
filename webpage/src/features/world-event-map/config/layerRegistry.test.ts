@@ -31,6 +31,7 @@ describe('World Event Map layer registry', () => {
       'extreme-temperature',
       'climate-anomalies',
       'air-routes',
+      'intel-hotspots',
       'ucdp',
       'sanctions-country-risk',
       'weather-radar',
@@ -40,7 +41,7 @@ describe('World Event Map layer registry', () => {
   it('exposes evidence-gated country layers as real optional controls', () => {
     expect(worldEventLayerById('intel-hotspots')?.selectable).toBe(true);
     expect(worldEventLayerById('sanctions-country-risk')?.selectable).toBe(true);
-    expect(worldEventLayerById('intel-hotspots')?.defaultEnabled).toBe(false);
+    expect(worldEventLayerById('intel-hotspots')?.defaultEnabled).toBe(true);
     expect(worldEventLayerById('sanctions-country-risk')?.defaultEnabled).toBe(true);
     expect(worldEventLayerById('air-routes')?.defaultEnabled).toBe(true);
   });

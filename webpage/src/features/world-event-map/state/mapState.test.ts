@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { worldEventMapReducer } from './mapReducer';
+import { executableWorldEventLayers } from '../config/layerRegistry';
 import { clampLongitude, defaultWorldEventMapState } from './mapState';
 import { filterWorldEventMapEvents, filterWorldEventMapEventsForLayers } from './selectors';
 import {
   parseWorldEventMapState,
+  initialWorldEventMapState,
   readStoredWorldEventMapState,
   serializeWorldEventMapUrl,
 } from './urlState';
@@ -54,6 +56,7 @@ describe('World Event Map state', () => {
       'extreme-temperature',
       'climate-anomalies',
       'air-routes',
+      'intel-hotspots',
       'ucdp',
       'sanctions-country-risk',
       'weather-radar',
@@ -61,6 +64,25 @@ describe('World Event Map state', () => {
     expect(defaults.activeLayerIds).toContain('air-routes');
     expect(defaults.aviationLens).toBe('trunk');
     expect(defaults.timeRange).toBe('7d');
+  });
+
+  it.each(['', '?layers=', '?layers=earthquakes-volcanoes', '?layers=retired-map-layer'])('enables all executable layers on entry despite old link %s and saved choices', (search) => {
+    const saved = JSON.stringify({ ...defaultWorldEventMapState(), activeLayerIds: [], center: { lon: 12, lat: 35 }, zoom: 4, timeRange: '24h', severities: ['critical'], aviationLens: 'watch' });
+    const entry = initialWorldEventMapState(search, saved);
+    expect(entry.activeLayerIds).toEqual(executableWorldEventLayers().map(layer => layer.id));
+    expect(entry).toMatchObject({ center: { lon: 12, lat: 35 }, zoom: 4, timeRange: '24h', severities: ['critical'], aviationLens: 'watch' });
+    const off = worldEventMapReducer(entry, { type: 'toggle-layer', layerId: 'air-routes' });
+    expect(off.activeLayerIds).not.toContain('air-routes');
+    expect(worldEventMapReducer(off, { type: 'set-time-range', timeRange: '6h' }).activeLayerIds).not.toContain('air-routes');
+    const url = serializeWorldEventMapUrl(off, 'https://example.test');
+    expect(initialWorldEventMapState(new URL(url).search, JSON.stringify(off)).activeLayerIds).toEqual(entry.activeLayerIds);
+  });
+
+  it('preserves URL investigation precedence while opening every layer', () => {
+    expect(initialWorldEventMapState('?center=100,20&zoom=3&layers=&time=6h&country=US&severity=warning&air=all&theme=positron', JSON.stringify({ countryCode: 'GB', timeRange: '7d' }))).toMatchObject({
+      center: { lon: 100, lat: 20 }, zoom: 3, timeRange: '6h', countryCode: 'US', severities: ['warning'], aviationLens: 'all', basemapTheme: 'positron',
+      activeLayerIds: executableWorldEventLayers().map(layer => layer.id),
+    });
   });
 
   it('applies URL state after stored state and round-trips canonical fields', () => {

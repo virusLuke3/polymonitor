@@ -1,3 +1,4 @@
+import { gotoMapScene } from './fixtures/browser';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { GENERATED_AT, installFixtures } from './fixtures/world-event-map';
 import { expect, test, type Page, type Route, type Request } from '@playwright/test';
@@ -28,7 +29,7 @@ test('anonymous dashboard uses public health and never polls administrator opera
   await page.route('**/wm-api/health', route => {
     publicRequests++; return route.fulfill({ json: { status: 'degraded', database: true, redis: false } });
   });
-  await page.goto(mapURL);
+  await gotoMapScene(page, mapURL);
   await expect.poll(() => publicRequests).toBeGreaterThan(0);
   await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', /webgl|svg/);
   await page.waitForTimeout(21_000);
@@ -51,7 +52,7 @@ test('radar arriving during renderer staging is handed to the committed map', as
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64',
     ) });
   });
-  await page.goto(mapURL.replace('layers=earthquakes-volcanoes', 'layers=earthquakes-volcanoes,weather-radar'), { waitUntil: 'domcontentloaded' });
+  await gotoMapScene(page, mapURL.replace('layers=earthquakes-volcanoes', 'layers=earthquakes-volcanoes,weather-radar'), { waitUntil: 'domcontentloaded' });
   await expect.poll(() => Boolean(style && manifest)).toBe(true);
   await expect(page.locator('.maplibregl-canvas')).toHaveCount(1);
   await expect(page.locator('[data-map-renderer-ready]')).toHaveCount(0);
@@ -79,7 +80,7 @@ test('slow bootstrap and one stalled catalog source do not block map or market s
     }
     remainingMarkets = route;
   });
-  await page.goto(mapURL);
+  await gotoMapScene(page, mapURL);
   await expect.poll(() => Boolean(bootstrap && groups), { timeout: 6000 }).toBe(true);
   await expect(page.locator('.wm-focused-market-row')).toContainText('Fixture market 1', { timeout: 6000 });
   expect(remainingMarkets).toBeDefined();
@@ -99,7 +100,7 @@ test('failed WebGL module download enters SVG fallback without an unhandled reje
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.route(deckModule, route => route.abort('failed'));
-  await page.goto(mapURL);
+  await gotoMapScene(page, mapURL);
   await readyFallback(page);
   await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-reason', /import|fetch|module/i);
   await page.getByRole('button', { name: /^All events/i }).click();
@@ -118,7 +119,7 @@ for (const renderer of ['webgl', 'svg'] as const) {
     await page.route(/noto-sans-sc.*\.woff2/, async route => { await fonts; await route.abort().catch(() => {}); });
     if (renderer === 'svg') await page.route(deckModule, route => route.abort('failed'));
     try {
-      await page.goto(mapURL, { waitUntil: 'domcontentloaded' });
+      await gotoMapScene(page, mapURL, { waitUntil: 'domcontentloaded' });
       await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', renderer, { timeout: 15_000 });
       await page.locator('.wm-world-event-list-toggle').click();
       await page.getByRole('button', { name: /M6.4 Test Ridge Earthquake/ }).click();
@@ -134,7 +135,7 @@ test('a slow WebGL download shows temporary SVG then restores the primary map an
   await installDashboard(page);
   let pending: Route | undefined;
   await page.route(deckModule, route => { pending = route; });
-  await page.goto(mapURL);
+  await gotoMapScene(page, mapURL);
   await expect.poll(() => Boolean(pending)).toBe(true);
   await readyFallback(page);
   await expect(page.locator('.wm-weather-deck-status')).toHaveAttribute('title', /still downloading/);
@@ -155,7 +156,7 @@ test('leaving a temporary map invalidates the pending WebGL promotion', async ({
   await installDashboard(page);
   let pending: Route | undefined;
   await page.route(deckModule, route => { pending = route; });
-  await page.goto(mapURL);
+  await gotoMapScene(page, mapURL);
   await readyFallback(page);
   await page.getByRole('tab', { name: '3D Globe', exact: true }).click();
   await expect(page.locator('[data-map-renderer-ready]')).toHaveCount(0);
@@ -167,7 +168,7 @@ test('leaving a temporary map invalidates the pending WebGL promotion', async ({
 
 test('a successfully replaced basemap remains primary beyond its loading deadline', async ({ page }) => {
   await installDashboard(page);
-  await page.goto(mapURL);
+  await gotoMapScene(page, mapURL);
   const host = page.locator('[data-map-basemap-state]');
   await expect(host).toHaveAttribute('data-map-basemap-state', 'primary-ready');
   await page.getByRole('combobox', { name: 'Basemap provider' }).selectOption('carto');
@@ -185,7 +186,7 @@ for (const leave of [false, true]) {
     page.on('pageerror', error => errors.push(error.message));
     let pending: Route | undefined;
     await page.route(svgModule, route => { pending = route; });
-    await page.goto(mapURL);
+    await gotoMapScene(page, mapURL);
     await expect(page.locator('.wm-weather-deck-map [role="alert"]')).toContainText('still downloading', { timeout: 20_000 });
     expect(pending).toBeDefined();
     if (leave) await page.getByRole('tab', { name: '3D Globe', exact: true }).click();
@@ -211,7 +212,7 @@ test('failed SVG download reports failure instead of an endless loading shell', 
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
   await page.route(svgModule, route => route.abort('failed'));
-  await page.goto(mapURL);
+  await gotoMapScene(page, mapURL);
   await expect(page.locator('.wm-weather-deck-map')).toHaveClass(/map-state-failed/);
   await expect(page.locator('.wm-weather-deck-map [role="alert"]')).toBeVisible();
   expect(errors).toEqual([]);
@@ -231,7 +232,7 @@ test.describe('production service worker startup', () => {
       if (request.isNavigationRequest() && request.frame() === page.mainFrame()) documents.push(request.url());
     });
     const origin = `http://127.0.0.1:${process.env.POLYMONITOR_E2E_PORT || '4174'}`;
-    await page.goto(`${origin}/?view=2d&time=all&layers=earthquakes-volcanoes`);
+    await gotoMapScene(page, `${origin}/?view=2d&time=all&layers=earthquakes-volcanoes`);
     await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(true);
     await readyFallback(page);
     await page.waitForTimeout(500);
@@ -258,7 +259,7 @@ resourceTest('production resource ownership: 30 layer and detail cycles release 
   test.setTimeout(180_000);
   await page.clock.setFixedTime(new Date(GENERATED_AT));
   await installFixtures(page);
-  await page.goto('/?view=2d&basemap=openfreemap&mapPerf=1&center=0,20&zoom=1.5&time=all&layers=earthquakes-volcanoes,weather-alerts,wildfires,climate-anomalies');
+  await gotoMapScene(page, '/?view=2d&basemap=openfreemap&mapPerf=1&center=0,20&zoom=1.5&time=all&layers=earthquakes-volcanoes,weather-alerts,wildfires,climate-anomalies');
   const host = page.locator('[data-map-renderer-ready]');
   await expect(host).toHaveAttribute('data-map-renderer-ready', 'webgl');
   expect(await page.evaluate(() => '__PREFRESH__' in window)).toBe(false);

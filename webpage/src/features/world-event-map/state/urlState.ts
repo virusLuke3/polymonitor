@@ -30,6 +30,18 @@ function finite(value: string | null) {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
+/** Entry policy: restore the investigation, but start every visit with all
+ * executable layers requested. Runtime capability/source gates still apply.
+ * Only initialization calls this; in-session toggles remain user controlled. */
+export function initialWorldEventMapState(search: string, storedRaw: string | null): WorldEventMapState {
+  const defaults = { ...defaultWorldEventMapState(), fitWorld: true };
+  const stored = readStoredWorldEventMapState(storedRaw, defaults);
+  return {
+    ...parseWorldEventMapState(search, stored),
+    activeLayerIds: executableWorldEventLayers().map((layer) => layer.id),
+  };
+}
+
 export function parseWorldEventMapState(
   search: string,
   fallback: WorldEventMapState = defaultWorldEventMapState(),

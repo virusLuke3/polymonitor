@@ -4,6 +4,8 @@
 > `WorldEventMap实施指导.md` 的交付证据，不代表复制 WorldMonitor 的业务图层或视觉资产。
 > Polymonitor 的地图主体仍是可验证灾害、异常、冲突与航空参考；预测市场只在事件详情中关联。
 
+> 下面第 1–3 节的“完成”指历史批次所列机制，不等于当前生产全来源正常，也不表示与 WorldMonitor 全功能等价。2026-10-02 的重新核对见第 6 节。
+
 ## 1. 架构与交互对照
 
 | 要求 | WorldMonitor 对照函数/机制 | Polymonitor 实现 | 自动化证据 | 状态 |
@@ -59,3 +61,52 @@ deployed SHA、asset hash、PMTiles 206、航空 dynamic commit、service/log �
 ## 5. 发布记录
 
 发布 SHA、CI、GCP deployed SHA、生产性能 JSON、桌面/移动截图和外部 coverage 限制在发布验收后写入本节。
+
+
+## 6. 2026-10-02 全开策略与 WorldMonitor 差距复核
+
+对照版本：本地 WorldMonitor 已从 `4691d9213` 快进到
+`0a74f70d8e0f6900bc5af967923f3127d44f83ad`。依据为该版本源码、当前
+Polymonitor 工作区和本项目实施契约，不能把上游 registry 的声明当作所有线上来源均可用。
+
+### 6.1 本轮明确改变的行为
+
+用户确认“每次进入都全开，之后可手动关闭”。`initialWorldEventMapState()` 在 URL/本地
+调查条件恢复后，只将 `activeLayerIds` 设为现有 registry 的全部 executable 项。
+当前生产配置对应 10 层：天气预警、地震火山、野火、极端温度、气候异常、航空、情报热点、
+冲突、制裁与国家证据、天气雷达。没有新建第二份 registry，也没有重置相机、时间、severity、
+国家或航空 lens。旧链接、刷新、本地空列表不再把航空/雷达关闭；当前页面手动关闭不会被
+普通刷新/缩放重新打开。URL 仍记录当前状态，但新一轮入场按全开策略执行。
+
+全开表示请求该功能，不承诺每层都有事件、每个来源新鲜，或 SVG 能绘制 WebGL 雷达。
+真实飞机仍要求有效 bbox、zoom >= 2 和有效观测；全球 trunk 动画仍是明确标识的参考表现。
+2D/3D 是互斥视图，并非同时加载的“图层”。
+
+本轮回归另修正两处就绪语义：替代底图按真实 source id 判断内容就绪，不能只识别 PMTiles 的 `basemap`；SVG/本地降级成功保留原故障原因，直到 primary-ready 才清除。
+
+### 6.2 仍需完成的产品差距
+
+| 领域 | 上游当前源码 | Polymonitor 当前事实 | 下一步与优先级 |
+|---|---|---|---|
+| 雷达加载/恢复 | `DeckGLMap.ts:fetchAndApplyRadar` 随 weather 开关启动，取最后一帧，每 5 分钟刷新 | `useWeatherRadar` 是独立 layer，已有真实瓦片/覆盖/错误状态；首次失败同样等 5 分钟才定时重试 | **P1** 区分首次失败重试与正常刷新，增加有限退避和手动重试；保留过期退出与真实错误。历史雷达播放是两边当前实现之外的新需求 |
+| 航空业务 | `data-loader.ts:loadFlightDelays`、`AviationCommandBar`、`DeckGLMap.fetchViewportAircraft`：机场扰动、NOTAM、航班查询、视口飞机 | `transportReferenceAdapter` + `AviationLens` + `useAviationViewport`：静态航线/机场、参考动画、真实视口观测与风险筛选 | **P1** 实施契约 v1.2 的 transport disruption 尚未交付；需要真实机场关闭/延误、空域通告来源和事件报告，不能用 OpenFlights 航线代替运营状态 |
+| 天气覆盖 | `map-layer-definitions.ts:weather` 与 weather service 包含 NWS、ECCC、WMO SWIC | 八类灾害来源含 NWS、NHC、USGS、EONET、GDACS、FIRMS、NCEI；NWS 不是全球气象预警目录 | **P1** 按来源扩展加拿大/全球官方预警，保留 native id、取消更新、几何增强和覆盖边界；先治理现有 deadline/过期来源 |
+| 国家详情 | `country-intel.ts` + `CountryBriefPanel` 汇合国家新闻、事件时间线和航空等信号 | 国家点击菜单目前是 Fit country / Filter events；事件详情有来源和灾害报告 | **P1** 复用现有 Inspector/Runtime 增加国家汇总入口，显示来源时间/缺失项；当前不等于国家综合简报 |
+| 地图搜索 | `search-manager.ts` 有国家、位置、图层和实时飞机结果与定位分发 | LayerPanel 搜图层名；EventList 搜已加载事件；首页命令面板主要是市场、panel、命令 | **P1** 将已有入口扩展为统一地理搜索与定位；保留事件/来源类型和不在当前筛选内的说明，不增加第二套加载 |
+| 国家区域含义 | 上游 CII 是多源复合分数，conflict 与 sanctions 另外建模 | `geoShockAdapter` 是制裁/冲突证据背景，`severityBasis=evidence-context-only`，不是 CII | **P1** 图例、国家报告持续明确证据与风险区别；如要分级评分，需另立可验证公式/来源/版本。不可为模仿红黄配色伪造风险 |
+| 边界一致性 | Protomaps 矢量底图 + 国家 GeoJSON；country-geometry 支持可选精细 overrides | 底图已恢复 provider 国界，风险 outline 像素单位与 beforeId 已修；国家命中/证据区域仍用独立 GeoJSON | **P2** 按缩放和地区对比边界贴合、接缝和争议边界语义；不能把叠加 GeoJSON 与不同 zoom 瓦片差异当作 CSS 修掉 |
+| 字体与视觉密度 | Protomaps 角色字体、symbol 排序和标签碰撞；不同业务 layer 自有语义 | 本地比例地图字体已保留 Regular/Medium/Bold/Italic，控件/报告用 body，代码字段用 mono；语言跟随当前 EN/中文 | **P2** 继续做全开状态的地名/事件/航线遮挡预算、全屏与普通高度、桌面/小屏验收。英文截图不能直接按中文字形判断渲染失败 |
+| 更多空间情报 | 上游 registry 有 AIS、tradeRoutes、水道、军事实体、海缆、管道、outages、GPS、cyber、displacement 等 | 当前地图 registry 没有这些执行链；面板存在类似主题不等于已经进入地图 | **P2/后续需求** 按本项目 §4.3/4.4 先做运输中断、重要基础设施及市场联动；每项要来源→规范化→layer→详情→测试闭环，不一次性复制全部变体/付费层 |
+| 生产可靠性 | 上游也受来源配额、覆盖、缓存与网络影响，声明能力不等于实时健康 | 全开只修启用策略；NWS/其他来源 ERROR/STALE，目录 REFRESH FAILED 等需要各自运行证据 | **P0** 按前端请求、CDN/cache、API deadline、provider 获取逐层定位；不隐藏 ERROR，不把 HTTP 200 算作 fresh，不用截图证明长期稳定 |
+
+已有且不应重建：MapLibre/deck/Protomaps、2D/3D、SVG fallback、国家点击/过滤、10 层 registry、
+灾害点线面、两级聚合与重要事件保护、完整记录列表、来源详情、真实雷达最新帧、航空视口
+取消/代次/日期变更线、离屏暂停恢复与动态画布清晰度机制。当前差距在业务覆盖和生产闭环，
+不是要重新换地图框架。
+
+### 6.3 本轮证据位置
+
+`webpage/artifacts/map-all-layers-20261002/` 保存旧七层 URL 的生产 before/after、
+桌面/窄视口 Chrome、手动关闭/刷新、请求与 SW/release 身份、trace/video。
+本轮测试明确区分 all-on 入场验收与用户手动选择的单图层回归场景。
+实际执行结果及未通过项以该目录 README 为准；本节不提前声称发布或全功能对齐完成。

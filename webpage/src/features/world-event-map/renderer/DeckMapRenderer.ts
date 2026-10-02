@@ -200,6 +200,7 @@ export class DeckMapRenderer implements MapRenderer {
   private events: GeoEvent[] = [];
   private fallbackApplied = false;
   private primaryHasContent = false;
+  private primarySourceIds = new Set(['basemap']);
   private readonly missingBaseTiles = new Map<string, {x: number; y: number; z: number}>();
   private missingTileRetryTimer: number | null = null;
   private missingTileAttempts = 0;
@@ -1274,6 +1275,10 @@ export class DeckMapRenderer implements MapRenderer {
 
   private handleStyleLoad = () => {
     if (!this.map || this.destroyed) return;
+    // Providers choose their own source IDs (PMTiles uses basemap, whereas
+    // OpenFreeMap/CARTO do not). Capture the base style before adding optional
+    // country/radar sources so those cannot falsely satisfy map readiness.
+    if (!this.fallbackApplied) this.primarySourceIds = new Set(Object.keys(this.map.getStyle().sources || {}));
     if (typeof performance !== 'undefined'
       && performance.getEntriesByName('polymonitor:map:first-basemap').length === 0) {
       performance.mark('polymonitor:map:first-basemap');
@@ -1287,12 +1292,14 @@ export class DeckMapRenderer implements MapRenderer {
   };
 
   private handleSourceData = (event: MapSourceDataEvent) => {
-    if (!this.fallbackApplied && event.sourceId === 'basemap') {
+    if (!this.fallbackApplied && this.primarySourceIds.has(event.sourceId)) {
       if (event.sourceDataType === 'metadata') this.primaryMetadataReady = true;
       // MapLibre considers an errored tile "loaded" too. Metadata/load/idle
       // alone therefore cannot prove that a vector basemap actually painted.
       const tile = (event as MapSourceDataEvent & { tile?: { state?: string; tileID?: {canonical?: {x: number; y: number; z: number}} } }).tile;
-      if (tile?.state === 'loaded') {
+      const source = this.map?.getStyle().sources?.[event.sourceId];
+      const geoJsonLoaded = source?.type === 'geojson' && event.sourceDataType === 'content' && event.isSourceLoaded;
+      if (tile?.state === 'loaded' || geoJsonLoaded) {
         this.primaryHasContent = true;
         const id = tile.tileID?.canonical;
         if (id) this.missingBaseTiles.delete(`${id.z}/${id.x}/${id.y}`);

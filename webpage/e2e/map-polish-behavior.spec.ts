@@ -1,3 +1,4 @@
+import { gotoMapScene } from './fixtures/browser';
 import { test, expect } from '@playwright/test';
 import { GENERATED_AT, hazard, mapResponse, installFixtures } from './fixtures/world-event-map';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -16,7 +17,7 @@ test.beforeEach(async ({ page }) => {
 
 test('new visitor controls stay compact without hiding event records', async ({ page }) => {
   await page.addInitScript(() => { if (location.protocol === 'http:') localStorage.removeItem('polydata:panel-library-open:v1'); });
-  await page.goto(url);
+  await gotoMapScene(page, url);
   await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', 'webgl');
   await expect(page.locator('.wm-weather-deck-legend')).toBeHidden();
   await expect(page.getByRole('button', { name: 'Open layers panel' })).toBeVisible();
@@ -41,7 +42,7 @@ test('refresh keeps reading order and a filtered selection remains readable', as
     return route.fulfill({ json: mapResponse(source, source === 'usgs' ? refreshed ? [incoming, original] : [original] : []) });
   });
   await page.route('**/wm-api/runtime/world/natural-hazards/events/**', route => route.fulfill({ json: { schemaVersion: 'natural-hazard-detail.v1', generatedAt: GENERATED_AT, event: original } }));
-  await page.goto(url);
+  await gotoMapScene(page, url);
   await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', 'webgl');
   await page.locator('.wm-world-event-list-toggle').click();
   await expect(page.locator('.wm-world-event-list-scroll')).toContainText('Old occurrence updated today');
@@ -60,7 +61,7 @@ test('refresh keeps reading order and a filtered selection remains readable', as
 });
 
 test('legend, safe focus mode and proportional fonts keep one renderer', async ({ page }) => {
-  await page.goto(url);
+  await gotoMapScene(page, url);
   const host = page.locator('[data-map-renderer-ready]');
   await expect(host).toHaveAttribute('data-map-renderer-ready', 'webgl');
   await page.evaluate(() => document.fonts.ready);
@@ -92,7 +93,7 @@ test('legend, safe focus mode and proportional fonts keep one renderer', async (
 });
 
 test('list scopes, time meaning and detail return preserve filters', async ({ page }) => {
-  await page.goto(url);
+  await gotoMapScene(page, url);
   await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', 'webgl');
   await page.locator('.wm-world-event-list-toggle').click();
   await expect(page.locator('.wm-world-event-list')).toContainText('Time windows use source updates');

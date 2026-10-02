@@ -1,3 +1,4 @@
+import { gotoMapScene } from './fixtures/browser';
 import { test, expect } from '@playwright/test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -27,7 +28,7 @@ test('an expired successful climate snapshot recovers without waiting six hours'
     await route.fulfill({json:body});
   });
   try {
-    await page.goto('/?view=2d&renderer=svg&time=all&layers=climate-anomalies');
+    await gotoMapScene(page, '/?view=2d&renderer=svg&time=all&layers=climate-anomalies');
     const status=page.locator('.wm-map-source-status').filter({has:page.locator('b',{hasText:/^ANOMALY$/})});
     await expect(status).toHaveClass(/is-degraded/); expect(bodies).toHaveLength(1);
     const count=await page.getByRole('button',{name:/^All events/i}).textContent();
@@ -53,7 +54,7 @@ for (const condition of ['throttled','blocked']) test(`retained source ${conditi
     await route.fulfill({json:body});
   });
   try {
-    await page.goto('/?view=2d&renderer=svg&time=all&layers=climate-anomalies');
+    await gotoMapScene(page, '/?view=2d&renderer=svg&time=all&layers=climate-anomalies');
     await expect.poll(()=>attempts).toBe(1);
     await expect(page.locator('.wm-map-source-status').filter({has:page.locator('b',{hasText:/^ANOMALY$/})})).toHaveClass(/is-degraded/);
     await page.clock.fastForward(89_000);expect(attempts).toBe(1);
@@ -82,7 +83,7 @@ test('a cached hazard response refreshes at its original server deadline', async
     await route.fulfill({json:body});
   });
   try {
-    await page.goto('/?view=2d&basemap=pmtiles&time=all&layers=earthquakes-volcanoes');
+    await gotoMapScene(page, '/?view=2d&basemap=pmtiles&time=all&layers=earthquakes-volcanoes');
     await expect.poll(() => bodies.length).toBeGreaterThan(0);
     await expect(page.locator('.wm-map-source-status').filter({has:page.locator('b',{hasText:/^USGS$/})})).toHaveClass(/is-ok/);
     await page.clock.fastForward(10_000);
@@ -103,7 +104,7 @@ test('optional country loading does not falsely demote a ready cached basemap', 
     requested++; await held; await route.continue();
   });
   try {
-    await page.goto('/?view=2d&mapPerf=1&basemap=pmtiles&center=-120,37&zoom=3&time=all&layers=earthquakes-volcanoes');
+    await gotoMapScene(page, '/?view=2d&mapPerf=1&basemap=pmtiles&center=-120,37&zoom=3&time=all&layers=earthquakes-volcanoes');
     const host = page.locator('[data-map-renderer-ready]');
     await expect.poll(() => requested).toBeGreaterThan(0);
     await expect(host).toHaveAttribute('data-map-renderer-ready', 'webgl', {timeout:10_000});
@@ -134,7 +135,7 @@ test('initial world fit does not wait for optional geometry or override saved ca
     requested++; await held; await route.continue();
   });
   try {
-    await page.goto('/?view=2d&mapPerf=1&basemap=pmtiles');
+    await gotoMapScene(page, '/?view=2d&mapPerf=1&basemap=pmtiles');
     const host = page.locator('[data-map-renderer-ready]');
     await expect.poll(() => requested).toBeGreaterThan(0);
     await expect(host).toHaveAttribute('data-map-renderer-ready', 'webgl');
@@ -148,7 +149,7 @@ test('initial world fit does not wait for optional geometry or override saved ca
     });
     await expect.poll(worldFitError).toBeLessThan(3);
     await host.screenshot({path:resolve(root,'world-fit-before-optional-load.png')});
-    await page.goto('/?view=2d&mapPerf=1&basemap=pmtiles&center=12,35&zoom=3');
+    await gotoMapScene(page, '/?view=2d&mapPerf=1&basemap=pmtiles&center=12,35&zoom=3');
     await expect(host).toHaveAttribute('data-map-renderer-ready', 'webgl');
     release(); await page.waitForTimeout(2000);
     expect(new URL(page.url()).searchParams.get('center')).toBe('12.0000,35.0000');
@@ -165,7 +166,7 @@ for (const viewport of [{width:1536,height:1000},{width:2048,height:567},{width:
     await installFixtures(page); const assets = await installRealMapAssets(page);
     const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
     try {
-      await page.goto('/?view=2d&mapPerf=1&basemap=pmtiles');
+      await gotoMapScene(page, '/?view=2d&mapPerf=1&basemap=pmtiles');
       const host=page.locator('[data-map-renderer-ready]');
       await expect(host).toBeVisible();await page.evaluate(()=>document.fonts.ready);await page.waitForTimeout(2000);
       const rect=await host.boundingBox();
@@ -189,7 +190,7 @@ test('actual context loss restores frame and picking; persistent failure recover
   await page.setViewportSize({width:1536,height:1000});await page.clock.setFixedTime(new Date(GENERATED_AT));
   await installFixtures(page);const assets=await installRealMapAssets(page);
   try {
-    await page.goto('/?view=2d&mapPerf=1&basemap=pmtiles&center=-120,37&zoom=3&time=all&layers=earthquakes-volcanoes');
+    await gotoMapScene(page, '/?view=2d&mapPerf=1&basemap=pmtiles&center=-120,37&zoom=3&time=all&layers=earthquakes-volcanoes');
     const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-renderer-ready','webgl');
     await host.evaluate(el=>{
       const canvas=el.querySelector<HTMLCanvasElement>('canvas.maplibregl-canvas')!;
@@ -231,7 +232,7 @@ test('slow vector tiles keep their loaded index and paint before the bounded gra
     await route.fallback();
   });
   try {
-    await page.goto('/?view=2d&mapPerf=1&basemap=pmtiles&center=0,20&zoom=2&layers=earthquakes-volcanoes');
+    await gotoMapScene(page, '/?view=2d&mapPerf=1&basemap=pmtiles&center=0,20&zoom=2&layers=earthquakes-volcanoes');
     const host=page.locator('.wm-weather-deck-basemap');
     await expect.poll(()=>heldRequests).toBeGreaterThan(0);
     await page.waitForTimeout(12_000);
@@ -248,7 +249,7 @@ test('failed PMTiles recovers from local geometry to the primary without losing 
   await installFixtures(page);const assets=await installRealMapAssets(page);let blocked=true;
   await page.route('**/map-tiles/**',async route=>{if(blocked)await route.fulfill({status:503,body:'Controlled PMTiles fault'});else await route.fallback();});
   try{
-    await page.goto('/?view=2d&mapPerf=1&basemap=pmtiles&center=0,20&zoom=1.5&time=all&layers=earthquakes-volcanoes');
+    await gotoMapScene(page, '/?view=2d&mapPerf=1&basemap=pmtiles&center=0,20&zoom=1.5&time=all&layers=earthquakes-volcanoes');
     const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-basemap-state','local-fallback-ready',{timeout:30_000});
     const camera=new URL(page.url()).searchParams.get('center');const records=await page.locator('.wm-world-event-list-toggle strong').innerText();await host.screenshot({path:resolve(root,'range-local-fallback.png')});
     blocked=false;await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready',{timeout:50_000});
@@ -269,7 +270,7 @@ test('aviation uses resized bounds and represents all valid returned records',as
     try{await route.fulfill({json:{schemaVersion:'aviation-viewport.v1',generatedAt:GENERATED_AT,status:'ok',bbox,zoom:3,aircraft,aircraftCount:180,availableAircraftCount:180,source:'Controlled ADSB fixture',coverage:{complete:true}}});}catch{entry.aborted=true;}
   });
   try{
-    await page.goto('/?view=2d&mapPerf=1&basemap=pmtiles&center=-98,39&zoom=3&time=all&layers=air-routes&air=all&presentation=records');
+    await gotoMapScene(page, '/?view=2d&mapPerf=1&basemap=pmtiles&center=-98,39&zoom=3&time=all&layers=air-routes&air=all&presentation=records');
     const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-renderer-ready','webgl');
     await expect(page.locator('[data-aviation-phase]')).toHaveAttribute('data-aviation-phase','READY');
     await expect(page.locator('.wm-aviation-lens-stats')).toContainText('180');
@@ -295,7 +296,7 @@ for (const locale of ['en','zh']) test(`frozen real sources ${locale}: default c
   });
   await page.route('**/wm-api/runtime/transport/global-shipping**',route=>route.fulfill({contentType:'application/json',body:readFileSync(resolve(input,'transport.json'))}));
   try{
-    await page.goto('/?view=2d&mapPerf=1&basemap=pmtiles&center=0,20&zoom=1.25&time=7d&layers=earthquakes-volcanoes,weather-alerts,wildfires,extreme-temperature,climate-anomalies');
+    await gotoMapScene(page, '/?view=2d&mapPerf=1&basemap=pmtiles&center=0,20&zoom=1.25&time=7d&layers=earthquakes-volcanoes,weather-alerts,wildfires,extreme-temperature,climate-anomalies');
     await page.locator('.wm-language-switch select').selectOption(locale);
     const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready');
     await expect.poll(async()=>Number(await page.locator('.wm-world-event-list-toggle strong').innerText())).toBeGreaterThan(300);
@@ -318,7 +319,7 @@ test('slow renderer download is temporary SVG, late same-generation module recov
   await installFixtures(page);const assets=await installRealMapAssets(page);
   await page.route(/(?:\/src\/features\/world-event-map\/renderer\/DeckMapRenderer\.ts|\/assets\/DeckMapRenderer-[^/]+\.js)(?:\?|$)/,async route=>{await new Promise(r=>setTimeout(r,9000));await route.continue();});
   try{
-    await page.goto('/?view=2d&mapPerf=1&basemap=pmtiles&center=-120,37&zoom=3&time=all&layers=earthquakes-volcanoes');
+    await gotoMapScene(page, '/?view=2d&mapPerf=1&basemap=pmtiles&center=-120,37&zoom=3&time=all&layers=earthquakes-volcanoes');
     const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-renderer-ready','svg',{timeout:15_000});
     await host.screenshot({path:resolve(root,'slow-download-svg.png')});
     await expect(host).toHaveAttribute('data-map-renderer-ready','webgl',{timeout:30_000});
@@ -340,7 +341,7 @@ test('a single isolated layer remains quarantined for the same data and recovers
     return route.fulfill({json:mapResponse(key,revised&&key==='usgs'?events.map(e=>({...e,title:`Validated revision: ${e.title}`,revision:{...(e.revision as object),revisionAt:'2026-08-26T02:59:59Z'}})):events)});
   });
   try{
-    await page.goto('/?view=2d&mapPerf=1&basemap=pmtiles&center=-120,37&zoom=3&time=all&layers=earthquakes-volcanoes');
+    await gotoMapScene(page, '/?view=2d&mapPerf=1&basemap=pmtiles&center=-120,37&zoom=3&time=all&layers=earthquakes-volcanoes');
     const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready');
     await page.waitForTimeout(1000);
     const isolated=await host.evaluate((el:any)=>el.__polymonitorIsolateLayer());expect(isolated).toBeTruthy();
@@ -374,7 +375,7 @@ test('date-line halves, corner aircraft, late responses and off/empty/partial/fa
   });
   const resume=()=>page.evaluate(()=>window.dispatchEvent(new Event('online')));
   try{
-    await page.goto('/?view=2d&mapPerf=1&basemap=pmtiles&center=179,20&zoom=3&time=all&layers=air-routes&air=all&presentation=records');
+    await gotoMapScene(page, '/?view=2d&mapPerf=1&basemap=pmtiles&center=179,20&zoom=3&time=all&layers=air-routes&air=all&presentation=records');
     const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-renderer-ready','webgl');
     await expect.poll(()=>requests.length).toBeGreaterThanOrEqual(2);
     await page.setViewportSize({width:1536,height:850});await expect.poll(()=>requests.length).toBeGreaterThan(2);
@@ -419,7 +420,7 @@ test('overview and records conserve identities; invalid feature and source offli
     return route.fulfill({json:mapResponse(source,source==='usgs'?[...ordinary,important,hazard({id:'invalid:one',title:'Feature that becomes valid',hazardKind:'earthquake',metrics:{kind:'earthquake',magnitude:4},geometry:{type:'Point',coordinates:bad?[999,999]:[-123,38]}})]:[])});
   });
   try{
-    await page.goto('/?view=2d&mapPerf=1&basemap=pmtiles&center=-122,37&zoom=3&time=all&layers=earthquakes-volcanoes');
+    await gotoMapScene(page, '/?view=2d&mapPerf=1&basemap=pmtiles&center=-122,37&zoom=3&time=all&layers=earthquakes-volcanoes');
     const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready');
     await expect(page.locator('.wm-world-event-list-toggle strong')).toHaveText('101');
     const audit=await host.evaluate((el:any)=>el.__polymonitorMapPresentation(true));expect(Object.keys(audit.membership)).toHaveLength(101);expect(Object.values(audit.membership)).not.toContain('DUPLICATE');
@@ -438,7 +439,7 @@ for(const viewport of [{width:1536,height:768},{width:2048,height:1004}])test(`f
   test.skip(phase==='before');test.setTimeout(90_000);mkdirSync(root,{recursive:true});
   await page.setViewportSize(viewport);await page.clock.setFixedTime(new Date(GENERATED_AT));await installFixtures(page);const assets=await installRealMapAssets(page);
   try{
-    await page.goto('/?view=2d&renderer=svg&time=all&layers=earthquakes-volcanoes&mapPerf=1');const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-renderer-ready','svg');await expect(host.locator('canvas')).toHaveCount(0);
+    await gotoMapScene(page, '/?view=2d&renderer=svg&time=all&layers=earthquakes-volcanoes&mapPerf=1');const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-renderer-ready','svg');await expect(host.locator('canvas')).toHaveCount(0);
     await page.locator('.wm-map-focus-toggle').click();await expect(page.locator('.wm-map-stage')).toHaveClass(/is-map-focused/);await host.screenshot({path:resolve(root,`focus-svg-${viewport.width}.png`)});await page.keyboard.press('Escape');await expect(page.locator('.wm-map-stage')).not.toHaveClass(/is-map-focused/);
     await page.locator('.wm-world-event-list-toggle').click();await page.locator('.wm-world-event-list-scroll button').first().focus();await page.keyboard.press('Enter');await expect(page.locator('.wm-event-inspector')).toBeVisible();await page.keyboard.press('Escape');
     await page.waitForTimeout(1000);await expect(host).toHaveAttribute('data-map-renderer-ready','svg');
@@ -453,7 +454,7 @@ for(const dpr of [1,2])for(const zoom of [1,1.25])test(`full raster resolution D
   const context=await browser.newContext({viewport:{width:Math.round(1536/zoom),height:Math.round(1000/zoom)},deviceScaleFactor:dpr*zoom,hasTouch:true,reducedMotion:'reduce',serviceWorkers:'block'});
   const page=await context.newPage();await page.clock.setFixedTime(new Date(GENERATED_AT));await installFixtures(page);const assets=await installRealMapAssets(page);
   try{
-    await page.goto('/?view=2d&mapPerf=1&basemap=pmtiles&time=all&layers=earthquakes-volcanoes');const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready');
+    await gotoMapScene(page, '/?view=2d&mapPerf=1&basemap=pmtiles&time=all&layers=earthquakes-volcanoes');const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready');
     const canvas=await host.locator('canvas.maplibregl-canvas').evaluate((c:HTMLCanvasElement)=>({width:c.width,height:c.height,cssWidth:c.clientWidth,cssHeight:c.clientHeight,dpr:devicePixelRatio}));
     expect(canvas.width).toBeGreaterThanOrEqual(Math.floor(canvas.cssWidth*canvas.dpr));expect(canvas.height).toBeGreaterThanOrEqual(Math.floor(canvas.cssHeight*canvas.dpr));
     await page.locator('.wm-world-event-list-toggle').tap();const first=page.locator('.wm-world-event-list-scroll li button').first();await first.focus();await page.keyboard.press('Enter');await expect(page.locator('.wm-event-inspector')).toBeVisible();
@@ -468,7 +469,7 @@ test('separate stable recovery episodes reset the budget; consecutive faults sto
   test.skip(phase==='before');test.setTimeout(180_000);mkdirSync(root,{recursive:true});
   await page.setViewportSize({width:1536,height:1000});await page.clock.install({time:new Date(GENERATED_AT)});await installFixtures(page);const assets=await installRealMapAssets(page);
   try{
-    await page.goto('/?view=2d&mapPerf=1&basemap=pmtiles&time=all&layers=earthquakes-volcanoes');const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready');
+    await gotoMapScene(page, '/?view=2d&mapPerf=1&basemap=pmtiles&time=all&layers=earthquakes-volcanoes');const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready');
     const cycles=[];
     for(let episode=0;episode<2;episode++){
       await host.dispatchEvent('polymonitor:map-renderer-failure');await expect(host).toHaveAttribute('data-map-renderer-ready','svg');
@@ -489,7 +490,7 @@ test('unavailable GPU stays lightweight with reports and no automatic GPU recrea
   await page.addInitScript(()=>{const get=HTMLCanvasElement.prototype.getContext;HTMLCanvasElement.prototype.getContext=function(kind:any,...args:any[]){if(String(kind).startsWith('webgl'))return null;return (get as any).call(this,kind,...args);} as any;});
   await page.clock.install({time:new Date(GENERATED_AT)});await installFixtures(page);const assets=await installRealMapAssets(page);
   try{
-    await page.goto('/?view=2d&mapPerf=1&time=all&layers=earthquakes-volcanoes');const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-renderer-ready','svg');
+    await gotoMapScene(page, '/?view=2d&mapPerf=1&time=all&layers=earthquakes-volcanoes');const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-renderer-ready','svg');
     await page.locator('.wm-world-event-list-toggle').click();await page.locator('.wm-world-event-list-scroll li button').first().click();await expect(page.locator('.wm-event-inspector')).toBeVisible();
     await page.clock.fastForward(180_000);await expect(host).toHaveAttribute('data-map-renderer-ready','svg');await expect(host.locator('canvas')).toHaveCount(0);await host.screenshot({path:resolve(root,'no-gpu-report.png')});
     writeFileSync(resolve(root,'no-gpu.json'),JSON.stringify({capability:'WebGL unavailable',renderer:'svg',recordAccess:true,automaticGPUCreation:false}));
@@ -503,7 +504,7 @@ test('provider authorization and throttling are explicit, bounded and recover on
   await page.route('**/wm-api/runtime/world/natural-hazards/map?**',async route=>{const key=new URL(route.request().url()).searchParams.get('source')!;if(key!=='usgs'){await route.fallback();return;}requests++;
     if(response==='auth')await route.fulfill({status:403,body:'Controlled credentials fault'});else if(response==='throttle')await route.fulfill({status:429,headers:{'Retry-After':'120'},body:'Controlled throttle'});else await route.fulfill({json:mapResponse(key,sourceEvents[key])});});
   try{
-    await page.goto('/?view=2d&mapPerf=1&basemap=pmtiles&time=all&layers=earthquakes-volcanoes');const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready');await expect(page.locator('.wm-map-source-status').filter({hasText:'USGS'}).first()).toHaveClass(/is-ok/);
+    await gotoMapScene(page, '/?view=2d&mapPerf=1&basemap=pmtiles&time=all&layers=earthquakes-volcanoes');const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready');await expect(page.locator('.wm-map-source-status').filter({hasText:'USGS'}).first()).toHaveClass(/is-ok/);
     response='auth';await page.evaluate(()=>window.dispatchEvent(new Event('online')));await expect(page.locator('.wm-map-source-status').filter({hasText:'USGS'}).first()).toHaveClass(/is-degraded/);const blockedCount=requests;await page.clock.fastForward(100_000);expect(requests).toBe(blockedCount);
     response='normal';await page.evaluate(()=>window.dispatchEvent(new Event('online')));await expect(page.locator('.wm-map-source-status').filter({hasText:'USGS'}).first()).toHaveClass(/is-ok/);
     response='throttle';await page.evaluate(()=>window.dispatchEvent(new Event('online')));await expect(page.locator('.wm-map-source-status').filter({hasText:'USGS'}).first()).toHaveClass(/is-degraded/);const throttledCount=requests;await page.clock.fastForward(110_000);expect(requests).toBe(throttledCount);response='normal';await page.clock.fastForward(20_000);await expect(page.locator('.wm-map-source-status').filter({hasText:'USGS'}).first()).toHaveClass(/is-ok/);
@@ -517,7 +518,7 @@ test('one missing PMTiles leaf stays on the GPU and recovers without replacing t
   await page.route('**/map-tiles/**',async route=>{const range=route.request().headers().range||'';
     if(armed&&!clear&&(!broken||broken===range)){broken=range;failed.push(range);await route.fulfill({status:503,body:'Controlled single leaf failure'});}else await route.fallback();});
   try{
-    await page.goto('/?view=2d&mapPerf=1&basemap=pmtiles&time=all&layers=earthquakes-volcanoes');const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready');
+    await gotoMapScene(page, '/?view=2d&mapPerf=1&basemap=pmtiles&time=all&layers=earthquakes-volcanoes');const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready');
     const canvas=host.locator('canvas.maplibregl-canvas');await canvas.evaluate(el=>el.setAttribute('data-v3-original-canvas','true'));
     await host.screenshot({path:resolve(root,'leaf-normal.png')});armed=true;await host.evaluate((el:any)=>el.__polymonitorMapCamera([120,20],5));
     await expect(page.locator('.wm-weather-deck-status')).toContainText('PARTIAL BASEMAP',{timeout:20_000});await expect(page.locator('.wm-weather-deck-status')).toHaveAttribute('title',/Missing base tiles/);await expect(host).toHaveAttribute('data-map-renderer-ready','webgl');await expect(canvas).toHaveAttribute('data-v3-original-canvas','true');await host.screenshot({path:resolve(root,'leaf-partial.png')});
@@ -538,7 +539,7 @@ test('native Chromium tab zoom 125 percent retains full raster resolution and us
     context=await chromium.launchPersistentContext(temporary,{channel:'chrome',headless:true,viewport:null,deviceScaleFactor:undefined,serviceWorkers:'block',args:['--window-size=1920,1080','--force-device-scale-factor=2','--disable-partial-raster','--use-angle=vulkan','--enable-features=Vulkan']});
     const page=context.pages()[0];await page.clock.setFixedTime(new Date(GENERATED_AT));await installFixtures(page);const assets=await installRealMapAssets(page);
     try{
-      await page.goto('http://127.0.0.1:4174/?view=2d&mapPerf=1&basemap=pmtiles&time=all&layers=earthquakes-volcanoes');const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready');
+      await gotoMapScene(page, 'http://127.0.0.1:4174/?view=2d&mapPerf=1&basemap=pmtiles&time=all&layers=earthquakes-volcanoes');const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready');
       const raster=await host.locator('canvas.maplibregl-canvas').evaluate((c:HTMLCanvasElement)=>({width:c.width,height:c.height,cssWidth:c.clientWidth,cssHeight:c.clientHeight,dpr:devicePixelRatio,innerWidth,outerWidth,visualScale:visualViewport!.scale}));
       expect(raster.outerWidth/raster.innerWidth).toBe(1.25);expect(raster.dpr).toBe(2.5);expect(raster.visualScale).toBe(1);
       expect(raster.width).toBeGreaterThanOrEqual(Math.floor(raster.cssWidth*raster.dpr));
@@ -556,7 +557,7 @@ test('fresh NWS catalog with delayed geometry keeps the same record and recovers
     const event=complete?{...original,geometry:{type:'Polygon',coordinates:[[[-100,30],[-96,30],[-96,35],[-100,30]]]},locationPrecision:'region',properties:{...(original.properties as object),geometrySource:'nws-affected-zones',unresolvedZoneCount:0,resolvedZoneCount:1}}:original;
     const response=mapResponse(key,key==='nws'?[event]:[]);if(key==='nws')bodies.push(response);await route.fulfill({json:response});});
   try{
-    await page.goto('/?view=2d&mapPerf=1&basemap=pmtiles&center=-98,32&zoom=4&time=all&layers=weather-alerts');const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready');await expect(page.locator('.wm-world-event-list-toggle strong')).toHaveText('1');
+    await gotoMapScene(page, '/?view=2d&mapPerf=1&basemap=pmtiles&center=-98,32&zoom=4&time=all&layers=weather-alerts');const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready');await expect(page.locator('.wm-world-event-list-toggle strong')).toHaveText('1');
     const badge=page.locator('.wm-map-source-status').filter({has:page.locator('b',{hasText:/^NWS$/})});await expect(badge).toHaveClass(/is-partial/);await expect(badge).toContainText('PARTIAL');
     await page.locator('.wm-world-event-list-toggle').click();await expect(page.locator('.wm-world-event-list-scroll')).toContainText('Controlled NWS');await host.screenshot({path:resolve(root,'nws-core-partial.png')});await page.locator('.wm-world-event-list-close').click();
     complete=true;await page.evaluate(()=>window.dispatchEvent(new Event('online')));await expect(badge).toHaveClass(/is-ok/);await expect(badge).toContainText('FRESH');await expect(page.locator('.wm-world-event-list-toggle strong')).toHaveText('1');
@@ -574,7 +575,7 @@ test('NWS authorization retention expires while polling is blocked and the catal
     const response=mapResponse(key,[hazard({id:'weather:nws:expiry',title:'Controlled NWS retained record',hazardKind:'flood',metrics:{kind:'weather-alert',event:'Flood Warning',severity:'Severe',certainty:'Observed',urgency:'Immediate'},sources:[{provider:'NWS',nativeId:'expiry',observedAt:GENERATED_AT,freshness:'live',status:'ok'}]})]);response.sources[0].fetchedAt=await page.evaluate(()=>new Date().toISOString());await route.fulfill({json:response});
   });
   try{
-    await page.goto('/?view=2d&mapPerf=1&basemap=pmtiles&time=all&layers=weather-alerts');const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready');const badge=page.locator('.wm-map-source-status').filter({has:page.locator('b',{hasText:/^NWS$/})});await expect(badge).toHaveClass(/is-ok/);
+    await gotoMapScene(page, '/?view=2d&mapPerf=1&basemap=pmtiles&time=all&layers=weather-alerts');const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready');const badge=page.locator('.wm-map-source-status').filter({has:page.locator('b',{hasText:/^NWS$/})});await expect(badge).toHaveClass(/is-ok/);
     blocked=true;await page.evaluate(()=>window.dispatchEvent(new Event('online')));await expect(badge).toHaveClass(/is-degraded/);const blockedRequests=requests;
     await page.clock.fastForward(901_000);await expect(badge).toHaveClass(/is-error/);expect(requests).toBe(blockedRequests);await expect(page.locator('.wm-world-event-list-toggle strong')).toHaveText('0');await expect(host).toHaveAttribute('data-map-renderer-ready','webgl');await host.screenshot({path:resolve(root,'nws-retention-expired.png')});
     blocked=false;await page.evaluate(()=>window.dispatchEvent(new Event('online')));await expect(badge).toHaveClass(/is-ok/);await expect(page.locator('.wm-world-event-list-toggle strong')).not.toHaveText('0');await host.screenshot({path:resolve(root,'nws-retention-recovered.png')});writeFileSync(resolve(root,'nws-retention-cycle.json'),JSON.stringify({deadlineMs:900000,blockedRequests,requests,sequence:['fresh','403 stale','expiry unavailable / no polls','fresh authorized probe'],renderer:'same GPU'}));
@@ -591,7 +592,7 @@ test('one slow or malformed catalog preserves other sources, expires bounded sta
     else await route.fulfill({json:mapResponse(key,key==='nws'?mode==='empty'?[]:[nwsEvent]:sourceEvents[key])});
   });
   try{
-    await page.goto('/?view=2d&mapPerf=1&basemap=pmtiles&time=all&layers=earthquakes-volcanoes,weather-alerts');const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready');const nwsBadge=page.locator('.wm-map-source-status').filter({has:page.locator('b',{hasText:/^NWS$/})});const usgsBadge=page.locator('.wm-map-source-status').filter({has:page.locator('b',{hasText:/^USGS$/})});await expect(nwsBadge).toHaveClass(/is-ok/);
+    await gotoMapScene(page, '/?view=2d&mapPerf=1&basemap=pmtiles&time=all&layers=earthquakes-volcanoes,weather-alerts');const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready');const nwsBadge=page.locator('.wm-map-source-status').filter({has:page.locator('b',{hasText:/^NWS$/})});const usgsBadge=page.locator('.wm-map-source-status').filter({has:page.locator('b',{hasText:/^USGS$/})});await expect(nwsBadge).toHaveClass(/is-ok/);
     const count=await page.locator('.wm-world-event-list-toggle strong').innerText();
     for(const fault of ['timeout','schema']){mode=fault;await page.evaluate(()=>window.dispatchEvent(new Event('online')));await expect(nwsBadge).toContainText('STALE');await expect(usgsBadge).toHaveClass(/is-ok/);await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready');await expect(page.locator('.wm-world-event-list-toggle strong')).toHaveText(count);await host.screenshot({path:resolve(root,`nws-${fault}-isolated.png`)});}
     mode='empty';await page.evaluate(()=>window.dispatchEvent(new Event('online')));await expect(nwsBadge).toContainText('EMPTY');await expect(nwsBadge).toHaveClass(/is-ok/);await expect(page.locator('.wm-world-event-list-toggle strong')).toHaveText(String(Number(count)-1));
@@ -604,7 +605,7 @@ test('all coincident important records remain reachable and selected identities 
   const {hazard,mapResponse}=await import('./fixtures/world-event-map');const important=Array.from({length:95},(_,i)=>hazard({id:`critical:stack:${i}`,title:`Protected observation ${String(i).padStart(3,'0')}`,severity:'critical',geometry:{type:'Point',coordinates:[-122,37]}}));
   await page.route('**/wm-api/runtime/world/natural-hazards/map?**',route=>{const key=new URL(route.request().url()).searchParams.get('source')!;return route.fulfill({json:mapResponse(key,key==='usgs'?important:[])});});
   try{
-    await page.goto('/?view=2d&mapPerf=1&basemap=pmtiles&time=all&layers=earthquakes-volcanoes&center=-122,37&zoom=14');const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready');await expect(page.locator('.wm-world-event-list-toggle strong')).toHaveText('95');
+    await gotoMapScene(page, '/?view=2d&mapPerf=1&basemap=pmtiles&time=all&layers=earthquakes-volcanoes&center=-122,37&zoom=14');const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready');await expect(page.locator('.wm-world-event-list-toggle strong')).toHaveText('95');
     const original=await host.evaluate((el:any)=>el.__polymonitorMapPresentation(true));expect(Object.keys(original.membership)).toHaveLength(95);expect(Object.values(original.membership)).not.toContain('DUPLICATE');const box=(await host.boundingBox())!,point=await host.evaluate((el:any)=>el.__polymonitorProjectGeoPoint(-122,37));
     await page.mouse.click(box.x+point.x,box.y+point.y);await expect(page.getByRole('heading',{name:'Cluster members'})).toBeVisible();await expect(page.locator('.wm-world-event-list-summary')).toContainText('30 / 95');
     for(const loaded of [60,90,95]){await page.getByRole('button',{name:'Load 30 more',exact:true}).click();await expect(page.locator('.wm-world-event-list-summary')).toContainText(`${loaded} / 95`);}

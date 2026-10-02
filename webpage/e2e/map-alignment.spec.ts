@@ -1,3 +1,4 @@
+import { gotoMapScene } from './fixtures/browser';
 import { mkdirSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -46,14 +47,14 @@ for (const language of ['en', 'zh']) {
     try {
       const cameraUrl = '/?view=2d&mapPerf=1&basemap=pmtiles&center=0,20&zoom=1.5&time=all&severity=info,watch,warning,critical';
       const framing = '.wm-map-stage,.wm-inline-weather-map,.wm-weather-deck-map {height:768px!important;min-height:768px!important;max-height:768px!important;width:1536px!important}.wm-map-stage{overflow:visible!important}';
-      await page.goto(`${cameraUrl}&layers=`);
+      await gotoMapScene(page, `${cameraUrl}&layers=`);
       await page.addStyleTag({ content: framing });
       await page.locator('.wm-language-switch select').selectOption(language);
       await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-basemap-state', 'primary-ready');
       await expect.poll(() => vectorResponses.filter(status => status === 206).length).toBeGreaterThan(0);
       await page.evaluate(() => document.fonts.ready); await page.mouse.move(0, 0); await page.waitForTimeout(2500);
       await page.locator('.wm-weather-deck-map').screenshot({ path: resolve(output, `basemap-${language}.png`) });
-      await page.goto(`${cameraUrl}&layers=earthquakes-volcanoes,weather-alerts,wildfires,climate-anomalies`);
+      await gotoMapScene(page, `${cameraUrl}&layers=earthquakes-volcanoes,weather-alerts,wildfires,climate-anomalies`);
       // Reference-only framing. Product layout is separately exercised by the
       // existing map and dashboard suites; no production setting is added.
       await page.addStyleTag({ content: '.wm-map-stage,.wm-inline-weather-map,.wm-weather-deck-map {height:768px!important;min-height:768px!important;max-height:768px!important;width:1536px!important}.wm-map-stage{overflow:visible!important}' });
@@ -181,7 +182,7 @@ test('real radar: latest manifest, raster tiles, coverage, close and reopen', as
   });
   const url = '/?view=2d&mapPerf=1&basemap=pmtiles&center=0,20&zoom=1.5&time=all&layers=earthquakes-volcanoes,weather-alerts';
   try {
-    await page.goto(url);
+    await gotoMapScene(page, url);
     await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-basemap-state', 'primary-ready');
     const map = page.locator('.wm-weather-deck-map');
     await page.addStyleTag({ content: '.wm-map-stage,.wm-inline-weather-map,.wm-weather-deck-map {height:768px!important;min-height:768px!important;max-height:768px!important;width:1536px!important}' });
@@ -237,7 +238,7 @@ for (const screen of [
     await installFixtures(page); const network = await installRealMapAssets(page);
     const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
     try {
-      await page.goto('/?view=2d&mapPerf=1&basemap=pmtiles&time=all&layers=earthquakes-volcanoes,weather-alerts');
+      await gotoMapScene(page, '/?view=2d&mapPerf=1&basemap=pmtiles&time=all&layers=earthquakes-volcanoes,weather-alerts');
       await page.locator('.wm-weather-deck-map').scrollIntoViewIfNeeded();
       const host = page.locator('[data-map-renderer-ready]');
       await expect(host).toHaveAttribute('data-map-renderer-ready', screen.width <= 720 ? 'svg' : 'webgl');
@@ -317,7 +318,7 @@ test('live sources: real public hazards and real vector assets in the local fron
     await route.fulfill({ response, json: data });
   });
   try {
-    await page.goto('/?view=2d&basemap=pmtiles&layers=earthquakes-volcanoes,weather-alerts,wildfires,climate-anomalies&time=7d');
+    await gotoMapScene(page, '/?view=2d&basemap=pmtiles&layers=earthquakes-volcanoes,weather-alerts,wildfires,climate-anomalies&time=7d');
     await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-basemap-state', 'primary-ready');
     await expect.poll(async () => Number(await page.locator('.wm-world-event-list-toggle strong').textContent()), { timeout: 45_000 }).toBeGreaterThan(0);
     await page.evaluate(() => document.fonts.ready); await page.waitForTimeout(3000);
@@ -340,7 +341,7 @@ test('product map at native 125 percent browser zoom', async () => {
   await page.clock.setFixedTime(new Date(GENERATED_AT)); await installFixtures(page);
   const network = await installRealMapAssets(page);
   try {
-    await page.goto('/?view=2d&mapPerf=1&basemap=pmtiles&center=0,20&zoom=1.5&time=all&layers=earthquakes-volcanoes,weather-alerts');
+    await gotoMapScene(page, '/?view=2d&mapPerf=1&basemap=pmtiles&center=0,20&zoom=1.5&time=all&layers=earthquakes-volcanoes,weather-alerts');
     const host = page.locator('[data-map-renderer-ready]');
     await expect(host).toHaveAttribute('data-map-basemap-state', 'primary-ready');
     await page.evaluate(() => document.fonts.ready);

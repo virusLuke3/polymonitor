@@ -265,7 +265,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     isExecutable: () => true,
     aliases: ['intelligence', 'breaking event', 'news hotspot'],
     capabilities: ['points', 'areas', 'clustering', 'details'],
-    defaultEnabled: false,
+    defaultEnabled: true,
     selectable: true,
     minZoom: 0,
     labelMinZoom: 3,

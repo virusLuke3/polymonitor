@@ -19,10 +19,24 @@ function callbacks(): MapRendererCallbacks {
 }
 
 describe('renderer hover lifecycle', () => {
+  it.each(['basemap', 'openmaptiles', 'carto'])('requires real content from provider source %s, not optional overlays', (sourceId) => {
+    const renderer = new DeckMapRenderer() as any;
+    renderer.map = { getStyle: () => ({ sources: { [sourceId]: { type: 'vector' } } }) };
+    renderer.primarySourceIds = new Set([sourceId]);
+    renderer.callbacks = callbacks();
+    renderer.handleSourceData({ sourceId: 'weather-radar', tile: { state: 'loaded' } });
+    renderer.handleSourceData({ sourceId, sourceDataType: 'metadata' });
+    renderer.handleSourceData({ sourceId, tile: { state: 'errored' } });
+    expect(renderer.callbacks.onBasemapStateChange).not.toHaveBeenCalledWith('primary-ready');
+    renderer.handleSourceData({ sourceId, tile: { state: 'loaded' } });
+    expect(renderer.callbacks.onBasemapStateChange).toHaveBeenCalledWith('primary-ready');
+    renderer.map = null; renderer.destroy();
+  });
+
   it.each(['basemap', 'weather-radar', 'country-boundaries'])('bounds initial loading while only %s metadata is ready', (sourceId) => {
     const renderer = new DeckMapRenderer() as any;
     vi.useFakeTimers(); vi.stubGlobal('window', globalThis);
-    renderer.map = {}; renderer.callbacks = callbacks(); renderer.applyLocalFallback = vi.fn();
+    renderer.map = { getStyle: () => ({ sources: {} }) }; renderer.callbacks = callbacks(); renderer.applyLocalFallback = vi.fn();
     try {
       renderer.schedulePrimaryDeadline();
       renderer.handleSourceData({sourceId, sourceDataType:'metadata'});
@@ -583,7 +597,7 @@ it('V3 radar commits only a complete visible frame and retains the previous fram
 it('V3 a single missing tile has a bounded source retry, pauses, then recovers without replacing the GPU',async()=>{
   vi.useFakeTimers();
   const renderer=new DeckMapRenderer() as any;vi.stubGlobal('window',globalThis);renderer.callbacks={...callbacks(),onBasemapIssueChange:vi.fn()};
-  renderer.map={refreshTiles:vi.fn()};renderer.primaryHasContent=true;
+  renderer.map={refreshTiles:vi.fn(),getStyle:()=>({sources:{}})};renderer.primaryHasContent=true;
   const tile={x:5,y:3,z:3};
   renderer.handleMapError({sourceId:'basemap',tile:{tileID:{canonical:tile}},message:'tile controlled 503'});
   expect(renderer.callbacks.onRendererFallbackRequested).not.toHaveBeenCalled();

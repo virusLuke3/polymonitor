@@ -1,3 +1,4 @@
+import { gotoMapScene } from './fixtures/browser';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { test, expect } from '@playwright/test';
@@ -42,7 +43,7 @@ for (const count of [v3 ? 750 : 713, 5000]) test(`polish ${count}: mixed dense e
   const errors: string[] = [];
   page.on('pageerror', e => errors.push(e.message));
   try {
-    await page.goto(`/?view=2d&mapPerf=1&basemap=pmtiles&center=-110,38&zoom=3&time=all&layers=earthquakes-volcanoes,wildfires${v3 ? ',air-routes&air=all' : ''}&severity=info,watch,warning,critical`);
+    await gotoMapScene(page, `/?view=2d&mapPerf=1&basemap=pmtiles&center=-110,38&zoom=3&time=all&layers=earthquakes-volcanoes,wildfires${v3 ? ',air-routes&air=all' : ''}&severity=info,watch,warning,critical`);
     await page.addStyleTag({ content: '.wm-map-stage,.wm-inline-weather-map,.wm-weather-deck-map{height:620px!important;min-height:620px!important;max-height:620px!important;width:2040px!important}' });
     const host = page.locator('[data-map-renderer-ready]');
     await expect(host).toHaveAttribute('data-map-basemap-state', 'primary-ready');

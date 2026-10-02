@@ -1,3 +1,4 @@
+import { gotoMapScene, selectMapLayers } from './fixtures/browser';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect, request, test, type Page } from '@playwright/test';
@@ -18,7 +19,7 @@ test.afterEach(async ({ page }) => {
 async function gotoMap(page: Page, search = '') {
   // Production defaults to PMTiles; select the same intercepted style in dev
   // and preview so worker/interaction checks never depend on external tiles.
-  await page.goto(`/?view=2d&mapPerf=1&basemap=openfreemap&time=all&severity=info,watch,warning,critical&${search}`);
+  await gotoMapScene(page, `/?view=2d&mapPerf=1&basemap=openfreemap&time=all&severity=info,watch,warning,critical&${search}`);
   await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute(
     'data-map-renderer-ready', search.includes('renderer=svg') ? 'svg' : 'webgl',
   );
@@ -45,6 +46,29 @@ function screenshot(page: Page, name: string) {
   mkdirSync(ARTIFACT_DIR, { recursive: true });
   return page.screenshot({ path: resolve(ARTIFACT_DIR, name), fullPage: false });
 }
+
+test('every entry opens all layers, while manual off survives in-session updates', async ({ page }) => {
+  // Use ordinary navigation: this acceptance test must NOT select a fixture
+  // scene after entry, unlike isolated rendering cases below.
+  await page.addInitScript(() => { if (location.protocol.startsWith('http')) localStorage.setItem('polydata:world-event-map:v8', JSON.stringify({ activeLayerIds: [], center: { lon: 12, lat: 35 }, zoom: 3, timeRange: '24h' })); });
+  await page.goto('/?view=2d&basemap=openfreemap&center=12,35&zoom=3&layers=&time=all');
+  const requested = () => new URL(page.url()).searchParams.get('layers')!.split(',');
+  await expect.poll(() => requested().length).toBe(10);
+  expect(requested()).toEqual(expect.arrayContaining(['air-routes', 'weather-radar', 'intel-hotspots']));
+  await expect(page.locator('.wm-aviation-lens')).toBeVisible();
+  await selectMapLayers(page, requested().filter(id => id !== 'air-routes' && id !== 'weather-radar'));
+  await expect(page.locator('.wm-map-aviation-toggle')).toContainText('Off');
+  await expect(page.locator('.wm-map-radar-status summary')).toContainText('Off');
+  await page.getByLabel('Map time range').getByRole('button', { name: '24h', exact: true }).click();
+  await expect.poll(() => new URL(page.url()).searchParams.get('time')).toBe('24h');
+  expect(requested()).not.toContain('air-routes');
+  expect(requested()).not.toContain('weather-radar');
+  await page.reload();
+  await expect.poll(() => requested().length).toBe(10);
+  await expect(page.locator('.wm-aviation-lens')).toBeVisible();
+  expect(new URL(page.url()).searchParams.get('time')).toBe('24h');
+  await screenshot(page, 'entry-all-layers.png');
+});
 
 test('a saved wide world fills the viewport through resize, zoom-out, pan and reload', async ({ page }) => {
   await page.setViewportSize({width:1920,height:1080});
@@ -188,7 +212,7 @@ test('real vector basemap on hardware WebGL renders tiles and localized labels w
       if (response.url().includes('planet.pmtiles')) ranges.push({ status: response.status(), range: response.headers()['content-range'] });
       if (/\/fonts\/|noto-sans-sc.*\.woff2/.test(response.url()) && response.ok()) glyphs.push(response.url());
     });
-    await page.goto('/?view=2d&basemap=pmtiles&time=all&layers=earthquakes-volcanoes&center=30,28&zoom=1.7');
+    await gotoMapScene(page, '/?view=2d&basemap=pmtiles&time=all&layers=earthquakes-volcanoes&center=30,28&zoom=1.7');
     const host = page.locator('[data-map-renderer-ready]');
     await expect(host).toHaveAttribute('data-map-renderer-ready', 'webgl');
     const gpu = await page.evaluate(() => {
@@ -249,13 +273,13 @@ test('WebGL map covers layered hazards, details, URL state, provider reload and 
   await expect(page).toHaveURL(/basemap=carto/);
   await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', 'webgl');
 
-  await page.goto(`/?view=2d&mapPerf=1&time=all&center=-98,39&zoom=3.5&layers=${ALL_LAYERS}&country=US&basemap=openfreemap&theme=dark`);
+  await gotoMapScene(page, `/?view=2d&mapPerf=1&time=all&center=-98,39&zoom=3.5&layers=${ALL_LAYERS}&country=US&basemap=openfreemap&theme=dark`);
   await expect(page.getByRole('button', { name: /Country · US/i })).toBeVisible();
   await expect(page.getByRole('button', { name: /^All events/i })).toContainText(/[1-9]/);
   await waitForMapPaint(page);
   await screenshot(page, '07-country-filter.png');
 
-  await page.goto(`/?view=2d&mapPerf=1&basemap=openfreemap&time=all&center=-73,42&zoom=3.2&layers=air-routes&air=all`);
+  await gotoMapScene(page, `/?view=2d&mapPerf=1&basemap=openfreemap&time=all&center=-73,42&zoom=3.2&layers=air-routes&air=all`);
   await expect(page.getByText('All aviation', {exact:true})).toBeVisible();
   await expect.poll(async () => page.evaluate(() => (
     window.__POLYMONITOR_MAP_PERF__?.snapshot().phases['dynamic-commit'].count || 0
@@ -269,7 +293,7 @@ test('dense hazards, NHC geometry and FIRMS drill-down remain visually distinct'
   await gotoMap(page, 'center=-118,35&zoom=4.6&layers=earthquakes-volcanoes,wildfires,weather-alerts');
   await screenshot(page, '02-high-density-hazards.png');
 
-  await page.goto('/?view=2d&mapPerf=1&basemap=openfreemap&time=all&center=-69,22&zoom=4.4&layers=weather-alerts');
+  await gotoMapScene(page, '/?view=2d&mapPerf=1&basemap=openfreemap&time=all&center=-69,22&zoom=4.4&layers=weather-alerts');
   await page.locator('.wm-map-legend-toggle').click();
   await expect(page.getByText('Observed', { exact: true })).toBeVisible();
   await expect(page.getByText('Forecast', { exact: true })).toBeVisible();
@@ -277,7 +301,7 @@ test('dense hazards, NHC geometry and FIRMS drill-down remain visually distinct'
   await waitForMapPaint(page);
   await screenshot(page, '03-hurricane-observed-forecast-cone.png');
 
-  await page.goto('/?view=2d&mapPerf=1&basemap=openfreemap&time=all&center=-118.25,34.15&zoom=6&layers=wildfires');
+  await gotoMapScene(page, '/?view=2d&mapPerf=1&basemap=openfreemap&time=all&center=-118.25,34.15&zoom=6&layers=wildfires');
   // EONET's wildfire and FIRMS' individual detection are distinct fixture IDs.
   // Waiting for only one could accept the partial first paint before EONET arrived.
   const events = page.getByRole('button', { name: /^All events/i });
@@ -309,7 +333,7 @@ test('WebGL event and cluster picking form complete interaction loops', async ({
   await expect(page.locator('.wm-event-inspector')).toContainText(/Disaster report/i);
   await page.getByRole('button', { name: 'Close event details' }).click();
 
-  await page.goto('/?view=2d&mapPerf=1&basemap=openfreemap&time=all&center=-122.1,37.4&zoom=2.2&layers=earthquakes-volcanoes');
+  await gotoMapScene(page, '/?view=2d&mapPerf=1&basemap=openfreemap&time=all&center=-122.1,37.4&zoom=2.2&layers=earthquakes-volcanoes');
   await expect(page.getByRole('button', { name: /^All events/i })).toContainText('8');
   await waitForMapPaint(page);
   const clusterPoint = await projectedMapPoint(page, -122.1, 37.4);
@@ -574,7 +598,7 @@ test('fifty layer, provider and selection cycles keep resources bounded and tool
   expect(box.y).toBeGreaterThanOrEqual(host.y);
   expect(box.x + box.width).toBeLessThanOrEqual(host.x + host.width);
   expect(box.y + box.height).toBeLessThanOrEqual(host.y + host.height);
-  await page.goto('/login');
+  await gotoMapScene(page, '/login');
   await expect(page.locator('.auth-login-layout')).toBeVisible();
   await expect(page.locator('.maplibregl-canvas, .wm-world-event-renderer-tooltip')).toHaveCount(0);
   const stopped=mapRequests;await page.waitForTimeout(1500);expect(mapRequests).toBe(stopped);
@@ -637,7 +661,7 @@ test('edge tooltip stays inside the map and legend retains geometry semantics', 
   }
 });
 
-test('saved seven-layer scene survives repeated offscreen returns with identical geometry pixels', async ({ page }) => {
+test('manually selected seven-layer scene survives repeated offscreen returns with identical geometry pixels', async ({ page }) => {
   test.setTimeout(120_000);
   await page.emulateMedia({ reducedMotion: 'reduce' });
   const seven = 'weather-alerts,earthquakes-volcanoes,wildfires,extreme-temperature,climate-anomalies,ucdp,sanctions-country-risk';
@@ -649,6 +673,7 @@ test('saved seven-layer scene survives repeated offscreen returns with identical
   await expect(page.locator('.wm-map-aviation-toggle')).toBeVisible();
   await expect(page.locator('.wm-aviation-lens')).toHaveCount(0);
   await page.reload(); await waitForMapPaint(page);
+  await selectMapLayers(page, seven.split(',')); await waitForMapPaint(page);
   await expect(page.locator('.wm-map-aviation-toggle')).toBeVisible();
   await host.scrollIntoViewIfNeeded(); await page.mouse.move(0, 0);
   await page.waitForTimeout(1500);
