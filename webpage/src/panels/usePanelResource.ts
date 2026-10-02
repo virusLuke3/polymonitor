@@ -99,7 +99,7 @@ export function usePanelResource<T>(contract: PanelResource<T>, active?: boolean
   if (!owner) throw new Error('Panel resources require PanelResourceProvider');
   // Complete keys describe immutable request meaning. Fresh object literals in
   // a consumer render must not repeatedly register/cancel the same request.
-  const declaration = useMemo(() => contract, [contract.key, contract.maxAgeMs, contract.staleAgeMs, contract.cache?.version,
+  const declaration = useMemo(() => contract, [contract.key, contract.maxAgeMs, contract.staleAgeMs, contract.cache?.version, contract.cache?.maxChars,
     contract.refreshPolicy.tier, contract.refreshPolicy.intervalMs, contract.refreshPolicy.staleAfterMs,
     contract.refreshPolicy.retry?.attempts, contract.refreshPolicy.retry?.baseDelayMs, contract.refreshPolicy.retry?.maxDelayMs]);
   const seed = useMemo(() => {

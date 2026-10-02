@@ -7,7 +7,7 @@ from typing import Any
 
 from flask import Blueprint, jsonify, request
 import logging
-from api.services.free_content.public import filter_payload
+from api.services.free_content.public import filter_payload, MAX_PUBLIC_ITEMS
 logger = logging.getLogger(__name__)
 
 
@@ -50,7 +50,7 @@ def create_content_blueprint(dependencies: ContentRouteDependencies) -> Blueprin
     @bp.route("/content/market/<int:market_id>", methods=["GET"])
     def api_content_by_market_id(market_id: int):
         try:
-            limit = min(20, max(1, int(request.args.get("limit", 8))))
+            limit = min(MAX_PUBLIC_ITEMS, max(1, int(request.args.get("limit", 8))))
         except ValueError:
             return jsonify({"error": "Invalid content limit"}), 400
         try:
@@ -80,7 +80,7 @@ def create_content_blueprint(dependencies: ContentRouteDependencies) -> Blueprin
     @bp.route("/content/latest", methods=["GET"])
     def api_content_latest():
         try:
-            limit = min(20, max(1, int(request.args.get("limit", 8))))
+            limit = min(MAX_PUBLIC_ITEMS, max(1, int(request.args.get("limit", 8))))
         except ValueError:
             return jsonify({"error": "Invalid content limit"}), 400
         try:

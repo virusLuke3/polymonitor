@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { activePayload, intelSnapshot, parseIntelPayload, reconcileReader, resourceId, initialIntelScope, intelStatusLabel } from './model';
+import { activePayload, intelSnapshot, parseIntelPayload, resourceId, INTEL_ITEM_LIMIT, initialIntelScope, intelStatusLabel } from './model';
 import type { PanelRuntimeStatus } from '@/panels/types';
 
 const resource = { marketId: 1, scope: 'market' as const, days: 7 };
@@ -42,22 +42,11 @@ describe('Related Intelligence resource contract', () => {
     expect(duplicate.items).toHaveLength(1);
     expect(duplicate.rejectedItemCount).toBe(1);
   });
-  it('updates source health and revisions immediately while new entries wait', () => {
-    const previous = { key: 'key', data: payload(), pending: null };
-    const latest = payload(['new', 'first']);
-    latest.status = 'partial';
-    latest.items[1]!.content_version = '2';
-    const next = reconcileReader(previous, 'key', latest);
-    expect(next.data?.status).toBe('partial');
-    expect(next.data?.items.map(i => i.id)).toEqual(['first']);
-    expect(next.data?.items[0]?.content_version).toBe('2');
-    expect(next.pending?.items.length).toBe(2);
-    expect(intelSnapshot(latest).status).toBe('degraded');
-  });
-  it('shows a fully replaced page immediately instead of leaving all new items pending', () => {
-    const next = reconcileReader({ key: 'key', data: payload(), pending: null }, 'key', payload(['new']));
-    expect(next.data?.items[0]?.id).toBe('new');
-    expect(next.pending).toBeNull();
+  it('accepts the larger page and rejects oversized responses', () => {
+    const ids = Array.from({ length: INTEL_ITEM_LIMIT }, (_, index) => `item-${index}`);
+    expect(payload(ids).items).toHaveLength(INTEL_ITEM_LIMIT);
+    expect(() => payload([...ids, 'overflow'])).toThrow();
+    expect(resourceId(resource)).toContain(`:${INTEL_ITEM_LIMIT}`);
   });
   it('removes expired entries without requiring reader acceptance', () => {
     const data = payload();

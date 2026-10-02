@@ -10,7 +10,7 @@ export function IntelCard({ item, scope }: { item: IntelPayload['items'][number]
   const kind = item.sourceKind === 'alert' ? copy('Weather alert', '天气警报')
     : item.sourceKind === 'observation' ? copy('Observation', '观测更新')
     : item.sourceKind === 'official_release' ? copy('Official', '公告') : copy('Reports', '报道');
-  return <article className="wm-free-intel-card">
+  return <article className="wm-free-intel-card" data-intel-item-id={item.id} data-intel-item-version={item.content_version}>
     <div className="wm-free-intel-meta"><strong>{item.source}</strong><span>{kind}</span></div>
     {item.author && <p>{copy('By', '作者')} {item.author}</p>}
     <a className={`wm-news-title ${expanded ? '' : 'wm-intel-clamped'}`} href={item.url} target="_blank" rel="noopener noreferrer">{item.title}</a>

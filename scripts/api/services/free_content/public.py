@@ -10,6 +10,7 @@ CANDIDATES_PER_PUBLISHER = 512
 RAW_CANDIDATES_PER_PUBLISHER = 2048
 # One bounded collector cycle (90s) plus the longest watch sleep (60s).
 CHECK_GRACE_SECONDS = 150
+MAX_PUBLIC_ITEMS = 100
 
 
 def source_is_stale(state, now):
@@ -132,6 +133,7 @@ def read_records(storage, *, days=30, now=None):
 def payload(storage, *, market=None, market_id=None, limit=20, days=7, now=None, records=None):
     now = now or datetime.now(timezone.utc)
     days = 30 if int(days) == 30 else 7
+    limit = min(MAX_PUBLIC_ITEMS, max(1, int(limit)))
     cutoff = (now - timedelta(days=days)).isoformat().replace("+00:00", "Z")
     sources = source_map()
     records = read_records(storage, days=days, now=now) if records is None else records
@@ -209,8 +211,9 @@ def payload(storage, *, market=None, market_id=None, limit=20, days=7, now=None,
         groups = {}
         for item in items:
             group = groups.setdefault(item["publisher_id"], [])
-            # High-frequency weather feeds supplement the default list.
-            if item["publisher_id"] in {"nws", "usgs", "nhc"} and len(group) >= 4:
+            # Scale the supplementary event quota with the requested page;
+            # keep the original four-item quota for small preview consumers.
+            if item["publisher_id"] in {"nws", "usgs", "nhc"} and len(group) >= max(4, (limit + 4) // 5):
                 continue
             group.append(item)
         balanced = []

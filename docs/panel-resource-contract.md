@@ -27,7 +27,7 @@ region so controls stay usable during a cold request. Offscreen demand pauses;
 a still-active summary consumer may legitimately keep the same resource alive.
 Page hiding suspends all automatic checks. Manual refresh is an explicit override.
 
-The dashboard summary consumes the same global/7-day/20-item resource and selects
+The dashboard summary consumes the same global/7-day/100-item resource and selects
 its first 12 items; it does not make another content request or promote an
 unvalidated bootstrap preview into the complete resource.
 
@@ -53,14 +53,20 @@ unvalidated bootstrap preview into the complete resource.
   source failure must not freeze persistence while verified items keep changing.
   Invalid/stale data never becomes the new saved snapshot. This does not exempt displayed content
   from current permission, window and expiry rules.
-- Persistence is only for reviewed public data. Schema version 3, complete keys,
-  revalidation, eight entries and 256,000 characters per entry bound this cache.
+- Persistence is only for reviewed public data. Schema version 4, complete keys
+  including the 100-item request limit, revalidation and eight entries bound this
+  cache. This resource explicitly permits 512,000 characters per entry for the
+  larger page; other resources retain their 256,000-character default.
   Storage failure does not fail a panel or remove other application storage.
-- New entries wait for acceptance while the current page remains readable. If a
-  finite page rolls over completely, show the newly verified page immediately,
-  avoiding a blank area containing only a pending button. Absence from top-N is
-  not labelled a withdrawal. Revisions, permission changes and expiry apply
-  without reader confirmation. Pending count is explicit.
+- Every successful scheduled response becomes the displayed list immediately,
+  including new entries, revisions and removals. There is no pending-reader state
+  or acceptance button. Permission changes and expiry still apply immediately.
+  Absence from a finite top-N page is not labelled a withdrawal.
+- The panel requests up to 100 items, renders the first 30 cards, and offers
+  Show more in batches of 30. Counts and category tabs describe the whole loaded
+  response, while an explicit showing/loaded counter describes the rendered
+  portion. An expanded list continues receiving automatic updates.
+
 
 ## Scope and coverage
 
@@ -130,10 +136,30 @@ Run model/cache/runtime unit tests, free-content/worker-budget/seed-health tests
 Related Intelligence E2E and shared frontend lifecycle tests, then the frontend
 build. Cases include two consumers/one request, visibility demand, Retry-After,
 unknown timestamps, malformed item/source isolation, 2,001-candidate source
-balance, cross-country rejection, page rollover, partial cache promotion and real
+balance, cross-country rejection, automatic new-item insertion, large-page rendering, partial cache promotion and real
 blocked-process termination. Fixtures never enter production data.
 
 Build from the exact pushed commit via `git archive`, preserving unrelated dirty
 work. Deploy that backend/frontend revision, verify release identity, and inspect
 real desktop/mobile UI across several checks/seed cycles without substituted APIs
 or tiles. Report upstream partial/failure states separately from code readiness.
+
+## Local WorldMonitor comparison
+
+The local WorldMonitor checkout schedules its news lane in `src/App.ts` using
+`REFRESH_INTERVALS.feeds` (20 minutes in `src/config/variants/base.ts`).
+`src/app/refresh-scheduler.ts` owns in-flight protection, a bounded lane lease,
+backoff, page-hidden suspension and staggered catch-up after visibility returns.
+`src/app/data-loader.ts` retains digest fallback and rejects superseded load
+results; `src/components/NewsPanel.ts::renderNews` immediately renders a flat
+list, with optional clustering afterward and windowed rendering for large
+cluster lists. Newly fetched articles do not require reader acceptance.
+
+Polymonitor retains its existing shared scheduler and bounded retries, with a
+30-second seed check rather than copying WorldMonitor's 20-minute interval.
+The important adoption is observable list insertion on successful checks;
+advancing checkedAt or generatedAt alone does not prove this. Source acquisition
+still follows each source's 3–15 minute schedule. Larger data pages use bounded
+progressive rendering instead of adding a second scheduler or virtualization
+system. High-frequency event publisher quotas scale from four at a 20-item
+preview to twenty at a 100-item page, retaining publisher-balanced ordering.

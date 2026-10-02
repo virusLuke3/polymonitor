@@ -294,6 +294,25 @@ def test_global_outage_is_retryable_and_healthy_empty_is_not_an_error():
     assert response.headers["Cache-Control"] == "no-store"
 
 
+def test_content_routes_accept_larger_bounded_pages_in_both_scopes():
+    from flask import Flask
+    from api.routes.content import create_content_blueprint, ContentRouteDependencies
+    calls = []
+    def read(*args, **kwargs):
+        calls.append(kwargs["limit"])
+        return {"items": [], "status": "ready"}
+    app = Flask(__name__)
+    app.register_blueprint(create_content_blueprint(ContentRouteDependencies(
+        get_market_by_id=lambda _: {"title": "Fixture"}, get_related_content_payload=read,
+        get_latest_content_payload=read, get_runtime_content_latest=lambda **_: pytest.fail("Unexpected collector"))))
+    client = app.test_client()
+    for path in ["/content/latest", "/content/market/7"]:
+        for requested, expected in [(100, 100), (200, 100), (0, 1)]:
+            assert client.get(f"{path}?limit={requested}").status_code == 200
+            assert calls[-1] == expected
+        assert client.get(f"{path}?limit=invalid").status_code == 400
+
+
 def test_public_read_uses_one_database_query_and_reuses_route_market(storage, source):
     from dataclasses import replace
     from api.services.query_service import ContentStorageDependencies, get_related_content_by_market_id
@@ -579,6 +598,26 @@ def test_source_balanced_candidates_do_not_hide_low_frequency_release(storage, s
     assert result["coverage"]["candidatesScanned"] == 1
     assert result["coverage"]["rawCandidatesScanned"] == 2001
     assert result["coverage"]["filteredByReason"]["low_magnitude"] == 2000
+
+
+def test_larger_public_page_preserves_publisher_balance_and_scales_event_quota(storage, source):
+    now = datetime(2026, 10, 1, 14, tzinfo=timezone.utc)
+    usgs = source_map()["usgs"]
+    for publisher, total in [(usgs, 80), (source, 30)]:
+        items = [article(publisher, external_id=f"{publisher['source_id']}-{i}",
+                         url=f"https://{publisher['allowed_hosts'][0]}/fixture/{i}",
+                         published_at="2026-10-01T12:00:00Z", magnitude=5)
+                 for i in range(total)]
+        store.persist(storage, publisher, items, "2026-10-01T13:00:00Z")
+    for sid in source_map():
+        store.save_state(storage, sid, {"status": "ok"})
+    small = public.payload(storage, limit=20, now=now)
+    large = public.payload(storage, limit=100, now=now)
+    assert sum(item["sourceId"] == "usgs" for item in small["items"]) == 4
+    assert sum(item["sourceId"] == "usgs" for item in large["items"]) == 20
+    assert len(large["items"]) == 50
+    assert {item["sourceId"] for item in large["items"][:2]} == {"usgs", source["source_id"]}
+    assert large["coverage"]["candidatesScanned"] == 110
 
 
 def test_actual_eligible_quota_still_reports_partial(storage, source):

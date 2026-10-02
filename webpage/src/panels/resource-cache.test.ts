@@ -28,6 +28,17 @@ describe('public panel snapshot recovery', () => {
     expect(readResourceCache(retained, cache, now + 360_000)?.status).toBe('ready');
     expect(readResourceCache(retained, cache, now + 1_800_000)).toBeNull();
   });
+  it('allows an explicit larger public snapshot without expanding other resources', () => {
+    const cache = storage();
+    const value = { ...payload, items: [{ id: 'large', source: 'Fixture', title: 'Valid public item',
+      sourceKind: 'news_report', url: 'https://example.org/item', excerptFull: 'x'.repeat(300_000) }] };
+    writeResourceCache(contract, value, cache, now);
+    expect(readResourceCache(contract, cache, now)).toBeNull();
+    const larger = { ...contract, cache: { version: 1, maxChars: 512_000 } };
+    writeResourceCache(larger, value, cache, now);
+    expect(readResourceCache(larger, cache, now)?.items[0]?.id).toBe('large');
+    expect(readResourceCache(contract, cache, now)).toBeNull();
+  });
   it('hydrates a validated snapshot immediately without extending its source lifetime', () => {
     const cache = storage();
     writeResourceCache(contract, payload, cache, now);

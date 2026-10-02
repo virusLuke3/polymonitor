@@ -6,7 +6,7 @@ export interface ResourceCacheContract<T> {
   maxAgeMs: number;
   /** Optional bounded recovery age; does not change fresh response acceptance. */
   staleAgeMs?: number;
-  cache?: { version: number };
+  cache?: { version: number; maxChars?: number };
 }
 
 const PREFIX = 'polymonitor:panel-resource:';
@@ -25,7 +25,7 @@ export function readResourceCache<T>(contract: ResourceCacheContract<T>, storage
     const raw = storage.getItem(key);
     if (!raw) return null;
     const envelope = JSON.parse(raw);
-    if (raw.length > MAX_CHARS || envelope.version !== contract.cache.version) throw new Error('Invalid cache version');
+    if (raw.length > (contract.cache.maxChars ?? MAX_CHARS) || envelope.version !== contract.cache.version) throw new Error('Invalid cache version');
     const value = contract.parse(envelope.value);
     if (!resourceIsCurrent(contract.updatedAt(value), Math.max(contract.maxAgeMs, contract.staleAgeMs ?? contract.maxAgeMs), now)) throw new Error('Expired cache');
     return value;
@@ -41,7 +41,7 @@ export function writeResourceCache<T>(contract: ResourceCacheContract<T>, raw: u
     const value = contract.parse(raw);
     if (!resourceIsCurrent(contract.updatedAt(value), contract.maxAgeMs, now)) return;
     const encoded = JSON.stringify({ version: contract.cache.version, value: raw });
-    if (encoded.length > MAX_CHARS) return;
+    if (encoded.length > (contract.cache.maxChars ?? MAX_CHARS)) return;
     const key = storageKey(contract.key);
     // Bound this cache without touching other application storage.
     storage.setItem(key, encoded);

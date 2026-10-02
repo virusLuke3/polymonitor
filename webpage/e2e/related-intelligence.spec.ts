@@ -102,7 +102,7 @@ test('slow A response cannot populate B, and a mismatched market response is rej
   await expect(page.getByText('Fixture market 2')).toBeVisible();
 });
 
-test('new content waits for the reader to accept it', async ({ page }) => {
+test('scheduled refresh immediately displays new entries and removals', async ({ page }) => {
   await installDashboard(page);
   await page.clock.install();
   const generatedAt = await page.evaluate(() => new Date().toISOString());
@@ -112,10 +112,14 @@ test('new content waits for the reader to accept it', async ({ page }) => {
   await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
   ids = ['new', 'first'];
   await page.clock.runFor(30_100);
-  await expect(page.getByRole('button', { name: 'New content available', exact: false })).toBeVisible();
-  await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
-  await page.getByRole('button', { name: 'New content available', exact: false }).click();
   await expect(page.locator('.wm-free-intel-card')).toHaveCount(2);
+  await expect(page.locator('.wm-free-intel-card').first()).toContainText('Fixture new');
+  await expect(page.getByRole('button', { name: 'New content available', exact: false })).toHaveCount(0);
+  ids = ['replacement', 'new'];
+  await page.clock.runFor(30_100);
+  await expect(page.locator('.wm-free-intel-card')).toHaveCount(2);
+  await expect(page.locator('.wm-free-intel-card').first()).toContainText('Fixture replacement');
+  await expect(page.locator('.wm-free-intel-card').filter({ hasText: 'Fixture first' })).toHaveCount(0);
 });
 
 test('dossier uses the same content API and explicitly requests history with visible attribution', async ({ page }) => {
@@ -190,7 +194,7 @@ test('same-market window change rejects an old response and validates malformed 
   await expect(page.locator('.wm-free-intel-card')).toContainText('Fixture history');
 });
 
-test('expired card disappears while a new card still waits for acceptance', async ({ page }) => {
+test('expired card disappears while automatically inserted content remains visible', async ({ page }) => {
   await installDashboard(page);
   await page.clock.install();
   const generatedAt = await page.evaluate(() => new Date().toISOString());
@@ -203,10 +207,8 @@ test('expired card disappears while a new card still waits for acceptance', asyn
   await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
   ids = ['new', 'first'];
   await page.clock.runFor(30_100);
-  await expect(page.getByRole('button', { name: 'New content available', exact: false })).toBeVisible();
+  await expect(page.locator('.wm-free-intel-card')).toHaveCount(2);
   await page.clock.runFor(15_000);
-  await expect(page.locator('.wm-free-intel-card')).toHaveCount(0);
-  await page.getByRole('button', { name: 'New content available', exact: false }).click();
   await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
   await expect(page.locator('.wm-free-intel-card')).toContainText('Fixture new');
 });
@@ -442,7 +444,35 @@ test('a freshly verified partial response replaces the older complete recovery s
   await page.getByRole('button', { name: 'Refresh', exact: true }).click();
   await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
   await expect(page.locator('.wm-free-intel-card')).toContainText('Fixture partial');
-  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('polymonitor:panel-resource:related-news:global:all:7')!).value);
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('polymonitor:panel-resource:related-news:global:all:7:100')!).value);
   expect(saved.items.map((value: {id: string}) => value.id)).toEqual(['partial']);
   expect(saved.status).toBe('partial');
+});
+
+
+test('a hundred-item resource displays in batches and keeps the expanded list live', async ({ page }) => {
+  await installDashboard(page);
+  await page.clock.install();
+  const generatedAt = await page.evaluate(() => new Date().toISOString());
+  let ids = Array.from({ length: 100 }, (_, index) => `card-${index}`);
+  const limits: string[] = [];
+  await page.route('**/wm-api/content/**', route => {
+    limits.push(new URL(route.request().url()).searchParams.get('limit')!);
+    return route.fulfill({ json: { ...payload(null, ids), generatedAt } });
+  });
+  await mount(page, null);
+  await expect(page.locator('.wm-panel-count')).toHaveText('100');
+  await expect(page.locator('.wm-free-intel-card')).toHaveCount(30);
+  await expect(page.getByText('Showing 30 / 100', { exact: true })).toBeVisible();
+  for (const count of [60, 90, 100]) {
+    await page.getByRole('button', { name: 'Show more', exact: false }).click();
+    await expect(page.locator('.wm-free-intel-card')).toHaveCount(count);
+  }
+  await expect(page.getByRole('button', { name: 'Show more', exact: false })).toHaveCount(0);
+  ids = ['arrived-automatically', ...ids.slice(0, 99)];
+  await page.clock.runFor(30_100);
+  await expect(page.locator('.wm-free-intel-card').first()).toContainText('Fixture arrived-automatically');
+  await expect(page.locator('.wm-free-intel-card')).toHaveCount(100);
+  expect(limits.length).toBeGreaterThanOrEqual(2);
+  expect(limits.every(limit => limit === '100')).toBeTruthy();
 });

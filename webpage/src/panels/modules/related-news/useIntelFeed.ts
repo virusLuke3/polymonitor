@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from 'preact/hooks';
 import { fetchLatestContent, fetchMarketContent } from '@/services/api';
 import { usePanelResource, type PanelResource } from '@/panels/usePanelResource';
 import {
-  activePayload, intelSnapshot, INTEL_REFRESH_MS, INTEL_STALE_MS, parseIntelPayload,
-  reconcileReader, resourceId, intelStatusLabel, type IntelPayload, type IntelSnapshot,
+  activePayload, intelSnapshot, INTEL_REFRESH_MS, INTEL_STALE_MS, INTEL_ITEM_LIMIT, parseIntelPayload,
+  resourceId, intelStatusLabel, type IntelPayload, type IntelSnapshot,
 } from './model';
 
 export { validScope } from './model';
@@ -12,11 +12,11 @@ export { validScope } from './model';
 export function useIntelResource(marketId: number | null, scope: 'market' | 'global', days: number, active?: boolean) {
   const key = resourceId({ marketId, scope, days });
   const contract = useMemo<PanelResource<IntelSnapshot>>(() => ({
-    key, title: 'Related Intelligence', maxAgeMs: 5 * 60_000, staleAgeMs: 30 * 60_000, cache: { version: 3 },
+    key, title: 'Related Intelligence', maxAgeMs: 5 * 60_000, staleAgeMs: 30 * 60_000, cache: { version: 4, maxChars: 512_000 },
     refreshPolicy: { tier: 'fast', intervalMs: INTEL_REFRESH_MS, staleAfterMs: INTEL_STALE_MS },
     fetch: async context => scope === 'market'
-        ? await fetchMarketContent(marketId!, 20, 8000, context?.signal, days)
-        : await fetchLatestContent(20, context?.signal, days),
+        ? await fetchMarketContent(marketId!, INTEL_ITEM_LIMIT, 8000, context?.signal, days)
+        : await fetchLatestContent(INTEL_ITEM_LIMIT, context?.signal, days),
     parse: value => {
       if (value && typeof value === 'object' && (value as IntelPayload).status === 'unavailable'
         && !(value as IntelPayload).items?.length) throw new Error('Content service unavailable');
@@ -34,32 +34,24 @@ export function useIntelResource(marketId: number | null, scope: 'market' | 'glo
 }
 
 export function useIntelFeed(marketId: number | null, scope: 'market' | 'global', days: number) {
-  const key = resourceId({ marketId, scope, days });
   const resource = useIntelResource(marketId, scope, days);
   const latest = resource.data?.content;
   const status = resource.status;
-  const [reader, setReader] = useState<{ key: string; data: IntelPayload | null; pending: IntelPayload | null }>({ key, data: latest ?? null, pending: null });
   const [, expire] = useState(0);
+  // A successful scheduled read is also a display update. Do not hold new
+  // entries behind a separate reader-acceptance state or a manual button.
+  const data = latest ? activePayload(latest) : null;
   useEffect(() => {
-    setReader(old => latest ? reconcileReader(old, key, latest) : { key, data: null, pending: null });
-  }, [key, latest]);
-  const current = reader.key === key ? reader : { key, data: null, pending: null };
-  const data = latest && current.data ? activePayload(current.data) : null;
-  const pending = latest && current.pending ? activePayload(current.pending) : null;
-  useEffect(() => {
-    const times = [...(current.data?.items || []), ...(current.pending?.items || [])]
+    const times = (latest?.items || [])
       .map(item => Date.parse(item.expires_at || '')).filter(time => Number.isFinite(time) && time > Date.now());
     if (!times.length) return;
     const timer = window.setTimeout(() => expire(version => version + 1), Math.min(2_147_483_647, Math.max(1, Math.min(...times) - Date.now())));
     return () => window.clearTimeout(timer);
-  }, [current.data, current.pending, data?.items.length, pending?.items.length]);
-  const hasNew = pending?.items.some(item => !data?.items.some(old => String(old.id) === String(item.id)));
+  }, [latest, data?.items.length]);
   return {
-    key, data, pending: hasNew ? pending : null, status,
-    pendingCount: hasNew ? pending!.items.filter(item => !data?.items.some(old => String(old.id) === String(item.id))).length : 0,
+    data, status,
     error: resource.error, loading: resource.loading, fromCache: resource.fromCache, suspended: resource.suspended,
     stale: Boolean(data?.stale || ['stale', 'degraded', 'error'].includes(status.phase)),
     refresh: resource.refresh,
-    accept: () => setReader(old => old.key === key && old.pending ? { ...old, data: activePayload(old.pending), pending: null } : old),
   };
 }
