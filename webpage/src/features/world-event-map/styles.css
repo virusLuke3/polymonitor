@@ -577,7 +577,8 @@
 .wm-weather-deck-status {
   position: absolute;
   right: 8px;
-  bottom: 8px;
+  /* Leave the event-list button's 36px hit area and bottom inset clear. */
+  bottom: 68px;
   z-index: 5;
   padding: 2px 6px;
   border: 1px solid rgba(68, 255, 136, 0.18);

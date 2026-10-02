@@ -320,7 +320,7 @@ test('slow renderer download is temporary SVG, late same-generation module recov
   test.skip(phase==='before');test.setTimeout(90_000);mkdirSync(root,{recursive:true});
   await page.setViewportSize({width:1536,height:1000});await page.clock.setFixedTime(new Date(GENERATED_AT));
   await installFixtures(page);const assets=await installRealMapAssets(page);
-  await page.route(/(?:\/src\/features\/world-event-map\/renderer\/DeckMapRenderer\.ts|\/assets\/DeckMapRenderer-[^/]+\.js)(?:\?|$)/,async route=>{await new Promise(r=>setTimeout(r,9000));await route.continue();});
+  await page.route(/(?:\/src\/features\/world-event-map\/renderer\/DeckMapRenderer\.ts|\/assets\/DeckMapRenderer-[^/]+\.js)(?:\?|$)/,async route=>{await new Promise(r=>setTimeout(r,9000));await route.fallback();});
   try{
     await gotoMapScene(page, '/?view=2d&mapPerf=1&basemap=pmtiles&center=-120,37&zoom=3&time=all&layers=earthquakes-volcanoes');
     const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-renderer-ready','svg',{timeout:15_000});
@@ -348,7 +348,8 @@ test('a single isolated layer remains quarantined for the same data and recovers
     const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready');
     await page.waitForTimeout(1000);
     const isolated=await host.evaluate((el:any)=>el.__polymonitorIsolateLayer());expect(isolated).toBeTruthy();
-    await expect(page.locator('.wm-banner.notice')).toContainText('ISOLATED');
+    const mapNotice=page.locator('.wm-banner.notice').filter({hasText:'MAP DEGRADED'});
+    await expect(mapNotice).toContainText('ISOLATED');
     await host.screenshot({path:resolve(root,'layer-isolated.png')});
     // A camera change produces different screen clusters, not a source revision.
     await page.locator('.wm-map-controls button').first().click();await page.waitForTimeout(600);
@@ -358,7 +359,7 @@ test('a single isolated layer remains quarantined for the same data and recovers
     await checkbox.uncheck();await checkbox.check();
     await page.evaluate(() => window.dispatchEvent(new Event('online')));
     await expect.poll(()=>host.evaluate((el:any)=>el.__polymonitorLayerFuses())).toEqual([]);
-    await expect(page.locator('.wm-banner.notice')).toHaveCount(0);await expect(host).toHaveAttribute('data-map-renderer-ready','webgl');
+    await expect(mapNotice).toHaveCount(0);await expect(host).toHaveAttribute('data-map-renderer-ready','webgl');
     await host.screenshot({path:resolve(root,'layer-recovered.png')});
     writeFileSync(resolve(root,'layer-cycle.json'),JSON.stringify({isolated,sameVersionOnZoom:'quarantined',validatedRevision:'recovered',wholeRenderer:'webgl'}));
   }finally{await page.goto('about:blank');await page.unrouteAll({behavior:'ignoreErrors'});await assets.dispose();}
