@@ -1,28 +1,21 @@
-import type { RuntimeSignalPayload } from '@/types';
-import { Panel } from '@/components/Panel';
-import type { PanelRenderMap } from '@/panels/types';
-import { whaleTrackerList } from '@/panels/shared/renderers';
-import { fetchRuntimeWhales } from '@/services/api';
-import { runtimePanelFromRenderer } from '@/panels/definePanel';
+import { useState } from 'preact/hooks';
+import { panelFromRenderer } from '@/panels/definePanel';
+import type { PanelInputs, PanelRenderMap } from '@/panels/types';
+import { TradeCard, TradeFeedBoundary, TradeFeedFrame } from '@/panels/shared/trade-feed/components';
+import { useI18n } from '@/services/i18n';
+import { useWhaleFeed } from './useWhaleFeed';
 
-const renderers: PanelRenderMap = {
-  'whale-tracker': {
-    render: (ctx) => (
-      <Panel title="WHALE TRACKER" badge="CHAIN" status="live" count={(ctx.runtimeData['whale-tracker'] as RuntimeSignalPayload | undefined)?.items.length || 0}>
-        {whaleTrackerList((ctx.runtimeData['whale-tracker'] as RuntimeSignalPayload | undefined)?.items || [], 'No whale trades loaded.')}
-      </Panel>
-    ),
-  },
-};
-
-export const panel = runtimePanelFromRenderer(renderers, {
-  id: 'whale-tracker',
-  title: 'Whale Tracker',
-  eyebrow: 'chain',
-  description: 'Largest recent on-chain trades.',
-  defaultEnabled: true,
-}, {
-  tier: 'slow',
-  limit: 14,
-  fetchData: (context, limit) => fetchRuntimeWhales(limit, context?.signal),
-});
+function WhaleView({ ctx }: { ctx: PanelInputs<'setSelectedMarketId'> }) {
+  const feed = useWhaleFeed(), i18n = useI18n(), cn = i18n.locale.startsWith('zh');
+  const [side, setSide] = useState('ALL');
+  const items = feed.data?.items || [], visible = items.filter(item => side === 'ALL' || item.side === side);
+  return <TradeFeedFrame title="WHALE TRACKER" feed={feed}>
+    <div className="wm-trade-watch-tabs" aria-label={cn ? '成交方向筛选' : 'Trade direction filters'}>{['ALL', 'BUY', 'SELL'].map(value => <button type="button" key={value} aria-pressed={side === value} onClick={() => setSide(value)}>{value === 'ALL' ? cn ? '全部' : 'All' : value} {items.filter(item => value === 'ALL' || item.side === value).length}</button>)}</div>
+    <p className="wm-trade-watch-help">{cn ? '近期大额成交样本；成交额分级不表示钱包获利能力或内幕交易。' : 'Recent large-fill sample. Size tiers do not establish wallet skill or insider activity.'}</p>
+    {feed.data && !visible.length && <p role="status">{cn ? '当前筛选下没有大额成交。' : 'No large trades match this filter.'}</p>}
+    {visible.map(item => <TradeCard key={item.id} item={item} onSelect={ctx.setSelectedMarketId} />)}
+  </TradeFeedFrame>;
+}
+const renderers: PanelRenderMap<'setSelectedMarketId'> = { 'whale-tracker': { render: ctx => <TradeFeedBoundary title="WHALE TRACKER"><WhaleView ctx={ctx} /></TradeFeedBoundary> } };
+export const panel = panelFromRenderer(renderers, { id: 'whale-tracker', title: 'Whale Tracker', eyebrow: 'chain',
+  contextKeys: ['setSelectedMarketId'], description: 'Recent canonical large fills with exact identities and bounded freshness.', defaultEnabled: true });

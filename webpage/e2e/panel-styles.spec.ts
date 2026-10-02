@@ -11,7 +11,8 @@ for (const width of [1440, 390]) {
     await installDashboard(page);
     await page.goto('/e2e/panels.html');
     await page.waitForFunction(() => window.panelHarness);
-    const ids = await page.evaluate(() => window.panelHarness.ids);
+    const focus = process.env.POLYMONITOR_STYLE_PANEL_IDS?.split(',');
+    const ids = (await page.evaluate(() => window.panelHarness.ids)).filter(id => !focus || focus.includes(id));
     const errors: string[] = [];
     page.on('pageerror', e => errors.push(e.message));
     for (const id of ids) {
@@ -21,7 +22,7 @@ for (const width of [1440, 390]) {
       await page.evaluate(() => document.fonts.ready);
       await expect.soft(panel).toHaveScreenshot(`${id}-${width}.png`, { animations: 'disabled', threshold: 0, maxDiffPixels: 0 });
     }
-    for (const id of populatedPanelIds) {
+    for (const id of populatedPanelIds.filter(id => !focus || focus.includes(id))) {
       await page.evaluate(({ id, data }) => window.panelHarness.mount(id, data), { id, data: panelData });
       const panel = page.locator('.wm-panel-slot');
       await expect(panel.locator('.wm-panel')).toBeVisible();

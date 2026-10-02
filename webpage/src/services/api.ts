@@ -447,11 +447,11 @@ export function fetchRuntimeNewMarketSignals(limit = 12, signal?: AbortSignal) {
 }
 
 export function fetchRuntimeWhales(limit = 14, signal?: AbortSignal) {
-  return apiGet<RuntimeSignalPayload>(`/runtime/trades/whales?limit=${limit}`, signal);
+  return apiGetWithTimeout<RuntimeSignalPayload>(`/runtime/trades/whales?limit=${limit}`, 12000, signal, 'no-store');
 }
 
 export function fetchRuntimeSuspicious(limit = 12, signal?: AbortSignal) {
-  return apiGet<RuntimeSignalPayload>(`/runtime/trades/suspicious?limit=${limit}`, signal);
+  return apiGetWithTimeout<RuntimeSignalPayload>(`/runtime/trades/suspicious?limit=${limit}`, 12000, signal, 'no-store');
 }
 
 export type RuntimePanelsPayload = {

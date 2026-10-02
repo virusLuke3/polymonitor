@@ -312,6 +312,12 @@ class SignalsWatcher:
                 return {"status": failed["status"], "recordCount": _record_count(failed), "error": type(exc).__name__}
             if previous:
                 preserved = {**previous, "cacheMode": "seeded", "status": "stale"}
+                if self.component in {"whales", "suspicious"}:
+                    preserved.update(lastAttemptAt=utc_now_iso(),
+                                     error=f"{self.component} source refresh failed ({type(exc).__name__}); showing the previous snapshot.",
+                                     errorCode="trade-source-refresh-failed",
+                                     sourceStates={**(previous.get("sourceStates") or {}),
+                                                   "refresh": {"status": "error", "errorCode": type(exc).__name__}})
                 self.store_payload(preserved)
                 stats = _payload_timestamp_stats(previous, stale_after_seconds=self.stale_after_seconds())
                 self.store_seed_meta(
@@ -342,6 +348,9 @@ class SignalsWatcher:
         if record_count > 0 and isinstance(data_age, int) and data_age > self.stale_after_seconds():
             status = "stale"
         stored_payload = {**payload, "status": status, "cacheMode": "seeded"}
+        if self.component in {"whales", "suspicious"}:
+            stored_payload.update(lastAttemptAt=utc_now_iso(), refreshIntervalSeconds=self.interval_seconds,
+                                  freshnessWindowSeconds=self.ttl_seconds())
         self.store_payload(stored_payload)
         telegram_sent = publish_cached_panel_snapshot(str(self.spec["panel_id"]), stored_payload)
         self.store_seed_meta(

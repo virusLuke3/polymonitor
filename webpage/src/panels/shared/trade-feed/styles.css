@@ -1,0 +1,22 @@
+.wm-trade-watch-panel .wm-panel-body { min-height: 0; overflow-y: auto; }
+.wm-trade-watch-toolbar, .wm-trade-watch-card-head { display: flex; justify-content: space-between; align-items: center; gap: .5rem; }
+.wm-trade-watch-toolbar, .wm-trade-watch-clock, .wm-trade-watch-tabs, .wm-trade-watch-help { margin-bottom: .7rem; }
+.wm-trade-watch-toolbar button, .wm-trade-watch-tabs button { padding: .35rem .55rem; background: var(--ds-color-surface, #171b1d); border: 1px solid var(--wm-border); color: var(--wm-text); cursor: pointer; }
+.wm-trade-watch-toolbar button:disabled { opacity: .6; cursor: wait; }
+.wm-trade-watch-clock, .wm-trade-watch-time, .wm-trade-watch-identities, .wm-trade-watch-help { color: var(--wm-text-dim); font-size: .75rem; line-height: 1.5; }
+.wm-trade-watch-clock span { display: block; }
+.wm-trade-watch-tabs { display: flex; flex-wrap: wrap; gap: .35rem; }
+.wm-trade-watch-tabs button[aria-pressed="true"] { border-color: #65d3ef; color: #65d3ef; }
+.wm-trade-watch-warning { color: #efcb78; padding: .55rem; border: 1px solid #6c5529; margin-bottom: .7rem; overflow-wrap: anywhere; }
+.wm-trade-watch-card { border: 1px solid var(--wm-border); border-left: 3px solid #65d3ef; padding: .7rem; margin-bottom: .6rem; min-width: 0; }
+.wm-trade-watch-card.is-buy { border-left-color: #33df76; }
+.wm-trade-watch-card.is-sell { border-left-color: #f2787e; }
+.wm-trade-watch-card-head { flex-wrap: wrap; font-size: .8rem; }
+.wm-trade-watch-market { display: block; width: 100%; background: transparent; color: var(--wm-text); border: 0; padding: .5rem 0; text-align: left; font: inherit; font-weight: 700; cursor: pointer; overflow-wrap: anywhere; }
+.wm-trade-watch-market:disabled { cursor: default; }
+.wm-trade-watch-metrics { display: flex; flex-wrap: wrap; gap: .7rem; margin: .25rem 0; font-size: .8rem; }
+.wm-trade-watch-metrics dt { color: var(--wm-text-dim); font-size: .7rem; }
+.wm-trade-watch-metrics dd { margin: 0; }
+.wm-trade-watch-type { margin: .35rem 0 0; color: #65d3ef; font-size: .75rem; }
+.wm-trade-watch-identities { display: grid; gap: .15rem; overflow-wrap: anywhere; }
+.wm-trade-watch-identities a { color: #65d3ef; }

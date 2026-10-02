@@ -1,4 +1,4 @@
-import type { ContentItem, OracleEvent, RuntimeTradeSignal, TradeRow } from '@/types';
+import type { ContentItem, OracleEvent, TradeRow } from '@/types';
 import { formatCompact, formatDate, formatPercent, formatRelative, shortHash } from './formatters';
 
 type EmptyStateCopy = {
@@ -397,101 +397,12 @@ function contentList(items: ContentItem[], emptyMessage: string, maxItems = 20, 
 }
 
 
-function whaleTrackerList(items: RuntimeTradeSignal[], emptyMessage: string, onMarketSelect?: (marketId: number) => void) {
-  if (!items.length) return emptyState(emptyMessage);
-  return (
-    <div className="wm-whale-feed">
-      <div className="wm-whale-tabs">
-        <span className="active">Trades</span>
-        <span>Flow</span>
-        <span>Signals</span>
-      </div>
-
-      <div className="wm-whale-list">
-        {items.map((item, index) => {
-           let timeStr = formatRelative(item.timestamp || null);
-           // clean up time format to look like '14m ago'
-           timeStr = timeStr.replace(' minutes ago', 'm ago').replace(' minutes', 'm ago')
-                            .replace(' hours ago', 'h ago').replace(' hours', 'h ago')
-                            .replace(' seconds ago', 's ago').replace(' seconds', 's ago');
-           if (timeStr.includes('just now')) timeStr = '1m ago';
-           if (!timeStr.includes('ago')) timeStr += ' ago'; // safe fallback
-           
-           const side = String(item.side || 'BUY').toUpperCase();
-           const isBuy = side === 'BUY';
-           const addressFull = item.txHash || item.addresses?.[0]?.address || 'unknown';
-           const address = shortHash(addressFull, 5, 0).replace('...', '');
-           
-           return (
-             <div
-               key={`${item.txHash || 'trade'}-${index}`}
-               className={`wm-whale-row ${isBuy ? 'buy' : 'sell'}`}
-               onClick={() => item.marketId && onMarketSelect?.(item.marketId)}
-             >
-               <div className="wm-whale-meta">
-                 <span className="wm-whale-dot" />
-                 <span>{address}</span>
-                 <i>·</i>
-                 <span>{timeStr}</span>
-                 <i>·</i>
-                 <strong>{side}</strong>
-                 <b>${formatCompact(item.notional || 0)}</b>
-               </div>
-               <strong className="wm-whale-title">
-                 {item.marketTitle || 'Unknown Market'}
-               </strong>
-             </div>
-           );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function tradeSignalList(items: RuntimeTradeSignal[], emptyMessage: string) {
-  if (!items.length) return emptyState(emptyMessage);
-  return (
-    <div className="wm-signal-list">
-      {items.map((item, index) => {
-        const severity = String(item.severity || 'watch').toLowerCase();
-        const side = String(item.side || '--').toUpperCase();
-        const outcome = String(item.outcome || '--').toUpperCase();
-        return (
-          <article className={`wm-trade-signal-card ${severity}`} key={`${item.txHash || item.title || 'trade'}-${index}`}>
-            <div className="wm-trade-signal-rail" />
-            <div className="wm-trade-signal-content">
-              <div className="wm-trade-signal-head">
-                <div className="wm-trade-chip-row">
-                  <span className={`wm-chip ${side === 'BUY' ? 'positive' : side === 'SELL' ? 'critical' : ''}`}>{side}</span>
-                  <span className="wm-trade-outcome">{outcome}</span>
-                </div>
-                <span className={`wm-signal-severity ${severity}`}>{severity.toUpperCase()}</span>
-              </div>
-              <div className="wm-trade-signal-body">
-                <strong className="wm-trade-signal-notional">{formatPercent(item.price)}</strong>
-                <span className="wm-trade-signal-market">{item.marketTitle || 'Market signal'}</span>
-              </div>
-              <div className="wm-trade-signal-meta">
-                <span>{shortHash(item.txHash || '', 12, 6)}</span>
-                <span>{item.notional ? `$${formatCompact(item.notional)}` : '--'}</span>
-                <span>{formatDate(item.timestamp || null)}</span>
-              </div>
-              {item.summary ? <div className="wm-trade-signal-summary">{item.summary}</div> : null}
-            </div>
-          </article>
-        );
-      })}
-    </div>
-  );
-}
 
 export {
   emptyState,
   orderfilledList,
   oracleList,
   contentList,
-  tradeSignalList,
-  whaleTrackerList,
 };
 
 export function openExternal(url?: string | null) {

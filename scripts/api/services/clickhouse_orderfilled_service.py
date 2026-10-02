@@ -671,7 +671,7 @@ def get_volume_whale_rows(
             f.notional DESC, f.block_number DESC, f.log_index DESC
         LIMIT {limit * 4} FORMAT JSONEachRow
     """,
-        timeout_seconds=5.0,
+        timeout_seconds=8.0,
     )
     if rows is None:
         return None

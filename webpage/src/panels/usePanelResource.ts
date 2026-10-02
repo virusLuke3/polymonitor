@@ -9,6 +9,8 @@ export interface PanelResource<T> extends ResourceCacheContract<T> {
   fetch: (context?: PanelFetchContext) => Promise<unknown>;
   refreshPolicy: PanelRefreshConfig;
   shouldPersist?: (next: T, previous: T | null) => boolean;
+  /** Permit validated overdue responses only within the bounded recovery age. */
+  acceptStale?: boolean;
   statusLabel?: (value: T, status: PanelRuntimeStatus) => string | undefined;
 }
 
@@ -80,7 +82,8 @@ function resourcePanel<T>(contract: PanelResource<T>): PanelModule {
     fetchData: async context => {
       const raw = await contract.fetch(context);
       const value = contract.parse(raw);
-      if (!resourceIsCurrent(contract.updatedAt(value), contract.maxAgeMs)) throw new Error('Resource snapshot time is unknown or overdue');
+      const acceptedAge = contract.acceptStale ? Math.max(contract.maxAgeMs, contract.staleAgeMs ?? contract.maxAgeMs) : contract.maxAgeMs;
+      if (!resourceIsCurrent(contract.updatedAt(value), acceptedAge)) throw new Error('Resource snapshot time is unknown or overdue');
       if (context?.signal.aborted) throw new DOMException('Aborted', 'AbortError');
       try {
         const previous = contract.shouldPersist ? readResourceCache(contract, window.localStorage) : null;
@@ -99,7 +102,7 @@ export function usePanelResource<T>(contract: PanelResource<T>, active?: boolean
   if (!owner) throw new Error('Panel resources require PanelResourceProvider');
   // Complete keys describe immutable request meaning. Fresh object literals in
   // a consumer render must not repeatedly register/cancel the same request.
-  const declaration = useMemo(() => contract, [contract.key, contract.maxAgeMs, contract.staleAgeMs, contract.cache?.version, contract.cache?.maxChars,
+  const declaration = useMemo(() => contract, [contract.key, contract.maxAgeMs, contract.staleAgeMs, contract.acceptStale, contract.cache?.version, contract.cache?.maxChars,
     contract.refreshPolicy.tier, contract.refreshPolicy.intervalMs, contract.refreshPolicy.staleAfterMs,
     contract.refreshPolicy.retry?.attempts, contract.refreshPolicy.retry?.baseDelayMs, contract.refreshPolicy.retry?.maxDelayMs]);
   const seed = useMemo(() => {

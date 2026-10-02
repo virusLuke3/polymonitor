@@ -47,6 +47,10 @@ export async function installDashboard(page: Page, locale = 'en', panelIds = DAS
     if (marketMatch) { const bundle = fixtureBundle(Number(marketMatch[1])); return json(marketMatch[2] === 'chart' ? bundle.chart : bundle); }
     if (path.startsWith('/runtime/lob/token/')) return json(fixtureBundle(Number(url.searchParams.get('marketId') || 1)).lob);
     if (path === '/trades/recent' || path === '/oracle/recent') return json([]);
+    if (path === '/runtime/trades/whales' || path === '/runtime/trades/suspicious') return json({
+      schemaVersion: 'trade-watch-v1', kind: path.endsWith('whales') ? 'whale-trades' : 'flow-watch',
+      generatedAt: GENERATED_AT, status: 'empty', items: [],
+    });
     if (path === '/v1/runtime/panels') {
       const panels = Object.fromEntries((url.searchParams.get('ids') || '').split(',').map((id) => [id, id === 'global-transport-shipping' ? transportPayload : { generatedAt: GENERATED_AT, status: 'ok', items: [] }]));
       return json({ apiVersion: 'v1', requestId: 'fixture', generatedAt: GENERATED_AT, status: 'ok', data: { panels }, meta: { panels: {} }, errors: [] });

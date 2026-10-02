@@ -185,7 +185,7 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
           const updatedAt = retained ? statusesRef.current[id]?.updatedAt ?? payloadTimestamp(merged[id])
             : metadataTimestamp(metadata) ?? payloadTimestamp(value);
           const staleAfter = policy?.staleAfterMs ?? DEFAULT_STALE_AFTER_MS[policy?.tier || 'manual'];
-          const phase = metadataPhase(metadata) ?? (payloadIsDegraded(value) ? 'degraded'
+          const phase = metadataPhase(metadata) ?? ((value as { status?: string } | null)?.status === 'stale' ? 'stale' : payloadIsDegraded(value) ? 'degraded'
             : updatedAt != null && Date.now() - updatedAt > staleAfter ? 'stale' : 'ready');
           const retry = retries.current.get(id);
           if (retry != null) { window.clearTimeout(retry); retries.current.delete(id); }
