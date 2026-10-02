@@ -218,3 +218,30 @@ def test_worker_startup_still_rejects_missing_auth_schema(monkeypatch):
     monkeypatch.setattr(auth,'schema_is_ready',lambda conn:False)
     with pytest.raises(RuntimeError,match='schema is missing'):auth.validate_runtime_config()
     assert closed==[True]
+
+def test_weather_provider_throttle_uses_independent_forecast_and_shared_cooldown():
+    import requests
+    calls = []
+    now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    def get(url, **kwargs):
+        calls.append((url, kwargs))
+        if 'open-meteo' in url:
+            response = requests.Response(); response.status_code = 429; response.headers['Retry-After'] = '3600'
+            raise requests.HTTPError(response=response)
+        return {'properties': {'timeseries': [{'time': now.isoformat(), 'data': {'instant': {'details': {
+            'air_temperature': 12.4, 'wind_speed': 2, 'relative_humidity': 61}}}}]}}
+    resources = RuntimeResources(); store = Store()
+    ctx = {'_resources': resources, 'SETTINGS': SimpleNamespace(), 'SNAPSHOT_STORE': store, 'http_json_get': get}
+    try:
+        result = query_map_weather(ctx, latitude=51.50853, longitude=-.12574)
+        assert result['source'] == 'MET Norway' and result['status'] == 'partial'
+        assert result['current']['wind_speed_10m'] == 7.2
+        assert result['dailySampled'] and result['daily']['temperature_2m_min'] == [12.4]
+        assert calls[-1][1]['params'] == {'lat': '51.5085', 'lon': '-0.1257'}
+        assert 'polymonitor.club' in calls[-1][1]['headers']['User-Agent']
+        query_map_weather(ctx, latitude=48.8566, longitude=2.3522)
+        assert len([u for u,_ in calls if 'open-meteo' in u]) == 1
+        count = len(calls)
+        query_map_weather(ctx, latitude=51.50853, longitude=-.12574)
+        assert len(calls) == count
+    finally: resources.close()

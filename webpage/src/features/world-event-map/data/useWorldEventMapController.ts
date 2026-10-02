@@ -230,7 +230,10 @@ export function useWorldEventMapController({ runtimeData, getStatus: getPanelRun
       : { events: [], rejected: [] },
     [showAirRoutes, mapTransportPayload],
   );
-  const airReferenceEvents = airReferenceAdapterResult.events;
+  const airReferenceEvents = useMemo(() => worldEventFilterState.countryCode
+    ? filterWorldEventMapEvents(airReferenceAdapterResult.events, { ...worldEventFilterState, timeRange: 'all' }, Date.now(), countryGeometry.index)
+    : airReferenceAdapterResult.events,
+  [airReferenceAdapterResult.events, worldEventFilterState, countryGeometry.index]);
   const supplementalEvents = useMemo(() => mapSignals.events.map(event => {
     if (event.properties.mapLayer !== 'internet-outages' || !event.countryCode) return event;
     const country = countryGeometry.index?.resolve(event.countryCode);

@@ -1868,6 +1868,45 @@ def get_global_weather_map_snapshot(
     )
 
 
+
+def _met_no_map_forecast(dependencies, latitude: float, longitude: float) -> Dict[str, Any]:
+    """Independent global model fallback; preserve native sample times and units."""
+    raw = dependencies.http_json_get("https://api.met.no/weatherapi/locationforecast/2.0/compact",
+        params={"lat": f"{latitude:.4f}", "lon": f"{longitude:.4f}"}, timeout=5,
+        headers={"Accept": "application/json", "User-Agent": "Polymonitor/0.2 (https://polymonitor.club)"})
+    properties = raw.get("properties", {}) if isinstance(raw, dict) else {}
+    now = datetime.now(timezone.utc)
+    rows = []
+    for row in properties.get("timeseries", []):
+        stamp = datetime.fromisoformat(str(row.get("time", "")).replace("Z", "+00:00"))
+        details = row.get("data", {}).get("instant", {}).get("details", {})
+        temperature = details.get("air_temperature")
+        if stamp >= now - timedelta(hours=1) and isinstance(temperature, (int, float)):
+            rows.append((stamp, details))
+    if not rows:
+        raise RuntimeError("met-no-forecast-unavailable")
+    rows.sort(key=lambda row: row[0])
+    daily = {}
+    for stamp, details in rows:
+        daily.setdefault(stamp.date().isoformat(), []).append(details["air_temperature"])
+    days = list(daily)[:7]
+    stamp, first = rows[0]
+    wind = first.get("wind_speed")
+    return {"status": "partial", "latitude": latitude, "longitude": longitude,
+        "current": {"time": stamp.isoformat().replace("+00:00", "Z"), "temperature_2m": first["air_temperature"],
+            "relative_humidity_2m": first.get("relative_humidity"),
+            "wind_speed_10m": round(wind * 3.6, 2) if isinstance(wind, (int, float)) else None},
+        "hourly": {"time": [t.isoformat().replace("+00:00", "Z") for t, _ in rows],
+            "temperature_2m": [d["air_temperature"] for _, d in rows]},
+        "daily": {"time": days, "temperature_2m_min": [min(daily[d]) for d in days],
+            "temperature_2m_max": [max(daily[d]) for d in days]},
+        "dailySampled": True, "units": {"temperature_2m": "°C", "wind_speed_10m": "km/h"},
+        "timezone": "UTC", "source": "MET Norway", "sourceUrl": "https://api.met.no/doc/locationforecast/HowTO",
+        "fetchedAt": _utc_now_iso(dependencies), "limitations": [
+            "Open-Meteo unavailable; independent MET Norway model forecast, not a station observation or hazard warning.",
+            "Daily ranges use available forecast samples; later periods may have six-hour resolution."]}
+
+
 def query_map_weather(ctx: GlobalWeatherMapContext, *, query: str = "", language: str = "en", latitude: float | None = None, longitude: float | None = None) -> Dict[str, Any]:
     """On-demand place lookup/forecast; shares the weather service and snapshot store.
 
@@ -1895,7 +1934,7 @@ def query_map_weather(ctx: GlobalWeatherMapContext, *, query: str = "", language
     if cached is not None:
         return cached
     locker = getattr(store, "fetch_lock", None)
-    with locker(namespace, key, timeout=8) if locker else nullcontext():
+    with locker(namespace, key, timeout=2) if locker else nullcontext():
         cached = store.get(namespace, key) if store else None
         if cached is not None:
             return cached
@@ -1912,18 +1951,36 @@ def query_map_weather(ctx: GlobalWeatherMapContext, *, query: str = "", language
             payload = {"status": "ok" if places else "empty", "places": places,
                 "source": "Open-Meteo / GeoNames", "sourceUrl": "https://open-meteo.com/en/docs/geocoding-api"}
         else:
-            raw = dependencies.http_json_get(
-                getattr(dependencies.settings, "open_meteo_api_url", "") or "https://api.open-meteo.com/v1/forecast",
-                params={"latitude": latitude, "longitude": longitude, "current": "temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m",
-                    "hourly": "temperature_2m", "daily": "temperature_2m_max,temperature_2m_min", "forecast_days": 7,
-                    "timezone": "UTC"}, timeout=7)
-            if not isinstance(raw, dict) or raw.get("error") or not isinstance(raw.get("current"), dict):
-                raise RuntimeError("invalid-weather-response")
-            payload = {"status": "ok", "latitude": latitude, "longitude": longitude,
-                "current": raw["current"], "hourly": raw.get("hourly", {}), "daily": raw.get("daily", {}),
-                "units": raw.get("current_units", {}), "timezone": "UTC", "source": "Open-Meteo",
-                "sourceUrl": "https://open-meteo.com/", "fetchedAt": _utc_now_iso(dependencies),
-                "limitations": ["Weather model estimate and forecast; not an official hazard warning."]}
+            cooldown = store.get(namespace, "open-meteo-cooldown") if store else None
+            try:
+                if cooldown:
+                    raise RuntimeError("open-meteo-cooldown")
+                raw = dependencies.http_json_get(
+                    getattr(dependencies.settings, "open_meteo_api_url", "") or "https://api.open-meteo.com/v1/forecast",
+                    params={"latitude": latitude, "longitude": longitude, "current": "temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m",
+                        "hourly": "temperature_2m", "daily": "temperature_2m_max,temperature_2m_min", "forecast_days": 7,
+                        "timezone": "UTC"}, timeout=7)
+                if not isinstance(raw, dict) or raw.get("error") or not isinstance(raw.get("current"), dict):
+                    raise RuntimeError("invalid-weather-response")
+                payload = {"status": "ok", "latitude": latitude, "longitude": longitude,
+                    "current": raw["current"], "hourly": raw.get("hourly", {}), "daily": raw.get("daily", {}),
+                    "units": raw.get("current_units", {}), "timezone": "UTC", "source": "Open-Meteo",
+                    "sourceUrl": "https://open-meteo.com/", "fetchedAt": _utc_now_iso(dependencies),
+                    "limitations": ["Weather model estimate and forecast; not an official hazard warning."]}
+            except Exception as exc:
+                if store and not cooldown:
+                    response = getattr(exc, "response", None)
+                    seconds = 60
+                    if getattr(response, "status_code", None) in {401, 403, 429}:
+                        # Respect provider cooldown across coordinates and callers.
+                        from email.utils import parsedate_to_datetime
+                        value = str(getattr(response, "headers", {}).get("Retry-After") or "3600")
+                        try: seconds = max(1, int(value))
+                        except ValueError:
+                            try: seconds = max(1, int((parsedate_to_datetime(value) - datetime.now(timezone.utc)).total_seconds()))
+                            except (ValueError, TypeError): seconds = 3600
+                    store.set(namespace, "open-meteo-cooldown", {"unavailable": True}, seconds)
+                payload = _met_no_map_forecast(dependencies, latitude, longitude)
         if store:
             store.set(namespace, key, payload, ttl)
         return payload

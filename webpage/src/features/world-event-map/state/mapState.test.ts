@@ -280,3 +280,11 @@ it('a revised old earthquake retains occurrence time and cannot enter a recent t
   expect(filterWorldEventMapEvents([event],{timeRange:'7d',severities:['critical']},now)).toEqual([]);
   expect(filterWorldEventMapEvents([event],{timeRange:'all',severities:['critical']},now)).toEqual([event]);
 });
+
+
+it('keeps country-only official warnings in country filtering without inventing geometry', () => {
+  const event: GeoEvent = {id:'swic:1', category:'weather', title:'Official warning', summary:'', severity:'watch',
+    countryCode:'TW', locationPrecision:'country', sources:[], limitations:[], relatedMarketIds:[], properties:{}};
+  expect(filterWorldEventMapEvents([event], {timeRange:'all', severities:['watch'], countryCode:'TW'})).toEqual([event]);
+  expect(filterWorldEventMapEvents([event], {timeRange:'all', severities:['watch'], countryCode:'JP'})).toEqual([]);
+});

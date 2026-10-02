@@ -34,9 +34,9 @@ test('search, regional temperature and country brief share real map navigation',
   await page.route('**/runtime/weather/map-query?**',route=>{
     const u=new URL(route.request().url());queries.push(u.search);
     return route.fulfill({json:u.searchParams.has('lat')?{
-      status:'ok',current:{time:GENERATED_AT.slice(0,16),temperature_2m:18.4,wind_speed_10m:8,relative_humidity_2m:60},
+      status:'partial',dailySampled:true,current:{time:GENERATED_AT.slice(0,16),temperature_2m:18.4,wind_speed_10m:8,relative_humidity_2m:60},
       hourly:{time:[],temperature_2m:[]},daily:{time:['2026-08-26'],temperature_2m_min:[12],temperature_2m_max:[20]},
-      source:'Open-Meteo',sourceUrl:'https://open-meteo.com/',
+      source:'MET Norway',sourceUrl:'https://api.met.no/doc/locationforecast/HowTO',
     }:{status:'ok',places:[{id:'london',name:'London',lat:51.5085,lon:-.1257,country:'United Kingdom',region:'England'}]}});
   });
   await gotoMapScene(page,'/?view=2d&basemap=openfreemap&mapPerf=1&layers=weather-alerts,earthquakes-volcanoes');
@@ -45,6 +45,8 @@ test('search, regional temperature and country brief share real map navigation',
   await search.getByRole('button',{name:'London · England · United Kingdom',exact:true}).click();
   await expect(search).toContainText('18.4 °C');
   await expect(search).toContainText('Model estimate, not a hazard warning');
+  await expect(search).toContainText('Seven-day forecast sample range');
+  await expect(search).toContainText('Open-Meteo unavailable; MET Norway model forecast');
   expect(queries.some(q=>q.includes('lat=51.5085')&&q.includes('lon=-0.1257'))).toBe(true);
   await expect(page).toHaveURL(/zoom=5/);
   await search.getByRole('searchbox').fill('Taiwan');

@@ -18,13 +18,6 @@ async function settled(page: Page) {
 // Layout baselines reflect the reviewed map controls and composition.
 // No masks: clock, API data, locale, renderer and motion are deterministic.
 async function visual(page: Page, name: string) {
-  // Layout baselines use the deterministic SVG fallback. Real WebGL geometry,
-  // recovery and resource ownership are covered by world-event-map.spec.ts.
-  const renderer = page.locator('[data-map-renderer-ready]');
-  if (await renderer.count() && await renderer.getAttribute('data-map-renderer-ready') === 'webgl') {
-    await renderer.dispatchEvent('polymonitor:map-renderer-failure');
-    await expect(renderer).toHaveAttribute('data-map-renderer-ready', 'svg');
-  }
   await settled(page);
   await expect.soft(page).toHaveScreenshot(name, { animations: 'disabled', maxDiffPixels: 0, threshold: 0 });
 }
@@ -36,7 +29,7 @@ for (const width of [1440, 390]) {
       page.on('pageerror', (error) => errors.push(error.message));
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
       await installDashboard(page, locale);
-      await gotoMapScene(page, '/?view=2d&mapPerf=1&time=all&layers=earthquakes-volcanoes,wildfires&center=-98,39&zoom=2.2');
+      await gotoMapScene(page, '/?view=2d&mapPerf=1&renderer=svg&time=all&layers=earthquakes-volcanoes,wildfires&center=-98,39&zoom=2.2');
       await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', /webgl|svg/, { timeout: 60_000 });
       await expect(page.locator('.wm-banner')).toHaveCount(0);
       await visual(page, `home-${width}-${locale}.png`);
@@ -91,7 +84,7 @@ for (const width of [1440, 390]) {
       await new Promise(resolve => setTimeout(resolve, 1000));
       await route.fallback();
     });
-    await gotoMapScene(page, '/?view=2d&mapPerf=1&time=all&layers=earthquakes-volcanoes');
+    await gotoMapScene(page, '/?view=2d&mapPerf=1&renderer=svg&time=all&layers=earthquakes-volcanoes');
     if (width === 390) await page.locator('.wm-map-filter-details > summary').click();
     const controls = page.locator('.wm-world-event-basemap-control');
     await expect(controls).toHaveCount(2);
@@ -119,15 +112,18 @@ for (const width of [1440, 390]) {
   test(`Chinese market sort keeps its caption with warm fonts ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     await installDashboard(page, 'zh');
-    await gotoMapScene(page, '/?view=2d&mapPerf=1&time=all&layers=earthquakes-volcanoes,wildfires&center=-98,39&zoom=2.2');
+    await gotoMapScene(page, '/?view=2d&mapPerf=1&renderer=svg&time=all&layers=earthquakes-volcanoes,wildfires&center=-98,39&zoom=2.2');
     await expect(page.locator('.wm-market-sort')).toBeVisible();
     await settled(page);
     const caption = page.locator('.wm-market-sort-caption');
+    await caption.evaluate(el => el.scrollIntoView({ block: 'center' }));
     const coldCaption = await caption.screenshot({ animations: 'disabled' });
     // Reload after the locale font is cached: the native select used to choose
     // a different anonymous line box here than when the font arrived late.
     await page.reload();
+    await selectMapLayers(page, ['earthquakes-volcanoes', 'wildfires']);
     await expect(caption).toBeVisible();
+    await caption.evaluate(el => el.scrollIntoView({ block: 'center' }));
     await settled(page);
     expect(await caption.screenshot({ animations: 'disabled' })).toEqual(coldCaption);
     const sort = page.getByRole('combobox', { name: '市场排序', exact: true });
@@ -147,7 +143,7 @@ for (const width of [1440, 390]) {
   test(`map details and source failure ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     await installDashboard(page);
-    await gotoMapScene(page, '/?view=2d&mapPerf=1&time=all&layers=earthquakes-volcanoes,wildfires&center=-98,39&zoom=2.2');
+    await gotoMapScene(page, '/?view=2d&mapPerf=1&renderer=svg&time=all&layers=earthquakes-volcanoes,wildfires&center=-98,39&zoom=2.2');
     await expect(page.getByRole('button', { name: /^All events/i })).toContainText('9');
     await page.getByRole('button', { name: /^All events/i }).click();
     await page.getByRole('button', { name: /M6.4 Test Ridge Earthquake/ }).click();
@@ -178,7 +174,7 @@ for (const width of [1440, 390]) {
       });
     });
     await installFixtures(page, true);
-    await gotoMapScene(page, '/?view=2d&mapPerf=1&time=all&layers=weather-alerts,earthquakes-volcanoes,climate-anomalies');
+    await gotoMapScene(page, '/?view=2d&mapPerf=1&renderer=svg&time=all&layers=weather-alerts,earthquakes-volcanoes,climate-anomalies');
     await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', /webgl|svg/, { timeout: 60_000 });
     const layersButton = page.getByRole('button', { name: 'Open layers panel' });
     if (await layersButton.isVisible()) await layersButton.click();
@@ -300,7 +296,7 @@ for (const state of ['loading', 'empty', 'error', 'stale', 'closed'] as const) {
         if (state === 'closed') bundle.market = { ...bundle.market, status: 'closed' };
         await route.fulfill({ json: path.includes('/runtime/lob/token/') ? bundle.lob : bundle });
       });
-      await gotoMapScene(page, '/?view=2d&mapPerf=1&time=all&layers=earthquakes-volcanoes&center=-98,39&zoom=2.2');
+      await gotoMapScene(page, '/?view=2d&mapPerf=1&renderer=svg&time=all&layers=earthquakes-volcanoes&center=-98,39&zoom=2.2');
       if (state === 'loading') {
         for (let frame = 0; frame < 10; frame++) {
           await page.clock.runFor(50);
@@ -324,11 +320,13 @@ for (const width of [1440, 390]) {
   test(`market hover, keyboard, selected and disabled controls ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     await installDashboard(page);
-    await gotoMapScene(page, '/?view=2d&mapPerf=1&time=all&layers=earthquakes-volcanoes');
+    await gotoMapScene(page, '/?view=2d&mapPerf=1&renderer=svg&time=all&layers=earthquakes-volcanoes');
     const market = page.locator('.wm-poly-market-card').filter({ hasText: 'Fixture market 2' });
     await expect(market).toBeVisible({ timeout: 60_000 });
     await market.scrollIntoViewIfNeeded();
     await market.hover(); await market.focus();
+    await page.keyboard.press('Shift+Tab');
+    await page.keyboard.press('Tab');
     await expect(market).toBeFocused();
     await expect(page.locator('.wm-focused-market-list')).toHaveScreenshot(`catalog-hover-focus-${width}.png`, { animations: 'disabled', maxDiffPixels: 0, threshold: 0 });
     await page.keyboard.press('Enter');
@@ -413,7 +411,7 @@ test('anonymous homepage renders a saved empty panel list without restoring defa
   await installDashboard(page, 'en', []);
   await page.route('**/wm-api/auth/session', route => route.fulfill({ json: { enabled: true, authenticated: false, user: null } }));
   for (let visit = 0; visit < 2; visit += 1) {
-    await gotoMapScene(page, '/?view=2d&mapPerf=1&time=all&layers=earthquakes-volcanoes,wildfires&center=-98,39&zoom=2.2');
+    await gotoMapScene(page, '/?view=2d&mapPerf=1&renderer=svg&time=all&layers=earthquakes-volcanoes,wildfires&center=-98,39&zoom=2.2');
     await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', /webgl|svg/, { timeout: 60_000 });
     await expect(page.locator('.wm-focused-market-list .wm-poly-market-card')).toHaveCount(2);
     await expect(page.locator('.wm-panels-grid [data-workspace-panel-id]')).toHaveCount(0);

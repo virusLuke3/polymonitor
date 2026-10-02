@@ -25,6 +25,7 @@ export function filterWorldEventMapEvents(
     if (countryCode) {
       const properties = event.properties || {};
       const directCodes = [
+        event.countryCode,
         properties.countryCode,
         properties.countryIso2,
         properties.iso2,

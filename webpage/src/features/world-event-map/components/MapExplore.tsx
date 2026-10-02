@@ -74,7 +74,8 @@ export function MapExplore({ countries, events, onLocate, onCountry, onEvent, ce
           <p>{forecast.current.time} UTC · {zh ? '模式估计，非灾害预警' : 'Model estimate, not a hazard warning'}</p>
           <p>{zh ? '风速' : 'Wind'} {forecast.current.wind_speed_10m ?? '—'} km/h · {zh ? '湿度' : 'Humidity'} {forecast.current.relative_humidity_2m ?? '—'}%</p>
           <details><summary>{zh ? '未来 24 小时' : 'Next 24 hours'}</summary><table><tbody>{hourly.map(row => <tr key={row.time}><td>{row.time.slice(5).replace('T', ' ')} UTC</td><td>{row.temp ?? '—'} °C</td></tr>)}</tbody></table></details>
-          <table><caption>{zh ? '七天最低 / 最高温度' : 'Seven-day low / high'}</caption><tbody>{forecast.daily.time?.map((day, i) => <tr key={day}><td>{day}</td><td>{forecast.daily.temperature_2m_min?.[i] ?? '—'} / {forecast.daily.temperature_2m_max?.[i] ?? '—'} °C</td></tr>)}</tbody></table>
+          <table><caption>{forecast.dailySampled ? (zh ? '七天预报采样温度范围' : 'Seven-day forecast sample range') : (zh ? '七天最低 / 最高温度' : 'Seven-day low / high')}</caption><tbody>{forecast.daily.time?.map((day, i) => <tr key={day}><td>{day}</td><td>{forecast.daily.temperature_2m_min?.[i] ?? '—'} / {forecast.daily.temperature_2m_max?.[i] ?? '—'} °C</td></tr>)}</tbody></table>
+          {forecast.dailySampled ? <p>{zh ? 'Open-Meteo 当前不可用，使用 MET Norway 模式预报；后期采样间隔可达六小时。' : 'Open-Meteo unavailable; MET Norway model forecast. Later samples may be six hours apart.'}</p> : null}
           <a href={forecast.sourceUrl} target="_blank" rel="noreferrer">{forecast.source} · CC BY 4.0</a>
         </> : null}
         <button type="button" disabled={loading} onClick={() => setAttempt(a => a + 1)}>{zh ? '重新查询' : 'Refresh forecast'}</button>

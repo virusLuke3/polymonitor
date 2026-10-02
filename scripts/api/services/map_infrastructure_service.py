@@ -21,7 +21,7 @@ def infrastructure_snapshot(context, *, bbox):
         cached = store.get(NAMESPACE,key) if store else None
         if cached is not None:return cached
         box = ','.join(str(v) for v in (south,west,north,east))
-        query = f'[out:json][timeout:7][maxsize:16777216];(way["waterway"~"^(river|canal)$"]({box});way["man_made"="pipeline"]({box});way["man_made"="submarine_cable"]({box});way["man_made"="cable"]["location"="underwater"]({box}););out geom;'
+        query = f'[out:json][timeout:7][maxsize:134217728];(way["waterway"~"^(river|canal)$"]({box});way["man_made"="pipeline"]({box});way["man_made"="submarine_cable"]({box});way["man_made"="cable"]["location"="underwater"]({box}););out geom;'
         raw = resolve_service_callable(context,'http_json_get')(URL,params={'data':query},timeout=9,headers={'Accept':'application/json','User-Agent':'Polymonitor/1.0 (+https://polymonitor.club; research map)'})
         if not isinstance(raw,dict) or not isinstance(raw.get('elements'),list):raise ValueError('invalid-overpass-response')
         events = []; rejected = 0

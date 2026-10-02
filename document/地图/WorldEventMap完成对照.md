@@ -128,7 +128,7 @@ RU/UA 的 geometry 有差异；本地仍用 `CN-TW`，上游已用 `TW`。本地
 | P0 API 断连 | `gcp_serving_healthcheck.py`、`routes/system.py`、healthcheck unit | 新增无依赖 `/health/live`；依赖 readiness 失败不重启仍响应的 API；重启前持久化次数；oneshot 预算覆盖有界恢复。Oct2 03:24 的 GCP 日志确认旧健康检查因内容查询超时重启 API，引发请求重置。不是把上游异常改成成功。09:26 日志另证实认证 DB 连接超时导致轮换 worker 启动失败并终止 master；`auth_service.validate_runtime_config` 现保留公共 API 启动，认证操作仍 fail-closed，静态配置错误/缺表仍阻止启动。 |
 | NWS/USGS 缓存返回 | `natural_hazards/service.py`、`snapshots.py` | fresh 直接返回；保留期内 stale 立即返回，后台 singleflight 刷新；缓存 IO 不占调度锁；保留 429、blocked 和原成功时间；NWS deadline 从真正执行时起算。 |
 | 雷达恢复 | `useWeatherRadar.ts`、现有雷达状态面板 | 失败后 5/15/45 秒有限快速重试，再回正常周期；手动刷新、过期退出；401/403/429 冷却不能被按钮和可见性变化绕过。不是历史帧播放。 |
-| 地区温度 | 现有 `global_weather_map_service.py` 的 map-query、`MapExplore` | 国家/地点/机场/已加载飞机搜索，选择真实坐标定位；Open-Meteo 当前模式温度、湿度、风速、24 小时及七天温度。请求可取消，缓存/singleflight 复用；标注模式估计，不当作官方灾害预警。 |
+| 地区温度 | 现有 `global_weather_map_service.py` 的 map-query、`MapExplore` | 国家/地点/机场/已加载飞机搜索，选择真实坐标定位；Open-Meteo 当前模式温度、湿度、风速、24 小时及七天温度；429/网络失败遵守共享冷却并使用独立 MET Norway 预报，保留时间/单位，日范围明确为采样范围。请求可取消，缓存/singleflight 复用；标注模式估计，不当作官方灾害预警。 |
 | 国家详情 | `CountryBrief`、既有事件详情 | 当前已加载且符合筛选的唯一记录、分类、来源、时间线、定位/筛选/事件详情。覆盖不足明确显示；不声称完整国家新闻档案或生成式国家研判。 |
 | 地区索引 | `countryGeometry.ts` | CN-TW 仅归一化索引到 TW，保留原几何；单测与搜索→国家简报→筛选浏览器测试。 |
 | 机场运行 | 现有运输 service 的 map source `faa` | 真实 FAA NAS 延误/限制/关闭通告，保留适用机型等原始条件；机场坐标来自现有 OpenFlights。不是全球机场正常状态目录。 |
@@ -147,3 +147,8 @@ RU/UA 的 geometry 有差异；本地仍用 `CN-TW`，上游已用 `TW`。本地
 - 实际来源可能为空、stale、partial 或 unavailable；保留这些状态。实机 iOS/Android 验收由用户明确排除；窄视口 Chrome 不替代实机结论。
 
 - 布局基线修订：原首页截图仍为旧矮地图/旧工具栏。本轮按实际概览、紧凑控件和搜索入口复核，原图与新图保存在证据目录 `reviewed-baselines/`；布局截图固定 SVG 分支，WebGL 几何、恢复及生产真实底图分别验收。仍使用零像素差异，不放宽容差。冷来源失败场景明确清空测试缓存，避免把上一场景保留的 stale 误判为 unavailable；中文冷/热字体复跑保持相同图层选择。
+
+- 生产补充发现（2026-10-02）：GCP Open-Meteo 返回 429；地区温度补充 MET Norway 独立模型备用源（官方接口文档：https://api.met.no/doc/locationforecast/HowTO），不是绕过原来源配额。OSM 原 16 MiB 查询预算低于 Overpass 最小执行需要，改为有界 128 MiB，仍限 25 平方度/7 秒。
+- AIS 现存 09:59 UTC 的旧格式采样没有 vessels 字段，下次原定六小时采样前显示 unavailable；不删除缓存强制超频。全球 NOTAM 未获得授权来源，不计完成。
+
+- 国家筛选补充回归：统一识别标准顶层 countryCode，WMO 无几何记录仍可按国家筛选；航空参考记录仅在明确国家筛选时按已有真实几何/国家归属筛选，不把全球航空记录计入每个国家。

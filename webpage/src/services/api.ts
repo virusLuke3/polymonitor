@@ -810,7 +810,7 @@ export type MapForecast = {
   status: string; current: { time?: string; temperature_2m?: number; relative_humidity_2m?: number; wind_speed_10m?: number };
   hourly: { time?: string[]; temperature_2m?: Array<number | null> };
   daily: { time?: string[]; temperature_2m_max?: Array<number | null>; temperature_2m_min?: Array<number | null> };
-  units: Record<string, string>; sourceUrl: string; source: string; fetchedAt: string; limitations: string[];
+  dailySampled?: boolean; units: Record<string, string>; sourceUrl: string; source: string; fetchedAt: string; limitations: string[];
 };
 export function searchMapPlaces(query: string, language: string, signal: AbortSignal) {
   return apiGetWithTimeout<{status: string; places: MapPlace[]}>(`/runtime/weather/map-query?${new URLSearchParams({q: query, language})}`, 16000, signal);
