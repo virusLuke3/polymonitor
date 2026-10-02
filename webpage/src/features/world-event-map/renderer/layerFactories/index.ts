@@ -3,7 +3,7 @@ import type { GeoEvent } from '../../domain/types';
 import type { WorldEventMapState } from '../../state/mapState';
 import { createAviationLayers } from './aviationLayers';
 import { type EventClusterIndex, type LabelProjection, type ScreenBox } from './eventClusters';
-import { createEventGeometryLayers } from './eventGeometryLayers';
+import { createEventGeometryLayers, type EventGeometryCache } from './eventGeometryLayers';
 import { createEventPointLayers } from './eventPointLayer';
 
 export {
@@ -68,8 +68,9 @@ export function createWorldEventGeometryLayers(
   zoom: number,
   beforeId?: string,
   viewport?: [number, number, number, number],
+  cache?: EventGeometryCache,
 ) {
-  return createEventGeometryLayers(events, selectedEventId, zoom, beforeId, viewport);
+  return createEventGeometryLayers(events, selectedEventId, zoom, beforeId, viewport, cache);
 }
 
 export function createWorldEventPointLayers(

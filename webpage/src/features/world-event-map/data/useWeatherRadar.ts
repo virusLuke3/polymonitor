@@ -1,3 +1,4 @@
+import { withRuntimeRequestBudget } from '@/services/api';
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 
 export type RadarFrame = { time: number; tiles: string; coverageTiles: string };
@@ -63,10 +64,12 @@ export function useWeatherRadar(enabled: boolean) {
       if (disposed || document.hidden || navigator.onLine === false) return;
       if (blockedUntil.current > Date.now()) { timer = setTimeout(refresh, blockedUntil.current - Date.now()); return; }
       const request = new AbortController(); controller = request;
-      const deadline = setTimeout(() => request.abort(), 12_000);
+      let deadline: ReturnType<typeof setTimeout> | undefined;
       let failureDelay: number | undefined;
       setState(current => current.frame && Date.now() - current.frame.time * 1000 <= 30 * 60_000 ? current : { frame: null, status: 'loading' });
       try {
+        const frame = await withRuntimeRequestBudget(async () => {
+        deadline = setTimeout(() => request.abort(), 12_000);
         const response = await fetch(MANIFEST, { signal: request.signal, credentials: 'omit' });
         if (!response.ok) {
           const header = response.headers.get('Retry-After');
@@ -76,7 +79,8 @@ export function useWeatherRadar(enabled: boolean) {
           if ([401,403,429].includes(response.status)) blockedUntil.current = Date.now() + failureDelay;
           throw new Error(`RainViewer HTTP ${response.status}`);
         }
-        const frame = latestRadarFrame(await response.json());
+        return latestRadarFrame(await response.json());
+        }, request.signal, 1);
         if (!disposed && controller === request && !request.signal.aborted) {
           lastFrame=frame;setState({ frame, status: 'ready' });scheduleExpiry();
           failures = 0;

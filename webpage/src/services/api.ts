@@ -88,7 +88,61 @@ function isAbortLikeError(error: unknown) {
     || String(maybe.message || '').toLowerCase().includes('signal is aborted');
 }
 
-async function apiGetWithTimeout<T>(path: string, timeoutMs = 12000, externalSignal?: AbortSignal, cache?: RequestCache): Promise<T> {
+type RuntimeRequest = { priority: number; start: () => void; signal?: AbortSignal; abort: () => void };
+const runtimeRequests: RuntimeRequest[] = [];
+let runtimeRunning = 0;
+let runtimePumpScheduled = false;
+
+/** One admission budget for Runtime's shared panels and map sources. No cache or refresh loop. */
+export function withRuntimeRequestBudget<T>(run: () => Promise<T>, signal?: AbortSignal, priority = 2): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => {
+      const index = runtimeRequests.indexOf(task);
+      if (index >= 0) runtimeRequests.splice(index, 1);
+      signal?.removeEventListener('abort', abort);
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    const task: RuntimeRequest = { priority, signal, abort, start: () => {
+      signal?.removeEventListener('abort', abort);
+      runtimeRunning++;
+      // The API deadline begins inside run(), after admission, and covers JSON.
+      void Promise.resolve().then(run).then(resolve, reject).finally(() => {
+        runtimeRunning--; pumpRuntimeRequests();
+      });
+    }};
+    if (signal?.aborted) { abort(); return; }
+    signal?.addEventListener('abort', abort, { once: true });
+    runtimeRequests.push(task);
+    pumpRuntimeRequests();
+  });
+}
+
+function pumpRuntimeRequests() {
+  if (runtimePumpScheduled || !runtimeRequests.length) return;
+  runtimePumpScheduled = true;
+  // A task boundary lets rendering/input run between completed source bodies.
+  setTimeout(() => {
+    runtimePumpScheduled = false;
+    const limit = typeof matchMedia === 'function' && matchMedia('(max-width: 720px)').matches ? 2 : 3;
+    runtimeRequests.sort((a, b) => a.priority - b.priority);
+    while (runtimeRunning < limit && runtimeRequests.length) {
+      const task = runtimeRequests.shift()!;
+      if (task.signal?.aborted) task.abort(); else task.start();
+    }
+  }, 0);
+}
+
+function apiGetWithTimeout<T>(path: string, timeoutMs = 12000, externalSignal?: AbortSignal, cache?: RequestCache): Promise<T> {
+  const run = () => apiGetAdmitted<T>(path, timeoutMs, externalSignal, cache);
+  if (!path.startsWith('/runtime/')) return run();
+  // First useful hazards precede optional background context, without disabling
+  // any layer. Interactive detail/viewport requests join the highest tier.
+  const priority = /natural-hazards\/map.*source=(usgs|nhc|nws)\b|detail|aviation.*viewport|map-query/.test(path) ? 0
+    : /natural-hazards|global-transport|transport\/global-shipping|geo-sanctions/.test(path) ? 1 : 2;
+  return withRuntimeRequestBudget(run, externalSignal, priority);
+}
+
+async function apiGetAdmitted<T>(path: string, timeoutMs = 12000, externalSignal?: AbortSignal, cache?: RequestCache): Promise<T> {
   const controller = new AbortController();
   const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   const abortFromExternal = () => controller.abort();

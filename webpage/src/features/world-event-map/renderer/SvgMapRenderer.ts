@@ -223,7 +223,7 @@ export class SvgMapRenderer implements MapRenderer {
     if (this.svg) return;
     this.host = container;
     this.tooltip = new RendererTooltip(container);
-    await loadMapFonts();
+    void loadMapFonts().then(() => { if (!this.destroyed) this.scheduleRender(); });
     if (this.destroyed) return;
     this.callbacks = callbacks;
     this.destroyed = false;

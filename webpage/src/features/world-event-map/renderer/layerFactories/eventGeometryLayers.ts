@@ -54,13 +54,40 @@ function namedPaths(event: GeoEvent, name: string, mode: NamedCyclonePath['mode'
   return [];
 }
 
+/** Cache only attached layers; removed/quarantined/context-lost instances cannot be reused. */
+export class EventGeometryCache {
+  private entries = new Map<string, { events: readonly GeoEvent[]; scope: string; layers: LayersList }>();
+  private used = new Set<string>();
+  begin() { this.used.clear(); }
+  end() { for (const id of this.entries.keys()) if (!this.used.has(id)) this.entries.delete(id); }
+  clear() { this.entries.clear(); }
+  get(id: string, events: readonly GeoEvent[], scope: string, build: () => LayersList): LayersList {
+    this.used.add(id);
+    const previous = this.entries.get(id);
+    if (previous?.scope === scope && previous.events.length === events.length
+      && events.every((event, i) => event === previous.events[i])) return previous.layers;
+    const layers = build();
+    this.entries.set(id, { events, scope, layers });
+    return layers;
+  }
+}
+
+/** Point-only updates cannot invalidate paths, polygons or country fills. */
+export function isGeometryEvent(event: GeoEvent) {
+  return event.properties.mapEntity !== 'air-route' && event.properties.mapEntity !== 'air-flight'
+    && (event.geometry?.type !== 'Point' && event.geometry != null
+      || Boolean(event.properties.geometries));
+}
+
 export function createEventGeometryLayers(
   events: GeoEvent[],
   selectedEventId: string | null,
   zoom = Number.POSITIVE_INFINITY,
   beforeId?: string,
   viewport?: [number, number, number, number],
+  cache?: EventGeometryCache,
 ): LayersList {
+  cache?.begin();
   const visibleEvents = viewport
     ? events.filter((event) => {
       if (event.id === selectedEventId) return true;
@@ -106,10 +133,16 @@ export function createEventGeometryLayers(
   ));
   const layers: LayersList = [];
 
-  layers.push(...createCountryRiskLayers(visibleEvents, selectedEventId, beforeId));
+  const cached = (id: string, inputs: GeoEvent[], build: () => LayersList, zoomDependent = false) => {
+    const selected = inputs.some(event => event.id === selectedEventId) ? selectedEventId : null;
+    return cache ? cache.get(id, inputs, JSON.stringify([selected, beforeId, zoomDependent ? zoom : null]), build) : build();
+  };
+  const countries = visibleEvents.filter(isCountryRiskArea);
+  if (countries.length) layers.push(...cached('country-risk', countries,
+    () => createCountryRiskLayers(countries, selectedEventId, beforeId)));
 
   if (cycloneCones.length) {
-    layers.push(new GeoJsonLayer({
+    layers.push(...cached('cyclone-cones', cycloneCones.map(item => item.event), () => [new GeoJsonLayer({
       id: 'world-event-cyclone-forecast-cones',
       data: {
         type: 'FeatureCollection',
@@ -128,11 +161,11 @@ export function createEventGeometryLayers(
       autoHighlight: false,
       wrapLongitude: true,
       beforeId,
-    }));
+    })]));
   }
 
   if (cyclonePaths.length) {
-    layers.push(new PathLayer<NamedCyclonePath, PathStyleExtensionProps<NamedCyclonePath>>({
+    layers.push(...cached('cyclone-paths', cyclonePaths.map(item => item.event), () => [new PathLayer<NamedCyclonePath, PathStyleExtensionProps<NamedCyclonePath>>({
       id: 'world-event-cyclone-tracks',
       data: cyclonePaths,
       getPath: (item) => item.path,
@@ -151,11 +184,11 @@ export function createEventGeometryLayers(
       capRounded: true,
       pickable: true,
       wrapLongitude: true,
-    }));
+    })]));
   }
 
   if (hazardAreas.length) {
-    layers.push(new GeoJsonLayer({
+    layers.push(...cached('hazard-areas', hazardAreas.map(item => item.event), () => [new GeoJsonLayer({
       id: 'world-event-hazard-areas',
       data: {
         type: 'FeatureCollection',
@@ -185,11 +218,11 @@ export function createEventGeometryLayers(
       autoHighlight: false,
       wrapLongitude: true,
       beforeId,
-    }));
+    })], true));
   }
 
   if (contextAreas.length) {
-    layers.push(new GeoJsonLayer({
+    layers.push(...cached('context-areas', contextAreas, () => [new GeoJsonLayer({
       id: 'world-event-context-areas',
       data: {
         type: 'FeatureCollection',
@@ -211,11 +244,11 @@ export function createEventGeometryLayers(
       autoHighlight: false,
       wrapLongitude: true,
       beforeId,
-    }));
+    })]));
   }
 
   if (lines.length) {
-    layers.push(new PathLayer<GeoEvent>({
+    layers.push(...cached('paths', lines, () => [new PathLayer<GeoEvent>({
       id: 'world-event-paths',
       wrapLongitude: true,
       data: lines,
@@ -228,10 +261,10 @@ export function createEventGeometryLayers(
       jointRounded: true,
       capRounded: true,
       pickable: true,
-    }));
+    })]));
   }
   if (cycloneCenters.length) {
-    layers.push(new ScatterplotLayer<CycloneCenter>({
+    layers.push(...cached('cyclone-centers', cycloneCenters.map(item => item.event), () => [new ScatterplotLayer<CycloneCenter>({
       id: 'world-event-cyclone-centers',
       data: cycloneCenters,
       getPosition: (center) => center.coordinates,
@@ -244,7 +277,8 @@ export function createEventGeometryLayers(
       lineWidthMinPixels: 1.2,
       pickable: true,
       stroked: true,
-    }));
+    })]));
   }
+  cache?.end();
   return layers;
 }

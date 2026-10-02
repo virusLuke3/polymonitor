@@ -1,4 +1,4 @@
-export type MapPerformancePhase = 'js-build' | 'deck-commit' | 'dynamic-build' | 'dynamic-commit';
+export type MapPerformancePhase = 'label-layout' | 'js-build' | 'deck-commit' | 'dynamic-build' | 'dynamic-commit';
 
 type Sample = { phase: MapPerformancePhase; duration: number; at: number };
 
@@ -18,7 +18,7 @@ declare global {
   }
 }
 
-const PHASES: MapPerformancePhase[] = ['js-build', 'deck-commit', 'dynamic-build', 'dynamic-commit'];
+const PHASES: MapPerformancePhase[] = ['label-layout', 'js-build', 'deck-commit', 'dynamic-build', 'dynamic-commit'];
 
 function percentile(values: number[], quantile: number) {
   if (!values.length) return 0;

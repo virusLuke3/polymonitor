@@ -1,3 +1,4 @@
+import { EventGeometryCache, isGeometryEvent } from './layerFactories/eventGeometryLayers';
 import { MAP_RENDERER_TIMEOUTS, splitViewportBounds } from './MapRenderer';
 import { loadMapFonts } from '../config/mapTypography';
 import type { ScreenBox } from './layerFactories/eventClusters';
@@ -141,12 +142,25 @@ export class DeckMapRenderer implements MapRenderer {
   private radarFrame: RadarFrame | null = null;
   private radarAppliedUrl = '';
 
-  setRadar(frame: RadarFrame | null) { this.radarFrame = frame; this.applyRadar(); }
+  setRadar(frame: RadarFrame | null) {
+    const changed = frame?.tiles !== this.radarFrame?.tiles;
+    const refreshed = frame !== this.radarFrame && this.radarFailed;
+    this.radarFrame = frame;
+    if (changed || refreshed) {
+      this.radarRetryCount = 0;
+      if (Date.now() >= this.radarBlockedUntil && this.radarRetryTimer != null) {
+        window.clearTimeout(this.radarRetryTimer); this.radarRetryTimer = null;
+      }
+    }
+    this.applyRadar();
+  }
 
   private radarActiveBank = '';
   private radarPending: { bank: string; frame: RadarFrame } | null = null;
   private radarRetryTimer: number | null = null;
   private radarRetryCount = 0;
+  private radarBlockedUntil = 0;
+  private radarFailed = false;
   private removeRadarBank(bank: string) {
     const map = this.map; if (!map) return;
     for (const id of [bank, `${bank}-coverage`]) {
@@ -163,12 +177,13 @@ export class DeckMapRenderer implements MapRenderer {
       if (this.radarRetryTimer != null) window.clearTimeout(this.radarRetryTimer); this.radarRetryTimer = null;
       this.callbacks?.onRadarStateChange?.('off', null); return;
     }
+    if (Date.now() < this.radarBlockedUntil || this.radarRetryTimer != null) return;
     // isStyleLoaded also waits for unrelated sources. Aviation animation can
     // keep `idle` from firing indefinitely. A parsed style permits addSource;
     // handleStyleLoad already retries this when the style itself is pending.
     if (!map.getStyle()?.layers) return;
     const frame = this.radarFrame;
-    if (this.radarAppliedUrl === frame.tiles || this.radarPending?.frame.tiles === frame.tiles) return;
+    if ((!this.radarFailed && this.radarAppliedUrl === frame.tiles) || this.radarPending?.frame.tiles === frame.tiles) return;
     if (this.radarPending) this.removeRadarBank(this.radarPending.bank);
     const bank = this.radarActiveBank === 'weather-radar' ? 'weather-radar-next' : 'weather-radar';
     this.removeRadarBank(bank); this.radarPending = { bank, frame };
@@ -187,7 +202,8 @@ export class DeckMapRenderer implements MapRenderer {
     map.setPaintProperty(pending.bank,'raster-opacity',0.6);
     map.setPaintProperty(`${pending.bank}-coverage`,'raster-opacity',0.16);
     if (old && old !== pending.bank) this.removeRadarBank(old);
-    this.radarRetryCount = 0;
+    this.radarRetryCount = 0; this.radarFailed = false;
+    if (this.radarRetryTimer != null) window.clearTimeout(this.radarRetryTimer); this.radarRetryTimer = null;
     this.callbacks?.onRadarStateChange?.('ready',pending.frame);
   }
 
@@ -197,6 +213,7 @@ export class DeckMapRenderer implements MapRenderer {
   private callbacks: MapRendererCallbacks | null = null;
   private state: WorldEventMapState | null = null;
   private language: 'en' | 'zh' = 'en';
+  private mapFontsReady = false;
   private events: GeoEvent[] = [];
   private fallbackApplied = false;
   private primaryHasContent = false;
@@ -252,9 +269,11 @@ export class DeckMapRenderer implements MapRenderer {
   private animationTime = 0;
   private pointLayers: LayersList | null = null;
   private geometryLayers: LayersList = [];
+  private readonly geometryCache = new EventGeometryCache();
   private geometryGeneration = 0;
   private geometryNeedsCommit = true;
   private occupiedScreenBoxes: ScreenBox[] = [];
+  private basemapLabelBoxes: ScreenBox[] | null = null;
   private readonly labelMeasureContext = typeof document === 'undefined' ? null : document.createElement('canvas').getContext('2d');
   private readonly clusterIndex = new EventClusterIndex();
   private readonly renderScheduler: MapRenderScheduler;
@@ -288,6 +307,8 @@ export class DeckMapRenderer implements MapRenderer {
   private readonly eventFirstSeenAt = new Map<string, number>();
   private receivedInitialEventSnapshot = false;
   private pulseEvents: GeoEvent[] = [];
+  private aviationMotionAvailable = false;
+  private pulseWasActive = false;
   /**
    * Aviation has a different invalidation cadence from hazards: route geometry,
    * hubs and live positions are static between data/camera changes, while only
@@ -323,10 +344,12 @@ export class DeckMapRenderer implements MapRenderer {
         if (this.destroyed || this.paused || generation !== this.geometryGeneration) return;
         this.geometryLayers = this.performanceMonitor.measure(
           'js-build',
-          () => createWorldEventGeometryLayers(events, selectedEventId, zoom, beforeId, viewport),
+          () => createWorldEventGeometryLayers(events, selectedEventId, zoom, beforeId, viewport, this.geometryCache),
         );
         this.geometryNeedsCommit = false;
-        this.requestRender();
+        // A concurrent aircraft tick may share this RAF. Mark the static
+        // commit explicitly so that tick cannot bypass freshly built geometry.
+        this.requestRender({ interaction: true });
       },
     );
     this.aviationLayerCommit = new DeferredLatestCommit(
@@ -347,6 +370,7 @@ export class DeckMapRenderer implements MapRenderer {
   setLanguage(language: 'en' | 'zh') {
     if (this.language === language) return;
     this.language = language;
+    this.basemapLabelBoxes = null;
     if (this.map) reinforceWorldEventBasemapLabels(this.map, language);
     this.requestRender({ points: true });
   }
@@ -364,8 +388,16 @@ export class DeckMapRenderer implements MapRenderer {
       this.language,
     );
     if (this.destroyed) return;
-    await loadMapFonts();
-    if (this.destroyed) return;
+    // Fonts affect text layout, not the ability to fetch/paint the basemap.
+    // Keep this continuation alive for late fonts without blocking MapLibre.
+    void loadMapFonts().then(() => {
+      if (this.destroyed) return;
+      this.mapFontsReady = true;
+      this.basemapLabelBoxes = null;
+      this.pointLayers = null;
+      this.aviationLayerSections = null;
+      this.requestRender({ points: true, aviation: true, dynamic: true });
+    });
     const map = new maplibregl.Map({
       container,
       style: primaryStyle,
@@ -574,6 +606,7 @@ export class DeckMapRenderer implements MapRenderer {
     const previousEvents = this.events;
     const nonAviationChanged = !sameEventReferences(previousEvents, events, (event) => !isAviationEvent(event));
     const aviationChanged = !sameEventReferences(previousEvents, events, isAviationEvent);
+    const geometryChanged = !sameEventReferences(previousEvents, events, isGeometryEvent);
     if (!nonAviationChanged && !aviationChanged) {
       this.events = events;
       return;
@@ -596,12 +629,14 @@ export class DeckMapRenderer implements MapRenderer {
       if (!nextIds.has(eventId)) this.eventFirstSeenAt.delete(eventId);
     }
     this.events = events;
+    this.aviationMotionAvailable = events.some(event => event.category === 'infrastructure'
+      && (event.properties.mapEntity === 'air-route' || event.properties.mapEntity === 'air-flight'));
     this.eventVersion++;
     this.clusterIndex.update(events);
     if (nonAviationChanged) {
       this.pulseEvents = selectEventPulseCandidates(events, this.state?.selectedEventId || null);
       this.pointLayers = null;
-      this.invalidateGeometry();
+      if (geometryChanged) this.invalidateGeometry();
     }
     if (aviationChanged) {
       this.aviationLayerSections = null;
@@ -610,7 +645,7 @@ export class DeckMapRenderer implements MapRenderer {
     this.requestRender({
       points: nonAviationChanged,
       aviation: aviationChanged,
-      geometry: nonAviationChanged,
+      geometry: geometryChanged,
       dynamic: aviationChanged,
       pulse: nonAviationChanged,
       interaction: true,
@@ -626,7 +661,7 @@ export class DeckMapRenderer implements MapRenderer {
       bounds: splitViewportBounds(b.getWest(), b.getSouth(), b.getEast(), b.getNorth()),
       center: [c.lng, c.lat], zoom: map.getZoom(), widthCssPx: host.clientWidth, heightCssPx: host.clientHeight });
   }
-  resize() { this.map?.resize(); this.emitViewport(); }
+  resize() { this.basemapLabelBoxes = null; this.map?.resize(); this.emitViewport(); }
 
   setReducedMotion(reduced: boolean) {
     this.reducedMotion = reduced;
@@ -767,6 +802,7 @@ export class DeckMapRenderer implements MapRenderer {
     this.aviationOverlay = null;
     this.pointLayers = null;
     this.geometryLayers = [];
+    this.geometryCache.clear();
     this.aviationLayerSections = null;
     this.aviationDynamicLayers = null;
     this.seededAircraftPickPoints = [];
@@ -805,6 +841,20 @@ export class DeckMapRenderer implements MapRenderer {
 
   private flushRender(invalidation: MapRenderInvalidation) {
     if (this.paused || !this.overlay || !this.state) return;
+    if (invalidation.dynamic && !invalidation.points && !invalidation.geometry
+      && !invalidation.aviation && !invalidation.pulse && !invalidation.interaction
+      && this.aviationLayerSections && this.aviationOverlay) {
+      const layers = this.performanceMonitor.measure('dynamic-build', () => createAviationDynamicLayers(
+        this.aviationLayerSections!.data, this.animationTime, this.state!.zoom,
+        this.state!.selectedEventId, this.hoveredDeckEventId,
+      )).filter((layer): layer is Layer => Boolean(layer) && !Array.isArray(layer))
+        .filter(layer => (this.mapFontsReady || !(layer instanceof TextLayer)) && this.acceptLayerVersion(layer));
+      this.aviationDynamicLayers = layers;
+      const aircraft = layers.find(layer => layer.id === 'aviation-seeded-aircraft');
+      this.seededAircraftPickPoints = Array.isArray(aircraft?.props.data) ? aircraft.props.data as AviationMotionPoint[] : [];
+      this.performanceMonitor.measure('dynamic-commit', () => this.aviationOverlay!.setProps({ layers }));
+      return;
+    }
     const bounds = this.map?.getBounds();
     const viewport: [number, number, number, number] | undefined = bounds
       ? bounds.getWest() <= bounds.getEast()
@@ -832,7 +882,9 @@ export class DeckMapRenderer implements MapRenderer {
         return measureContext.measureText(text).width;
       };
       const host = map?.getContainer?.();
-      if (map) {
+      if (map && this.basemapLabelBoxes == null) {
+        const labelStarted = performance.now();
+        const boxes: ScreenBox[] = [];
         try {
           const symbolLayerIds = (map.getStyle()?.layers || [])
             .filter((layer) => layer.type === 'symbol')
@@ -853,15 +905,18 @@ export class DeckMapRenderer implements MapRenderer {
             const size = Number(evaluated?.layout?.get('text-size')?.evaluate?.(feature, {}) ?? map.getLayoutProperty(feature.layer.id, 'text-size'));
             const fontSize = Number.isFinite(size) ? size : feature.layer.id.includes('country') ? 13 : 11;
             const width = measureLabel(text, fontSize);
-            occupiedScreenBoxes.push([
+            boxes.push([
               screen.x - width / 2, screen.y - fontSize / 2 - 3, screen.x + width / 2, screen.y + fontSize / 2 + 3,
             ]);
           }
+          this.basemapLabelBoxes = boxes;
         } catch {
           // A basemap may be mid-style-reload; event labels are recomputed on
           // the next style/data render without blocking the map.
         }
+        this.performanceMonitor.record('label-layout', performance.now() - labelStarted);
       }
+      occupiedScreenBoxes.push(...(this.basemapLabelBoxes || []));
       this.pointLayers = this.performanceMonitor.measure(
         'js-build',
         () => createWorldEventPointLayers(
@@ -943,7 +998,7 @@ export class DeckMapRenderer implements MapRenderer {
     const seededInteractionLayers = aviationDynamicLayerList.filter((layer) => (
       layer.id.startsWith('aviation-seeded-hover-') || layer.id.startsWith('aviation-seeded-selected-')
     ));
-    const aviationCountLabels = aviationDynamicLayerList.filter((layer) => layer.id.endsWith('-counts'));
+    const aviationCountLabels = this.mapFontsReady ? aviationDynamicLayerList.filter((layer) => layer.id.endsWith('-counts')) : [];
     const pulseLayers = this.reducedMotion
       ? []
       : createEventPulseLayers({
@@ -971,11 +1026,13 @@ export class DeckMapRenderer implements MapRenderer {
       ...(aviationSections?.hubLayers || []),
       ...(aviationSections?.aircraftLayers || []),
     ];
-    const staticLabelLayers = [
+    // Do not initialize deck's font atlas with a temporary browser fallback:
+    // its atlas cache would otherwise survive the later font download.
+    const staticLabelLayers = (this.mapFontsReady ? [
       ...this.createFallbackCountryLabelLayers(),
       ...pointLabels,
       ...(aviationSections?.labelLayers || []),
-    ].filter((layer): layer is Layer => Boolean(layer) && !Array.isArray(layer))
+    ] : []).filter((layer): layer is Layer => Boolean(layer) && !Array.isArray(layer))
       .filter((layer) => this.acceptLayerVersion(layer));
     const aviationMotionLayers = [
       ...routeRunnerLayers,
@@ -1077,6 +1134,7 @@ export class DeckMapRenderer implements MapRenderer {
     // request and persist the constructor's provisional camera.
     if (this.state?.fitWorld && !this.fittingWorld) return;
     this.fittingWorld = false;
+    this.basemapLabelBoxes = null;
     this.emitViewport();
     const zoomChanged = Math.abs(map.getZoom() - (this.state?.zoom ?? map.getZoom())) > 0.001;
     this.mapDragging = false;
@@ -1274,6 +1332,8 @@ export class DeckMapRenderer implements MapRenderer {
   };
 
   private handleStyleLoad = () => {
+    this.basemapLabelBoxes = null;
+    this.geometryCache.clear();
     if (!this.map || this.destroyed) return;
     // Providers choose their own source IDs (PMTiles uses basemap, whereas
     // OpenFreeMap/CARTO do not). Capture the base style before adding optional
@@ -1292,6 +1352,7 @@ export class DeckMapRenderer implements MapRenderer {
   };
 
   private handleSourceData = (event: MapSourceDataEvent) => {
+    if (this.primarySourceIds.has(event.sourceId) && event.sourceDataType === 'content') this.basemapLabelBoxes = null;
     if (!this.fallbackApplied && this.primarySourceIds.has(event.sourceId)) {
       if (event.sourceDataType === 'metadata') this.primaryMetadataReady = true;
       // MapLibre considers an errored tile "loaded" too. Metadata/load/idle
@@ -1316,6 +1377,7 @@ export class DeckMapRenderer implements MapRenderer {
   };
 
   private handleBasemapIdle = () => {
+    if (this.basemapLabelBoxes == null && !this.paused && !this.interacting) this.requestRender({ points: true });
     // Country GeoJSON may arrive after the pointer stops moving. Re-query
     // once the newly loaded style/source has actually painted.
     if (this.countryPointer && !this.paused && !this.interacting) this.countryHoverQueryController?.queue(this.countryPointer);
@@ -1630,14 +1692,26 @@ export class DeckMapRenderer implements MapRenderer {
     }, 30_000 * (this.missingTileAttempts + 1));
   }
 
-  private handleMapError = (event: { sourceId?: string; tile?: { tileID?: {canonical?: {x: number; y: number; z: number}} }; error?: { message?: string }; message?: string }) => {
+  private handleMapError = (event: { sourceId?: string; tile?: { tileID?: {canonical?: {x: number; y: number; z: number}} }; error?: { message?: string; status?: number; headers?: Headers }; message?: string }) => {
     const message = event.error?.message || event.message || 'Unknown MapLibre error';
     if (event.sourceId?.startsWith('weather-radar') || /rainviewer/i.test(message)) {
       if (this.radarPending) { this.removeRadarBank(this.radarPending.bank); this.radarPending = null; }
+      this.radarFailed = true;
       this.callbacks?.onRadarStateChange?.('error');
-      if (this.radarRetryTimer == null && this.radarRetryCount < 2) {
-        this.radarRetryCount++;
-        this.radarRetryTimer = window.setTimeout(() => { this.radarRetryTimer = null; this.applyRadar(); }, 30_000 * this.radarRetryCount);
+      const status = event.error?.status || 0;
+      // MapLibre currently omits response headers from AJAXError. When absent,
+      // rate limits use a conservative five-minute floor, never a fast retry.
+      const header = event.error?.headers?.get('Retry-After');
+      const advised = header ? (Number.isFinite(Number(header)) ? Number(header) * 1000 : Date.parse(header) - Date.now()) : 0;
+      if ([401, 403, 429].includes(status)) {
+        this.radarBlockedUntil = Date.now() + Math.max(300_000, advised || 0);
+        if (this.radarRetryTimer != null) window.clearTimeout(this.radarRetryTimer);
+        this.radarRetryTimer = null;
+      }
+      if ([401, 403].includes(status)) return;
+      if (this.radarRetryTimer == null && this.radarRetryCount < 3 && !this.paused && this.radarFrame) {
+        const delay = Math.max([5_000, 15_000, 45_000][this.radarRetryCount++]!, advised || 0, this.radarBlockedUntil - Date.now());
+        this.radarRetryTimer = window.setTimeout(() => { this.radarRetryTimer = null; this.applyRadar(); }, delay);
       }
       return;
     }
@@ -1685,6 +1759,7 @@ export class DeckMapRenderer implements MapRenderer {
     // Context loss really releases GPU layers, unlike a visibility pause.
     // Drop every cached instance so the recovery commit cannot reinsert it.
     this.geometryLayers = [];
+    this.geometryCache.clear();
     this.pointLayers = null;
     this.aviationLayerSections = null;
     this.emitBasemapState('initializing');
@@ -1806,6 +1881,7 @@ export class DeckMapRenderer implements MapRenderer {
     }
     if (this.quarantinedLayerIds.has(layerId)) return;
     this.quarantinedLayerIds.add(layerId);
+    this.geometryCache.clear();
     this.quarantinedLayerData.set(layerId, this.layerInputFingerprint(layer!));
     this.callbacks?.onLayerDegraded?.(layerId, error);
     this.callbacks?.onError(new Error(`Map layer ${layerId} was isolated after a render error: ${error.message}`));
@@ -1897,11 +1973,7 @@ export class DeckMapRenderer implements MapRenderer {
   }
 
   private hasAnimatedAviation() {
-    const airRoutesActive = this.state?.activeLayerIds.includes('air-routes') === true;
-    return airRoutesActive && this.events.some((event) => (
-      event.category === 'infrastructure'
-      && (event.properties.mapEntity === 'air-route' || event.properties.mapEntity === 'air-flight')
-    ));
+    return this.state?.activeLayerIds.includes('air-routes') === true && this.aviationMotionAvailable;
   }
 
   private hasAnimation() {
@@ -1933,7 +2005,12 @@ export class DeckMapRenderer implements MapRenderer {
       this.animationTime = advanceAnimationTime(this.animationTime, this.pendingAnimationDeltaMs);
       this.pendingAnimationDeltaMs = 0;
       this.hazardPulseTime = Date.now();
-      this.requestRender({ dynamic: this.hasAnimatedAviation(), pulse: true });
+      const pulseActive = hasAnimatedHazardPulse(this.pulseEvents,
+        this.state?.selectedEventId || null, this.eventFirstSeenAt, this.hazardPulseTime, this.state?.zoom ?? 0);
+      // Submit one final empty pulse layer when a pulse expires, then leave the
+      // static map alone while aircraft continue moving on their own canvas.
+      this.requestRender({ dynamic: this.hasAnimatedAviation(), pulse: pulseActive || this.pulseWasActive });
+      this.pulseWasActive = pulseActive;
     } else {
       this.pendingAnimationDeltaMs = Math.min(this.pendingAnimationDeltaMs, 160);
     }

@@ -1,10 +1,12 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DeckMapRenderer } from './DeckMapRenderer';
 import * as basemap from '@/config/weatherBasemap';
 import { SvgMapRenderer } from './SvgMapRenderer';
 import type { MapRendererCallbacks } from './MapRenderer';
 import { defaultWorldEventMapState } from '../state/mapState';
 import type { GeoEvent } from '../domain/types';
+
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 function callbacks(): MapRendererCallbacks {
   return {
@@ -517,6 +519,7 @@ describe('renderer hover lifecycle', () => {
       destroy: () => void;
     };
     renderer.overlay = { setProps };
+    (renderer as any).mapFontsReady = true;
     renderer.state = {
       ...defaultWorldEventMapState(),
       activeLayerIds: ['earthquakes-volcanoes'],
@@ -580,6 +583,7 @@ it('V3 layer fuse rejects the SAME toxic data but accepts a fresh corrected vers
 });
 
 it('V3 radar commits only a complete visible frame and retains the previous frame on error',()=>{
+  vi.useFakeTimers();
   const renderer=new DeckMapRenderer() as any;renderer.callbacks=callbacks();renderer.callbacks.onRadarStateChange=vi.fn();
   let loaded=false;const layers=new Set<string>(),sources=new Set<string>();
   renderer.map={isStyleLoaded:()=>true,getStyle:()=>({layers:[]}),getLayer:(id:string)=>layers.has(id),getSource:(id:string)=>sources.has(id),
@@ -590,7 +594,7 @@ it('V3 radar commits only a complete visible frame and retains the previous fram
   loaded=false;renderer.setRadar({time:200,tiles:'second',coverageTiles:'coverage'});renderer.commitRadarIfReady();expect(renderer.radarAppliedUrl).toBe('first');
   vi.stubGlobal('window',globalThis);renderer.handleMapError({sourceId:'weather-radar-next',message:'503'});
   expect(renderer.radarAppliedUrl).toBe('first');expect(renderer.radarPending).toBeNull();
-  renderer.applyRadar();loaded=true;renderer.commitRadarIfReady();expect(renderer.radarAppliedUrl).toBe('second');
+  vi.advanceTimersByTime(5000);loaded=true;renderer.commitRadarIfReady();expect(renderer.radarAppliedUrl).toBe('second');
   renderer.map=null;renderer.destroy();vi.unstubAllGlobals();
 });
 

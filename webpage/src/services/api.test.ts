@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiTimeoutError, fetchAllActiveMarkets, fetchAviationViewport, fetchMarketWideAiSnapshot, fetchNaturalHazardMapSource, fetchRuntimeGlobalTemperatureMonitor, fetchSystemHealth, fetchWorkspaceBundle } from './api';
+import { ApiTimeoutError, withRuntimeRequestBudget, fetchAllActiveMarkets, fetchAviationViewport, fetchMarketWideAiSnapshot, fetchNaturalHazardMapSource, fetchRuntimeGlobalTemperatureMonitor, fetchSystemHealth, fetchWorkspaceBundle } from './api';
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
@@ -92,7 +92,38 @@ describe('HTTP lifecycle', () => {
     const controller = new AbortController();
     const request = fetchWorkspaceBundle(1, { includeContent: true, includeLob: true, signal: controller.signal });
     controller.abort(); await request;
-    expect(signals).toHaveLength(3);
+    // The queued Runtime book request is cancelled before admission.
+    expect(signals).toHaveLength(2);
     expect(signals.every((signal) => signal.aborted)).toBe(true);
+  });
+});
+
+
+describe('shared Runtime admission', () => {
+  it('bounds independent sources, prioritizes queued map demand, and cancels before work starts', async () => {
+    const started: string[] = [], releases: (() => void)[] = [];
+    const held = (id: string) => () => new Promise<void>(resolve => { started.push(id); releases.push(resolve); });
+    const active = [0, 1, 2].map(i => withRuntimeRequestBudget(held(String(i))));
+    await new Promise(resolve => setTimeout(resolve, 10));
+    expect(started).toEqual(['0', '1', '2']);
+    const abort = new AbortController();
+    const cancelled = withRuntimeRequestBudget(held('cancelled'), abort.signal, 0);
+    const rejection = expect(cancelled).rejects.toMatchObject({name:'AbortError'});
+    abort.abort(); await rejection;
+    const background = withRuntimeRequestBudget(async () => { started.push('background'); }, undefined, 2);
+    const map = withRuntimeRequestBudget(async () => { started.push('map'); }, undefined, 0);
+    expect(started).toHaveLength(3);
+    releases.shift()!();
+    await map; await background;
+    expect(started).toEqual(['0','1','2','map','background']);
+    releases.forEach(release=>release()); await Promise.all(active);
+  });
+  it('uses the small-screen budget without coupling source cancellation', async () => {
+    vi.stubGlobal('matchMedia', () => ({matches:true}));
+    let active=0, peak=0;
+    await Promise.all(Array.from({length:5},()=>withRuntimeRequestBudget(async()=>{
+      peak=Math.max(peak,++active); await new Promise(resolve=>setTimeout(resolve,5)); active--;
+    })));
+    expect(peak).toBe(2);
   });
 });
