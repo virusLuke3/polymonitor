@@ -2,8 +2,9 @@
 .wm-alpha-signal-panel button { font: inherit; color: var(--accent, #70d9f5); background: #152028; border: 1px solid #425a69; padding: 6px 10px; cursor: pointer; }
 .wm-alpha-signal-panel button:disabled { opacity: .55; cursor: wait; }
 .wm-alpha-signal-panel button:focus-visible { outline: 2px solid #70d9f5; outline-offset: 2px; }
-.wm-alpha-signal-panel .wm-alpha-help, .wm-alpha-signal-panel .wm-alpha-clock { color: #a7b2b5; font-size: 11px; line-height: 1.5; }
-.wm-alpha-signal-panel .wm-alpha-clock span { display: block; }
+.wm-alpha-signal-panel .wm-alpha-help, .wm-alpha-signal-panel .wm-alpha-clock { color: #a7b2b5; font-size: 11px; line-height: 1.4; margin: 4px 0; }
+.wm-alpha-signal-panel .wm-alpha-clock { display: flex; flex-wrap: wrap; gap: 2px 8px; }
+.wm-alpha-signal-panel .wm-alpha-clock span { white-space: nowrap; }
 .wm-alpha-signal-panel .wm-alpha-card { border: 1px solid #283a40; border-left: 3px solid #39d982; padding: 10px; margin: 10px 0; background: #111b1d; overflow-wrap: anywhere; }
 .wm-alpha-signal-panel .wm-alpha-card.is-sell { border-left-color: #f07179; }
 .wm-alpha-signal-panel .wm-alpha-card-heading { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; color: #70d9f5; font-size: 11px; }

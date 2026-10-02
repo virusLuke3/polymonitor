@@ -6,10 +6,11 @@ test.use({ baseURL: `http://127.0.0.1:${process.env.POLYMONITOR_E2E_PORT || 4174
 test('Alpha uses its resource to apply scheduled updates, retain failures and separate pending labels', async ({ page }) => {
   await installDashboard(page);
   await page.clock.install({ time: new Date(GENERATED_AT) });
-  let version = 1, fail = false, requests = 0;
+  let version = 1, fail = false, verificationFailed = false, requests = 0;
   await page.route('**/wm-api/runtime/signals/alpha?*', route => {
     requests++;
     if (fail) return route.fulfill({ status: 503, json: { error: 'Fixture outage' } });
+    if (verificationFailed) return route.fulfill({ json: { policyVersion: 'token-flow-v1', scope: 'global', status: 'degraded', generatedAt: GENERATED_AT, windowMinutes: 15, baselineMinutes: 60, items: [], candidates: [], error: 'Ownership check unavailable', coverage: { candidateCount: 2, verifiedCount: 0, rejectedCount: 2, rejectionReasons: {} } } });
     const item = { id: `alpha-${version}`, marketId: 1, tokenId: 'token-a', marketTitle: `Verified flow ${version}`, side: 'BUY', logicalOutcome: 'YES', sourceOutcomeLabel: 'Yes', price: '.62', outcomeSemanticsValid: true, outcomeSemanticsCapabilities: { supportsYesNoWording: true }, metrics: { totalNotional: 15000, netFlowNotional: 14000, netDirectionStrength: .875, marketShare: .3, uniqueTraderCount: 6, tradeCount: 12, score: 88 } };
     return route.fulfill({ json: { policyVersion: 'token-flow-v1', scope: 'global', status: 'partial', generatedAt: GENERATED_AT, windowMinutes: 15, baselineMinutes: 60, items: [item], candidates: [{ ...item, id: 'pending', marketTitle: 'Pending flow', qualification: 'labels-unavailable', marketIdentityVerified: true, outcomeSemanticsValid: false }], coverage: { candidateCount: 2, verifiedCount: 1, rejectedCount: 1, rejectionReasons: { projection_missing: 1 } } } });
   });
@@ -17,6 +18,12 @@ test('Alpha uses its resource to apply scheduled updates, retain failures and se
   await page.waitForFunction(() => window.panelHarness);
   await page.evaluate(() => window.panelHarness.mount('alpha-signal', {}, {}));
   await expect(page.locator('.wm-alpha-card')).toHaveCount(2);
+  const panel = page.locator('.wm-alpha-signal-panel');
+  await panel.evaluate(element => { element.style.height = '270px'; element.style.display = 'flex'; element.style.flexDirection = 'column'; });
+  await panel.locator('.wm-panel-body').evaluate(element => { element.style.minHeight = '0'; element.style.overflowY = 'auto'; });
+  const bounds = await panel.locator('.wm-panel-body').boundingBox();
+  const title = await panel.getByRole('button', { name: 'Verified flow 1' }).boundingBox();
+  expect(title!.y + title!.height).toBeLessThan(bounds!.y + bounds!.height);
   await expect(page.getByRole('button', { name: 'Verified flow 1' })).toBeVisible();
   await expect(page.locator('.wm-alpha-card.is-pending')).not.toContainText('88/100');
   await expect(page.locator('.wm-alpha-card.is-pending')).not.toContainText('Buy Yes');
@@ -29,5 +36,11 @@ test('Alpha uses its resource to apply scheduled updates, retain failures and se
   await page.clock.runFor(31_000);
   await expect(page.getByRole('button', { name: 'Verified flow 2' })).toBeVisible();
   await expect(page.getByText('Alpha data cannot currently be verified.', { exact: false })).toBeVisible();
+  fail = false; verificationFailed = true;
+  const beforeVerification = requests;
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect.poll(() => requests).toBeGreaterThan(beforeVerification);
+  await expect(page.getByRole('button', { name: 'Verified flow 2' })).toBeVisible();
+  await expect(page.getByText('Ownership check unavailable', { exact: false })).toBeVisible();
   expect(await page.evaluate(() => Boolean(localStorage.getItem('polymonitor:panel-resource:alpha-signal:global:token-flow-v1:8')))).toBe(true);
 });
