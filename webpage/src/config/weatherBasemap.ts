@@ -225,28 +225,9 @@ export function getWeatherMapFallbackStyle(theme: WeatherMapTheme = 'dark') {
           'line-width': ['interpolate', ['linear'], ['zoom'], 0, 0.45, 4, 0.9, 7, 1.4],
         },
       },
-      {
-        id: 'wm-local-country-labels',
-        type: 'symbol',
-        source: 'wm-weather-country-boundaries',
-        layout: {
-          'text-field': ['coalesce', ['get', 'name:en'], ['get', 'name']],
-          'text-font': mapBasemapFonts('en'),
-          'text-size': ['interpolate', ['linear'], ['zoom'], 0, 13, 3, 15, 5, 17],
-          'text-padding': 8,
-          'text-max-width': 8,
-          'text-letter-spacing': 0.035,
-          'text-allow-overlap': false,
-          'text-ignore-placement': false,
-        },
-        paint: {
-          'text-color': light ? '#4a5459' : '#aeb7ba',
-          'text-halo-color': light ? '#eef3f4' : '#333333',
-          'text-halo-width': 1.25,
-          'text-halo-blur': 0.15,
-          'text-opacity': 0.94,
-        },
-      },
+      // Country labels are drawn once at their verified geometry anchors by
+      // DeckMapRenderer. Polygon symbol placement repeats names on each
+      // clipped GeoJSON tile at city zooms, so it must not label this source.
     ],
   } satisfies StyleSpecification;
 }

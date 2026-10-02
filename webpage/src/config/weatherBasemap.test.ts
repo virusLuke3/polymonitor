@@ -52,22 +52,13 @@ describe('World Event Map vector basemap', () => {
       .toBe('https://maps.example.test/planet.pmtiles');
   });
 
-  it('keeps readable country labels in the local GeoJSON fallback', () => {
-    const style = getWeatherMapFallbackStyle('dark');
-    const labels = style.layers.find((layer) => layer.id === 'wm-local-country-labels');
-    expect(style).not.toHaveProperty('glyphs');
-    expect(labels).toMatchObject({
-      type: 'symbol',
-      source: 'wm-weather-country-boundaries',
-      layout: {
-        'text-size': ['interpolate', ['linear'], ['zoom'], 0, 13, 3, 15, 5, 17],
-      },
-      paint: {
-        'text-color': '#aeb7ba',
-        'text-halo-width': 1.25,
-        'text-opacity': 0.94,
-      },
-    });
+  it('leaves fallback labels to the anchored renderer instead of labelling every polygon tile', () => {
+    for (const theme of ['dark', 'positron'] as const) {
+      const style = getWeatherMapFallbackStyle(theme);
+      expect(style).not.toHaveProperty('glyphs');
+      expect(style.layers.map(layer => layer.type)).toEqual(['background', 'fill', 'line']);
+      expect(style.sources['wm-weather-country-boundaries'].data).toBe('/map-data/world-countries.geojson');
+    }
   });
 
   it('uses the zero-config OpenFreeMap style outside the production PMTiles build', async () => {

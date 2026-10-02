@@ -243,19 +243,22 @@ test('slow vector tiles keep their loaded index and paint before the bounded gra
   }finally{release();await page.goto('about:blank');await page.unrouteAll({behavior:'ignoreErrors'});await assets.dispose();}
 });
 
-test('failed PMTiles recovers from local geometry to the primary without losing camera or events',async({page})=>{
+for (const scene of [
+  {name:'world', camera:'center=0,20&zoom=1.5'},
+  {name:'city', camera:'center=-0.1257,51.5085&zoom=12'},
+]) test(`failed PMTiles recovers at ${scene.name} zoom without losing camera or events`,async({page})=>{
   test.skip(phase==='before');test.setTimeout(120_000);mkdirSync(root,{recursive:true});
   await page.setViewportSize({width:1536,height:1000});await page.clock.setFixedTime(new Date(GENERATED_AT));
   await installFixtures(page);const assets=await installRealMapAssets(page);let blocked=true;
   await page.route('**/map-tiles/**',async route=>{if(blocked)await route.fulfill({status:503,body:'Controlled PMTiles fault'});else await route.fallback();});
   try{
-    await gotoMapScene(page, '/?view=2d&mapPerf=1&basemap=pmtiles&center=0,20&zoom=1.5&time=all&layers=earthquakes-volcanoes');
+    await gotoMapScene(page, `/?view=2d&mapPerf=1&basemap=pmtiles&${scene.camera}&time=all&layers=earthquakes-volcanoes`);
     const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-basemap-state','local-fallback-ready',{timeout:30_000});
-    const camera=new URL(page.url()).searchParams.get('center');const records=await page.locator('.wm-world-event-list-toggle strong').innerText();await host.screenshot({path:resolve(root,'range-local-fallback.png')});
+    const camera=new URL(page.url()).searchParams.get('center');const records=await page.locator('.wm-world-event-list-toggle strong').innerText();await host.screenshot({path:resolve(root,`range-local-fallback-${scene.name}.png`)});
     blocked=false;await expect(host).toHaveAttribute('data-map-basemap-state','primary-ready',{timeout:50_000});
     expect(new URL(page.url()).searchParams.get('center')).toBe(camera);await expect(page.locator('.wm-world-event-list-toggle strong')).toHaveText(records);
-    await host.screenshot({path:resolve(root,'range-recovered.png')});
-    writeFileSync(resolve(root,'range-cycle.json'),JSON.stringify({fault:'503',fallback:'local-fallback-ready',recovered:'primary-ready',camera,records}));
+    await host.screenshot({path:resolve(root,`range-recovered-${scene.name}.png`)});
+    writeFileSync(resolve(root,`range-cycle-${scene.name}.json`),JSON.stringify({fault:'503',fallback:'local-fallback-ready',recovered:'primary-ready',camera,records}));
   }finally{await page.goto('about:blank');await page.unrouteAll({behavior:'ignoreErrors'});await assets.dispose();}
 });
 
