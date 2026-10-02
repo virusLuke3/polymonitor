@@ -79,6 +79,24 @@ def test_whale_candidates_are_oversampled_once():
     assert query.call_args.kwargs['limit'] == 28
 
 
+def test_flow_reports_the_actual_reader_cap_and_limited_coverage():
+    context = ctx(); context['get_cached_json'] = lambda *args: seed()
+    context['get_recent_oracle_events'] = lambda **kw: [{'marketId': 7, 'eventTime': '2026-10-02T08:59:00Z'}]
+    context['get_recent_trades'] = Mock(return_value=[fill() for _ in range(200)])
+    with patch.object(flow.outcome_semantics_service, 'annotate_raw_trade_rows', side_effect=lambda c, rows: rows):
+        data = flow.fetch_live_suspicious_trades_payload(context)
+    context['get_recent_trades'].assert_called_once_with(limit=200)
+    assert data['coverage']['sampleLimit'] == 200 and data['coverage']['limited'] is True
+
+
+def test_flow_snapshot_generation_cannot_precede_its_consumed_source_snapshot():
+    context = ctx()
+    context['utc_now_iso'] = Mock(side_effect=[NOW, '2026-10-02T09:00:03Z', '2026-10-02T09:00:04Z'])
+    context['get_cached_json'] = lambda *args: seed(generatedAt='2026-10-02T09:00:02Z')
+    data = flow.fetch_live_suspicious_trades_payload(context)
+    assert data['generatedAt'] > data['sourceStates']['largeTrades']['observedAt']
+
+
 class TradeWatcherDiagnosticsTest(unittest.TestCase):
     make_watcher = seed_helpers.SignalsSeedWatcherTestCase.make_watcher
     def test_failed_refresh_preserves_success_time_and_exposes_attempt_and_safe_diagnostics(self):

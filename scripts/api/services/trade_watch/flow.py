@@ -8,6 +8,8 @@ from typing import Any, Dict
 from .. import outcome_semantics_service
 from .common import SCHEMA_VERSION, _format_trade_item, parse_time, recent_large_trades
 
+RECENT_TRADE_SAMPLE_LIMIT = 200  # Canonical recent-trades reader's actual cap.
+
 
 def fetch_live_suspicious_trades_payload(ctx: dict, limit: int = 12) -> Dict[str, Any]:
     generated_at = ctx["utc_now_iso"]()
@@ -39,7 +41,7 @@ def fetch_live_suspicious_trades_payload(ctx: dict, limit: int = 12) -> Dict[str
     candidate_count = 0
     if events:
         try:
-            trades = ctx["get_recent_trades"](limit=max(200, limit*30))
+            trades = ctx["get_recent_trades"](limit=RECENT_TRADE_SAMPLE_LIMIT)
             if not isinstance(trades, list):
                 raise ValueError("Trade source returned no assessment")
             candidate_count = len(trades)
@@ -99,11 +101,11 @@ def fetch_live_suspicious_trades_payload(ctx: dict, limit: int = 12) -> Dict[str
 
     failures = any(state["status"] == "error" for state in states.values())
     return {"schemaVersion": SCHEMA_VERSION, "kind": "flow-watch", "items": items,
-            "generatedAt": generated_at, "source": "Canonical OrderFilled and Oracle events",
+            "generatedAt": ctx["utc_now_iso"](), "source": "Canonical OrderFilled and Oracle events",
             "sourceMode": "mixed" if linked and large_count else "oracle-linked" if linked else "large-trades",
             "status": "partial" if failures and items else "degraded" if failures else "ok" if items else "empty",
             "cacheMode": "live-build", "sourceStates": states, "error": " ".join(errors) or None,
             "coverage": {"oracleLinkedCount": min(len(linked), limit), "largeTradeCount": large_count,
                          "candidateTradeCount": candidate_count, "recentOracleEventCount": len(events),
-                         "sampleLimit": max(200, limit*30), "limited": candidate_count >= max(200, limit*30),
+                         "sampleLimit": RECENT_TRADE_SAMPLE_LIMIT, "limited": candidate_count >= RECENT_TRADE_SAMPLE_LIMIT,
                          "labelVerifiedCount": sum(item.get("outcomeSemanticsValid") is True for item in items)}}
