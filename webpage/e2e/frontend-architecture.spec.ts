@@ -150,6 +150,9 @@ for (const width of [1440, 390]) {
     await expect(page.locator('.wm-event-inspector')).toBeVisible();
     // Focus must settle without scrolling the page or the clipped map canvas.
     await expect(page.locator('#wm-event-inspector-title')).toBeFocused();
+    // The clicked list row disappears; park the pointer so the revealed layer
+    // checkbox does not acquire an incidental hover in this report scene.
+    await page.mouse.move(0, 0);
     await visual(page, `map-selected-${width}.png`);
     await page.getByRole('button', { name: 'Close event details' }).click();
     // Returning from a report now restores the retained reading list. Close
