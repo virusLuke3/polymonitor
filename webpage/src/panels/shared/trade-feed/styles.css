@@ -30,4 +30,8 @@
     height: 380px;
     min-height: 380px;
   }
+  .wm-dashboard .wm-panels-grid > .wm-panel-slot[data-workspace-panel-id='whale-tracker']:last-child,
+  .wm-dashboard .wm-panels-grid > .wm-panel-slot[data-workspace-panel-id='suspicious-flow']:last-child {
+    margin-bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+  }
 }
