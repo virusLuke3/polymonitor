@@ -34,13 +34,14 @@ def _age(snapshot, now):
 def _cached(cache, now):
     store = cache.get("store")
     get_json = cache.get("get_json")
-    # The durable local seed is the latency bound. Optional Redis must not sit
-    # in front of a fresh local hit on every HTTP request.
+    # The durable local seed is the latency bound, including explicitly stale
+    # recovery. Optional Redis is needed only when the local seed is unusable.
     if store:
         try:
             local = store.get_stale(NAMESPACE, CACHE_KEY)
-            if _age(local, now) < TTL_SECONDS:
-                return local, "sqlite"
+            age = _age(local, now)
+            if age <= MAX_STALE_SECONDS:
+                return local, "sqlite" if age < TTL_SECONDS else "sqlite-stale"
         except Exception:
             pass
     try:
@@ -49,14 +50,6 @@ def _cached(cache, now):
             return value, "redis"
     except Exception:
         pass  # Optional cache failure cannot make verified content unavailable.
-    if store:
-        try:
-            value = store.get_stale(NAMESPACE, CACHE_KEY)
-            age = _age(value, now)
-            if age <= MAX_STALE_SECONDS:
-                return value, "sqlite" if age < TTL_SECONDS else "sqlite-stale"
-        except Exception:
-            pass
     return None, None
 
 

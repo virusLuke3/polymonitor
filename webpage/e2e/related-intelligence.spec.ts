@@ -270,7 +270,7 @@ test('legacy empty outage retries automatically and check time advances even wit
 test('reopened panel shows a saved snapshot during an outage and stops showing it at its age limit', async ({ page }) => {
   await installDashboard(page);
   await page.clock.install();
-  const generatedAt = await page.evaluate(() => new Date().toISOString());
+  let generatedAt = await page.evaluate(() => new Date().toISOString());
   let fail = false;
   await page.route('**/wm-api/content/**', route => fail
     ? route.fulfill({ status: 503, json: { error: 'Fixture unavailable' } })
@@ -283,9 +283,20 @@ test('reopened panel shows a saved snapshot during an outage and stops showing i
   await expect(page.getByText('Content service unavailable.', { exact: false })).toBeVisible();
   await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
   await page.clock.fastForward(300_001);
+  await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
+  await expect(page.locator('[data-intel-updated-at]')).toHaveAttribute('datetime', generatedAt);
+  // Remount exercises persisted recovery after the fresh lifetime has passed.
+  await mount(page);
+  await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
+  await page.clock.fastForward(1_500_001);
   await expect(page.locator('.wm-free-intel-card')).toHaveCount(0);
   await expect(page.getByText('Content service unavailable.', { exact: false })).toBeVisible();
   await expect(page.getByText('No content meeting this market', { exact: false })).toHaveCount(0);
+  fail = false;
+  generatedAt = await page.evaluate(() => new Date().toISOString());
+  await page.getByRole('button', { name: 'Retry', exact: true }).click();
+  await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
+  await expect(page.getByText('Content service unavailable.', { exact: false })).toHaveCount(0);
 });
 
 test('page hiding pauses checks and returning resumes without losing readable content', async ({ page }) => {
@@ -418,7 +429,7 @@ test('one malformed card is isolated and a complete page rollover never leaves a
   await expect(page.getByRole('button', { name: 'New content available', exact: false })).toHaveCount(0);
 });
 
-test('partial responses can display without replacing a complete recovery snapshot', async ({ page }) => {
+test('a freshly verified partial response replaces the older complete recovery snapshot', async ({ page }) => {
   await installDashboard(page);
   let partial = false;
   await page.route('**/wm-api/content/**', route => route.fulfill({ json: {
@@ -432,5 +443,6 @@ test('partial responses can display without replacing a complete recovery snapsh
   await expect(page.locator('.wm-free-intel-card')).toHaveCount(1);
   await expect(page.locator('.wm-free-intel-card')).toContainText('Fixture partial');
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('polymonitor:panel-resource:related-news:global:all:7')!).value);
-  expect(saved.items.map((value: {id: string}) => value.id)).toEqual(['complete-1', 'complete-2']);
+  expect(saved.items.map((value: {id: string}) => value.id)).toEqual(['partial']);
+  expect(saved.status).toBe('partial');
 });

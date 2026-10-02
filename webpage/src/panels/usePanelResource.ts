@@ -22,13 +22,18 @@ const ResourceOwner = createContext<Owner | null>(null);
 export const PanelResourceVisibility = createContext(true);
 export const PanelResourceView = createContext<string | null>(null);
 
+function resourceStatus<T>(contract: PanelResource<T>, value: T | null, status: PanelRuntimeStatus): PanelRuntimeStatus {
+  return value != null && !resourceIsCurrent(contract.updatedAt(value), contract.maxAgeMs)
+    ? { ...status, phase: 'stale' } : status;
+}
+
 /** Workspace status/retry use the actual resource owner, without domain knowledge. */
 export function usePanelResourceBinding(panelId: string) {
   const owner = useContext(ResourceOwner);
   const consumer = owner && [...owner.consumers.values()].reverse().find(value => value.panelId === panelId);
   if (!owner || !consumer) return null;
-  const status = owner.runtime.getStatus(consumer.contract.key);
   const value = owner.runtime.getData(consumer.contract.key);
+  const status = resourceStatus(consumer.contract, value ?? null, owner.runtime.getStatus(consumer.contract.key));
   return { status: { ...status, label: value == null ? undefined : consumer.contract.statusLabel?.(value, status) },
     refresh: () => owner.runtime.refreshIds([consumer.contract.key], { reason: 'manual', force: true }) };
 }
@@ -94,7 +99,7 @@ export function usePanelResource<T>(contract: PanelResource<T>, active?: boolean
   if (!owner) throw new Error('Panel resources require PanelResourceProvider');
   // Complete keys describe immutable request meaning. Fresh object literals in
   // a consumer render must not repeatedly register/cancel the same request.
-  const declaration = useMemo(() => contract, [contract.key, contract.maxAgeMs, contract.cache?.version,
+  const declaration = useMemo(() => contract, [contract.key, contract.maxAgeMs, contract.staleAgeMs, contract.cache?.version,
     contract.refreshPolicy.tier, contract.refreshPolicy.intervalMs, contract.refreshPolicy.staleAfterMs,
     contract.refreshPolicy.retry?.attempts, contract.refreshPolicy.retry?.baseDelayMs, contract.refreshPolicy.retry?.maxDelayMs]);
   const seed = useMemo(() => {
@@ -109,17 +114,19 @@ export function usePanelResource<T>(contract: PanelResource<T>, active?: boolean
   }, [owner.register, declaration, seed, panelId]);
   useLayoutEffect(() => subscription.current?.setActive(enabled), [enabled]);
   const runtime = owner.runtime;
-  const status = runtime.getStatus(contract.key);
   const latest = (runtime.getData(contract.key) ?? seed) as T | null;
+  const status = resourceStatus(contract, latest, runtime.getStatus(contract.key));
   const timestamp = latest == null ? null : contract.updatedAt(latest);
   const [, tick] = useState(0);
-  const expired = latest != null && timestamp != null && !resourceIsCurrent(timestamp, contract.maxAgeMs);
+  const retentionMs = Math.max(contract.maxAgeMs, contract.staleAgeMs ?? contract.maxAgeMs);
+  const stale = latest != null && !resourceIsCurrent(timestamp, contract.maxAgeMs);
+  const expired = latest != null && !resourceIsCurrent(timestamp, retentionMs);
   useEffect(() => {
     if (timestamp == null || expired) return;
     const timer = window.setTimeout(() => tick(version => version + 1),
-      Math.min(2_147_483_647, Math.max(1, timestamp + contract.maxAgeMs - Date.now())));
+      Math.min(2_147_483_647, Math.max(1, timestamp + (stale ? retentionMs : contract.maxAgeMs) - Date.now())));
     return () => window.clearTimeout(timer);
-  }, [timestamp, contract.maxAgeMs, expired]);
+  }, [timestamp, contract.maxAgeMs, retentionMs, stale, expired]);
   const data = expired ? null : latest ?? null;
   return {
     data, status, expired, suspended: runtime.suspended || !enabled,

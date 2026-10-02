@@ -259,8 +259,11 @@ def due_sources(states, *, probe=False, force=False, selected=None, stamp=None):
     ]
 
 
-def cycle(storage, snapshot_store, *, probe=False, force=False, selected=None, on_result=None):
-    ensure_schema(storage)
+def cycle(storage, snapshot_store, *, probe=False, force=False, selected=None, on_result=None, schema_ready=False):
+    # The watch parent initializes once. A fresh spawned runtime must not repeat
+    # ALTER TABLE every cycle while the parent publishes a concurrent seed.
+    if not schema_ready:
+        ensure_schema(storage)
     states = source_states(storage)
     stamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     pending = due_sources(states, probe=probe, force=force, selected=selected, stamp=stamp)

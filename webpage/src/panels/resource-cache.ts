@@ -4,6 +4,8 @@ export interface ResourceCacheContract<T> {
   parse: (value: unknown) => T;
   updatedAt: (value: T) => number | null;
   maxAgeMs: number;
+  /** Optional bounded recovery age; does not change fresh response acceptance. */
+  staleAgeMs?: number;
   cache?: { version: number };
 }
 
@@ -25,7 +27,7 @@ export function readResourceCache<T>(contract: ResourceCacheContract<T>, storage
     const envelope = JSON.parse(raw);
     if (raw.length > MAX_CHARS || envelope.version !== contract.cache.version) throw new Error('Invalid cache version');
     const value = contract.parse(envelope.value);
-    if (!resourceIsCurrent(contract.updatedAt(value), contract.maxAgeMs, now)) throw new Error('Expired cache');
+    if (!resourceIsCurrent(contract.updatedAt(value), Math.max(contract.maxAgeMs, contract.staleAgeMs ?? contract.maxAgeMs), now)) throw new Error('Expired cache');
     return value;
   } catch {
     try { storage.removeItem(key); } catch { /* Storage is optional. */ }

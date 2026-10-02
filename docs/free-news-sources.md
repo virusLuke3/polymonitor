@@ -157,7 +157,7 @@ NHC feed 的 summary/full advisory 同 URL 只保留更完整的 feed 节选；�
 
 现有 `content_topic_refresh.py` 在采集前、中、后预热最近 30 天、每个 publisher 最多 512 条合格候选的 seed（原始扫描上限 2,048；先过滤再应用候选配额）（`snapshot:content:free-public` / `candidates-v4`），同时保存 `seed-meta:content` / `related-news` 的成功时间、失败原因及来源状态。复用既有 Redis 和 SQLite；有效期 90 秒，超过有效期但年龄不超过 300 秒可显式标记 stale 返回，超过 300 秒必须重新读取数据库。worker 每轮休眠 30–60 秒，完整周期还包含有 90 秒上限的采集耗时；采集中每 30 秒发布 seed。各来源仍按自身调度与退避采集，不新增 collector，不在 API GET 中抓取外部源。
 
-API 优先读新鲜 SQLite seed，再尝试可选 Redis 和较旧 SQLite 快照，冷缓存使用现有跨进程锁合并候选查询。市场/时间范围投影不缓存，每次读取按当前契约、时间窗口、来源许可、警报有效期重新过滤。`generatedAt` 是候选列表核验时间，`lastSuccessfulCheckAt` 是来源最近成功时间；来源超期或失败保留 partial/unavailable，不因缓存命中变成 ready。
+API 优先读新鲜或 300 秒内的有界较旧 SQLite seed，本地无可用快照时才尝试可选 Redis，冷缓存使用现有跨进程锁合并候选查询。市场/时间范围投影不缓存，每次读取按当前契约、时间窗口、来源许可、警报有效期重新过滤。`generatedAt` 是候选列表核验时间，`lastSuccessfulCheckAt` 是来源最近成功时间；来源超期或失败保留 partial/unavailable，不因缓存命中变成 ready。
 
 新条目等待读者点击查看；已显示条目的修订、撤回、过期和来源健康立即生效。显式选择全局后，后台市场更新不改变这个选择；切回市场模式时使用当前市场 ID。浏览器按真实 expiry 到期移除警报。响应身份、卡片结构、日期及公开链接在渲染前校验，局部错误边界隔离渲染异常。专属样式由目录内的 `styles.css` 维护，滚动区域避开工作区缩放手柄的点击范围。来源内容与覆盖面仍受前述限制，合法空结果不回填全局新闻。
 
@@ -165,6 +165,12 @@ Dossier 请求失败保留同市场 unavailable 状态，页面不再将超时�
 
 ## 2026-10-01 架构整改
 
-共享资源、缓存晋升、Retry-After、可见性和阅读状态见 `docs/panel-resource-contract.md`。原 worker 内的采集执行增加 90 秒可终止进程边界；父进程在采集前、中、后发布 seed，慢来源不阻止其余已核验资讯展示。单条来源状态 JSON 错误被隔离。seed-meta 已接入统一健康列表，contentSync 检查实际 seed 年龄和状态。HTTP 的连接/读取超时仍为 6/18 秒上限，且与许可补取共用 45 秒源预算。当前查询优先读取本地新鲜 SQLite seed，再降级 Redis/数据库；保留 90 秒新鲜、300 秒有界回放。
+共享资源、缓存晋升、Retry-After、可见性和阅读状态见 `docs/panel-resource-contract.md`。原 worker 内的采集执行增加 90 秒可终止进程边界；父进程在采集前、中、后发布 seed，慢来源不阻止其余已核验资讯展示。单条来源状态 JSON 错误被隔离。seed-meta 已接入统一健康列表，contentSync 检查实际 seed 年龄和状态。HTTP 的连接/读取超时仍为 6/18 秒上限，且与许可补取共用 45 秒源预算。当前查询优先读取本地新鲜或有界较旧 SQLite seed，本地不可用时再降级 Redis/数据库；保留 90 秒新鲜、300 秒有界回放。
 
 RSS 实体检查只检查 XML 标记，不把 CDATA/注释内的 HTML DOCTYPE 当成 XML 声明；真实 DTD/ENTITY 仍拒绝。来源上轮解析或写入失败时，重试不发送旧 ETag/Last-Modified，必须重新验证响应体后才能恢复。
+
+## 2026-10-02 空白恢复修复
+
+浏览器的 5 分钟新鲜响应门槛与 30 分钟最大故障回放期分开：仅此面板 opt-in `staleAgeMs`，较旧内容明确标记 STALE 并保留原始快照时间，30 分钟后移除。警报按原 expiry 移除，不延长许可或条目时间。新鲜有效的 PARTIAL 结果可以更新已有 READY 缓存，避免来源部分失败时缓存永久停留在旧版本。未知数据数量显示 — 而非 0；实际请求错误即使没有列表也可见。
+
+watch 父进程启动时完成 schema 初始化，周期子进程不再重复执行 ALTER TABLE，避免与父进程 seed 查询争夺表锁；独立 collector 默认仍初始化。SQLite 有界回放不先等待 Redis，300 秒上限保持不变。

@@ -12,7 +12,7 @@ export { validScope } from './model';
 export function useIntelResource(marketId: number | null, scope: 'market' | 'global', days: number, active?: boolean) {
   const key = resourceId({ marketId, scope, days });
   const contract = useMemo<PanelResource<IntelSnapshot>>(() => ({
-    key, title: 'Related Intelligence', maxAgeMs: 5 * 60_000, cache: { version: 3 },
+    key, title: 'Related Intelligence', maxAgeMs: 5 * 60_000, staleAgeMs: 30 * 60_000, cache: { version: 3 },
     refreshPolicy: { tier: 'fast', intervalMs: INTEL_REFRESH_MS, staleAfterMs: INTEL_STALE_MS },
     fetch: async context => scope === 'market'
         ? await fetchMarketContent(marketId!, 20, 8000, context?.signal, days)
@@ -27,8 +27,8 @@ export function useIntelResource(marketId: number | null, scope: 'market' | 'glo
     },
     updatedAt: value => value.generatedAt ? Date.parse(value.generatedAt) : null,
     statusLabel: intelStatusLabel,
-    shouldPersist: (next, previous) => !next.content.rejectedItemCount && !next.content.stale
-      && (!previous || next.content.status === 'ready' || previous.content.status !== 'ready'),
+    shouldPersist: next => !next.content.rejectedItemCount && !next.content.stale
+      && next.content.status !== 'unavailable',
   }), [key, marketId, scope, days]);
   return usePanelResource(contract, active);
 }

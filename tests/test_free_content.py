@@ -432,6 +432,7 @@ def test_seed_rechecks_expiry_policy_and_reports_staleness(storage, source, tmp_
     cache = {"store": SnapshotStore(str(tmp_path / "snapshots.db"))}
     seed = refresh_candidates(storage, cache, now=now)
     storage.query_all = lambda *_: pytest.fail("Bounded stale read queried the database")
+    cache['get_json'] = lambda *_: pytest.fail('Bounded local recovery waited for optional Redis')
     result = read_payload(storage, cache, days=30, now=now + timedelta(seconds=100))
     assert result["stale"] and result["cacheMode"] == "sqlite-stale"
     assert result["generatedAt"] == seed["generatedAt"]
@@ -439,6 +440,17 @@ def test_seed_rechecks_expiry_policy_and_reports_staleness(storage, source, tmp_
         assert read_payload(storage, cache, days=30, now=now)["items"] == []
     with patch("api.services.free_content.public.permitted_item", return_value=False):
         assert read_payload(storage, cache, days=30, now=now)["items"] == []
+
+
+def test_watch_cycle_uses_parent_schema_without_repeating_ddl(storage, monkeypatch):
+    initialized = []
+    monkeypatch.setattr(collector, 'ensure_schema', lambda s: initialized.append(s))
+    monkeypatch.setattr(collector, 'due_sources', lambda *a, **k: [])
+    monkeypatch.setattr(collector, 'prune', lambda *a: None)
+    assert collector.cycle(storage, None, schema_ready=True) == []
+    assert not initialized
+    assert collector.cycle(storage, None) == []
+    assert initialized == [storage]  # Standalone entrypoints still initialize.
 
 
 def test_failed_refresh_retains_last_seed_and_old_seed_cannot_serve_forever(storage, tmp_path):

@@ -79,7 +79,7 @@ def _cycle_process(events, options):
     try:
         with content_runtime() as runtime:
             storage = ContentStorageDependencies.from_context(runtime.query_context)
-            cycle(storage, runtime.SNAPSHOT_STORE, **options,
+            cycle(storage, runtime.SNAPSHOT_STORE, **options, schema_ready=True,
                   on_result=lambda state: events.put({"result": state}))
     except Exception as exc:
         events.put({"cycleError": type(exc).__name__})

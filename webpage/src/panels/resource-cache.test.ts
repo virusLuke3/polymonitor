@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readResourceCache, writeResourceCache, type ResourceCacheContract } from './resource-cache';
+import { readResourceCache, resourceIsCurrent, writeResourceCache, type ResourceCacheContract } from './resource-cache';
 import { parseIntelPayload, type IntelPayload } from './modules/related-news/model';
 
 const now = Date.parse('2026-10-01T12:00:00Z');
@@ -18,6 +18,16 @@ function storage() {
 }
 
 describe('public panel snapshot recovery', () => {
+  it('opt-in stale retention keeps original time and never accepts an overdue replacement as fresh', () => {
+    const retained = { ...contract, staleAgeMs: 30 * 60_000 };
+    const cache = storage();
+    writeResourceCache(retained, payload, cache, now);
+    expect(resourceIsCurrent(now, retained.maxAgeMs, now + 360_000)).toBe(false);
+    expect(readResourceCache(retained, cache, now + 360_000)?.generatedAt).toBe(payload.generatedAt);
+    writeResourceCache(retained, { ...payload, items: [], status: 'partial' }, cache, now + 360_000);
+    expect(readResourceCache(retained, cache, now + 360_000)?.status).toBe('ready');
+    expect(readResourceCache(retained, cache, now + 1_800_000)).toBeNull();
+  });
   it('hydrates a validated snapshot immediately without extending its source lifetime', () => {
     const cache = storage();
     writeResourceCache(contract, payload, cache, now);

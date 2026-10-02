@@ -45,7 +45,7 @@ function IntelView({ ctx, scope, days, setDays, setGlobal }: {
   const unsupported = scope === 'market' && data?.marketCoverage?.status === 'unsupported';
   const labels = { all: copy('All', '全部'), news_report: copy('Reports', '报道'), official_release: copy('Official', '公告'), event: copy('Events', '事件') };
   const filtered = (filter: typeof kinds[number]) => items.filter((item) => filter === 'all' || (filter === 'event' ? ['alert', 'observation'].includes(item.sourceKind || '') : item.sourceKind === filter));
-  return <Panel title={scope === 'global' ? copy('Global Updates', '全局资讯') : copy('Related Intelligence', '关联情报')} count={feed.loading ? '…' : items.length} className="wm-related-intel-panel wm-free-intel-panel">
+  return <Panel title={scope === 'global' ? copy('Global Updates', '全局资讯') : copy('Related Intelligence', '关联情报')} count={data ? items.length : feed.loading ? '…' : '—'} className="wm-related-intel-panel wm-free-intel-panel">
     <div className="wm-intel-scope">
       <button type="button" aria-pressed={scope === 'market'} disabled={ctx.selectedMarketId == null} onClick={() => setGlobal(false)}>{copy('Market', '市场')}</button>
       <button type="button" aria-pressed={scope === 'global'} onClick={() => setGlobal(true)}>{copy('Global', '全局')}</button>
@@ -57,6 +57,8 @@ function IntelView({ ctx, scope, days, setDays, setGlobal }: {
     {feed.loading && <PanelLoading />}
     {feed.pending && <button type="button" className="wm-intel-new" onClick={feed.accept}>{copy('New content available', '有新内容')} · {feed.pendingCount} · {copy('show', '点击查看')}</button>}
     {(feed.error || data?.status === 'unavailable') && <p role="status">{copy('Content service unavailable.', '资讯服务暂不可用。')} {!!items.length && copy('Showing previously verified content.', '显示此前已核验的内容。')}</p>}
+    {!feed.error && data && feed.stale && data.status !== 'partial' && <p role="status" className="wm-intel-health">{copy('Showing an older saved snapshot while checking updates.', '正在检查更新，当前显示较旧的已保存快照。')}</p>}
+    {feed.error && <p role="status" className="wm-intel-health">{feed.error}</p>}
     {!feed.error && !unsupported && data?.status === 'partial' && <p role="status" className="wm-intel-health">{data.stale
       ? copy('Using an overdue snapshot.', '当前使用较旧快照。') : data.coverage?.truncated
       ? copy('Candidate coverage is limited; results may be incomplete.', '候选覆盖有限，结果可能不完整。') : data.rejectedItemCount

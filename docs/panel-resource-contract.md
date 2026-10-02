@@ -35,7 +35,10 @@ unvalidated bootstrap preview into the complete resource.
 
 - Identity, window and `generatedAt` are mandatory. Missing source time cannot
   acquire a new lifetime from a successful request. Future time tolerance is one
-  minute; maximum browser recovery age is five minutes of original seed age.
+  minute. Fresh response acceptance is five minutes of original seed age.
+  Related Intelligence opts into 30 minutes of bounded browser recovery with
+  `staleAgeMs`; after five minutes it is explicitly STALE, with the original
+  snapshot time retained. Other resources keep their existing age limit.
 - Wrong market/scope/window rejects the whole response. Individual invalid cards
   are isolated, counted and surfaced as partial; an entirely malformed list is
   rejected. Card render boundaries protect valid siblings.
@@ -46,9 +49,9 @@ unvalidated bootstrap preview into the complete resource.
   empty results stay distinct. Automatic retry observes Retry-After, bounded
   exponential backoff and jitter. Non-retryable HTTP/identity failures await a
   parameter change or manual retry. Persistent failure slows to five minutes.
-- Acceptance and persistence are independent: a useful partial response may
-  display without replacing a complete recovery snapshot. Invalid/stale data
-  never becomes the new saved snapshot. This does not exempt displayed content
+- Fresh validated partial responses replace older complete snapshots: a temporary
+  source failure must not freeze persistence while verified items keep changing.
+  Invalid/stale data never becomes the new saved snapshot. This does not exempt displayed content
   from current permission, window and expiry rules.
 - Persistence is only for reviewed public data. Schema version 3, complete keys,
   revalidation, eight entries and 256,000 characters per entry bound this cache.
@@ -84,7 +87,10 @@ IDs, preserving per-article rights checks while avoiding a remote DB round trip
 per card and the connection deadline that it can exhaust.
 
 The existing collector executes in a spawned process with fresh service runtime
-and connections. The parent retains the single worker/advisory lock. Worker-only PostgreSQL
+and connections. The watch parent initializes the schema once before running
+cycles; children skip repeated schema DDL, which otherwise acquires PostgreSQL
+table locks concurrently with parent seed reads. Standalone collectors still
+initialize the schema. The parent retains the single worker/advisory lock. Worker-only PostgreSQL
 connection setup/lease acquisition has a 20-second bound and one connection,
 inside the unchanged cycle budget; HTTP API connection policy is unchanged. A 90-second
 cycle budget terminates a blocked child, marks unfinished due sources as failed,
@@ -103,8 +109,8 @@ publisher's quota; quota overflow is explicitly partial, never comprehensive
 recall. Direct statistical relations require positive jurisdiction and matching
 metric/reference period/basis; unknown jurisdiction is at most context.
 
-Local SQLite is checked before optional Redis for a fresh seed, avoiding a Redis
-outage delay on every warm request. Freshness is 90 seconds; bounded stale SQLite
+Local SQLite is checked before optional Redis for fresh and bounded stale seeds,
+avoiding optional Redis delays throughout local recovery. Freshness is 90 seconds; bounded stale SQLite
 recovery is 300 seconds. Cold reads use the existing database under a one-second
 cross-process lock. Failed queries do not replace the previous seed; SQLite and
 Redis writes are independent, and worker success requires a verified write.

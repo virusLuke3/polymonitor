@@ -46,6 +46,21 @@ def test_completed_sources_are_not_marked_failed(monkeypatch):
     assert not multiprocessing.active_children()
 
 
+def test_spawned_cycle_declares_the_watch_parent_schema_ready(monkeypatch):
+    from api.services.query_service import ContentStorageDependencies
+    runtime = SimpleNamespace(query_context={}, SNAPSHOT_STORE=object())
+    class Context:
+        def __enter__(self): return runtime
+        def __exit__(self, *args): pass
+    monkeypatch.setattr(worker, 'content_runtime', Context)
+    monkeypatch.setattr(ContentStorageDependencies, 'from_context', lambda _: object())
+    calls = []
+    monkeypatch.setattr(collector, 'cycle', lambda *a, **kw: calls.append(kw))
+    events = SimpleNamespace(put=lambda event: calls.append(event))
+    worker._cycle_process(events, {'probe': False})
+    assert len(calls) == 1 and calls[0]['schema_ready'] is True
+
+
 def test_worker_connection_setup_can_exceed_http_budget_but_remains_bounded(monkeypatch):
     from api import config, db_pool, runtime as api_runtime
     import pytest
