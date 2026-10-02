@@ -1,5 +1,5 @@
 import type { GeoEvent } from '../domain/types';
-import { eventMatchesWorldEventLayers, isHazardGeoEvent } from '../config/layerRegistry';
+import { eventMatchesWorldEventLayers, isHazardGeoEvent, worldEventLayerById, worldEventLayerIdForEvent } from '../config/layerRegistry';
 import type { WorldEventMapState, WorldEventTimeRange } from './mapState';
 import type { CountryGeometryIndex } from '../domain/countryGeometry';
 
@@ -39,7 +39,10 @@ export function filterWorldEventMapEvents(
       const expiresAt = event.expiresAt ? Date.parse(event.expiresAt) : Number.NaN;
       if (Number.isFinite(expiresAt) && expiresAt <= now) return false;
     }
-    if (cutoff == null) return true;
+    const layerId = worldEventLayerIdForEvent(event);
+    // Reference geometries have no incident timestamp. Honour the registry's
+    // time contract instead of inventing a recent observation to display them.
+    if (cutoff == null || (layerId && worldEventLayerById(layerId)?.timeFilter === false)) return true;
     const timestamp = isHazardGeoEvent(event) && event.hazardKind === 'earthquake'
       ? event.occurredAt || event.updatedAt : event.updatedAt || event.occurredAt;
     if (!timestamp) return false;

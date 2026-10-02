@@ -288,3 +288,14 @@ it('keeps country-only official warnings in country filtering without inventing 
   expect(filterWorldEventMapEvents([event], {timeRange:'all', severities:['watch'], countryCode:'TW'})).toEqual([event]);
   expect(filterWorldEventMapEvents([event], {timeRange:'all', severities:['watch'], countryCode:'JP'})).toEqual([]);
 });
+
+it('keeps timeless infrastructure references under recent filters while respecting layer, severity and country', () => {
+  const event: GeoEvent = {id:'osm:way:test',category:'infrastructure',title:'Mapped river',summary:'',severity:'info',
+    locationPrecision:'exact',countryCode:'GB',geometry:{type:'LineString',coordinates:[[-.15,51.5],[-.1,51.5]]},
+    sources:[],limitations:[],relatedMarketIds:[],properties:{mapLayer:'waterways'}};
+  const state = {activeLayerIds:['waterways'],timeRange:'1h' as const,severities:['info' as const],countryCode:'GB'};
+  expect(filterWorldEventMapEventsForLayers([event], state)).toEqual([event]);
+  expect(filterWorldEventMapEventsForLayers([event], {...state,activeLayerIds:[]})).toEqual([]);
+  expect(filterWorldEventMapEventsForLayers([event], {...state,severities:['warning']})).toEqual([]);
+  expect(filterWorldEventMapEventsForLayers([event], {...state,countryCode:'US'})).toEqual([]);
+});
