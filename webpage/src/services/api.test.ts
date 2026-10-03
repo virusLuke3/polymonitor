@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiTimeoutError, withRuntimeRequestBudget, fetchAllActiveMarkets, fetchAviationViewport, fetchMarketWideAiSnapshot, fetchNaturalHazardMapSource, fetchRuntimeAlpha, fetchRuntimeGlobalTemperatureMonitor, fetchSystemHealth, fetchWorkspaceBundle } from './api';
+import { ApiTimeoutError, withRuntimeRequestBudget, fetchAllActiveMarkets, fetchAviationViewport, fetchMarketWideAiSnapshot, fetchNaturalHazardMapSource, fetchRuntimeAlpha, fetchRuntimeGeoSanctionsShock, fetchRuntimeGlobalTemperatureMonitor, fetchSystemHealth, fetchWorkspaceBundle } from './api';
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
@@ -108,6 +108,27 @@ describe('HTTP lifecycle', () => {
 
 
 describe('shared Runtime admission', () => {
+  it('admits a visible signal before queued background geography without expanding concurrency', async () => {
+    vi.stubGlobal('window', globalThis);
+    const releases: (() => void)[] = [], started: string[] = [];
+    const active = [0, 1, 2].map(() => withRuntimeRequestBudget(() => new Promise<void>(resolve => releases.push(resolve))));
+    await new Promise(resolve => setTimeout(resolve, 10));
+    vi.stubGlobal('fetch', vi.fn(async (url: unknown) => {
+      started.push(String(url));
+      return { ok: true, json: async () => ({ items: [] }) };
+    }));
+    const geography = fetchRuntimeGeoSanctionsShock();
+    const signal = fetchRuntimeAlpha();
+    expect(started).toHaveLength(0);
+    releases.shift()!();
+    try {
+      await signal; await geography;
+      expect(started[0]).toContain('/runtime/signals/alpha');
+      expect(started[1]).toContain('/runtime/world/geo-sanctions-shock');
+    } finally {
+      releases.forEach(release => release()); await Promise.all(active);
+    }
+  });
   it('bounds independent sources, prioritizes queued map demand, and cancels before work starts', async () => {
     const started: string[] = [], releases: (() => void)[] = [];
     const held = (id: string) => () => new Promise<void>(resolve => { started.push(id); releases.push(resolve); });

@@ -380,6 +380,28 @@ test('online events cannot restart hidden demand or a nonretryable failure', asy
   expect(await count(page)).toBe(2);
 });
 
+test('reconnect starts batch-capable sources separately so a slow sibling cannot delay completion', async ({ page }) => {
+  let batches = 0;
+  await page.route('**/wm-api/v1/runtime/panels?**', route => {
+    batches++;
+    return route.fulfill({ json: { status: 'ok', generatedAt: GENERATED_AT, meta: { panels: {} },
+      data: { panels: Object.fromEntries(['frequent', 'blocked'].map(id =>
+        [id, { generatedAt: GENERATED_AT, items: ['kept'] }])) } } });
+  });
+  await harness(page, 'runtime-batch-policy');
+  await expect.poll(() => page.evaluate(() => window.frontendHarness.runtime!.getStatus('frequent').phase)).toBe('ready');
+  expect(batches).toBe(1);
+  await page.evaluate(() => window.dispatchEvent(new Event('online')));
+  await page.clock.runFor(100);
+  expect(await count(page)).toBe(2);
+  expect(batches).toBe(1);
+  await page.evaluate(generatedAt => window.frontendHarness.requests.find(r => r.id === 'frequent')!.resolve({ generatedAt, items: ['recovered'] }), GENERATED_AT);
+  await page.clock.runFor(100);
+  expect(await page.evaluate(() => window.frontendHarness.runtime!.getData('frequent'))).toMatchObject({ items: ['recovered'] });
+  expect(await page.evaluate(() => window.frontendHarness.runtime!.getStatus('frequent').fetching)).toBe(false);
+  expect(await page.evaluate(() => window.frontendHarness.runtime!.getStatus('blocked').fetching)).toBe(true);
+});
+
 test('repeated network failures keep retry waiting bounded by the refresh policy', async ({ page }) => {
   await harness(page, 'runtime');
   for (let i = 0; i < 7; i++) {

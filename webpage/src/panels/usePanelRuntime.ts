@@ -339,7 +339,7 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
       });
       // Connectivity recovery bypasses an old network backoff. Inflight work is
       // still joined, and only accepted data clears errors or advances clocks.
-      if (due.length) void refreshPanels(due, { panelIds: due.map(panel => panel.id), reason: 'retry', force: true });
+      due.forEach(panel => { void refreshPanels([panel], { panelIds: [panel.id], reason: 'retry', force: true }); });
     };
     window.addEventListener('online', reconnect);
     return () => window.removeEventListener('online', reconnect);

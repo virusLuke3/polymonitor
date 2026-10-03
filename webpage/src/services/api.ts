@@ -135,9 +135,9 @@ function pumpRuntimeRequests() {
 function apiGetWithTimeout<T>(path: string, timeoutMs = 12000, externalSignal?: AbortSignal, cache?: RequestCache): Promise<T> {
   const run = () => apiGetAdmitted<T>(path, timeoutMs, externalSignal, cache);
   if (!path.startsWith('/runtime/')) return run();
-  // First useful hazards precede optional background context, without disabling
-  // any layer. Interactive detail/viewport requests join the highest tier.
-  const priority = /natural-hazards\/map.*source=(usgs|nhc|nws)\b|detail|aviation.*viewport|map-query/.test(path) ? 0
+  // Visible quote/signal consumers share the first tier with primary hazards
+  // and interactive detail. Bulk map layers cannot starve their refreshes.
+  const priority = /^\/runtime\/(signals|trades|markets)\/|natural-hazards\/map.*source=(usgs|nhc|nws)\b|detail|aviation.*viewport|map-query/.test(path) ? 0
     : /natural-hazards|global-transport|transport\/global-shipping|geo-sanctions/.test(path) ? 1 : 2;
   return withRuntimeRequestBudget(run, externalSignal, priority);
 }
