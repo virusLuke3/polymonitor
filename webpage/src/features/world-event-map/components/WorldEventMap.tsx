@@ -283,19 +283,16 @@ export function WorldEventMap({
     // Start the visible map's download before waiting for CPU admission.
     // Keep a caught promise so a failed speculative download still follows the
     // normal SVG/recovery path and never becomes an unhandled rejection.
-    const markModuleDownloadFailed = () => {
-      // Chromium retains failed ESM graph loads in this document. Repeating
-      // import() is not a network retry, even after connectivity recovers.
-      moduleDownloadFailed = true;
-      if (!disposed) setModuleReloadRequired(true);
-    };
     const downloadRenderer = async (): Promise<new () => MapRenderer> => {
       try {
         return preferredRenderer === 'globe'
           ? (await import('../renderer/GlobeMapRenderer')).GlobeMapRenderer
           : (await import('../renderer/DeckMapRenderer')).DeckMapRenderer;
       } catch (error) {
-        markModuleDownloadFailed();
+        // Chromium retains failed ESM graph loads in this document. Repeating
+        // import() is not a network retry, even after connectivity recovers.
+        moduleDownloadFailed = true;
+        if (!disposed) setModuleReloadRequired(true);
         throw error;
       }
     };
@@ -351,7 +348,6 @@ export function WorldEventMap({
           ++rendererGeneration;
           rendererRef.current?.destroy();
           rendererRef.current = null;
-          delete host.dataset.mapRendererReady;
           setBasemapState('failed');
           setRendererError(failure.message);
         }
@@ -400,10 +396,7 @@ export function WorldEventMap({
             setRendererError('The lightweight map is still downloading. It will appear when ready.');
           }, 12_000);
         }
-        const Renderer = loadedRenderer ?? (await import('../renderer/SvgMapRenderer').catch(error => {
-          markModuleDownloadFailed();
-          throw error;
-        })).SvgMapRenderer;
+        const Renderer = loadedRenderer ?? (await import('../renderer/SvgMapRenderer')).SvgMapRenderer;
         if (!isCurrent()) return;
         clearRendererDeadline();
         setRendererError(reason?.message ?? null);
@@ -489,7 +482,11 @@ export function WorldEventMap({
       } finally { preferredLoading = false; }
     };
     retryRendererRef.current = () => {
-      if (preferredLoading) return;
+      if (lightweight || preferredLoading || host.dataset.mapRendererReady === preferredRenderer) return;
+      // A temporary context limit may have cleared since the initial probe.
+      // Recheck on the user's action; never silently accept software rendering.
+      if (!support.supported) support = inspectWebGL2Support(supportOptions);
+      if (!support.supported) { setRendererError(support.reason); return; }
       if (moduleDownloadFailed) {
         // Only the explicit recovery action reloads; never create an automatic
         // reload loop. Preserve the investigation URL and the requested mode,
@@ -499,11 +496,6 @@ export function WorldEventMap({
         window.location.assign(target.href);
         return;
       }
-      if (lightweight || host.dataset.mapRendererReady === preferredRenderer) return;
-      // A temporary context limit may have cleared since the initial probe.
-      // Recheck on the user's action; never silently accept software rendering.
-      if (!support.supported) support = inspectWebGL2Support(supportOptions);
-      if (!support.supported) { setRendererError(support.reason); return; }
       if (recoveryAttempts >= 2 && Date.now() - episodeStarted < 300_000) {
         setRendererError('The recovery budget is exhausted. Try again after five minutes.'); return;
       }
@@ -804,8 +796,7 @@ export function WorldEventMap({
             : basemapState === 'primary-ready'
               ? basemapIssue ? (locale === 'zh' ? '底图部分缺失' : 'PARTIAL BASEMAP') : 'PRIMARY BASEMAP'
               : basemapState.replace(/-/g, ' ').toUpperCase()}
-      {(rendererKind === 'svg' || basemapState === 'failed')
-        && (moduleReloadRequired || new URLSearchParams(window.location.search).get('renderer') !== 'svg') ? (
+      {rendererKind === 'svg' && new URLSearchParams(window.location.search).get('renderer') !== 'svg' ? (
         <button className="wm-map-renderer-retry" type="button" onClick={() => retryRendererRef.current?.()} title={rendererError || undefined}>
           {moduleReloadRequired
             ? (locale === 'zh' ? '重新加载地图' : 'Reload map')

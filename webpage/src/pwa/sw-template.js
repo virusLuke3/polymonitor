@@ -86,24 +86,9 @@ async function cacheFirst(request) {
   const cache = await caches.open(STATIC_CACHE);
   const cached = (await cache.match(request)) || (await (await caches.open(SHELL_CACHE)).match(request));
   if (cached) return cached;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const response = await fetch(request);
-      if (!response.ok || !response.body) return response;
-      // Finish the body before exposing it to the module loader. A connection
-      // change can reject the stream after HTTP 200 and poison this document's
-      // ESM graph. cache.put already waited for that body in the old path.
-      const complete = new Response(await response.blob(), {
-        status: response.status, statusText: response.statusText, headers: response.headers,
-      });
-      // Storage quota/private-mode failures must not discard a valid download.
-      try { await cache.put(request, complete.clone()); } catch {}
-      return complete;
-    } catch (error) {
-      if (attempt === 1 || request.signal.aborted) throw error;
-      await new Promise(resolve => setTimeout(resolve, 250));
-    }
-  }
+  const response = await fetch(request);
+  if (response.ok) await cache.put(request, response.clone());
+  return response;
 }
 
 self.addEventListener('fetch', (event) => {

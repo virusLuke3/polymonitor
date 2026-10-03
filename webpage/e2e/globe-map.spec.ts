@@ -1,25 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { installDashboard } from './fixtures/dashboard';
 
-test.describe('production globe asset delivery', () => {
-  test.use({ serviceWorkers: 'allow' });
-  test('the active service worker delivers a complete lazy globe module', async ({ page }) => {
-    test.skip(process.env.POLYMONITOR_E2E_PREVIEW !== '1', 'Requires the built service worker.');
-    await installDashboard(page);
-    await page.clock.install({ time: new Date('2026-08-26T03:00:00Z') });
-    const servedByWorker: boolean[] = [];
-    page.on('response', response => {
-      if (/\/assets\/GlobeMapRenderer-.*\.js/.test(response.url())) servedByWorker.push(response.fromServiceWorker());
-    });
-    await page.goto('/?view=2d&mapPerf=1&time=all&basemap=openfreemap');
-    await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(true);
-    await page.getByRole('tab', { name: '3D Globe', exact: true }).click();
-    await expect(page.locator('.wm-weather-deck-basemap')).toHaveAttribute('data-map-renderer-ready', 'globe', { timeout: 60000 });
-    await expect(page.locator('.wm-globe-renderer')).toHaveAttribute('data-globe-records', '15');
-    expect(servedByWorker).toContain(true);
-  });
-});
-
 test('retry rechecks a temporary WebGL context creation failure', async ({ page }) => {
   await installDashboard(page);
   await page.clock.install({ time: new Date('2026-08-26T03:00:00Z') });
@@ -59,20 +40,6 @@ test('failed 3D module download can recover after the connection returns', async
   await expect(page.getByRole('tab', { name: '3D Globe', exact: true })).toHaveAttribute('aria-selected', 'true');
   await expect(page.locator('.wm-globe-renderer')).toHaveAttribute('data-globe-records', '15');
   expect(attempts).toBe(1);
-});
-
-test('both globe and SVG module downloads failing still expose working recovery', async ({ page }) => {
-  await installDashboard(page);
-  await page.clock.install({ time: new Date('2026-08-26T03:00:00Z') });
-  const modules = /\/(?:assets\/(?:Globe|Svg)MapRenderer-[^/]+\.js|src\/features\/world-event-map\/renderer\/(?:Globe|Svg)MapRenderer\.ts)(?:\?.*)?$/;
-  await page.route(modules, route => route.abort('connectionreset'));
-  await page.goto('/?view=3d&mapPerf=1&time=all');
-  await expect(page.locator('.wm-weather-deck-basemap')).toHaveAttribute('data-map-basemap-state', 'failed');
-  await expect(page.getByRole('button', { name: 'Reload map', exact: true })).toBeVisible();
-  await page.unroute(modules);
-  await page.getByRole('button', { name: 'Reload map', exact: true }).click();
-  await expect(page.locator('.wm-weather-deck-basemap')).toHaveAttribute('data-map-renderer-ready', 'globe', { timeout: 60000 });
-  await expect(page.locator('.wm-globe-renderer')).toHaveAttribute('data-globe-records', '15');
 });
 
 test('failed earth texture reports its cause and retries without losing records', async ({ page }) => {
