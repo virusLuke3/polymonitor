@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from api.context import resolve_optional_service_callable, resolve_service_callable
+from api.services import commodities_service
 
 
 @dataclass(frozen=True)
@@ -91,7 +92,7 @@ def build_market_group_cache_key(items: List[tuple[str, str, str]], *, kind: str
         {
             "kind": kind,
             "symbols": [symbol for _, _, symbol in items],
-            "snapshotVersion": 3 if kind == "crypto" else 2,
+            "snapshotVersion": 3,
         },
         sort_keys=True,
         ensure_ascii=True,
@@ -133,15 +134,22 @@ def fetch_live_market_group_payload(ctx: RuntimeServiceContext, items: List[tupl
             snapshot = None
         if not snapshot:
             return symbol, None
+        commodity_fields = ({
+            key: snapshot.get(key) for key in (
+                "quoteAt", "fetchedAt", "marketState", "exchangeTimezone", "instrumentType",
+                "tradingSession", "sessionVolume", "changeBasis",
+            )
+        } if kind == "commodities" else {})
         return symbol, {
             "id": key,
             "label": label,
             "symbol": symbol,
             "price": snapshot.get("price"),
-            "changePercent": snapshot.get("changePercent"),
+            "changePercent": snapshot.get("dailyChangePercent") if kind == "commodities" else snapshot.get("changePercent"),
             "currency": snapshot.get("currency"),
             "volume24h": snapshot.get("volume24h"),
             "points": snapshot.get("points") or [],
+            **commodity_fields,
         }
 
     max_workers = min(8, max(1, len(items)))
@@ -203,7 +211,9 @@ def fetch_live_market_group_payload(ctx: RuntimeServiceContext, items: List[tupl
             rows = merged_rows
         except Exception:
             _dependencies(ctx).application.logger.exception("coingecko crypto fallback failed")
-    return normalize_market_group_payload({"kind": kind, "items": rows, "generatedAt": _dependencies(ctx).utc_now_iso()}, kind=kind)
+    now = _dependencies(ctx).utc_now_iso()
+    payload = normalize_market_group_payload({"kind": kind, "items": rows, "generatedAt": now}, kind=kind)
+    return commodities_service.merge_snapshot(payload, {}, items, now) if kind == "commodities" else payload
 
 
 def get_market_group_snapshot(ctx: RuntimeServiceContext, items: List[tuple[str, str, str]], *, kind: str) -> Dict[str, Any]:
@@ -211,6 +221,25 @@ def get_market_group_snapshot(ctx: RuntimeServiceContext, items: List[tuple[str,
     cache_key = build_market_group_cache_key(items, kind=kind)
     namespace = f"snapshot:markets:{kind}"
     seeded_payload = _read_seeded_snapshot(ctx, namespace=namespace, cache_key=cache_key, ttl_seconds=ttl_seconds)
+    if kind == "commodities":
+        now = _dependencies(ctx).utc_now_iso()
+        if seeded_payload is None or commodities_service.age_seconds(seeded_payload.get("generatedAt"), now) > commodities_service.MAX_SEED_AGE_SECONDS:
+            def recover() -> None:
+                try:
+                    live = fetch_live_market_group_payload(ctx, items, kind=kind)
+                    previous = _read_seeded_snapshot(ctx, namespace=namespace, cache_key=cache_key, ttl_seconds=ttl_seconds) or {}
+                    # A watcher publication that completed after this fetch wins.
+                    if commodities_service.age_seconds(previous.get("generatedAt"), _dependencies(ctx).utc_now_iso()) < commodities_service.age_seconds(live.get("generatedAt"), _dependencies(ctx).utc_now_iso()):
+                        return
+                    merged = commodities_service.merge_snapshot(live, previous, items, _dependencies(ctx).utc_now_iso())
+                    _store_seed_fallback(ctx, namespace=namespace, cache_key=cache_key, payload={**merged, "cacheMode": "live-fallback"}, ttl_seconds=ttl_seconds)
+                except Exception:
+                    _dependencies(ctx).application.logger.exception("commodity seed recovery failed")
+            commodities_service.recover_seed(recover)
+        if seeded_payload is not None:
+            return commodities_service.seeded_response(normalize_market_group_payload(seeded_payload, kind=kind), now)
+        return {"kind": kind, "items": [], "generatedAt": "", "status": "warming", "cacheMode": "warming",
+                "error": "Commodity source is warming; retrying automatically"}
     if seeded_payload is not None:
         return normalize_market_group_payload(seeded_payload, kind=kind, generated_at=_dependencies(ctx).utc_now_iso())
 

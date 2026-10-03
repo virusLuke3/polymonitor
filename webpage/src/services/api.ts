@@ -275,7 +275,7 @@ export function fetchLatestContent(limit = 8, signal?: AbortSignal, days = 7) {
 }
 
 export function fetchRuntimeCommodities(signal?: AbortSignal) {
-  return apiGet<RuntimeMarketGroup>('/runtime/markets/commodities', signal);
+  return apiGetWithTimeout<RuntimeMarketGroup>('/runtime/markets/commodities', 12000, signal, 'no-store');
 }
 
 export function fetchRuntimeCrypto(signal?: AbortSignal) {

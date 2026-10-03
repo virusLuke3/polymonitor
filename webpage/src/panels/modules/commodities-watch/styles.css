@@ -1,0 +1,17 @@
+.wm-commodities-panel .wm-commodity-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; font-size: 11px; color: #a7b2b5; }
+.wm-commodities-panel .wm-commodity-toolbar button { font: inherit; color: #70d9f5; background: #152028; border: 1px solid #425a69; padding: 6px 10px; cursor: pointer; }
+.wm-commodities-panel .wm-commodity-toolbar button:disabled { opacity: .55; cursor: wait; }
+.wm-commodities-panel button:focus-visible { outline: 2px solid #70d9f5; outline-offset: 2px; }
+.wm-commodities-panel .wm-commodity-clock { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.wm-commodities-panel .wm-commodity-clock span { white-space: nowrap; }
+.wm-commodities-panel .wm-commodity-clock, .wm-commodities-panel .wm-commodity-help, .wm-commodities-panel .wm-commodity-coverage, .wm-commodities-panel .wm-commodity-quote-time { font-size: 11px; color: #a7b2b5; line-height: 1.45; margin: 3px 0; }
+.wm-commodities-panel .wm-commodity-notice { border: 1px solid #685429; padding: 8px; color: #e6c478; font-size: 12px; line-height: 1.4; }
+.wm-commodities-panel .commodity-card { min-width: 0; }
+.wm-commodities-panel .commodity-foot { flex-wrap: wrap; }
+.wm-commodities-panel .commodity-price { overflow-wrap: anywhere; font-size: clamp(15px, 1.3vw, 23px); }
+.wm-commodities-panel .commodity-meta { flex-wrap: wrap; }
+.wm-commodities-panel .commodity-signal-tag { white-space: normal; }
+.wm-commodities-panel .commodity-card.is-retained, .wm-commodities-panel .commodity-card.is-stale { border-left-color: #e6c478; }
+.wm-commodities-panel .wm-commodity-source { font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
+.wm-commodities-panel .wm-commodity-source summary { color: #70d9f5; cursor: pointer; }
+@media (max-width: 480px) { .wm-commodities-panel .commodity-head { gap: 3px; flex-wrap: wrap; } .wm-commodities-panel .commodity-price { font-size: 18px; } }

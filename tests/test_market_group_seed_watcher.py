@@ -71,10 +71,10 @@ class MarketGroupSeedWatcherTestCase(unittest.TestCase):
     def test_watcher_stores_commodities_payload_and_seed_meta(self):
         watcher, fake_redis = self.make_watcher()
         with patch.object(runtime_service, "fetch_live_market_group_payload", return_value=sample_payload("commodities")):
-            result = watcher.run_component(panel_id="commodities-watch", kind="commodities", items=market_group_watcher.COMMODITY_SYMBOLS)
+            result = watcher.run_component(panel_id="commodities-watch", kind="commodities", items=[("gold", "GOLD", "GC=F")])
 
         self.assertEqual("ok", result["status"])
-        cache_key = runtime_service.build_market_group_cache_key(market_group_watcher.COMMODITY_SYMBOLS, kind="commodities")
+        cache_key = runtime_service.build_market_group_cache_key([("gold", "GOLD", "GC=F")], kind="commodities")
         stored = json.loads(fake_redis.get(f"polydata:snapshot:markets:commodities:{cache_key}") or "{}")
         self.assertEqual("seeded", stored["cacheMode"])
         meta = json.loads(fake_redis.get("polydata:seed-meta:markets:commodities-watch") or "{}")
@@ -128,7 +128,7 @@ class MarketGroupSeedWatcherTestCase(unittest.TestCase):
                 "SNAPSHOT_STORE": store,
                 "get_cached_json": lambda namespace, key: None,
                 "set_cached_json": lambda namespace, key, payload, ttl: None,
-                "utc_now_iso": lambda: "2026-05-03T00:00:00Z",
+                "utc_now_iso": lambda: "2026-05-03T08:00:10Z",
             }
             with patch.object(runtime_service, "fetch_live_market_group_payload", side_effect=AssertionError("live fetch should not run")):
                 payload = runtime_service.get_market_group_snapshot(ctx, symbols, kind="commodities")

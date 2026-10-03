@@ -1,228 +1,64 @@
-import type { RuntimeMarketGroup, RuntimeMarketTicker } from '@/types';
+import { memo } from 'preact/compat';
 import { useMemo, useState } from 'preact/hooks';
-import { Panel } from '@/components/Panel';
-import type { PanelRenderMap } from '@/panels/types';
+import { Panel, PanelLoading } from '@/components/Panel';
+import { panelFromRenderer } from '@/panels/definePanel';
+import { useI18n } from '@/services/i18n';
+import { commoditySparkline, tickerTone, formatCommodityChange, averageChange, topMover } from '@/panels/shared/market-tickers';
 import { formatCompact } from '@/panels/shared/formatters';
-import { useSpecialistCopy } from '@/services/specialist-i18n';
-import { commoditySparkline, tickerTone, formatCommodityChange, averageChange, topMover, sortTickers } from '../../shared/market-tickers';
-import { fetchRuntimeCommodities } from '@/services/api';
-import { runtimePanelFromRenderer } from '@/panels/definePanel';
+import { useCommodityFeed } from './useCommodityFeed';
+import { commodityClass, formatPrice, quoteState, dailyMovers, type Quote } from './model';
+import './styles.css';
 
-type CommoditiesTab = 'commodities' | 'fx';
+const QuoteCard = memo(function QuoteCard({ item, cn, now }: { item: Quote; cn: boolean; now: number }) {
+  const i18n = useI18n();
+  const state = quoteState(item, now), tone = tickerTone(item);
+  const sourceLabels = { open: cn ? '交易时段' : 'OPEN', closed: cn ? '休市报价' : 'CLOSED', stale: cn ? '报价过期' : 'QUOTE STALE', unknown: cn ? '报价时间待确认' : 'TIME UNKNOWN', retained: cn ? '保留报价 · 采集失败' : 'RETAINED · FETCH FAILED' };
+  const change = item.changePercent;
+  const alert = ['open', 'closed'].includes(state) && change != null && Math.abs(change) >= 1.5;
+  return <article className={`commodity-item commodity-card ${tone} is-${state}`} data-commodity-symbol={item.symbol}>
+    <div className="commodity-head"><span className="commodity-name">{item.label}</span><b className="commodity-class-tag">{commodityClass(item)}</b></div>
+    <div className="commodity-spark">{commoditySparkline(item.points, tone === 'down' ? '#ff6464' : '#39ff73')}</div>
+    <div className="commodity-foot"><strong className="commodity-price">{formatPrice(item)}</strong><span className={`commodity-change ${tone}`}>{formatCommodityChange(change)}</span></div>
+    <div className="commodity-meta"><span className={`commodity-signal-tag ${alert ? 'alert' : 'watch'}`}>{alert ? cn ? '日变动≥1.5%' : 'DAY MOVE ≥1.5%' : sourceLabels[state]}</span>{item.sessionVolume != null && <em>{cn ? '时段量' : 'SESSION VOL'} {formatCompact(item.sessionVolume)}</em>}</div>
+    <p className="wm-commodity-quote-time">{sourceLabels[state]} · {item.quoteAt ? <time dateTime={item.quoteAt} title={i18n.formatDateTime(item.quoteAt)}>{i18n.formatDateTime(item.quoteAt)}</time> : cn ? '来源未提供报价时间' : 'Provider quote time unavailable'}</p>
+  </article>;
+});
 
-const COMMODITY_SYMBOL_ORDER = [
-  '^VIX',
-  'GC=F',
-  'SI=F',
-  'HG=F',
-  'PL=F',
-  'PA=F',
-  'ALI=F',
-  'CL=F',
-  'BZ=F',
-  'NG=F',
-  'TTF=F',
-  'RB=F',
-  'HO=F',
-  'URA',
-  'LIT',
-  'MTF=F',
-  'ZW=F',
-  'ZC=F',
-  'ZS=F',
-  'ZR=F',
-  'KC=F',
-  'SB=F',
-  'CC=F',
-  'CT=F',
-] as const;
-
-const FX_SYMBOL_ORDER = [
-  'EURUSD=X',
-  'GBPUSD=X',
-  'USDJPY=X',
-  'USDCNY=X',
-  'USDINR=X',
-  'AUDUSD=X',
-  'USDCHF=X',
-  'USDCAD=X',
-  'USDTRY=X',
-] as const;
-
-const COMMODITY_SORT_INDEX = new Map(COMMODITY_SYMBOL_ORDER.map((symbol, index) => [symbol, index]));
-
-const FX_SORT_INDEX = new Map(FX_SYMBOL_ORDER.map((symbol, index) => [symbol, index]));
-
-function tickerMoveTag(item: RuntimeMarketTicker) {
-  const absChange = Math.abs(Number(item.changePercent));
-  if (!Number.isFinite(absChange)) return 'QUOTE';
-  if (absChange >= 1.5) return 'ALERT';
-  if (absChange >= 0.6) return 'MOVE';
-  return 'WATCH';
-}
-
-function tagKey(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-}
-
-function commodityClass(item: RuntimeMarketTicker) {
-  const symbol = item.symbol.toUpperCase();
-  if (isFxTicker(item)) return 'FX';
-  if (['GC=F', 'SI=F', 'HG=F', 'PL=F', 'PA=F', 'ALI=F'].includes(symbol)) return 'METALS';
-  if (['CL=F', 'BZ=F', 'NG=F', 'TTF=F', 'RB=F', 'HO=F', 'URA', 'LIT'].includes(symbol)) return 'ENERGY';
-  if (symbol === '^VIX') return 'RISK';
-  return 'AGRI';
-}
-
-function commodityAuxMeta(item: RuntimeMarketTicker) {
-  const volume = Number(item.volume24h);
-  if (Number.isFinite(volume) && volume > 0) return `VOL ${formatCompact(volume)}`;
-  const marketCap = Number(item.marketCap);
-  if (Number.isFinite(marketCap) && marketCap > 0) return `MCAP ${formatCompact(marketCap)}`;
-  return null;
-}
-
-function isFxTicker(item: RuntimeMarketTicker) {
-  return item.symbol.endsWith('=X');
-}
-
-function formatCommodityPrice(item: RuntimeMarketTicker) {
-  if (item.price == null || !Number.isFinite(Number(item.price))) return '--';
-  const numeric = Number(item.price);
-  if (isFxTicker(item)) {
-    return numeric.toFixed(4);
-  }
-  if (Math.abs(numeric) >= 1000) {
-    return `$${formatCompact(numeric)}`;
-  }
-  return `$${numeric.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function commodityBoard(
-  items: RuntimeMarketTicker[],
-  emptyMessage: string,
-  labels: { topMove: string; averageMove: string; alerts: string },
-) {
-  if (!items.length) {
-    return (
-      <div className="wm-commodity-empty">
-        <span>{emptyMessage}</span>
+function CommoditiesWatchPanel() {
+  const i18n = useI18n(), cn = i18n.locale.startsWith('zh');
+  const copy = (en: string, zh: string) => cn ? zh : en;
+  const [tab, setTab] = useState<'commodities' | 'fx'>('commodities');
+  const feed = useCommodityFeed(), data = feed.data;
+  const groups = useMemo(() => ({ commodities: data?.items.filter(item => !item.symbol.endsWith('=X')) || [], fx: data?.items.filter(item => item.symbol.endsWith('=X')) || [] }), [data]);
+  const items = groups[tab], now = feed.status.checkedAt ?? Date.now();
+  const movers = dailyMovers(items, now), leader = topMover(movers), average = averageChange(movers);
+  const alerts = movers.filter(item => Math.abs(item.changePercent!) >= 1.5).length;
+  const checked = feed.status.checkedAt ? new Date(feed.status.checkedAt).toISOString() : null;
+  const clock = (value: string) => new Intl.DateTimeFormat(i18n.locale, { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(value));
+  return <Panel title={copy('COMMODITIES', '商品行情')} badge="MACRO" status="muted" count={data ? items.length : '—'} className="wm-market-panel wm-commodities-panel" dataPanelId="commodities-watch">
+    <div className="wm-commodity-panel-stack">
+      <div className="wm-commodity-tabbar" role="tablist" aria-label={copy('Quote groups', '行情分组')}>
+        {(['commodities', 'fx'] as const).map(group => <button type="button" role="tab" aria-selected={tab === group} key={group} className={`panel-tab${tab === group ? ' active' : ''}`} onClick={() => setTab(group)}>{group === 'fx' ? 'FX' : copy('Commodities', '商品')} <b>{data ? groups[group].length : '—'}</b></button>)}
       </div>
-    );
-  }
-  const leader = topMover(items);
-  const avg = averageChange(items);
-  const alertCount = items.filter((item) => tickerMoveTag(item) === 'ALERT').length;
-  return (
-    <div className="wm-commodity-board">
-      <div className="wm-market-radar-strip">
-        <span><b>{leader?.label || '--'}</b><em>{labels.topMove}</em></span>
-        <span><b>{avg == null ? '--' : formatCommodityChange(avg)}</b><em>{labels.averageMove}</em></span>
-        <span><b>{alertCount}</b><em>{labels.alerts}</em></span>
-      </div>
-      <div className="commodities-grid">
-      {items.map((item) => {
-        const tone = tickerTone(item);
-        const sparkColor = tone === 'down' ? '#ff6464' : '#39ff73';
-        const assetClass = commodityClass(item);
-        const signalTag = tickerMoveTag(item);
-        const auxMeta = commodityAuxMeta(item);
-        return (
-          <div className={`commodity-item ${tone}`} key={item.symbol}>
-            <div className="commodity-head">
-              <span className="commodity-name">{item.label}</span>
-              <b className={`commodity-class-tag ${tagKey(assetClass)}`}>{assetClass}</b>
-            </div>
-            <div className="commodity-spark">{commoditySparkline(item.points, sparkColor)}</div>
-            <div className="commodity-foot">
-              <strong className="commodity-price">{formatCommodityPrice(item)}</strong>
-              <span className={`commodity-change ${tone}`}>{formatCommodityChange(item.changePercent)}</span>
-            </div>
-            <div className="commodity-meta">
-              <span className={`commodity-signal-tag ${tagKey(signalTag)}`}>{signalTag}</span>
-              {auxMeta ? <em>{auxMeta}</em> : null}
-            </div>
-          </div>
-        );
-      })}
-      </div>
+      <div className="wm-commodity-toolbar"><span>{feed.suspended ? copy('Auto paused while hidden', '不可见时暂停检查') : copy('Auto check 20s', '自动检查20秒')}{data && ` · ${copy('Source', '后台更新')} ${data.refreshIntervalSeconds}s`}</span><button type="button" disabled={feed.status.fetching} onClick={() => void feed.refresh()}>{feed.status.fetching ? copy('Refreshing…', '刷新中…') : copy('Refresh', '刷新')}</button></div>
+      <p className="wm-commodity-clock">{checked && <span>{copy('Checked', '检查')} <time data-commodity-checked-at dateTime={checked} title={i18n.formatDateTime(checked)}>{clock(checked)}</time></span>}{data && <span>{copy('Snapshot', '快照')} <time data-commodity-updated-at dateTime={data.generatedAt} title={i18n.formatDateTime(data.generatedAt)}>{clock(data.generatedAt)}</time></span>}</p>
+      {feed.loading && <PanelLoading />}
+      {feed.fromCache && <p className="wm-commodity-notice" role="status">{copy('Showing saved quotes while checking updates.', '显示已保存报价，正在检查更新。')}</p>}
+      {(feed.error || feed.status.phase === 'stale' || data?.status === 'stale') && <p className="wm-commodity-notice" role="status">{copy('Refresh or collector overdue. Last available quotes remain visible; retrying automatically.', '刷新失败或采集已超时；保留最后有效报价并自动重试。')}{!data && ` ${copy('No usable snapshot yet.', '暂无可用快照。')}`}</p>}
+      {data && <p className="wm-commodity-coverage">{copy('Acquired', '采集成功')} {data.coverage.succeeded}/{data.coverage.expected}{!!data.coverage.retained && ` · ${copy('Retained', '保留')} ${data.coverage.retained}`}{!!data.coverage.missing && ` · ${copy('Missing', '缺失')} ${data.coverage.missing}`}</p>}
+      {data && <>
+        <p className="wm-commodity-help">{copy('Moves vs previous close · closed markets may keep the same price.', '涨跌幅对比前收盘 · 休市期间价格可能不变。')}</p>
+        <div className="wm-market-radar-strip"><span><b>{leader?.label || '—'}</b><em>{copy('TOP DAY MOVE', '最大日变动')}</em></span><span><b>{average == null ? '—' : formatCommodityChange(average)}</b><em>{copy('AVG DAY MOVE', '平均日变动')}</em></span><span><b>{alerts}</b><em>{copy('MOVES ≥1.5%', '变动≥1.5%')}</em></span></div>
+        <p className="wm-commodity-help">{copy('Comparable daily quotes', '可比较的日行情')} {movers.length}/{items.length}</p>
+        <div className="commodities-grid">{items.map(item => <QuoteCard key={item.symbol} item={item} cn={cn} now={now} />)}</div>
+        {!items.length && <p role="status">{copy('No quotes available in this group; checking automatically.', '本分组暂无报价，正在自动检查。')}</p>}
+        <details className="wm-commodity-source"><summary>{copy('Source and coverage', '来源与覆盖')}</summary><p>Yahoo Finance · {copy('30-minute chart points; quotes may be delayed.', '30分钟历史价格点，报价可能延迟。')}</p><p>{copy('Includes futures, an index and ETF proxies. Currency and cents are preserved; contract units differ.', '包含期货、指数与ETF代理。保留币种及美分单位，各合约计价单位不同。')}</p><p>{copy('Daily statistics exclude missing, retained or unconfirmed quote clocks. Missing previous close is shown as —.', '日变动统计排除缺失、保留及时间未确认的报价；缺少前收盘时显示 —。')}</p>{!!data.coverage.failedSymbols.length && <p>{copy('Acquisition gaps', '采集缺口')}: {data.coverage.failedSymbols.join(', ')}</p>}</details>
+      </>}
     </div>
-  );
+  </Panel>;
 }
 
-function CommoditiesWatchPanel({ commodities }: { commodities?: RuntimeMarketGroup | null }) {
-  const { copy, shared, formatNumber } = useSpecialistCopy('commodities-watch');
-  const [tab, setTab] = useState<CommoditiesTab>('commodities');
-
-  const tabItems = useMemo(() => {
-    const items = commodities?.items || [];
-    const commodityItems = sortTickers(items.filter((item) => !isFxTicker(item)), COMMODITY_SORT_INDEX);
-    const fxItems = sortTickers(items.filter((item) => isFxTicker(item)), FX_SORT_INDEX);
-    return { commodities: commodityItems, fx: fxItems };
-  }, [commodities]);
-
-  const hasFx = tabItems.fx.length > 0;
-  const safeTab = tab === 'fx' && !hasFx ? 'commodities' : tab;
-  const visibleItems = safeTab === 'fx' ? tabItems.fx : tabItems.commodities;
-
-  return (
-    <Panel
-      title={copy('title', 'COMMODITIES')}
-      badge={shared('macro', 'MACRO')}
-      status="live"
-      count={visibleItems.length}
-      className="wm-market-panel wm-commodities-panel"
-    >
-      <div className="wm-commodity-panel-stack">
-        <div className="wm-commodity-tabbar" role="tablist" aria-label={copy('views', 'Commodity market views')}>
-          <button
-            type="button"
-            className={`panel-tab${safeTab === 'commodities' ? ' active' : ''}`}
-            onClick={() => setTab('commodities')}
-            role="tab"
-            aria-selected={safeTab === 'commodities'}
-          >
-            {copy('commodities', 'Commodities')} <b>{formatNumber(tabItems.commodities.length)}</b>
-          </button>
-          {hasFx ? (
-            <button
-              type="button"
-              className={`panel-tab${safeTab === 'fx' ? ' active' : ''}`}
-              onClick={() => setTab('fx')}
-              role="tab"
-              aria-selected={safeTab === 'fx'}
-            >
-              FX <b>{formatNumber(tabItems.fx.length)}</b>
-            </button>
-          ) : null}
-        </div>
-        {commodityBoard(
-          visibleItems,
-          safeTab === 'fx' ? copy('noFx', 'No FX quotes loaded yet.') : copy('empty', 'No commodity quotes loaded yet.'),
-          {
-            topMove: shared('topMove', 'top move'),
-            averageMove: shared('averageMove', 'avg move'),
-            alerts: shared('alerts', 'alerts'),
-          },
-        )}
-      </div>
-    </Panel>
-  );
-}
-
-const renderers: PanelRenderMap = {
-  'commodities-watch': {
-    render: (ctx) => <CommoditiesWatchPanel commodities={(ctx.runtimeData['commodities-watch'] as RuntimeMarketGroup | undefined)} />,
-  },
-};
-
-export const panel = runtimePanelFromRenderer(renderers, {
-  id: 'commodities-watch',
-  title: 'Commodities Watch',
-  eyebrow: 'macro',
-  description: 'Commodity price boards and sparklines.',
-  defaultEnabled: true,
-}, {
-  tier: 'fast',
-  fetchData: (context) => fetchRuntimeCommodities(context?.signal),
+export const panel = panelFromRenderer({ 'commodities-watch': { render: () => <CommoditiesWatchPanel /> } }, {
+  id: 'commodities-watch', title: 'Commodities Watch', eyebrow: 'macro',
+  description: 'Commodity and FX quotes with source clocks, daily changes and autonomous refresh.', defaultEnabled: true,
 });

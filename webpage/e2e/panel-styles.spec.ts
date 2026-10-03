@@ -19,6 +19,7 @@ for (const width of [1440, 390]) {
       await page.evaluate(id => window.panelHarness.mount(id), id);
       const panel = page.locator('.wm-panel-slot');
       await expect(panel.locator('.wm-panel')).toBeVisible();
+      if (id === 'commodities-watch') await expect(panel.locator('.wm-commodity-notice')).toBeVisible();
       await page.evaluate(() => document.fonts.ready);
       await expect.soft(panel).toHaveScreenshot(`${id}-${width}.png`, { animations: 'disabled', threshold: 0, maxDiffPixels: 0 });
     }

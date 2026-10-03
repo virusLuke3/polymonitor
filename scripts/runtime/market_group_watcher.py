@@ -31,6 +31,7 @@ from api.clients import market_data_client
 from api.clients.http_client import http_json_get
 from api.config import load_api_settings
 from api.services import runtime_service
+from api.services import commodities_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
 from runtime.snapshot_store import SnapshotStore
 
@@ -239,7 +240,7 @@ class MarketGroupWatcher:
         previous = self.seed_meta_store.load(SEED_META_NAMESPACE, panel_id) or {}
         attempted_at = utc_now_iso()
         last_success_at = previous.get("lastSuccessAt")
-        if status in {"ok", "degraded", "preserved"}:
+        if status in {"ok", "degraded"} and source_states.get("acquired", record_count) > 0:
             last_success_at = attempted_at
         payload = build_seed_meta_payload(
             panel_id=panel_id,
@@ -249,7 +250,7 @@ class MarketGroupWatcher:
             expected_interval_seconds=self.interval_seconds,
             status=status,
             last_attempt_at=attempted_at,
-            last_success_at=last_success_at or attempted_at,
+            last_success_at=last_success_at,
             record_count=record_count,
             source_states=source_states,
             error_summary=error_summary,
@@ -257,6 +258,9 @@ class MarketGroupWatcher:
             payload_status=status,
             metadata={"result": "stored"},
         )
+        # The common builder defaults an absent success clock to the attempt;
+        # a failed first scan must keep its success clock explicitly unknown.
+        payload["lastSuccessAt"] = last_success_at
         self.seed_meta_store.store(SEED_META_NAMESPACE, panel_id, payload)
 
     def run_component(self, *, panel_id: str, kind: str, items: list[tuple[str, str, str]]) -> Dict[str, Any]:
@@ -266,6 +270,13 @@ class MarketGroupWatcher:
         try:
             payload = runtime_service.fetch_live_market_group_payload(self.service_context(), items, kind=kind)
         except Exception as exc:
+            if kind == "commodities":
+                payload = commodities_service.merge_snapshot({"items": [], "generatedAt": utc_now_iso()}, previous, items, utc_now_iso())
+                payload["error"] = str(exc)
+                self.store_payload(namespace, cache_key, {**payload, "cacheMode": "seeded"}, kind=kind)
+                self.store_seed_meta(panel_id=panel_id, status="degraded", record_count=len(payload["items"]),
+                                     source_states={kind: "error", "acquired": 0}, error_summary=str(exc))
+                return {"status": "degraded", "recordCount": len(payload["items"])}
             if previous:
                 self.store_payload(namespace, cache_key, previous, kind=kind)
                 status = "preserved"
@@ -278,8 +289,11 @@ class MarketGroupWatcher:
             self.store_seed_meta(panel_id=panel_id, status=status, record_count=record_count, source_states={kind: status}, error_summary=error_summary)
             return {"status": status, "error": error_summary, "recordCount": record_count}
 
+        if kind == "commodities":
+            payload = commodities_service.merge_snapshot(payload, previous, items, utc_now_iso())
+            payload["refreshIntervalSeconds"] = self.interval_seconds
         record_count = len(payload.get("items") or [])
-        if previous and record_count <= 0:
+        if previous and record_count <= 0 and kind != "commodities":
             self.store_payload(namespace, cache_key, previous, kind=kind)
             self.store_seed_meta(
                 panel_id=panel_id,
@@ -292,13 +306,13 @@ class MarketGroupWatcher:
 
         payload = {**payload, "cacheMode": "seeded"}
         self.store_payload(namespace, cache_key, payload, kind=kind)
-        status = "ok" if record_count > 0 else "degraded"
+        status = payload.get("status", "ok") if record_count > 0 else "degraded"
         self.store_seed_meta(
             panel_id=panel_id,
             status=status,
             record_count=record_count,
-            source_states={kind: "ok" if record_count else "empty"},
-            error_summary=None if record_count else f"{kind} payload contained no items",
+            source_states={kind: status, "acquired": (payload.get("coverage") or {}).get("succeeded", record_count)},
+            error_summary=payload.get("error") or (None if record_count else f"{kind} payload contained no items"),
         )
         return {"status": status, "recordCount": record_count}
 
@@ -340,13 +354,15 @@ def main() -> int:
         return 0
     interval_seconds = max(30, int(args.interval or DEFAULT_INTERVAL_SECONDS))
     while True:
+        started_at = time.monotonic()
         try:
             print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
         except KeyboardInterrupt:
             return 0
         except Exception as exc:
             print(f"[market-group] ERROR watch loop failed: {exc}", file=sys.stderr)
-        time.sleep(interval_seconds)
+        # Start-to-start cadence; slow sources still get a minimum cooldown.
+        time.sleep(max(5, interval_seconds - (time.monotonic() - started_at)))
 
 
 if __name__ == "__main__":

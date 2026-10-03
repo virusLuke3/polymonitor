@@ -48,6 +48,49 @@ def _price_scale_compatible(left: Optional[float], right: Optional[float]) -> bo
     return ratio <= 20
 
 
+def _quote_metadata(meta: dict, current: Optional[float], safe_float: Any) -> dict:
+    """Preserve provider clocks; a recent fetch is not a recent quote."""
+    now = datetime.now(timezone.utc)
+
+    def iso(value: Any) -> str | None:
+        try:
+            number = float(value)
+            return datetime.fromtimestamp(number, timezone.utc).isoformat().replace("+00:00", "Z") if number > 0 else None
+        except (TypeError, ValueError, OverflowError, OSError):
+            return None
+
+    period = (meta.get("currentTradingPeriod") or {}).get("regular") or {}
+    start, end = iso(period.get("start")), iso(period.get("end"))
+    state = str(meta.get("marketState") or "").upper()
+    market_state = "unknown"
+    if state in {"REGULAR", "OPEN"}:
+        market_state = "open"
+    elif state in {"CLOSED", "PRE", "PREPRE", "POST", "POSTPOST"}:
+        market_state = "closed"
+    elif start and end:
+        start_dt, end_dt = datetime.fromisoformat(start.replace("Z", "+00:00")), datetime.fromisoformat(end.replace("Z", "+00:00"))
+        # An obsolete trading window cannot prove the market is closed today.
+        if start_dt <= now <= end_dt:
+            market_state = "open"
+        elif abs((now - end_dt).total_seconds()) <= 4 * 86400:
+            market_state = "closed"
+    previous = safe_float(meta.get("previousClose"))
+    daily = None
+    if current is not None and _price_scale_compatible(current, previous):
+        daily = round((current - previous) / previous * 100, 2)
+    return {
+        "dailyChangePercent": daily,
+        "changeBasis": "previous-close" if daily is not None else "unknown",
+        "quoteAt": iso(meta.get("regularMarketTime")),
+        "fetchedAt": now.isoformat().replace("+00:00", "Z"),
+        "marketState": market_state,
+        "exchangeTimezone": meta.get("exchangeTimezoneName"),
+        "instrumentType": meta.get("instrumentType"),
+        "tradingSession": {"start": start, "end": end},
+        "sessionVolume": safe_float(meta.get("regularMarketVolume")),
+    }
+
+
 def get_yahoo_market_snapshot(
     ctx: dict,
     symbol: str,
@@ -110,6 +153,7 @@ def get_yahoo_market_snapshot(
         "marketCap": ctx["_safe_float"](meta.get("marketCap")),
         "name": meta.get("symbol") or symbol,
         "points": points[-48:],
+        **_quote_metadata(meta, current, ctx["_safe_float"]),
     }
     cache_ttl = max(1, int(ttl_seconds if ttl_seconds is not None else ctx["FINANCE_RUNTIME_TTL_SECONDS"]))
     if use_runtime_cache:
