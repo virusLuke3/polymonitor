@@ -108,6 +108,8 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
         fetcher = Mock(side_effect=ValueError("invalid source"))
         with patch.dict(watcher.spec, {"fetcher": fetcher}), patch.object(watcher, "service_context", return_value={}):
             result = watcher.run_once()
+        self.assertFalse(result["sourceError"])
+        self.assertEqual(120, watcher.next_refresh_delay(result, elapsed_seconds=0))
         fetcher.assert_called_once()
         self.assertEqual("error", result["status"])
 
@@ -417,6 +419,49 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
         self.assertEqual("stale", stored["status"])
         self.assertEqual(previous["generatedAt"], stored["generatedAt"])
         self.assertEqual(previous["items"], stored["items"])
+
+    def test_source_failure_schedule_backs_off_then_resets_after_recovery(self):
+        watcher, _ = self.make_watcher()
+        failed = {"status": "preserved", "sourceError": True}
+        self.assertEqual([15, 30, 60, 120, 120], [watcher.next_refresh_delay(failed, elapsed_seconds=20) for _ in range(5)])
+        self.assertEqual(110, watcher.next_refresh_delay({"status": "ok"}, elapsed_seconds=10))
+        self.assertEqual(15, watcher.next_refresh_delay(failed, elapsed_seconds=20))
+        self.assertEqual(60, watcher.next_refresh_delay({"status": "ok"}, elapsed_seconds=300))
+
+    def test_partial_source_failure_retries_but_semantic_limits_keep_normal_cadence(self):
+        watcher, _ = self.make_watcher(component="suspicious")
+        payload = {"items": [], "status": "partial", "sourceStates": {"oracleTrades": {"status": "error"}}}
+        with patch.object(watcher, "fetch_payload", return_value=payload):
+            result = watcher.run_once()
+        self.assertTrue(result["sourceError"])
+        self.assertEqual(15, watcher.next_refresh_delay(result, elapsed_seconds=25))
+        payload["sourceStates"] = {"semantics": "partial", "coverage": {"status": "limited"}}
+        with patch.object(watcher, "fetch_payload", return_value=payload):
+            result = watcher.run_once()
+        self.assertFalse(result["sourceError"])
+        self.assertEqual(95, watcher.next_refresh_delay(result, elapsed_seconds=25))
+
+    def test_alpha_unavailable_source_retries_without_renewing_previous_clock(self):
+        watcher, redis = self.make_watcher(component="alpha")
+        previous = {"items": [{"id": "verified"}], "generatedAt": "2026-10-03T00:00:00Z", "status": "ok"}
+        watcher.store_payload(previous)
+        payload = {"items": [], "status": "degraded", "sourceStates": {"clickhouse": "unavailable"}}
+        with patch.object(watcher, "fetch_payload", return_value=payload):
+            result = watcher.run_once()
+        self.assertTrue(result["sourceError"])
+        self.assertEqual(15, watcher.next_refresh_delay(result, elapsed_seconds=10))
+        self.assertEqual(previous["generatedAt"], json.loads(redis.get(watcher.redis_key()))["generatedAt"])
+
+    def test_watch_loop_uses_failure_cadence_and_returns_to_periodic_refresh(self):
+        watcher, _ = self.make_watcher()
+        watcher.run_once = Mock(side_effect=[{"status": "preserved", "sourceError": True}, {"status": "ok"}, KeyboardInterrupt])
+        with patch.object(signals_watcher, "SignalsWatcher", return_value=watcher), patch.object(
+            signals_watcher, "build_arg_parser", return_value=Mock(parse_args=lambda: SimpleNamespace(component="whales", limit=14, watch=True))
+        ), patch("runtime.environment.load_environment"), patch.object(
+            signals_watcher.time, "monotonic", side_effect=[0, 20, 35, 45, 155]
+        ), patch.object(signals_watcher.time, "sleep") as sleep:
+            self.assertEqual(0, signals_watcher.main())
+        self.assertEqual([15, 110], [call.args[0] for call in sleep.call_args_list])
 
     def test_repeated_requests_read_canonical_seed_without_refresh(self):
         old = {"items": [{"title": "old"}], "generatedAt": "2026-09-28T10:00:00Z", "status": "ok"}

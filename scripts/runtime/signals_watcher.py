@@ -113,6 +113,17 @@ def _record_count(payload: Dict[str, Any]) -> int:
     return len(items) if isinstance(items, list) else 0
 
 
+def _source_failed(payload: Dict[str, Any]) -> bool:
+    states = payload.get("sourceStates")
+    if not isinstance(states, dict):
+        return False
+    for state in states.values():
+        status = state.get("status") if isinstance(state, dict) else state
+        if isinstance(status, str) and status in {"error", "unavailable", "failed"}:
+            return True
+    return False
+
+
 def _parse_item_timestamp(raw: Any) -> Optional[datetime]:
     if not raw:
         return None
@@ -298,6 +309,17 @@ class SignalsWatcher:
                 if attempt == 2:
                     raise
 
+    def next_refresh_delay(self, result: Dict[str, Any], *, elapsed_seconds: float) -> float:
+        if result.get("sourceError"):
+            failures = min(getattr(self, "_refresh_failures", 0) + 1, 4)
+            self._refresh_failures = failures
+            # Failed acquisition has its own bounded cadence. Do not leave a
+            # recovered transport idle until the next healthy seed interval.
+            return min(self.interval_seconds, 15 * 2 ** (failures - 1))
+        self._refresh_failures = 0
+        # Slow successful reads must not produce a catch-up request burst.
+        return max(self.interval_seconds / 2, self.interval_seconds - elapsed_seconds)
+
     def run_once(self) -> Dict[str, Any]:
         previous = self.load_previous_payload()
         payload = None
@@ -322,7 +344,8 @@ class SignalsWatcher:
                                      record_count=_record_count(failed),
                                      error_summary=failed["error"], preserve_last_success=True,
                                      source_states=failed.get("sourceStates"), payload_status=failed["status"])
-                return {"status": failed["status"], "recordCount": _record_count(failed), "error": type(exc).__name__}
+                return {"status": failed["status"], "recordCount": _record_count(failed), "error": type(exc).__name__,
+                        "sourceError": _source_failed(payload) or isinstance(exc, TimeoutError)}
             if previous:
                 preserved = {**previous, "cacheMode": "seeded", "status": "stale"}
                 if self.component in {"whales", "suspicious"}:
@@ -341,7 +364,8 @@ class SignalsWatcher:
                     metadata={"result": "preserved", "component": self.component, **stats},
                     payload_status=preserved.get("status") or "preserved",
                 )
-                return {"status": "preserved", "recordCount": _record_count(previous), "error": type(exc).__name__}
+                return {"status": "preserved", "recordCount": _record_count(previous), "error": type(exc).__name__,
+                        "sourceError": isinstance(exc, TimeoutError)}
             self.store_seed_meta(
                 status="error",
                 record_count=0,
@@ -349,7 +373,8 @@ class SignalsWatcher:
                 preserve_last_success=True,
                 metadata={"result": "error", "component": self.component},
             )
-            return {"status": "error", "recordCount": 0, "error": type(exc).__name__}
+            return {"status": "error", "recordCount": 0, "error": type(exc).__name__,
+                    "sourceError": isinstance(exc, TimeoutError)}
 
         record_count = _record_count(payload)
         stats = _payload_timestamp_stats(payload, stale_after_seconds=self.stale_after_seconds())
@@ -376,7 +401,8 @@ class SignalsWatcher:
             source_states=payload.get("sourceStates") if isinstance(payload.get("sourceStates"), dict) else {"database": status},
             payload_status=status,
         )
-        return {"status": status, "recordCount": record_count, "component": self.component, "telegramSent": telegram_sent}
+        return {"status": status, "recordCount": record_count, "component": self.component, "telegramSent": telegram_sent,
+                "sourceError": _source_failed(payload)}
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -410,11 +436,12 @@ def main() -> int:
             print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
             return 0
 
-        interval_seconds = watcher.interval_seconds
         while True:
             started = time.monotonic()
+            result = {}
             try:
-                print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
+                result = watcher.run_once()
+                print(json.dumps(result, ensure_ascii=False), file=sys.stderr)
             except KeyboardInterrupt:
                 return 0
             except Exception as exc:
@@ -426,8 +453,7 @@ def main() -> int:
                     metadata={"result": "exception", "component": args.component},
                 )
                 print(f"[signals] ERROR watch loop failed: {type(exc).__name__}", file=sys.stderr)
-            # Never catch up with a burst after a slow or failed refresh.
-            time.sleep(max(interval_seconds / 2, interval_seconds - (time.monotonic() - started)))
+            time.sleep(watcher.next_refresh_delay(result, elapsed_seconds=time.monotonic() - started))
     finally:
         watcher.close()
 
