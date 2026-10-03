@@ -118,6 +118,9 @@ def _query_json_rows(ctx: dict, query: str, *, timeout_seconds: float = 1.8) -> 
         return None
     if ctx.get("app") is None:
         return None
+    collection_timeout = runtime_resources(ctx).clickhouse_read_timeout_seconds
+    if collection_timeout is not None:
+        timeout_seconds = max(timeout_seconds, collection_timeout)
     if _settings(ctx).http_url:
         return _query_json_rows_http(ctx, query, timeout_seconds=timeout_seconds)
     if shutil.which("docker") is None:

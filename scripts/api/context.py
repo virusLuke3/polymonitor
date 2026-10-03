@@ -18,6 +18,9 @@ class RuntimeResources:
     """Mutable caches and background work owned by one application/worker."""
 
     clickhouse: ClickHouseSettings = field(default_factory=ClickHouseSettings.from_environment)
+    # Background collection can allow tunnel latency without changing SQL
+    # execution/memory limits or the serving API's short read deadline.
+    clickhouse_read_timeout_seconds: float | None = None
     snapshot_workers: int = 2
     workspace_workers: int = 2
     shutdown_timeout_seconds: float = 20

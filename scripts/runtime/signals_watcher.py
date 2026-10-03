@@ -278,6 +278,9 @@ class SignalsWatcher:
 
         if not hasattr(self, "_service_runtime"):
             self._service_runtime = ServiceRuntime(self.settings, application=_AppAdapter())
+            # Collection runs outside HTTP requests. Allow bounded tunnel
+            # latency; keep ClickHouse execution, memory and concurrency caps.
+            self._service_runtime.resources.clickhouse_read_timeout_seconds = 10.0
         if self.component == "alpha":
             return self._service_runtime.alpha_signal_context
         return self._service_runtime.polybeats_context if self.component == "polybeats" else self._service_runtime.signal_context
