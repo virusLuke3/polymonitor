@@ -13,7 +13,7 @@ from api.context import RuntimeResources, runtime_resources, resolve_optional_se
 from .contracts import SCHEMA_VERSION, SourceFetchResult
 from .dedupe import latest_revision
 from .providers import eccc, swic, eonet, firms, gdacs, nhc, ncei, nws, usgs, usgs_volcano_cap
-from .snapshots import cached_source_result, fetch_with_snapshot, stale_source_result
+from .snapshots import cached_source_result, fetch_with_snapshot, stale_source_result, source_refresh_due
 from .source_health import unavailable_source
 
 
@@ -111,13 +111,13 @@ def _fetch_provider_results(
             cached = cached_results[key]
             if cached is not None:
                 results[key] = cached
-                if cached["status"] in {"ok", "partial"}:
+                if cached["status"] in {"ok", "partial"} and not source_refresh_due(cached, ttl):
                     continue
             future = resources.hazard_pending.get(key)
             if future is None or future.done():
                 future = resources.submit(resources.hazard_executor, fetch_with_snapshot,
                     source_lock=resources.hazard_locks[key], key=key,
-                    snapshot_store=dependencies.snapshot_store, fetcher=fetcher, ttl_seconds=ttl)
+                    snapshot_store=dependencies.snapshot_store, fetcher=fetcher, ttl_seconds=ttl, refresh_ahead=True)
                 resources.hazard_pending[key] = future
             if cached is None:
                 futures[future] = key

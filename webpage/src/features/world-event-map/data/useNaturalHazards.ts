@@ -333,8 +333,11 @@ export function useNaturalHazards({ sourceKeys, zoom, center, suspended }: {
         const sourceState = records.current.get(source)?.parsed.response.sources[0];
         const stale = sourceState?.status === 'degraded' || sourceState?.status === 'error'
           || (Number.isFinite(expiresAt) && expiresAt <= Date.now());
+        // Revalidate before the *original* freshness deadline, leaving room
+        // for network latency. A source returning the same nearly-expired
+        // snapshot is retried no faster than every five seconds.
         const refreshDelay = Number.isFinite(expiresAt) && expiresAt > Date.now()
-          ? Math.min(REFRESH_INTERVAL_MS[source], Math.max(1000, expiresAt - Date.now()))
+          ? Math.min(REFRESH_INTERVAL_MS[source], Math.max(5000, expiresAt - Date.now() - 10_000))
           : REFRESH_INTERVAL_MS[source];
         const delay = failed ? RETRY_DELAYS_MS[Math.min(RETRY_DELAYS_MS.length - 1, Math.max(0, failures - 1))]!
           : stale ? Math.min(60_000, 30_000 * Math.max(1, failures)) : refreshDelay;

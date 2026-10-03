@@ -1216,3 +1216,56 @@ def test_nws_optional_work_has_independent_budget_and_ignores_inactive_alerts():
         assert len(calls) == 1 and calls[0][0].endswith('T002')
         assert .5 < calls[0][1] <= nws.ZONE_FETCH_BUDGET_SECONDS
     finally: resources.close()
+
+
+def test_refresh_ahead_serves_fresh_snapshot_while_one_shared_fetch_runs(monkeypatch):
+    from api.context import RuntimeResources
+    from threading import Event
+    from datetime import timedelta
+    resources = RuntimeResources(); store = FakeSnapshotStore()
+    now = datetime(2026, 10, 3, tzinfo=timezone.utc)
+    monkeypatch.setattr(snapshots, 'utc_now', lambda: now)
+    original = {'events': [{'id': 'original'}], 'fetchedAt': snapshots.iso_utc(now-timedelta(seconds=40)),
+                'staleAfter': snapshots.iso_utc(now+timedelta(seconds=20)), 'dataUpdatedAt': 'native-time'}
+    store.values[(snapshots.SNAPSHOT_NAMESPACE, 'nws')] = original
+    started = Event(); release = Event(); calls = []
+    def fetch():
+        calls.append(1); started.set(); release.wait(2)
+        return {'events': [{'id': 'new'}], 'data_updated_at': 'new-native-time'}
+    deps = service.NaturalHazardDependencies.from_context({'_resources': resources, 'SNAPSHOT_STORE': store, 'http_json_get': lambda *_a, **_k: None})
+    try:
+        for _ in range(5):
+            result = service._fetch_provider_results(dependencies=deps, source_specs={'nws': (60, fetch)})['nws']
+            assert result['status'] == 'ok'
+            assert result['events'] == original['events']
+            assert result['staleAfter'] == original['staleAfter']
+            assert result['lastSuccessAt'] == original['fetchedAt']
+        assert started.wait(1) and len(calls) == 1
+        release.set(); resources.hazard_pending['nws'].result(2)
+        current = service._fetch_provider_results(dependencies=deps, source_specs={'nws': (60, fetch)})['nws']
+        assert current['events'] == [{'id': 'new'}]
+        assert current['dataUpdatedAt'] == 'new-native-time'
+        assert current['fetchedAt'] == snapshots.iso_utc(now)
+        assert len(calls) == 1
+    finally:
+        release.set(); resources.close()
+
+
+def test_refresh_ahead_preserves_provider_cooldown_and_original_deadlines(monkeypatch):
+    from threading import Lock
+    from datetime import timedelta
+    now = datetime(2026, 10, 3, tzinfo=timezone.utc)
+    monkeypatch.setattr(snapshots, 'utc_now', lambda: now)
+    store = FakeSnapshotStore()
+    original = {'events': [], 'fetchedAt': snapshots.iso_utc(now-timedelta(seconds=40)),
+                'staleAfter': snapshots.iso_utc(now+timedelta(seconds=20))}
+    store.values[(snapshots.SNAPSHOT_NAMESPACE, 'nws')] = original
+    store.values[(snapshots.CONDITION_NAMESPACE, 'nws')] = {'retryAt': now.timestamp()+120, 'errorCode': 'nws-http-429', 'condition': 'throttled'}
+    def forbidden(): raise AssertionError('retry-after must govern upstream requests')
+    result = snapshots.fetch_with_snapshot(key='nws', snapshot_store=store, source_lock=Lock(), fetcher=forbidden, ttl_seconds=60, refresh_ahead=True)
+    assert result['condition'] == 'throttled' and result['retryAfterSeconds'] == 120
+    assert result['lastSuccessAt'] == original['fetchedAt']
+    assert result['staleAfter'] == original['staleAfter']
+    assert not snapshots.source_refresh_due({'staleAfter': snapshots.iso_utc(now+timedelta(seconds=25))}, 60)
+    assert snapshots.source_refresh_due(original, 60)
+    assert not snapshots.source_refresh_due({'staleAfter': 'invalid'}, 60)

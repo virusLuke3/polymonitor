@@ -913,21 +913,34 @@ def _read_aisstream_cache(
     ctx: GlobalTransportShippingContext,
     *,
     max_age_seconds: int,
+    require_positions: bool = False,
 ) -> Optional[Dict[str, Any]]:
     dependencies = _dependencies(ctx)
     reader = dependencies.get_cached_json
-    payload = reader(AISSTREAM_SNAPSHOT_NAMESPACE, AISSTREAM_CACHE_KEY) if reader is not None else None
-    if not isinstance(payload, dict):
-        store = dependencies.snapshot_store
-        if store is not None:
-            payload = store.get(AISSTREAM_SNAPSHOT_NAMESPACE, AISSTREAM_CACHE_KEY)
-    if not isinstance(payload, dict):
-        return None
-    sampled_at = payload.get("sampledAt") or payload.get("generatedAt")
-    age = _age_seconds(sampled_at)
-    if age is None or age > max_age_seconds:
-        return None
-    return {**payload, "cacheMode": "ais-cache", "ageSeconds": round(max(0, age))}
+    payloads = []
+    if reader is not None:
+        cached = reader(AISSTREAM_SNAPSHOT_NAMESPACE, AISSTREAM_CACHE_KEY)
+        if isinstance(cached, dict):
+            payloads.append(cached)
+    store = dependencies.snapshot_store
+    if store is not None:
+        # The map's retention budget is longer than the sampler's cache TTL.
+        # A failed/empty Redis sample must not hide a valid retained position set.
+        read = getattr(store, "get_stale", store.get)
+        cached = read(AISSTREAM_SNAPSHOT_NAMESPACE, AISSTREAM_CACHE_KEY)
+        if isinstance(cached, dict):
+            payloads.append(cached)
+    candidates = []
+    for payload in payloads:
+        if require_positions and not payload.get("vessels"):
+            continue
+        age = _age_seconds(payload.get("sampledAt") or payload.get("generatedAt"))
+        if age is not None and 0 <= age <= max_age_seconds:
+            candidates.append({**payload, "cacheMode": "ais-cache", "ageSeconds": round(age)})
+    # Newest attempt still governs sampler admission. The map separately asks
+    # for retained positions and must not initiate its own websocket acquisition.
+    return min(candidates, key=lambda row: row["ageSeconds"]) if candidates else None
+
 
 
 def _store_aisstream_cache(
@@ -2213,7 +2226,7 @@ def get_transport_map_source(ctx, *, source, query=""):
     if source == "ais":
         # Acquisition stays in the existing AIS watcher. A browser never opens
         # another websocket or advances its quota-controlled sampling schedule.
-        sample = _read_aisstream_cache(ctx, max_age_seconds=86400)
+        sample = _read_aisstream_cache(ctx, max_age_seconds=86400, require_positions=True)
         if not sample or not sample.get('vessels'):
             return {"status": "unavailable", "events": [], "message": "No retained AIS positions. The configured low-frequency sampler owns acquisition."}
         events = []

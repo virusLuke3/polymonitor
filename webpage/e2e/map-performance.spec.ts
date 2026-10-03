@@ -66,3 +66,27 @@ for (const width of [1440, 390]) test(`fixed map appearance ${width}`, async ({p
   await page.mouse.move(0,0);
   await expect(page.locator('.wm-map-stage')).toHaveScreenshot(`map-performance-${width}.png`,{maxDiffPixels:0});
 });
+
+test('visible renderer downloads before idle admission and explicit SVG does not download it', async({page})=>{
+  let requested=0;
+  page.on('request',request=>{if(/\/DeckMapRenderer(?:\.ts|-[\w-]+\.js)/.test(request.url()))requested++;});
+  await page.addInitScript(()=>{
+    // Hold CPU admission but leave module download free to overlap the shell.
+    window.requestIdleCallback=callback=>{(window as any).__releaseMapIdle=()=>callback({didTimeout:false,timeRemaining:()=>50});return 123;};
+    const original=window.setTimeout.bind(window);
+    window.setTimeout=((callback:any,ms?:number,...args:any[])=>ms===2500?original(callback,30000,...args):original(callback,ms,...args)) as typeof window.setTimeout;
+  });
+  await page.goto('/?view=2d&basemap=openfreemap&mapPerf=1',{waitUntil:'domcontentloaded'});
+  await page.locator('.wm-map-section').scrollIntoViewIfNeeded();
+  await expect.poll(()=>requested).toBeGreaterThan(0);
+  expect(await page.locator('.maplibregl-canvas').count()).toBe(0);
+  await page.evaluate(()=>(window as any).__releaseMapIdle());
+  await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-basemap-state','primary-ready');
+  requested=0;
+  await page.goto('/?view=2d&renderer=svg',{waitUntil:'domcontentloaded'});
+  await page.locator('.wm-map-section').scrollIntoViewIfNeeded();
+  await page.waitForFunction(()=>Boolean((window as any).__releaseMapIdle));
+  await page.evaluate(()=>(window as any).__releaseMapIdle());
+  await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready','svg');
+  expect(requested).toBe(0);
+});

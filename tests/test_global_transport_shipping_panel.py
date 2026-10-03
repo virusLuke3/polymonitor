@@ -463,3 +463,28 @@ def test_v3_aviation_cold_viewport_is_shared_across_api_workers(tmp_path, monkey
         worker.join(2);assert worker.exitcode==0
     assert 0 < calls.value <= 4
     assert all(result['aircraftCount']==1 for result in returned)
+
+
+def test_ais_map_retains_positions_past_sample_ttl_without_starting_acquisition(tmp_path, monkeypatch):
+    from datetime import timedelta
+    store = SnapshotStore(str(tmp_path / 'ais.sqlite3'))
+    now = datetime.now(timezone.utc)
+    sample_time = (now-timedelta(hours=7)).isoformat()
+    previous = {'status': 'ok', 'sampledAt': sample_time, 'vessels': [{'mmsi': '241967000', 'name': 'Reported vessel', 'lat': 37.93, 'lon': 23.68, 'observedAt': sample_time}]}
+    # Expired cache entry is still valid evidence within the map's 24-hour
+    # retention budget. It must not pretend to be a fresh/live position.
+    store.set(global_transport_shipping_service.AISSTREAM_SNAPSHOT_NAMESPACE, global_transport_shipping_service.AISSTREAM_CACHE_KEY, previous, -1)
+    latest_attempt = {'status': 'error', 'sampledAt': now.isoformat(), 'vessels': []}
+    ctx = {'SNAPSHOT_STORE': store, 'get_cached_json': lambda *_a: latest_attempt}
+    monkeypatch.setenv('AISSTREAM_API_KEY', 'fixture-key')
+    def forbidden(*_a, **_k): raise AssertionError('map reads cannot acquire AIS data')
+    monkeypatch.setattr(global_transport_shipping_service, '_sample_aisstream', forbidden)
+    result = global_transport_shipping_service.get_transport_map_source(ctx, source='ais')
+    assert result['status'] == 'partial' and len(result['events']) == 1
+    assert result['updatedAt'] == sample_time
+    assert result['events'][0]['sources'][0]['freshness'] == 'stale'
+    # Sampling admission still uses the newest attempt, even when it failed.
+    assert global_transport_shipping_service._aisstream_status(ctx)['status'] == 'error'
+    previous['sampledAt'] = (now-timedelta(hours=25)).isoformat()
+    store.set(global_transport_shipping_service.AISSTREAM_SNAPSHOT_NAMESPACE, global_transport_shipping_service.AISSTREAM_CACHE_KEY, previous, -1)
+    assert global_transport_shipping_service.get_transport_map_source(ctx, source='ais')['status'] == 'unavailable'

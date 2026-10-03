@@ -269,6 +269,17 @@ export function WorldEventMap({
         void loadPreferredRenderer();
       }, recoveryAttempts === 0 ? 30_000 : 120_000);
     };
+    // Start the visible map's download before waiting for CPU admission.
+    // Keep a caught promise so a failed speculative download still follows the
+    // normal SVG/recovery path and never becomes an unhandled rejection.
+    let rendererDownload: Promise<typeof import('../renderer/DeckMapRenderer')> | null = null;
+    const preloadRenderer = () => {
+      if (!rendererDownload && !disposed && inViewport && !document.hidden && support.supported && !lightweight) {
+        rendererDownload = import('../renderer/DeckMapRenderer');
+        void rendererDownload.catch(() => { rendererDownload = null; });
+      }
+    };
+    preloadRenderer();
     let preferredLoadGeneration = 0;
     let slowLoadTimer: number | null = null;
     let rendererDeadline: number | null = null;
@@ -433,7 +444,8 @@ export function WorldEventMap({
         ));
       }, 6_000);
       try {
-        const { DeckMapRenderer } = await import('../renderer/DeckMapRenderer');
+        preloadRenderer();
+        const { DeckMapRenderer } = await (rendererDownload || import('../renderer/DeckMapRenderer'));
         if (!isCurrent()) return;
         if (slowLoadTimer != null) window.clearTimeout(slowLoadTimer);
         slowLoadTimer = null;
@@ -473,6 +485,7 @@ export function WorldEventMap({
     }
 
     const scheduleRendererInstall = () => {
+      preloadRenderer();
       if (disposed || rendererInstallStarted || installFrame != null || document.hidden || !inViewport
         || (!interactionReady && !idleReady && !forceReady)) return;
       // Let the lightweight map shell and surrounding controls paint first.

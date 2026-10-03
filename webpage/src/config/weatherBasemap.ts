@@ -1,4 +1,6 @@
 import { addProtocol, type ExpressionSpecification, type StyleSpecification, type SymbolLayerSpecification } from 'maplibre-gl';
+import { Protocol, PMTiles } from 'pmtiles';
+import { layers, namedFlavor } from '@protomaps/basemaps';
 import {
   OPENFREEMAP_DARK_STYLE,
   OPENFREEMAP_LIGHT_STYLE,
@@ -26,9 +28,15 @@ let pmtilesProtocol: import('pmtiles').Protocol | null = null;
 async function registerWorldEventPMTilesProtocol() {
   if (pmtilesRegistered) return;
   pmtilesRegistration ??= (async () => {
-    const { Protocol } = await import('pmtiles');
     if (pmtilesRegistered) return;
     const protocol = new Protocol();
+    if (WORLD_EVENT_PMTILES_URL) {
+      const archive = new PMTiles(resolveWorldEventPMTilesUrl(WORLD_EVENT_PMTILES_URL));
+      protocol.add(archive);
+      // Header/root directory download overlaps style preparation and WebGL
+      // construction; MapLibre reuses this same archive/cache, not a raw fetch.
+      if (typeof window !== 'undefined') void archive.getHeader().catch(() => undefined);
+    }
     pmtilesProtocol = protocol;
     addProtocol('pmtiles', protocol.tile);
     pmtilesRegistered = true;
@@ -43,7 +51,6 @@ async function registerWorldEventPMTilesProtocol() {
 export async function resetWorldEventPMTilesArchive() {
   if (!WORLD_EVENT_PMTILES_URL) return;
   await registerWorldEventPMTilesProtocol();
-  const { PMTiles } = await import('pmtiles');
   pmtilesProtocol?.add(new PMTiles(resolveWorldEventPMTilesUrl(WORLD_EVENT_PMTILES_URL)));
 }
 
@@ -71,7 +78,6 @@ export function mapBasemapFonts(_language: 'en' | 'zh', original?: unknown): Non
 }
 
 export async function buildWorldEventPMTilesStyle(url: string, language: 'en' | 'zh' = 'en', theme: WeatherMapTheme = 'dark'): Promise<StyleSpecification> {
-  const { layers, namedFlavor } = await import('@protomaps/basemaps');
   const archiveUrl = resolveWorldEventPMTilesUrl(url);
   const rankedLayers = layers('basemap', namedFlavor(theme === 'positron' ? 'light' : 'black'), { lang: language }) as StyleSpecification['layers'];
   // Use the WorldMonitor provider palette, boundaries and collision rules.
@@ -108,8 +114,11 @@ export async function getWeatherMapStyle(
     ? (WORLD_EVENT_PMTILES_URL ? 'pmtiles' : 'openfreemap')
     : provider;
   if (resolvedProvider === 'pmtiles' && WORLD_EVENT_PMTILES_URL) {
-    await registerWorldEventPMTilesProtocol();
-    return buildWorldEventPMTilesStyle(WORLD_EVENT_PMTILES_URL, language, theme);
+    const [, style] = await Promise.all([
+      registerWorldEventPMTilesProtocol(),
+      buildWorldEventPMTilesStyle(WORLD_EVENT_PMTILES_URL, language, theme),
+    ]);
+    return style;
   }
   if (resolvedProvider === 'carto') return theme === 'positron' ? CARTO_LIGHT_STYLE : CARTO_DARK_STYLE;
   return theme === 'positron' ? OPENFREEMAP_LIGHT_STYLE : OPENFREEMAP_DARK_STYLE;

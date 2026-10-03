@@ -33,7 +33,9 @@ def test_watcher_runs_live_refresh_outside_api_request(monkeypatch, tmp_path: Pa
         interval_seconds=90,
     )
 
+    assert watcher.interval_seconds == 10
     result = watcher.run_once()
+    watcher.close()
 
     assert captured["allow_provider_fetch"] is True
     assert captured["context"]["SNAPSHOT_STORE"] is watcher.snapshot_store

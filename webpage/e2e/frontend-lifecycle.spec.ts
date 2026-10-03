@@ -412,11 +412,11 @@ test('hazard layers share source demand and only FIRMS restarts for a viewport c
   expect(await hazardCalls(page)).toHaveLength(6);
   await page.evaluate(() => window.frontendHarness.setHazardView({ layers: ['wildfires', 'weather-alerts'] }));
   await page.clock.runFor(100);
-  await expect.poll(async () => (await hazardCalls(page)).length).toBe(8);
-  expect((await hazardCalls(page)).slice(6).map((call: any) => call.source).sort()).toEqual(['nhc', 'nws']);
+  await expect.poll(async () => (await hazardCalls(page)).length).toBe(10);
+  expect((await hazardCalls(page)).slice(6).map((call: any) => call.source).sort()).toEqual(['eccc', 'nhc', 'nws', 'swic']);
   await page.evaluate(() => window.frontendHarness.setHazardView({ layers: [] }));
   await page.clock.runFor(600_000);
-  expect(await hazardCalls(page)).toHaveLength(8);
+  expect(await hazardCalls(page)).toHaveLength(10);
   await page.evaluate(() => window.frontendHarness.unmount());
 });
 
@@ -691,4 +691,32 @@ test('aircraft refresh retains last good data, cancels hidden/unmounted requests
   const stoppedCalls = calls;
   await page.clock.runFor(90_000);
   expect(calls).toBe(stoppedCalls);
+});
+
+test('hazards revalidate before freshness expires without replacing evidence timestamps while pending', async ({page}) => {
+  await installFixtures(page);
+  let calls=0, finish: (()=>Promise<void>) | undefined;
+  await page.route('**/wm-api/runtime/world/natural-hazards/map?**', route=>{
+    if(new URL(route.request().url()).searchParams.get('source')!=='usgs')return route.fallback();
+    calls++;
+    const payload=mapResponse('usgs', []);
+    payload.sources[0]!.fetchedAt=GENERATED_AT;
+    payload.sources[0]!.lastSuccessAt=GENERATED_AT;
+    payload.sources[0]!.staleAfter=new Date(Date.parse(GENERATED_AT)+60_000).toISOString();
+    if(calls===1)return route.fulfill({json:payload});
+    finish=()=>route.fulfill({json:payload});
+  });
+  await harness(page,'hazards');
+  const source=()=>page.evaluate(()=>window.frontendHarness.hazards!.sources.find(s=>s.key==='usgs'));
+  await expect.poll(async()=>(await source())?.phase).toBe('empty');
+  await page.clock.runFor(54_000);
+  await expect.poll(()=>calls).toBe(2);
+  expect((await source())?.phase).toBe('empty');
+  expect(await page.evaluate(()=>window.frontendHarness.hazards!.response!.sources.find(s=>s.key==='usgs')!.lastSuccessAt)).toBe(GENERATED_AT);
+  await page.clock.runFor(7_000);
+  await expect.poll(async()=>(await source())?.phase).toBe('stale');
+  await finish!();await page.clock.runFor(200);
+  expect((await source())?.phase).toBe('stale');
+  expect(calls).toBe(2);
+  await page.evaluate(()=>window.frontendHarness.unmount());
 });

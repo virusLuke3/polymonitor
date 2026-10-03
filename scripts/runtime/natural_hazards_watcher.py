@@ -23,7 +23,7 @@ from api.services import natural_hazards
 from runtime.snapshot_store import SnapshotStore
 
 
-DEFAULT_INTERVAL_SECONDS = 90
+DEFAULT_INTERVAL_SECONDS = 10
 
 
 class _Logger:
@@ -45,7 +45,10 @@ class NaturalHazardsWatcher:
     def __init__(self, *, settings: Any, snapshot_sqlite_path: str, interval_seconds: int) -> None:
         self.resources = RuntimeResources()
         self.settings = settings
-        self.interval_seconds = max(60, int(interval_seconds or DEFAULT_INTERVAL_SECONDS))
+        # This is a cache-admission tick, not an upstream poll interval. Source
+        # TTLs/singleflight/backoff own external requests. Legacy --interval 90
+        # must not keep the 60-second USGS/NWS snapshots expired for half a cycle.
+        self.interval_seconds = max(1, min(10, int(interval_seconds or DEFAULT_INTERVAL_SECONDS)))
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.session = requests.Session()
         # Production collectors must not inherit an operator's workstation or
@@ -142,6 +145,7 @@ def main() -> int:
     )
     try:
         while True:
+            started = time.monotonic()
             try:
                 print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
             except KeyboardInterrupt:
@@ -150,7 +154,7 @@ def main() -> int:
                 print(f"[natural-hazards] ERROR {exc}", file=sys.stderr)
             if not args.watch:
                 return 0
-            time.sleep(watcher.interval_seconds)
+            time.sleep(max(1, watcher.interval_seconds - (time.monotonic() - started)))
     finally:
         watcher.close()
 

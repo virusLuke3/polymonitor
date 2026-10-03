@@ -73,6 +73,19 @@ def cached_source_result(snapshot_store: Any, key: str) -> SourceFetchResult | N
     return stale
 
 
+def source_refresh_due(result: Dict[str, Any], ttl_seconds: int) -> bool:
+    """Refresh before expiry without changing the original freshness deadline.
+
+    At most 30 seconds / 40% of the source TTL is reserved for acquisition.
+    A 60-second NWS cache therefore never polls upstream faster than 36 seconds.
+    """
+    try:
+        deadline = datetime.fromisoformat(str(result.get("staleAfter") or "").replace("Z", "+00:00"))
+        return (deadline - utc_now()).total_seconds() <= min(30, ttl_seconds * .4)
+    except (ValueError, TypeError):
+        return False
+
+
 def fetch_with_snapshot(
     *,
     key: str,
@@ -80,10 +93,13 @@ def fetch_with_snapshot(
     source_lock: Lock,
     fetcher: Callable[[], Dict[str, Any]],
     ttl_seconds: int,
+    refresh_ahead: bool = False,
 ) -> SourceFetchResult:
     def fresh_result():
         fresh = snapshot_store.get(SNAPSHOT_NAMESPACE, key)
         if not isinstance(fresh, dict) or not isinstance(fresh.get("events"), list):
+            return None
+        if refresh_ahead and source_refresh_due(fresh, ttl_seconds):
             return None
         return {"key": key, "status": "partial" if fresh.get("isPartial") else "ok",
             "coverage": SOURCE_COVERAGE[key], "events": fresh["events"],
