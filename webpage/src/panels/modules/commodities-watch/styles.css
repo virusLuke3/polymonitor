@@ -15,3 +15,5 @@
 .wm-commodities-panel .wm-commodity-source { font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
 .wm-commodities-panel .wm-commodity-source summary { color: #70d9f5; cursor: pointer; }
 @media (max-width: 480px) { .wm-commodities-panel .commodity-head { gap: 3px; flex-wrap: wrap; } .wm-commodities-panel .commodity-price { font-size: 18px; } }
+.wm-commodities-panel .wm-commodity-panel-stack { gap: 4px; }
+.wm-commodities-panel .wm-panel-body { padding: 8px; }

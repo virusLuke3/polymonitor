@@ -46,8 +46,8 @@ test('commodity resource applies automatic changes, preserves outages and restor
   expect(await page.evaluate(() => localStorage.getItem('polymonitor:panel-resource:commodities:global:previous-close:v4'))).toContain('2420');
 });
 
-test('mobile commodity quotes load autonomously when scrolled into view', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
+for (const width of [1440, 390]) test(`commodity quotes load autonomously and prices remain visible at ${width}px`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 844 });
   await installDashboard(page, 'en', ['commodities-watch']);
   await page.route('**/wm-api/runtime/markets/commodities', route => route.fulfill({ json: {
     kind: 'commodities', status: 'ok', generatedAt: GENERATED_AT, items: [{ id: 'ttf', label: 'TTF GAS', symbol: 'TTF=F', price: 76.5, currency: 'EUR', marketState: 'closed', quoteAt: GENERATED_AT, fetchedAt: GENERATED_AT, points: [] }],
@@ -57,6 +57,7 @@ test('mobile commodity quotes load autonomously when scrolled into view', async 
   await expect(slot).toBeAttached();
   await slot.scrollIntoViewIfNeeded();
   await expect(slot.locator('[data-commodity-symbol="TTF=F"]')).toContainText('€76.50');
+  await expect(slot.locator('.commodity-price').first()).toBeInViewport();
   await expect(slot.locator('[data-commodity-checked-at]')).toBeAttached();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
 });

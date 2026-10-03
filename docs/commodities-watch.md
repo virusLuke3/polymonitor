@@ -35,6 +35,9 @@ shared backoff. Seed freshness is 180 seconds; browser recovery retention is
 Checked time, snapshot time and each instrument's quote time are separate.
 Closed-session quotes may remain unchanged. Absent quote clocks or obsolete
 session evidence remain unknown; they are not replaced with the current time.
+The default compact panel shows controls, clocks and quotes first; explanatory
+copy and daily summaries follow the quote grid so prices are visible without
+scrolling the desktop panel.
 Daily moves use Yahoo `previousClose`, never the five-day chart baseline.
 Missing/incompatible previous close displays a dash. Daily summary calculations
 exclude retained, stale or unconfirmed quotes, and expose their denominator.
