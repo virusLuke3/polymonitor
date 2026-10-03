@@ -225,6 +225,13 @@
   grid-column: var(--wm-panel-column, span 1);
 }
 
+@media (max-width: 760px) {
+  /* Auto-sized mobile rows need space before the visibility observer mounts content. */
+  .wm-panel-slot-deferred {
+    min-height: 240px;
+  }
+}
+
 .wm-panel-slot.dragging-source {
   opacity: 0.22;
   transform: scale(0.975);

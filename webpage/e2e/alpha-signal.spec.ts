@@ -3,6 +3,25 @@ import { installDashboard } from './fixtures/dashboard';
 import { GENERATED_AT } from './fixtures/world-event-map';
 test.use({ baseURL: `http://127.0.0.1:${process.env.POLYMONITOR_E2E_PORT || 4174}` });
 
+test('mobile Alpha reserves space before deferred content and loads when scrolled into view', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await installDashboard(page, 'en', ['alpha-signal']);
+  let requests = 0;
+  await page.route('**/wm-api/runtime/signals/alpha?*', route => {
+    requests++;
+    const item = { id: 'mobile-alpha', marketId: 1, tokenId: 'token-a', marketTitle: 'Mobile verified flow', side: 'BUY', logicalOutcome: 'YES', sourceOutcomeLabel: 'Yes', price: '.62', outcomeSemanticsValid: true, outcomeSemanticsCapabilities: { supportsYesNoWording: true }, metrics: { totalNotional: 15000, netFlowNotional: 14000, netDirectionStrength: .875, marketShare: .3, uniqueTraderCount: 6, tradeCount: 12, score: 88 } };
+    return route.fulfill({ json: { policyVersion: 'token-flow-v1', scope: 'global', status: 'ok', generatedAt: GENERATED_AT, windowMinutes: 15, baselineMinutes: 60, items: [item], candidates: [], coverage: { candidateCount: 1, verifiedCount: 1, rejectedCount: 0, rejectionReasons: {} } } });
+  });
+  await page.goto('/');
+  const slot = page.locator('.wm-panel-slot[data-workspace-panel-id="alpha-signal"]');
+  await expect(slot).toBeAttached();
+  await expect.poll(() => slot.evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThan(0);
+  await slot.scrollIntoViewIfNeeded();
+  await expect(slot.getByRole('button', { name: 'Mobile verified flow' })).toBeVisible();
+  expect(requests).toBeGreaterThan(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+});
+
 test('Alpha uses its resource to apply scheduled updates, retain failures and separate pending labels', async ({ page }) => {
   await installDashboard(page);
   await page.clock.install({ time: new Date(GENERATED_AT) });
