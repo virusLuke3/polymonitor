@@ -284,8 +284,16 @@ class SignalsWatcher:
 
     def fetch_payload(self) -> Dict[str, Any]:
         fetcher: Callable[..., Dict[str, Any]] = self.spec["fetcher"]
-        payload = fetcher(self.service_context(), limit=self.limit)
-        return {**payload, "cacheMode": "seeded"}
+        for attempt in (1, 2):
+            try:
+                payload = fetcher(self.service_context(), limit=self.limit)
+                return {**payload, "cacheMode": "seeded"}
+            except TimeoutError:
+                # A short transport failure should not cost an entire seed
+                # interval. Never retry invalid data or renew a failed clock.
+                print(f"[signals] WARN source timeout component={self.component} attempt={attempt}", file=sys.stderr)
+                if attempt == 2:
+                    raise
 
     def run_once(self) -> Dict[str, Any]:
         previous = self.load_previous_payload()

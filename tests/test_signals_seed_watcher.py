@@ -79,6 +79,38 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
         self.assertEqual("ok", meta["status"])
         self.assertEqual(1, meta["recordCount"])
 
+    def test_transient_source_timeout_is_retried_in_the_same_seed_cycle(self):
+        watcher, fake_redis = self.make_watcher()
+        payload = {"items": [{"title": "Current whale"}], "generatedAt": signals_watcher.utc_now_iso(), "status": "ok"}
+        fetcher = Mock(side_effect=[TimeoutError("private connection"), payload])
+        with patch.dict(watcher.spec, {"fetcher": fetcher}), patch.object(watcher, "service_context", return_value={}):
+            result = watcher.run_once()
+        self.assertEqual(2, fetcher.call_count)
+        self.assertEqual("ok", result["status"])
+        self.assertEqual(payload["generatedAt"], json.loads(fake_redis.get(watcher.redis_key()))["generatedAt"])
+
+    def test_exhausted_source_timeouts_preserve_the_previous_snapshot_and_clock(self):
+        watcher, fake_redis = self.make_watcher()
+        previous = {"items": [{"title": "Previous whale"}], "generatedAt": "2026-10-03T00:00:00Z", "status": "ok"}
+        watcher.store_payload(previous)
+        fetcher = Mock(side_effect=TimeoutError("private connection"))
+        with patch.dict(watcher.spec, {"fetcher": fetcher}), patch.object(watcher, "service_context", return_value={}):
+            result = watcher.run_once()
+        stored = json.loads(fake_redis.get(watcher.redis_key()))
+        self.assertEqual(2, fetcher.call_count)
+        self.assertEqual("preserved", result["status"])
+        self.assertEqual(previous["generatedAt"], stored["generatedAt"])
+        self.assertEqual(previous["items"], stored["items"])
+        self.assertNotIn("private", stored["error"])
+
+    def test_invalid_source_payload_is_not_retried(self):
+        watcher, _ = self.make_watcher()
+        fetcher = Mock(side_effect=ValueError("invalid source"))
+        with patch.dict(watcher.spec, {"fetcher": fetcher}), patch.object(watcher, "service_context", return_value={}):
+            result = watcher.run_once()
+        fetcher.assert_called_once()
+        self.assertEqual("error", result["status"])
+
     def test_watcher_replaces_previous_payload_when_successful_result_is_empty(self):
         watcher, fake_redis = self.make_watcher(component="alpha", limit=8)
         previous = {"items": [{"title": "Old alpha"}], "generatedAt": "old", "status": "ok", "cacheMode": "seeded"}
