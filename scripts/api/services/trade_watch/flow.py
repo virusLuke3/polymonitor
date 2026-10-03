@@ -3,12 +3,27 @@ from __future__ import annotations
 
 from datetime import timedelta
 from decimal import Decimal
+import logging
 from typing import Any, Dict
 
 from .. import outcome_semantics_service
 from .common import SCHEMA_VERSION, _format_trade_item, parse_time, recent_large_trades
 
 RECENT_TRADE_SAMPLE_LIMIT = 200  # Canonical recent-trades reader's actual cap.
+
+
+def _read_source(ctx: dict, name: str, *, limit: int):
+    """Retry one timed-out readonly source call within the collector cycle."""
+    logger = logging.getLogger(__name__)
+    for attempt in (1, 2):
+        try:
+            return ctx[name](limit=limit)
+        except TimeoutError:
+            # Driver messages may contain credentials; log only the source and
+            # attempt. Invalid responses and semantic errors are not retried.
+            logger.warning("Flow source read timed out: source=%s attempt=%s", name, attempt)
+            if attempt == 2:
+                raise
 
 
 def fetch_live_suspicious_trades_payload(ctx: dict, limit: int = 12) -> Dict[str, Any]:
@@ -18,7 +33,7 @@ def fetch_live_suspicious_trades_payload(ctx: dict, limit: int = 12) -> Dict[str
     errors = []
     events = []
     try:
-        source_events = ctx["get_recent_oracle_events"](limit=max(16, limit*2))
+        source_events = _read_source(ctx, "get_recent_oracle_events", limit=max(16, limit*2))
         if not isinstance(source_events, list):
             raise ValueError("Oracle source returned no assessment")
         seen = set()
@@ -41,7 +56,7 @@ def fetch_live_suspicious_trades_payload(ctx: dict, limit: int = 12) -> Dict[str
     candidate_count = 0
     if events:
         try:
-            trades = ctx["get_recent_trades"](limit=RECENT_TRADE_SAMPLE_LIMIT)
+            trades = _read_source(ctx, "get_recent_trades", limit=RECENT_TRADE_SAMPLE_LIMIT)
             if not isinstance(trades, list):
                 raise ValueError("Trade source returned no assessment")
             candidate_count = len(trades)

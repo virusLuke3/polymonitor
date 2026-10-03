@@ -18,6 +18,45 @@ from api.services import signal_service
 from api.services.signal_reads import SignalReadPending, read_verified_seed
 
 
+def test_tunnel_cold_connection_is_admitted_within_default_budget(monkeypatch):
+    from unittest.mock import Mock
+    from api import db_pool
+    clock, connection = [0.0], Mock()
+    def connect(*args, **kwargs):
+        clock[0] += 6.3  # Measured production connection setup through the tunnel.
+        return connection
+    monkeypatch.delenv("POLYDATA_API_POSTGRES_POOL_ACQUIRE_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("POLYDATA_API_POSTGRES_POOL_SIZE", raising=False)
+    monkeypatch.setattr(db_pool.time, "monotonic", lambda: clock[0])
+    factory = db_pool.build_api_connection_factory(connect, lambda: "postgres")
+    try:
+        factory().close()
+        factory().close()  # The admitted session is reusable; no reconnect.
+        assert clock[0] == 6.3
+        connection.close.assert_not_called()
+    finally:
+        factory.close()
+
+
+def test_explicit_short_connection_deadline_still_rejects_late_sessions(monkeypatch):
+    from unittest.mock import Mock
+    from api import db_pool
+    clock, connection = [0.0], Mock()
+    def connect(*args, **kwargs):
+        clock[0] += 6.3
+        return connection
+    monkeypatch.setenv("POLYDATA_API_POSTGRES_POOL_ACQUIRE_TIMEOUT_SECONDS", "5")
+    monkeypatch.delenv("POLYDATA_API_POSTGRES_POOL_SIZE", raising=False)
+    monkeypatch.setattr(db_pool.time, "monotonic", lambda: clock[0])
+    factory = db_pool.build_api_connection_factory(connect, lambda: "postgres")
+    try:
+        with pytest.raises(TimeoutError, match="deadline"):
+            factory()
+        connection.close.assert_called_once()
+    finally:
+        factory.close()
+
+
 @pytest.fixture
 def ctx():
     resources = RuntimeResources(shutdown_timeout_seconds=.1)

@@ -165,7 +165,10 @@ def build_api_connection_factory(
         max_size=pool_size,
         acquire_timeout_seconds=_env_float(
             "POLYDATA_API_POSTGRES_POOL_ACQUIRE_TIMEOUT_SECONDS",
-            5.0,
+            # The production reverse tunnel can take six seconds to establish
+            # a cold session. Keep admission bounded without rejecting a
+            # healthy connection immediately after its search_path commit.
+            8.0,
         ),
     )
 

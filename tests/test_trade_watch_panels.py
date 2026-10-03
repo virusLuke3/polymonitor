@@ -45,6 +45,46 @@ def test_flow_oracle_failure_is_partial_and_does_not_suppress_large_trades():
     assert data['status'] == 'partial' and len(data['items']) == 1
     assert data['sourceStates']['oracle']['status'] == 'error'
     assert 'private' not in data['error']
+    assert context['get_recent_oracle_events'].call_count == 2
+
+
+def test_flow_retries_a_transient_oracle_timeout_without_downgrading_valid_data():
+    context = ctx(); context['get_cached_json'] = lambda *args: seed()
+    context['get_recent_oracle_events'] = Mock(side_effect=[TimeoutError('private'), []])
+    data = flow.fetch_live_suspicious_trades_payload(context)
+    assert context['get_recent_oracle_events'].call_count == 2
+    assert data['status'] == 'ok' and data['sourceStates']['oracle']['status'] == 'ok'
+    context['get_recent_trades'].assert_not_called()
+
+
+def test_flow_retries_recent_trade_timeout_but_keeps_the_real_sample_and_identity():
+    context = ctx(); context['get_cached_json'] = lambda *args: seed()
+    context['get_recent_oracle_events'] = lambda **kw: [{'marketId': 7, 'eventTime': '2026-10-02T08:59:00Z'}]
+    context['get_recent_trades'] = Mock(side_effect=[TimeoutError('private'), [fill()]])
+    with patch.object(flow.outcome_semantics_service, 'annotate_raw_trade_rows', side_effect=lambda c, rows: rows):
+        data = flow.fetch_live_suspicious_trades_payload(context)
+    assert context['get_recent_trades'].call_count == 2
+    assert data['status'] == 'ok' and data['coverage']['candidateTradeCount'] == 1
+    assert data['coverage']['oracleLinkedCount'] == 1
+
+
+def test_flow_exhausted_trade_timeout_remains_partial_with_large_trades():
+    context = ctx(); context['get_cached_json'] = lambda *args: seed()
+    context['get_recent_oracle_events'] = lambda **kw: [{'marketId': 7, 'eventTime': '2026-10-02T08:59:00Z'}]
+    context['get_recent_trades'] = Mock(side_effect=TimeoutError('private'))
+    data = flow.fetch_live_suspicious_trades_payload(context)
+    assert context['get_recent_trades'].call_count == 2
+    assert data['status'] == 'partial' and data['sourceStates']['oracleTrades']['status'] == 'error'
+    assert len(data['items']) == 1 and data['items'][0]['observationType'] == 'large-trade'
+    assert 'private' not in data['error']
+
+
+def test_flow_does_not_retry_an_invalid_source_response():
+    context = ctx(); context['get_cached_json'] = lambda *args: seed()
+    context['get_recent_oracle_events'] = Mock(return_value=None)
+    data = flow.fetch_live_suspicious_trades_payload(context)
+    context['get_recent_oracle_events'].assert_called_once()
+    assert data['status'] == 'partial'
 
 
 def test_flow_source_failure_is_not_a_successful_empty_assessment():
