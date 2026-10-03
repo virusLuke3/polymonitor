@@ -2244,17 +2244,19 @@ def get_transport_map_source(ctx, *, source, query=""):
     cached = store.get(TRANSPORT_MAP_NAMESPACE, source) if store else None
     if cached is not None: return cached
     locker = getattr(store, 'fetch_lock', None)
-    with locker(TRANSPORT_MAP_NAMESPACE, source, timeout=2) if locker else nullcontext():
-        cached = store.get(TRANSPORT_MAP_NAMESPACE, source) if store else None
-        if cached is not None: return cached
-        try:
+    try:
+        with locker(TRANSPORT_MAP_NAMESPACE, source, timeout=2) if locker else nullcontext():
+            cached = store.get(TRANSPORT_MAP_NAMESPACE, source) if store else None
+            if cached is not None: return cached
             payload = parse_faa_status(_http_text(ctx, FAA_STATUS_URL, timeout=6), _airport_index(ctx))
             payload['fetchedAt'] = _utc_now_iso(ctx)
             if store: store.set(TRANSPORT_MAP_NAMESPACE, source, payload, 120)
             return payload
-        except Exception:
-            stale = store.get_stale(TRANSPORT_MAP_NAMESPACE, source) if store else None
-            age = _age_seconds(stale.get('fetchedAt')) if stale else None
-            if age is not None and 0 <= age <= 900:
-                return {**stale, "status": "degraded", "message": "FAA refresh failed; retaining snapshot within 15 minute budget."}
-            return {"status": "unavailable", "events": [], "message": "FAA source unavailable"}
+    except Exception:
+        cached = store.get(TRANSPORT_MAP_NAMESPACE, source) if store else None
+        if cached is not None: return cached
+        stale = store.get_stale(TRANSPORT_MAP_NAMESPACE, source) if store else None
+        age = _age_seconds(stale.get('fetchedAt')) if stale else None
+        if age is not None and 0 <= age <= 900:
+            return {**stale, "status": "degraded", "message": "FAA refresh failed; retaining snapshot within 15 minute budget."}
+        return {"status": "unavailable", "events": [], "message": "FAA source unavailable"}

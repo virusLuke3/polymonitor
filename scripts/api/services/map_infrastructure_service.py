@@ -108,10 +108,10 @@ def spatial_signal_snapshot(context, *, source):
     cached=store.get(NAMESPACE,key) if store else None
     if cached is not None:return cached
     lock=getattr(store,'fetch_lock',None)
-    with lock(NAMESPACE,key,timeout=2) if lock else nullcontext():
-        cached=store.get(NAMESPACE,key) if store else None
-        if cached is not None:return cached
-        try:
+    try:
+        with lock(NAMESPACE,key,timeout=2) if lock else nullcontext():
+            cached=store.get(NAMESPACE,key) if store else None
+            if cached is not None:return cached
             if source=='gpsjam':
                 get=resolve_service_callable(context,'http_text_get')
                 manifest=list(csv.DictReader(io.StringIO(get('https://gpsjam.org/data/manifest.csv',timeout=4))))
@@ -131,9 +131,11 @@ def spatial_signal_snapshot(context, *, source):
             result['fetchedAt']=datetime.now(timezone.utc).isoformat()
             if store:store.set(NAMESPACE,key,result,ttl)
             return result
-        except Exception:
-            retained=store.get_stale(NAMESPACE,key) if store else None
-            try:age=(datetime.now(timezone.utc)-datetime.fromisoformat(retained['fetchedAt'])).total_seconds()
-            except (TypeError,KeyError,ValueError):age=float('inf')
-            if 0<=age<=(7200 if source=='gpsjam' else 900):return {**retained,'status':'degraded','message':retained['message']+' · Refresh failed; retained snapshot.'}
-            raise
+    except Exception:
+        cached=store.get(NAMESPACE,key) if store else None
+        if cached is not None:return cached
+        retained=store.get_stale(NAMESPACE,key) if store else None
+        try:age=(datetime.now(timezone.utc)-datetime.fromisoformat(retained['fetchedAt'])).total_seconds()
+        except (TypeError,KeyError,ValueError):age=float('inf')
+        if 0<=age<=(7200 if source=='gpsjam' else 900):return {**retained,'status':'degraded','message':retained['message']+' · Refresh failed; retained snapshot.'}
+        raise

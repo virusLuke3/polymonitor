@@ -17,6 +17,50 @@ class Store:
     def set(self, ns, key, value, ttl): self.values[ns,key] = value
 
 
+@pytest.mark.parametrize('source', ['faa', 'ioda', 'gpsjam'])
+@pytest.mark.parametrize('state', ['retained', 'published', 'expired', 'missing'])
+def test_map_source_lock_contention_uses_bounded_snapshots(monkeypatch, source, state):
+    from contextlib import contextmanager
+    from datetime import timedelta
+    from api.services import global_transport_shipping_service as transport, map_infrastructure_service as signals
+
+    now = datetime.now(timezone.utc)
+    retained = {'status': 'partial', 'events': [{'id': 'native-record'}], 'message': 'Limited coverage',
+                'fetchedAt': (now - timedelta(seconds=10000 if state == 'expired' else 400)).isoformat()}
+    fresh = {**retained, 'fetchedAt': now.isoformat()}
+
+    class ContendedStore:
+        fresh = None
+        def get(self, *args): return self.fresh
+        def get_stale(self, *args): return None if state == 'missing' else retained
+        @contextmanager
+        def fetch_lock(self, *args, **kwargs):
+            if state == 'published': self.fresh = fresh
+            # Raised by __enter__, before the old inner provider try/except.
+            raise TimeoutError('shared-source-acquisition-deadline')
+            yield  # pragma: no cover
+        def set(self, *args): raise AssertionError('A waiting reader must not rewrite snapshot freshness')
+
+    store = ContendedStore()
+    def unexpected(*args, **kwargs): raise AssertionError('A waiting reader must not duplicate acquisition')
+    monkeypatch.setattr(transport, '_dependencies', lambda context: SimpleNamespace(snapshot_store=store))
+    monkeypatch.setattr(transport, '_http_text', unexpected)
+    context = {'SNAPSHOT_STORE': store, 'http_json_get': unexpected, 'http_text_get': unexpected}
+    fetch = lambda: transport.get_transport_map_source(context, source=source) if source == 'faa' else signals.spatial_signal_snapshot(context, source=source)
+    if state in {'expired', 'missing'} and source != 'faa':
+        with pytest.raises(TimeoutError): fetch()
+        return
+    result = fetch()
+    if state in {'expired', 'missing'}:
+        assert result['status'] == 'unavailable' and result['events'] == []
+    elif state == 'published':
+        assert result == fresh
+    else:
+        assert result['status'] == 'degraded'
+        assert result['events'] == retained['events']
+        assert result['fetchedAt'] == retained['fetchedAt']
+
+
 def test_liveness_does_not_touch_unavailable_dependencies():
     def fail(*a, **k): raise AssertionError('must not query dependencies')
     app = Flask(__name__)
