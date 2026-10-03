@@ -16,7 +16,6 @@ import { PanelLoading } from '@/components/Panel';
 import {
   PanelWorkspaceSlot,
 } from '@/components/PanelWorkspaceSlot';
-import { WorldGlobe, type WorldGlobeStatusMetrics } from '@/components/WorldGlobe';
 import { PANEL_LIBRARY, PANEL_REGISTRY, RUNTIME_PANEL_MODULES } from '@/panels/registry';
 import { usePanelRuntime } from '@/panels/usePanelRuntime';
 import { useI18n, type MessageKey } from '@/services/i18n';
@@ -152,20 +151,12 @@ function WorldMonitorApp() {
   const { selectedMarketId, setSelectedMarketId, resetMarketSelection, selectedMarketGroupId, selectedMarketGroupOutcomeKey, setSelectedMarketGroupOutcomeKey,
     selectedMarketGroupDetail, selectedMarketGroupChart, selectedMarketGroupChartRange, setSelectedMarketGroupChartRange,
     bundle, bundleLoading, focusMarketGroup, prefetchMarketFocus, error: focusError } = useMarketFocus({ bootstrap, markets, marketGroups, catalogLoaded });
-  const { worldEventMap, setRendererViewport, aviationStatus, setMapRendererKind, layers, region, mapZoom, setRegion, setMapZoom, enabledLayerIds,
-    countryIndex, ucdpRawMapEvents, worldEventMapEvents, mapSourceStatuses } = useWorldEventMapController(runtime, viewMode === '2d');
+  const { worldEventMap, setRendererViewport, aviationStatus, setMapRendererKind, layers, region, mapZoom, setRegion, setMapZoom,
+    countryIndex, mapVisibleEventCount, onMapVisibilityChange, onMapPresentationChange, worldEventMapEvents, mapSourceStatuses } = useWorldEventMapController(runtime);
   const { workspaceSyncStatus, workspaceSyncUpdatedAt, retryWorkspaceSync } = useWorkspaceSync(workspace, { region, mapZoom, setRegion, setMapZoom });
   const [commandQuery, setCommandQuery] = useState('');
   const [commandTab, setCommandTab] = useState<CommandPaletteTab>('markets');
   const [commandActiveMarketId, setCommandActiveMarketId] = useState<number | null>(null);
-  const [globeStatus, setGlobeStatus] = useState<WorldGlobeStatusMetrics>({
-    fps: 0,
-    markerTotal: 0,
-    markerVisible: 0,
-    qualitySetting: 'auto',
-    qualityLevel: 'high',
-    dpr: 1,
-  });
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const { hits: commandMarketHits, loading: commandMarketSearchLoading, unavailable: commandSearchUnavailable } = useMarketSearch(commandQuery, showCommandPalette);
   const commandMarketSearchError = commandSearchUnavailable ? t('atlas.commandSearchUnavailable') : '';
@@ -255,10 +246,7 @@ function WorldMonitorApp() {
     { label: 'ORACLE', value: currentGlobalOracle.length || 0 },
     { label: 'INTEL', value: currentLatestContent.length || 0 },
   ];
-  const mapVisibleEventCount = viewMode === '3d' ? globeStatus.markerVisible : worldEventMapEvents.length;
-  const mapQualityLabel = viewMode === '3d'
-    ? `${globeStatus.qualitySetting.toUpperCase()} · ${globeStatus.fps ? Math.round(globeStatus.fps) : '--'} FPS`
-    : `${t(MAP_VIEW_MESSAGE_KEYS[viewMode])} · Z${mapZoom.toFixed(2)}`;
+  const mapQualityLabel = `${t(MAP_VIEW_MESSAGE_KEYS[viewMode])} · Z${mapZoom.toFixed(2)}`;
 
   const runtimePayloadLoaded = (panelId: string) => runtime.getData(panelId) !== undefined && runtime.getData(panelId) !== null;
   const panelShouldShowLoading = (panelId: string) => {
@@ -497,7 +485,8 @@ function WorldMonitorApp() {
 
           <MapToolbar
             state={worldEventMap.state}
-            onPresentationChange={viewMode === '2d' ? worldEventMap.setPresentationMode : undefined}
+            onPresentationChange={worldEventMap.setPresentationMode}
+            basemapAvailable={viewMode === '2d'}
             onTimeRangeChange={worldEventMap.setTimeRange}
             onSeveritiesChange={worldEventMap.setSeverities}
             onBasemapProviderChange={worldEventMap.setBasemapProvider}
@@ -517,37 +506,26 @@ function WorldMonitorApp() {
               />
 
               <div className="wm-globe-hero">
-                {viewMode === '3d' ? (
-                  <WorldGlobe
-                    markets={displayMarkets}
-                    selectedMarket={selectedMarket}
-                    recentTrades={currentGlobalTrades}
-                    recentOracle={currentGlobalOracle}
-                    contentItems={currentLatestContent}
-                    ucdpEvents={ucdpRawMapEvents}
-                    region={region}
-                    zoomLevel={Math.min(4, mapZoom)}
-                    enabledLayerIds={enabledLayerIds}
-                    onMetricsChange={setGlobeStatus}
-                  />
-                ) : (
-                  <WorldEventMapView
-                    countryIndex={countryIndex}
-                    onViewportChange={setRendererViewport}
-                    aviationStatus={aviationStatus}
-                    onRendererKindChange={setMapRendererKind}
-                    events={worldEventMapEvents}
-                    state={worldEventMap.state}
-                    onCameraChange={(nextCamera) => worldEventMap.setCamera(nextCamera.center, nextCamera.zoom)}
-                    onEventSelect={worldEventMap.selectEvent}
-                    onOpenMarket={focusRelatedMarket}
-                    onAviationLensChange={worldEventMap.setAviationLens}
-                    onAviationRiskSourceChange={worldEventMap.setAviationRiskSource}
-                    onAviationToggle={() => worldEventMap.toggleLayer('air-routes')}
-                    onCountryChange={worldEventMap.setCountry}
-                    onWeatherPreset={() => { for (const id of ['weather-alerts', 'weather-radar']) if (!worldEventMap.state.activeLayerIds.includes(id)) worldEventMap.toggleLayer(id); }}
-                  />
-                )}
+                <WorldEventMapView
+                  key={viewMode}
+                  preferredRenderer={viewMode === '3d' ? 'globe' : 'webgl'}
+                  onVisibilityChange={onMapVisibilityChange}
+                  onPresentationChange={onMapPresentationChange}
+                  countryIndex={countryIndex}
+                  onViewportChange={setRendererViewport}
+                  aviationStatus={aviationStatus}
+                  onRendererKindChange={setMapRendererKind}
+                  events={worldEventMapEvents}
+                  state={worldEventMap.state}
+                  onCameraChange={(nextCamera) => worldEventMap.setCamera(nextCamera.center, nextCamera.zoom)}
+                  onEventSelect={worldEventMap.selectEvent}
+                  onOpenMarket={focusRelatedMarket}
+                  onAviationLensChange={worldEventMap.setAviationLens}
+                  onAviationRiskSourceChange={worldEventMap.setAviationRiskSource}
+                  onAviationToggle={() => worldEventMap.toggleLayer('air-routes')}
+                  onCountryChange={worldEventMap.setCountry}
+                  onWeatherPreset={() => { for (const id of ['weather-alerts', 'weather-radar']) if (!worldEventMap.state.activeLayerIds.includes(id)) worldEventMap.toggleLayer(id); }}
+                />
 
               </div>
 

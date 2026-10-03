@@ -4,7 +4,7 @@ import { defineConfig, loadEnv, type Plugin } from 'vite';
 import preact from '@preact/preset-vite';
 import { resolve } from 'path';
 
-const LAZY_MAP_ASSET_RE = /(?:WorldEventMap|DeckMapRenderer|SvgMapRenderer|maplibre|deck-stack|map-tiles|map-geo)-[A-Za-z0-9_-]+\.(?:js|css)$/;
+const LAZY_MAP_ASSET_RE = /(?:WorldEventMap|DeckMapRenderer|GlobeMapRenderer|SvgMapRenderer|maplibre|deck-stack|map-tiles|map-geo)-[A-Za-z0-9_-]+\.(?:js|css)$/;
 
 function repositorySha() {
   try {

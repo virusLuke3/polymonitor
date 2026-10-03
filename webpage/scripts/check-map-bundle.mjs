@@ -5,7 +5,7 @@ import ts from 'typescript';
 const dist = resolve(process.cwd(), 'dist');
 const assets = resolve(dist, 'assets');
 const files = readdirSync(assets);
-const required = ['maplibre-', 'maplibre-gl-worker-', 'deck-stack-', 'map-geo-'];
+const required = ['maplibre-', 'maplibre-gl-worker-', 'deck-stack-', 'map-geo-', 'GlobeMapRenderer-'];
 const missing = required.filter((prefix) => !files.some((file) => file.startsWith(prefix) && file.endsWith('.js')));
 if (missing.length) throw new Error(`Missing lazy map chunks: ${missing.join(', ')}`);
 
@@ -43,7 +43,7 @@ const inspectImports = (path, staticImports = new Set()) => {
 const staticImports = inspectImports(resolve(assets, entry.file));
 const eagerMapImports = [...staticImports].filter(path => required.some(prefix => path.includes(`/assets/${prefix}`)));
 if (eagerMapImports.length) throw new Error(`Lazy map engine is statically imported by the entry: ${eagerMapImports.join(', ')}`);
-const lightweightRoots = files.filter(file => /^(?:WorldEventMap|SvgMapRenderer|globe\.gl)-.*\.js$/.test(file));
+const lightweightRoots = files.filter(file => /^(?:WorldEventMap|SvgMapRenderer|GlobeMapRenderer|globe\.gl)-.*\.js$/.test(file));
 for (const file of lightweightRoots) {
   const heavy = [...inspectImports(resolve(assets, file))].filter(path => /\/(?:deck-stack|maplibre|map-tiles)-/.test(path));
   if (heavy.length) throw new Error(`${file} imports a WebGL engine before it is needed: ${heavy.join(', ')}`);
@@ -51,7 +51,7 @@ for (const file of lightweightRoots) {
 
 const sw = readFileSync(resolve(dist, 'sw.js'), 'utf8');
 const lazyAssetsInPrecache = files.filter((file) => (
-  /^(?:WorldEventMap|DeckMapRenderer|SvgMapRenderer|maplibre|deck-stack|map-tiles|map-geo|globe\.gl|hls)(?:[.-])/.test(file)
+  /^(?:WorldEventMap|DeckMapRenderer|GlobeMapRenderer|SvgMapRenderer|maplibre|deck-stack|map-tiles|map-geo|globe\.gl|hls)(?:[.-])/.test(file)
   && sw.includes(`/assets/${file}`)
 ));
 if (lazyAssetsInPrecache.length) {

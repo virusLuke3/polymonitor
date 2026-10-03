@@ -66,6 +66,7 @@ export interface MapRenderer {
   verifyReady?(): Promise<boolean>;
   setState(state: WorldEventMapState): void;
   setEvents(events: GeoEvent[]): void;
+  setCountries?(index: import('../domain/countryGeometry').CountryGeometryIndex | null): void;
   setRadar?(frame: RadarFrame | null): void;
   resize(): void;
   setOcclusions?(boxes: ScreenBox[]): void;

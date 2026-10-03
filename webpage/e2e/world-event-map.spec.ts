@@ -489,7 +489,7 @@ test('WebGL context failure switches to SVG and destroys stale deck canvases', a
   // MapLibre's global RTL dispatcher holds the shared pool for the document.
   // Removing a map releases its own actor; remounting must reuse that pool.
   await page.getByRole('tab', { name: '3D Globe', exact: true }).click();
-  await expect(page.locator('.wm-globe-runtime')).toBeVisible();
+  await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', 'globe');
   await page.getByRole('tab', { name: '2D Map', exact: true }).click();
   await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', 'webgl');
   await waitForMapPaint(page);

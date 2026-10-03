@@ -22,6 +22,7 @@ const SEVERITY_LABELS: Record<GeoEventSeverity, string> = {
 
 export function MapToolbar({
   state,
+  basemapAvailable = true,
   onPresentationChange,
   onTimeRangeChange,
   onSeveritiesChange,
@@ -29,6 +30,7 @@ export function MapToolbar({
   onBasemapThemeChange,
   onClearCountry,
 }: {
+  basemapAvailable?: boolean;
   state: Pick<WorldEventMapState, 'timeRange' | 'severities' | 'basemapProvider' | 'basemapTheme' | 'countryCode' | 'presentationMode'>;
   onPresentationChange?: (mode: WorldEventMapState['presentationMode']) => void;
   onTimeRangeChange: (timeRange: WorldEventTimeRange) => void;
@@ -83,6 +85,8 @@ export function MapToolbar({
       <label className="wm-world-event-basemap-control">
         <span>{mt("Basemap")}</span>
         <select
+          disabled={!basemapAvailable}
+          title={!basemapAvailable ? (locale === 'zh' ? '3D 使用地球纹理；底图样式仅限 2D' : 'Globe uses Earth texture; vector basemaps are available in 2D') : undefined}
           aria-label={mt("Basemap provider")}
           value={state.basemapProvider}
           onChange={(event) => onBasemapProviderChange(
@@ -97,6 +101,7 @@ export function MapToolbar({
       <label className="wm-world-event-basemap-control">
         <span>{mt("Theme")}</span>
         <select
+          disabled={!basemapAvailable}
           aria-label={mt("Basemap theme")}
           value={state.basemapTheme}
           onChange={(event) => onBasemapThemeChange(

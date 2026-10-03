@@ -94,7 +94,97 @@ async function verifyArchive(page) {
   receipt.archive={ranges,decoded,header};
 }
 
+// Shared-renderer release gate. Keep APIs, tiles, clock and service worker real;
+// record unavailable providers separately from renderer/asset failures.
+async function verifySharedRenderers() {
+  for (const width of [1440, 390]) {
+    const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 900 }, locale: 'en-US' });
+    const page = await context.newPage();
+    const record = { width, errors: [], assets: [], sources: [], states: [] };
+    receipt.browsers.push(record);
+    page.on('pageerror', error => record.errors.push(error.message));
+    page.on('response', response => {
+      if (/\/assets\//.test(response.url())) record.assets.push({ url: response.url(), status: response.status() });
+    });
+    await context.tracing.start({ screenshots: true, snapshots: true });
+    try {
+      await check(`${width}: exact published release`, async () => {
+        const response = await context.request.get(`${base}/release-sha?verify=${Date.now()}`);
+        assert.equal((await response.text()).trim(), expectedSha);
+      });
+      await page.goto(`${base}/?view=2d`, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+      const host = page.locator('[data-map-renderer-ready]');
+      await check(`${width}: real 2D primary map and lazy 3D assets`, async () => {
+        await expect(host).toHaveAttribute('data-map-renderer-ready', 'webgl', { timeout: 60_000 });
+        await expect(host).toHaveAttribute('data-map-basemap-state', 'primary-ready', { timeout: 60_000 });
+        await expect(page.locator('.wm-world-event-list-toggle strong')).toContainText(/[1-9]/, { timeout: 60_000 });
+        assert(!record.assets.some(asset => /GlobeMapRenderer/.test(asset.url)));
+        record.gpu = await host.locator('.maplibregl-canvas').evaluate(canvas => {
+          const gl = canvas.getContext('webgl2'), debug = gl.getExtension('WEBGL_debug_renderer_info');
+          return gl.getParameter(debug.UNMASKED_RENDERER_WEBGL);
+        });
+        assert(record.gpu && !/swiftshader|llvmpipe|softpipe|software/i.test(record.gpu));
+        await capture(page, `shared-2d-${width}`);
+      });
+      if (width === 1440) await check('shared map: real PMTiles ranges and vector content', () => verifyArchive(page));
+      await check(`${width}: real 3D sources, controls, details and pause`, async () => {
+        await page.getByRole('tab', { name: '3D Globe', exact: true }).click();
+        await page.locator('.wm-map-stage').scrollIntoViewIfNeeded();
+        await expect(host).toHaveAttribute('data-map-renderer-ready', 'globe', { timeout: 90_000 });
+        const globe = page.locator('.wm-globe-renderer');
+        await expect.poll(async () => Number(await globe.getAttribute('data-globe-records'))).toBeGreaterThan(0);
+        await expect(page.locator('.wm-map-radar-status')).toContainText('2D WebGL only');
+        const zoom = Number(new URL(page.url()).searchParams.get('zoom'));
+        await page.getByRole('button', { name: 'Zoom in', exact: true }).click();
+        await expect.poll(() => Number(new URL(page.url()).searchParams.get('zoom'))).toBeGreaterThan(zoom);
+        await globe.locator('select').selectOption('performance');
+        await capture(page, `shared-3d-${width}`);
+        record.states.push({ mode: '3d', url: page.url(), records: await globe.getAttribute('data-globe-records'), rect: await globe.boundingBox() });
+        await page.locator('.wm-world-event-list-toggle').click();
+        await page.locator('.wm-world-event-list-scroll li button').first().click();
+        await expect(page.locator('#wm-event-inspector-title')).toBeVisible();
+        await capture(page, `shared-3d-detail-${width}`);
+        await page.locator('.wm-event-inspector-close').click();
+        const closeList = page.locator('.wm-world-event-list-close');
+        if (await closeList.isVisible()) await closeList.click();
+        await page.locator('.wm-focused-market-row').scrollIntoViewIfNeeded();
+        // Scroll further into the actual dashboard; no synthetic spacer on live UI.
+        await page.locator('.wm-main-content').evaluate(el => { el.scrollTop = el.scrollHeight; });
+        await expect(globe).toHaveAttribute('data-render-paused', 'true');
+        await page.locator('.wm-map-stage').scrollIntoViewIfNeeded();
+        await expect(globe).toHaveAttribute('data-render-paused', 'false');
+        await expect.poll(async () => Number(await globe.getAttribute('data-globe-records'))).toBeGreaterThan(0);
+        await capture(page, `shared-3d-resumed-${width}`);
+      });
+      await check(`${width}: 2D return and service worker release`, async () => {
+        await page.getByRole('tab', { name: '2D Map', exact: true }).click();
+        await page.locator('.wm-map-stage').scrollIntoViewIfNeeded();
+        await expect(host).toHaveAttribute('data-map-renderer-ready', 'webgl', { timeout: 60_000 });
+        await expect(host).toHaveAttribute('data-map-basemap-state', 'primary-ready', { timeout: 60_000 });
+        await expect(page.locator('.wm-globe-renderer')).toHaveCount(0);
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await expect(host).toHaveAttribute('data-map-basemap-state', 'primary-ready', { timeout: 60_000 });
+        await expect.poll(() => page.evaluate(() => navigator.serviceWorker.controller?.scriptURL || ''), { timeout: 30_000 }).toContain(expectedSha);
+        record.worker = await page.evaluate(() => navigator.serviceWorker.controller.scriptURL);
+        record.sources = await page.locator('.wm-map-source-status').allTextContents();
+        await capture(page, `shared-reloaded-${width}`);
+      });
+      await check(`${width}: no renderer or published asset errors`, async () => {
+        assert.deepEqual(record.errors, []);
+        assert.deepEqual(record.assets.filter(asset => asset.status >= 400), []);
+      });
+    } catch (error) {
+      receipt.failure ||= error.message; record.failure = error.message; process.exitCode = 1;
+      await capture(page, `shared-failure-${width}`).catch(() => {});
+    } finally {
+      await context.tracing.stop({ path: resolve(output, `shared-${width}.zip`) });
+      await context.close();
+    }
+  }
+}
+
 try {
+  if (process.env.POLYMONITOR_VERIFY_SHARED_RENDERERS === '1') await verifySharedRenderers();
   if(process.env.POLYMONITOR_WAIT_RELEASE==='1'){
     const context=await browser.newContext({viewport:{width:1536,height:1000}}),page=await context.newPage();
     await context.tracing.start({screenshots:true,snapshots:true});
@@ -114,7 +204,7 @@ try {
   if(process.env.POLYMONITOR_VERIFY_RANGE_ONLY==='1'){
     const context=await browser.newContext(),page=await context.newPage();await page.goto(base,{waitUntil:'domcontentloaded'});await check('real PMTiles byte ranges and decoded distant vector tiles',()=>verifyArchive(page));await context.close();
   }
-  for (const width of process.env.POLYMONITOR_VERIFY_RANGE_ONLY==='1'?[]:[1536, 390]) {
+  for (const width of process.env.POLYMONITOR_VERIFY_RANGE_ONLY==='1' || process.env.POLYMONITOR_VERIFY_SHARED_RENDERERS==='1'?[]:[1536, 390]) {
     const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 1000 }, locale: 'en-US' });
     const page = await context.newPage();
     await context.tracing.start({ screenshots: true, snapshots: true, sources: false });

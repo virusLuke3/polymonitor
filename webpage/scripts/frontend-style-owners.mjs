@@ -3,7 +3,7 @@
 export function panelStyleOwner(selector) {
   const value = selector.replace(/:not\([^)]*\)/g, '');
   if (/\.wm-(world-event|weather-deck|inline-weather-map|event-inspector|country-context|map-(status|legend|hover)|aviation-(lens|risk-tabs))/.test(value)) return 'map';
-  if (/\.wm-(globe-(runtime|shade|quality|perf|hover|html)|ucdp-marker)/.test(value)) return 'globe';
+  if (/\.wm-(globe-(runtime|shade|quality|perf|hover|html)|ucdp-marker)/.test(value)) return 'map';
   if (/\.wm-market-(tv|youtube)/.test(value) || /data-panel-id=['"]market-(tv|youtube)/.test(value)) return 'media';
   if (/\.wm-(global-transport|aviation-)/.test(value)) return 'transport';
   if (/\.wm-(weather-|temp-city|global-temperature|world-clock)/.test(value) || /data-panel-id=['"](?:weather-|global-temperature)/.test(value)) return 'weather';
@@ -17,6 +17,6 @@ export function panelStyleOwner(selector) {
   return 'shell';
 }
 
-export const panelStyleFiles = Object.fromEntries(['shell', 'finance', 'tech', 'market', 'signals', 'macro', 'weather', 'sports', 'media', 'breaking', 'transport', 'map', 'globe'].map(owner => [owner,
-  owner === 'map' ? 'features/world-event-map/styles.css' : owner === 'globe' ? 'components/WorldGlobe.css' : `panels/styles/${owner}.css`,
+export const panelStyleFiles = Object.fromEntries(['shell', 'finance', 'tech', 'market', 'signals', 'macro', 'weather', 'sports', 'media', 'breaking', 'transport', 'map'].map(owner => [owner,
+  owner === 'map' ? 'features/world-event-map/styles.css' : `panels/styles/${owner}.css`,
 ]));

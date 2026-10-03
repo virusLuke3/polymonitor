@@ -20,11 +20,11 @@ export type MapLayerDefinition = {
   categories: GeoEventCategory[];
   sourceKeys: string[];
   requiredSources: string[];
-  supportedRenderers: Array<'webgl' | 'svg'>;
+  supportedRenderers: Array<'webgl' | 'svg' | 'globe'>;
   availability: 'ready' | 'degraded' | 'unavailable';
   availabilityReason?: string;
   isExecutable: (context?: {
-    renderer?: 'webgl' | 'svg';
+    renderer?: 'webgl' | 'svg' | 'globe';
     availableSources?: ReadonlySet<string>;
   }) => boolean;
   aliases: string[];
@@ -51,7 +51,7 @@ export type MapLayerDefinition = {
 export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
   ...([['waterways', 'Waterways', 'waterways', '🌊'], ['pipelines', 'Pipelines', 'pipelines', '🛢️'], ['submarine-cables', 'Submarine cables', 'submarineCables', '🔌']] as const).map(([id, label, message, emoji]): MapLayerDefinition => ({
     id, label, messageKey: `atlas.layer.${message}`, legendLabel: label, panelEmoji: emoji, icon: 'signal', categories: ['infrastructure'],
-    sourceKeys: ['osm-infrastructure'], requiredSources: [], supportedRenderers: ['webgl','svg'], availability: 'ready', isExecutable: () => true,
+    sourceKeys: ['osm-infrastructure'], requiredSources: [], supportedRenderers: ['webgl','svg','globe'], availability: 'ready', isExecutable: () => true,
     aliases: [label, id, 'OSM'], capabilities: ['paths','details'], defaultEnabled: true, selectable: true, minZoom: 0, labelMinZoom: 8,
     cluster: false, clusterRadius: 0, clusterMinPoints: 0, timeFilter: false, severities: ['info'], legend: [{label,symbol:'signal'}],
     explanation: {purpose: 'Mapped infrastructure in the current viewport.', sources: ['OpenStreetMap contributors · ODbL'],
@@ -60,7 +60,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
   })),
   ...([['gnss-interference', 'GNSS accuracy signals', 'GPSJAM', 'gpsjam'], ['internet-outages', 'Internet signals', 'IODA', 'ioda'], ['airport-disruptions', 'Airport restrictions', 'FAA NAS', 'faa'], ['ais-vessels', 'Vessel observations', 'AISStream', 'ais']] as const).map(([id, label, source, key]): MapLayerDefinition => ({
     id, label, messageKey: `atlas.layer.${({'ais-vessels':'aisVessels','airport-disruptions':'airportDisruptions','gnss-interference':'gnssInterference','internet-outages':'internetOutages'} as const)[id]}`, legendLabel: label, panelEmoji: ({'ais-vessels':'🚢','airport-disruptions':'✈','gnss-interference':'🛰️','internet-outages':'🌐'} as const)[id], icon: id === 'ais-vessels' ? 'vessel' : id === 'airport-disruptions' ? 'aircraft' : 'signal', categories: ['transport-disruption', 'infrastructure'],
-    sourceKeys: [key], requiredSources: [], supportedRenderers: ['webgl', 'svg'], availability: 'ready', isExecutable: () => true,
+    sourceKeys: [key], requiredSources: [], supportedRenderers: ['webgl', 'svg', 'globe'], availability: 'ready', isExecutable: () => true,
     aliases: [source, key, label], capabilities: id === 'gnss-interference' || id === 'internet-outages' ? ['areas', 'details'] : ['points', 'details'], defaultEnabled: true, selectable: true,
     minZoom: 0, labelMinZoom: 4, cluster: false, clusterRadius: 0, clusterMinPoints: 0, timeFilter: false,
     severities: ['info','watch','warning','critical'], legend: [{label, symbol: id === 'ais-vessels' ? 'vessel' : id === 'airport-disruptions' ? 'aircraft' : 'signal'}],
@@ -93,7 +93,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     categories: ['weather', 'natural-hazard'],
     sourceKeys: ['nws', 'eccc', 'swic', 'nhc', 'eonet', 'gdacs'],
     requiredSources: [],
-    supportedRenderers: ['webgl', 'svg'],
+    supportedRenderers: ['webgl', 'svg', 'globe'],
     availability: 'ready',
     isExecutable: () => true,
     aliases: ['hurricane', 'typhoon', 'tornado', 'flood', 'tsunami', 'storm'],
@@ -133,7 +133,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     categories: ['natural-hazard'],
     sourceKeys: ['usgs', 'usgs-volcano-cap', 'eonet', 'gdacs'],
     requiredSources: ['usgs'],
-    supportedRenderers: ['webgl', 'svg'],
+    supportedRenderers: ['webgl', 'svg', 'globe'],
     availability: 'ready',
     isExecutable: () => true,
     aliases: ['quake', 'eruption', 'seismic', 'volcano'],
@@ -170,7 +170,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     categories: ['natural-hazard'],
     sourceKeys: ['eonet', 'gdacs', 'firms'],
     requiredSources: [],
-    supportedRenderers: ['webgl', 'svg'],
+    supportedRenderers: ['webgl', 'svg', 'globe'],
     availability: 'ready',
     isExecutable: () => true,
     aliases: ['fire', 'firms', 'hotspot', 'satellite detection'],
@@ -207,7 +207,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     categories: ['weather', 'natural-hazard'],
     sourceKeys: ['nws', 'eccc', 'swic', 'eonet'],
     requiredSources: [],
-    supportedRenderers: ['webgl', 'svg'],
+    supportedRenderers: ['webgl', 'svg', 'globe'],
     availability: 'ready',
     isExecutable: () => true,
     aliases: ['heat', 'cold', 'temperature', 'freeze'],
@@ -244,7 +244,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     categories: ['weather', 'natural-hazard'],
     sourceKeys: ['climate-anomaly'],
     requiredSources: ['climate-anomaly'],
-    supportedRenderers: ['webgl', 'svg'],
+    supportedRenderers: ['webgl', 'svg', 'globe'],
     availability: 'ready',
     isExecutable: () => true,
     aliases: ['anomaly', 'climatology', 'temperature departure', 'precipitation departure'],
@@ -278,7 +278,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     categories: ['intel'],
     sourceKeys: ['breaking-event-radar'],
     requiredSources: ['breaking-event-radar'],
-    supportedRenderers: ['webgl', 'svg'],
+    supportedRenderers: ['webgl', 'svg', 'globe'],
     availability: 'ready',
     isExecutable: () => true,
     aliases: ['intelligence', 'breaking event', 'news hotspot'],
@@ -312,7 +312,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     categories: ['conflict', 'unrest'],
     sourceKeys: ['geo-sanctions-shock'],
     requiredSources: ['geo-sanctions-shock'],
-    supportedRenderers: ['webgl', 'svg'],
+    supportedRenderers: ['webgl', 'svg', 'globe'],
     availability: 'ready',
     isExecutable: () => true,
     aliases: ['war', 'unrest', 'ucdp', 'armed conflict'],
@@ -350,7 +350,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     categories: ['sanctions', 'country-risk'],
     sourceKeys: ['geo-sanctions-shock'],
     requiredSources: ['geo-sanctions-shock'],
-    supportedRenderers: ['webgl', 'svg'],
+    supportedRenderers: ['webgl', 'svg', 'globe'],
     availability: 'ready',
     isExecutable: () => true,
     aliases: ['sanctions', 'risk', 'country exposure'],
@@ -386,7 +386,7 @@ export const WORLD_EVENT_LAYER_REGISTRY: readonly MapLayerDefinition[] = [
     categories: ['infrastructure'],
     sourceKeys: ['global-transport-shipping'],
     requiredSources: ['global-transport-shipping'],
-    supportedRenderers: ['webgl', 'svg'],
+    supportedRenderers: ['webgl', 'svg', 'globe'],
     availability: 'ready',
     isExecutable: () => true,
     aliases: ['aviation', 'aircraft', 'airport', 'flight', 'corridor'],
@@ -435,7 +435,7 @@ export function selectableWorldEventLayers() {
 }
 
 export type MapLayerExecutionContext = {
-  renderer?: 'webgl' | 'svg';
+  renderer?: 'webgl' | 'svg' | 'globe';
   availableSources?: ReadonlySet<string>;
 };
 

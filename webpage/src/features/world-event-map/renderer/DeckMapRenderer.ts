@@ -1340,8 +1340,8 @@ export class DeckMapRenderer implements MapRenderer {
     // country/radar sources so those cannot falsely satisfy map readiness.
     if (!this.fallbackApplied) this.primarySourceIds = new Set(Object.keys(this.map.getStyle().sources || {}));
     if (typeof performance !== 'undefined'
-      && performance.getEntriesByName('polymonitor:map:first-basemap').length === 0) {
-      performance.mark('polymonitor:map:first-basemap');
+      && performance.getEntriesByName('polymonitor:map:style-ready').length === 0) {
+      performance.mark('polymonitor:map:style-ready');
     }
     reinforceWorldEventBasemapLabels(this.map, this.language);
     this.ensureCountryHoverLayers();
@@ -1391,6 +1391,7 @@ export class DeckMapRenderer implements MapRenderer {
   private markPrimaryReady() {
     if (!this.primaryHasContent || this.fallbackApplied || !this.map || this.destroyed) return;
     this.clearFallbackTimer();
+    if (performance.getEntriesByName('polymonitor:map:first-basemap').length === 0) performance.mark('polymonitor:map:first-basemap');
     this.emitBasemapState('primary-ready');
   }
 

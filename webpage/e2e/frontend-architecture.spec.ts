@@ -185,70 +185,61 @@ for (const width of [1440, 390]) {
     await visual(page, `map-degraded-${width}.png`);
   });
   test(`3d globe ${width}`, async ({ page }) => {
-    const hazardRequests: string[] = [];
-    const geometryRequests: string[] = [];
-    page.on('request', request => {
-      if (request.url().includes('/natural-hazards/map')) hazardRequests.push(request.url());
-      if (request.url().includes('/map-data/world-countries.geojson')) geometryRequests.push(request.url());
-    });
+    test.setTimeout(180_000);
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     await installDashboard(page);
-    // Kapsule's debounce uses Date.now(). A frozen Date prevents globe.gl's
-    // texture and size updates; advance Date and timers together instead.
     await page.clock.install({ time: new Date('2026-08-26T03:00:00Z') });
-    const texture = page.waitForResponse(response => response.url().endsWith('/textures/earth-topo-bathy.jpg') && response.ok());
-    // Development enables telemetry by default; production does not. Use the
-    // existing debug query so the keyboard toggle starts from the same state.
-    await gotoMapScene(page, '/?view=3d&layers=earthquakes-volcanoes&globePerf=1');
-    await expect(page.locator('.wm-globe-runtime canvas')).toBeAttached();
-    await texture;
-    await expect.poll(() => page.workers().filter(worker => worker.url().includes('worldGlobeMarkers')).length).toBe(1);
-    const canvas = page.locator('.wm-globe-runtime canvas');
-    await expect.poll(() => canvas.evaluate(c => c.getBoundingClientRect().height)).toBeGreaterThan(300);
-    await expect.poll(() => canvas.evaluate(c => Math.abs(c.getBoundingClientRect().height - c.closest('.wm-globe-runtime')!.clientHeight))).toBeLessThan(1);
-    await page.locator('.wm-globe-quality-control select').selectOption('high');
-    await expect(page.locator('.wm-globe-perf-overlay')).toBeVisible();
-    await page.keyboard.press('Alt+Shift+g');
-    await expect(page.locator('.wm-globe-perf-overlay')).toHaveCount(0);
-    await settled(page);
-    await expect(page.locator('.wm-globe-runtime-wrap')).toHaveClass(/is-render-idle/);
-    // The scene itself is stable; FPS telemetry in the surrounding toolbar is
-    // measured live and is covered by behavior rather than a masked screenshot.
-    await expect(page.locator('.wm-globe-runtime-wrap')).toHaveScreenshot(`globe-visible-${width}.png`, { animations: 'disabled', maxDiffPixels: 0, threshold: 0 });
-    expect(hazardRequests).toEqual([]);
-    expect(geometryRequests).toEqual([]);
-    await page.waitForTimeout(500);
-    await expect(page.locator('.wm-globe-runtime-wrap')).toHaveClass(/is-render-idle/);
-    const beforeZoom = await canvas.screenshot();
-    await canvas.hover({ position: { x: width / 2, y: 220 } });
-    await page.mouse.wheel(0, -200);
-    await expect(page.locator('.wm-globe-runtime-wrap')).toHaveClass(/is-render-idle/);
-    expect((await canvas.screenshot()).equals(beforeZoom)).toBe(false);
-    await page.setViewportSize({ width: width - 30, height: width === 390 ? 800 : 850 });
-    await expect.poll(() => canvas.evaluate(c => {
-      const box = c.getBoundingClientRect(), parent = c.closest('.wm-globe-runtime')!;
-      return Math.max(Math.abs(box.width - parent.clientWidth), Math.abs(box.height - parent.clientHeight));
-    })).toBeLessThan(1);
-    await expect(page.locator('.wm-globe-runtime-wrap')).toHaveClass(/is-render-idle/);
-    expect((await canvas.screenshot()).equals(beforeZoom)).toBe(false);
-    // Preserve the established scene/zoom checks above, then exercise geometry
-    // demand through the real layer control (which overlays the narrow canvas).
-    const layersButton = page.getByRole('button', { name: 'Open layers panel' });
-    if (await layersButton.isVisible()) await layersButton.click();
-    await page.getByRole('checkbox', { name: 'Show Sanctions & Country Risk', exact: true }).check();
-    await page.waitForTimeout(500);
-    expect(geometryRequests).toEqual([]);
-    await page.getByRole('tab', { name: '2D Map', exact: true }).click();
-    await expect(page.locator('.wm-globe-runtime canvas')).toHaveCount(0);
-    await expect.poll(() => page.workers().filter(worker => worker.url().includes('worldGlobeMarkers')).length).toBe(0);
-    await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', /webgl|svg/, { timeout: 60_000 });
-    await expect.poll(() => hazardRequests.length).toBeGreaterThan(0);
-    await expect.poll(() => geometryRequests.length).toBeGreaterThan(0);
-    await page.getByRole('tab', { name: '3D Globe', exact: true }).click();
-    await expect(page.locator('.wm-globe-runtime canvas')).toBeAttached();
-    const stopped = hazardRequests.length;
-    await page.clock.fastForward(65_000);
-    expect(hazardRequests).toHaveLength(stopped);
+    await page.goto('/?view=3d&mapPerf=1&basemap=openfreemap&time=all');
+    const host=page.locator('[data-map-renderer-ready]');
+    await expect(host).toHaveAttribute('data-map-renderer-ready','globe',{timeout:60000});
+    const globe=page.locator('.wm-globe-renderer'), canvas=globe.locator('canvas').first();
+    // Wait for the complete fixed source inventory, including late shared feeds.
+    await expect(globe).toHaveAttribute('data-globe-records','15');
+    await page.evaluate(() => document.fonts.ready);
+    const records=await globe.getAttribute('data-globe-records');
+    await globe.locator('select').selectOption('performance');
+    await expect(globe).toHaveAttribute('data-globe-records',records!);
+    await globe.locator('select').selectOption('high');
+    await expect(globe).toHaveClass(/is-render-idle/);
+    await expect.poll(()=>canvas.evaluate(c=>Math.abs(c.getBoundingClientRect().height-c.closest('.wm-globe-renderer')!.clientHeight))).toBeLessThan(1);
+    await expect(globe).toHaveScreenshot(`globe-shared-${width}.png`,{animations:'disabled',maxDiffPixels:0,threshold:0});
+    const before=await canvas.screenshot();
+    await page.getByRole('button',{name:'Zoom in',exact:true}).click();
+    await expect(globe).toHaveClass(/is-render-idle/);
+    expect((await canvas.screenshot()).equals(before)).toBe(false);
+    const camera=new URL(page.url()).searchParams.get('zoom');
+    if(width===390)await page.locator('.wm-map-filter-details > summary').click();
+    await page.getByRole('button',{name:'Critical',exact:true}).click();
+    await expect.poll(async()=>Number(await globe.getAttribute('data-globe-records'))).toBeLessThan(Number(records));
+    const filtered=await globe.getAttribute('data-globe-records');
+    await page.getByRole('button',{name:'Records',exact:true}).click();
+    await expect(globe).toHaveAttribute('data-globe-records',filtered!);
+    // The short fixture dashboard needs a scroll target below the map to
+    // exercise a real IntersectionObserver transition on desktop as well.
+    await page.locator('.wm-main-content').evaluate(el=>{
+      const spacer=document.createElement('div');spacer.dataset.globeScrollTarget='true';spacer.style.cssText='height:2000px;flex-shrink:0';el.append(spacer);
+    });
+    await page.locator('[data-globe-scroll-target]').scrollIntoViewIfNeeded();
+    await expect(globe).toHaveAttribute('data-render-paused','true');
+    await page.getByRole('tab',{name:'3D Globe',exact:true}).scrollIntoViewIfNeeded();
+    await expect(globe).toHaveAttribute('data-render-paused','false');
+    await page.locator('[data-globe-scroll-target]').evaluate(el=>el.remove());
+    await expect(globe).toHaveAttribute('data-globe-records',filtered!);
+    await page.setViewportSize({width:width-30,height:width===390?800:850});
+    await expect.poll(()=>canvas.evaluate(c=>Math.abs(c.getBoundingClientRect().width-c.closest('.wm-globe-renderer')!.clientWidth))).toBeLessThan(1);
+    await page.getByRole('tab',{name:'2D Map',exact:true}).click();
+    await page.locator('.wm-map-stage').scrollIntoViewIfNeeded();
+    await expect(globe).toHaveCount(0);
+    await expect(host).toHaveAttribute('data-map-renderer-ready',/webgl|svg/,{timeout:60000});
+    expect(new URL(page.url()).searchParams.get('zoom')).toBe(camera);
+    await expect(page.getByRole('button',{name:'Critical',exact:true})).toHaveAttribute('aria-pressed','false');
+    await page.getByRole('tab',{name:'3D Globe',exact:true}).click();
+    await page.locator('.wm-map-stage').scrollIntoViewIfNeeded();
+    await expect(host).toHaveAttribute('data-map-renderer-ready','globe',{timeout:60000});
+    await expect(globe).toHaveAttribute('data-globe-records',filtered!);
+    expect(errors).toEqual([]);
   });
 }
 

@@ -1,3 +1,5 @@
+import { useMapSignals } from '../../src/features/world-event-map/data/useMapSignals';
+import { useMapInfrastructure } from '../../src/features/world-event-map/data/useMapInfrastructure';
 import { useAviationViewport } from '../../src/features/world-event-map/data/useAviationViewport';
 import { render } from 'preact';
 import { useMemo, useState } from 'preact/hooks';
@@ -19,7 +21,7 @@ import { fixtureMarkets } from './dashboard';
 import { GENERATED_AT } from './world-event-map';
 
 const root = document.getElementById('root')!;
-type HarnessKind = 'runtime' | 'observed-runtime' | 'registered-runtime' | 'dashboard' | 'focus' | 'book' | 'workspace' | 'hazards' | 'dossier' | 'geometry' | 'aviation';
+type HarnessKind = 'runtime' | 'observed-runtime' | 'registered-runtime' | 'dashboard' | 'focus' | 'book' | 'workspace' | 'hazards' | 'dossier' | 'geometry' | 'aviation' | 'map-signals' | 'map-infrastructure';
 type HazardView = { layers: string[]; zoom: number; center: [number, number]; active: boolean };
 const noPanels: PanelModule[] = [];
 const translate = (key: string) => key;
@@ -35,6 +37,9 @@ const modules: PanelModule[] = [{
 const bootstrap = { generatedAt: GENERATED_AT, activeMarketsPreview: fixtureMarkets, activeMarketGroupsPreview: [] } as unknown as BootstrapPayload;
 const api = {
   requests,
+  signals: null as ReturnType<typeof useMapSignals> | null,
+  infrastructure: null as ReturnType<typeof useMapInfrastructure> | null,
+  setMapSourceActive: (_active:boolean) => {},
   runtime: null as ReturnType<typeof usePanelRuntime> | null,
   dashboard: null as ReturnType<typeof useDashboardData> | null,
   focus: null as ReturnType<typeof useMarketFocus> | null,
@@ -53,11 +58,23 @@ const api = {
   setHazardView: (_patch: Partial<HazardView>) => {},
   setGeometryEnabled: (_enabled: boolean) => {},
   mount: (kind: HarnessKind) => {
-    render(kind === 'dashboard' ? <PanelResourceProvider><Dashboard /></PanelResourceProvider> : kind === 'observed-runtime' ? <Runtime observed /> : kind === 'registered-runtime' ? <Runtime registered /> : kind === 'runtime' ? <Runtime /> : kind === 'focus' ? <Focus /> : kind === 'book' ? <Book />
+    render(kind === 'map-signals' ? <Signals /> : kind === 'map-infrastructure' ? <Infrastructure /> : kind === 'dashboard' ? <PanelResourceProvider><Dashboard /></PanelResourceProvider> : kind === 'observed-runtime' ? <Runtime observed /> : kind === 'registered-runtime' ? <Runtime registered /> : kind === 'runtime' ? <Runtime /> : kind === 'focus' ? <Focus /> : kind === 'book' ? <Book />
       : kind === 'aviation' ? <Aviation /> : kind === 'hazards' ? <Hazards /> : kind === 'dossier' ? <Dossier /> : kind === 'geometry' ? <Geometry /> : <Workspace />, root);
   },
   unmount: () => render(null, root),
 };
+function Signals() {
+  const [active,setActive]=useState(true);api.setMapSourceActive=setActive;
+  api.signals=useMapSignals(['airport-disruptions'],!active);
+  return <output>{api.signals.events.length}</output>;
+}
+function Infrastructure() {
+  const [active,setActive]=useState(true);api.setMapSourceActive=setActive;
+  const viewport=useMemo(()=>({center:[180,10] as [number,number],zoom:9,widthCssPx:900,heightCssPx:600,revision:1,
+    bounds:[[178,9,180,11],[-180,9,-178,11]] as [number,number,number,number][]}),[]);
+  api.infrastructure=useMapInfrastructure(active,viewport);
+  return <output>{api.infrastructure.events.length}</output>;
+}
 function Runtime({ registered = false, observed = false }: { registered?: boolean; observed?: boolean }) {
   const [ids, setIds] = useState(registered ? ['price-implications', 'oracle-timeline', 'sample-chain-trades'] : ['shared']);
   api.setPanels = setIds;

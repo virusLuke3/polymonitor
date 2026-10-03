@@ -1463,3 +1463,15 @@ Natural Hazards v1.1 只有同时满足以下条件才算完成：
 最终产品判断标准：
 
 > WorldMonitor 告诉用户世界发生了什么；Polymonitor 的 World Event Map 在保留同等地图可信度的基础上，进一步告诉用户预测市场如何定价这件事。
+
+
+## 2026-10-03：2D / 3D 共用业务链路
+
+- `WorldEventMap` 统一管理 renderer 装载、可见性、暂停、候选帧验证及有限恢复。`DeckMapRenderer`、`GlobeMapRenderer` 和 `SvgMapRenderer` 实现同一个 `MapRenderer`；3D 不再走 App 内的 UCDP 专用旁路。
+- 两种视图复用 `useWorldEventMapController`、规范化事件、时间/等级/国家过滤、事件列表与 Inspector。3D 画质只影响绘制密度和动画频率，不再截断来源记录。已有航空场景仍区分参考航线动画与真实视口观测。
+- 3D 相机变化写回同一地图状态；视口需求由真实相机的射线与地球交点产生，含日期变更线两侧。国家边界和未变化事件几何复用对象。球面多边形适配只调整环方向，不改坐标、等级或来源。
+- 3D 引擎与纹理按视图懒加载，不进入 2D 首屏静态依赖或 Service Worker 预缓存。原 `WorldGlobe`、专用 marker worker、旧详情和样式退出。
+- 来源失败保留已成功返回的快照并显示 stale；合法空结果可以替换旧数据。基础设施日期变更线分片独立接受成功结果，失败分片保留旧记录，不伪造成功时间。
+- 3D 雷达仍未实现：图层及控件明确提示仅限 2D WebGL。3D 地球纹理不冒充 Protomaps 矢量底图，底图/主题选择在该视图禁用。
+- `polymonitor:map:style-ready` 表示样式加载，`first-basemap` 表示可用地图内容。不得把前者当作首次有效底图或把独立 RAF 频率当作绘制 FPS。
+- 回归入口：`globeScene.test.ts`、`frontend-lifecycle.spec.ts`、`frontend-architecture.spec.ts` 的 3D 场景、`globe-map.spec.ts` 及已有 `world-event-map.spec.ts`。新 3D 场景有独立截图基线；2D 容差不变。发布仍须核对真实生产制品及桌面/窄屏交互，测试名称与构建成功不能代替线上验收。

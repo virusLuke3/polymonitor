@@ -31,7 +31,7 @@ export async function selectMapLayers(page: Page, layerIds: string[]) {
 export async function gotoMapScene(page: Page, url: string, options?: Parameters<Page['goto']>[1]) {
   const result = await page.goto(url, options);
   const params = new URL(url, 'http://127.0.0.1').searchParams;
-  if (params.get('view') === '2d' && params.has('layers')) {
+  if (['2d','3d'].includes(params.get('view') || '') && params.has('layers')) {
     await selectMapLayers(page, params.get('layers')!.split(',').filter(Boolean));
   }
   return result;

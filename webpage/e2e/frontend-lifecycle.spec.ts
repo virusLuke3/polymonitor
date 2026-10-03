@@ -720,3 +720,51 @@ test('hazards revalidate before freshness expires without replacing evidence tim
   expect(calls).toBe(2);
   await page.evaluate(()=>window.frontendHarness.unmount());
 });
+
+const retainedEvent = (id:string, lon=10) => ({id,title:id,category:'infrastructure',severity:'watch',
+  locationPrecision:'exact',geometry:{type:'Point',coordinates:[lon,10]},sources:[{provider:'Fixture',freshness:'fresh'}],
+  limitations:[],relatedMarketIds:[],properties:{}});
+
+test('map signals retain the last success across failure and suspension, then accept a valid empty recovery',async({page})=>{
+  let mode='ok',requests=0;
+  await page.route('**/runtime/transport/map?source=faa',route=>{
+    requests++;return route.fulfill({json:{status:mode==='fail'?'unavailable':'ok',message:mode,events:mode==='ok'?[retainedEvent('faa:one')]:[],updatedAt:GENERATED_AT}});
+  });
+  await harness(page,'map-signals');
+  const result=()=>page.evaluate(()=>window.frontendHarness.signals);
+  await expect.poll(async()=> (await result())?.events.length).toBe(1);
+  mode='fail';await page.clock.fastForward(120001);
+  await expect.poll(async()=> (await result())?.sources[0]?.phase).toBe('stale');
+  expect((await result())?.events).toHaveLength(1);
+  expect((await result())?.sources[0]?.generatedAt).toBe(GENERATED_AT);
+  expect((await result())?.events[0]?.sources[0]?.freshness).toBe('stale');
+  await page.evaluate(()=>window.frontendHarness.setMapSourceActive(false));await page.clock.runFor(100);
+  const stopped=requests;await page.clock.fastForward(600000);expect(requests).toBe(stopped);
+  expect((await result())?.events).toHaveLength(1);
+  mode='empty';await page.evaluate(()=>window.frontendHarness.setMapSourceActive(true));await page.clock.runFor(100);
+  await expect.poll(async()=> (await result())?.sources[0]?.phase).toBe('empty');
+  expect((await result())?.events).toEqual([]);
+  await page.evaluate(()=>window.frontendHarness.unmount());
+  const ended=requests;await page.clock.fastForward(600000);expect(requests).toBe(ended);
+});
+
+test('infrastructure preserves a failed dateline half and accepts its later empty recovery',async({page})=>{
+  let mode='ok';
+  await page.route('**/runtime/world/infrastructure?*',route=>{
+    const west=Number(new URL(route.request().url()).searchParams.get('bbox')!.split(',')[0]);
+    const failing=west<0&&mode==='fail';
+    return route.fulfill({json:{status:failing?'unavailable':'partial',message:failing?'fixture failure':'limited coverage',
+      events:failing||mode==='empty'?[]:[retainedEvent(west<0?'west':'east',west)],updatedAt:GENERATED_AT}});
+  });
+  await harness(page,'map-infrastructure');await page.clock.runFor(600);
+  const result=()=>page.evaluate(()=>window.frontendHarness.infrastructure);
+  await expect.poll(async()=> (await result())?.events.length).toBe(2);
+  mode='fail';await page.clock.fastForward(3600001);
+  await expect.poll(async()=> (await result())?.sources[0]?.phase).toBe('stale');
+  expect((await result())?.events.map(event=>event.id).sort()).toEqual(['east','west']);
+  expect((await result())?.events.find(event=>event.id==='west')?.sources[0]?.freshness).toBe('stale');
+  expect((await result())?.events.find(event=>event.id==='east')?.sources[0]?.freshness).toBe('fresh');
+  mode='empty';await page.clock.fastForward(5001);
+  await expect.poll(async()=> (await result())?.events.length).toBe(0);
+  expect((await result())?.sources[0]?.phase).toBe('partial');
+});

@@ -425,6 +425,7 @@ try {
     mapData: summarizeDataSamples(dataSnapshot),
     lifecycle: {
       firstMapShellMs: lifecycle.marks?.['polymonitor:map:first-shell'] ?? null,
+      styleReadyMs: lifecycle.marks?.['polymonitor:map:style-ready'] ?? null,
       firstBasemapMs: lifecycle.marks?.['polymonitor:map:first-basemap'] ?? null,
       firstHazardMs: lifecycle.marks?.['polymonitor:map:first-hazard'] ?? null,
       completeVisibleHazardsMs: publishTimes.length ? Math.max(...publishTimes) : null,
