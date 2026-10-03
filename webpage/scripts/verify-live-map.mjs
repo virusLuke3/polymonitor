@@ -149,7 +149,10 @@ async function verifySharedRenderers() {
         if (await closeList.isVisible()) await closeList.click();
         await page.locator('.wm-focused-market-row').scrollIntoViewIfNeeded();
         // Scroll further into the actual dashboard; no synthetic spacer on live UI.
-        await page.locator('.wm-main-content').evaluate(el => { el.scrollTop = el.scrollHeight; });
+        await page.locator('.wm-main-content').evaluate(el => {
+          el.scrollTop = el.scrollHeight;
+          window.scrollTo(0, document.documentElement.scrollHeight);
+        });
         await expect(globe).toHaveAttribute('data-render-paused', 'true');
         await page.locator('.wm-map-stage').scrollIntoViewIfNeeded();
         await expect(globe).toHaveAttribute('data-render-paused', 'false');

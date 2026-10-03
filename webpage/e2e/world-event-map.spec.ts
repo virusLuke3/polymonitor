@@ -472,6 +472,9 @@ test('SVG country context and filtering remain keyboard-accessible', async ({ pa
 });
 
 test('WebGL context failure switches to SVG and destroys stale deck canvases', async ({ page }) => {
+  // The remounted 3D engine debounces with Date; advance it together with timers.
+  // A fixed Date with running native timers would never finish that debounce.
+  await page.clock.install({ time: new Date(GENERATED_AT) });
   await gotoMap(page, 'center=-70,22&zoom=3&layers=weather-alerts,earthquakes-volcanoes');
   await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', 'webgl');
   const mapWorkers = () => page.workers().filter(worker => worker.url().includes('maplibre-gl-worker'));
