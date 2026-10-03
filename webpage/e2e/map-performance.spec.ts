@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { installFixtures, GENERATED_AT } from './fixtures/world-event-map';
+import { installRealMapAssets } from './fixtures/real-map-assets';
 
 // Performance and pixel comparisons use the same Chrome raster backend as
 // their pre-change baseline. Do not silently compare it with SwiftShader.
@@ -89,4 +90,25 @@ test('visible renderer downloads before idle admission and explicit SVG does not
   await page.evaluate(()=>(window as any).__releaseMapIdle());
   await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready','svg');
   expect(requested).toBe(0);
+});
+
+test('primary PMTiles style downloads both same-origin sprite assets in dark and light themes', async ({page}) => {
+  const assets = await installRealMapAssets(page);
+  try {
+    for (const theme of ['dark', 'positron']) {
+      const name = theme === 'dark' ? 'dark' : 'light';
+      // Primary-ready alone does not prove the style's sprites loaded:
+      // MapLibre can paint vectors after rejecting an invalid sprite URL.
+      const responses = ['json', 'png'].map(extension => page.waitForResponse(response =>
+        new URL(response.url()).pathname === `/map-assets/protomaps-sprites-v4/${name}.${extension}`));
+      await page.goto(`/?view=2d&basemap=pmtiles&mapPerf=1&theme=${theme}`, {waitUntil:'domcontentloaded'});
+      await page.locator('.wm-map-section').scrollIntoViewIfNeeded();
+      for (const response of await Promise.all(responses)) {
+        expect(response.ok()).toBe(true);
+        expect(new URL(response.url()).origin).toBe(new URL(page.url()).origin);
+        expect((await response.body()).length).toBeGreaterThan(100);
+      }
+      await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-basemap-state', 'primary-ready');
+    }
+  } finally { await page.goto('about:blank'); await assets.dispose(); }
 });

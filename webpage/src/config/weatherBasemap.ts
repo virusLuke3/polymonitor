@@ -91,7 +91,8 @@ export async function buildWorldEventPMTilesStyle(url: string, language: 'en' | 
   }) as StyleSpecification['layers'];
   return {
     version: 8,
-    sprite: `/map-assets/protomaps-sprites-v4/${theme === 'positron' ? 'light' : 'dark'}`,
+    // MapLibre 6 requires absolute sprite URLs even for same-origin assets.
+    sprite: resolveWorldEventPMTilesUrl(`/map-assets/protomaps-sprites-v4/${theme === 'positron' ? 'light' : 'dark'}`),
     sources: {
       basemap: {
         type: 'vector',

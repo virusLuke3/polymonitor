@@ -138,9 +138,11 @@ it('retains the provider boundary paint instead of dimming ordinary countries be
 
 it('ships complete native-resolution sprite atlases on the application origin', async () => {
   const {readFileSync}=await import('node:fs');
+  vi.stubGlobal('window', {location:{origin:'https://polymonitor.club'}});
+  try {
   for(const theme of ['dark','light']) {
     const style=await buildWorldEventPMTilesStyle('/map-tiles/planet.pmtiles','en',theme==='light'?'positron':'dark');
-    expect(style.sprite).toBe(`/map-assets/protomaps-sprites-v4/${theme}`);
+    expect(new URL(style.sprite as string).href).toBe(`https://polymonitor.club/map-assets/protomaps-sprites-v4/${theme}`);
     for(const scale of ['', '@2x']) {
       const root=`../../public/map-assets/protomaps-sprites-v4/${theme}${scale}`;
       const atlas=JSON.parse(readFileSync(new URL(root+'.json',import.meta.url),'utf8'));
@@ -155,4 +157,5 @@ it('ships complete native-resolution sprite atlases on the application origin', 
       }
     }
   }
+  } finally { vi.unstubAllGlobals(); }
 });
