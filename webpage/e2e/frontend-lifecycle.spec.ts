@@ -3,6 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { fixtureBundle } from './fixtures/dashboard';
 import { GENERATED_AT, installFixtures, mapResponse } from './fixtures/world-event-map';
 import type {} from './fixtures/lifecycle';
+test.use({ baseURL: `http://127.0.0.1:${process.env.POLYMONITOR_E2E_PORT || 4174}` });
 
 async function harness(page: Page, kind: Parameters<Window['frontendHarness']['mount']>[0], query = '') {
   await installLocalAssets(page);
@@ -127,14 +128,14 @@ test('retry recovers and a failed refresh retains data without inventing freshne
   expect(await page.evaluate(() => window.frontendHarness.runtime!.getStatus('shared').phase)).toBe('error');
   await page.clock.runFor(1100);
   expect(await count(page)).toBe(2);
-  await page.evaluate(() => window.frontendHarness.requests[1].resolve({ items: ['retained'], status: 'ok' }));
+  await page.evaluate(generatedAt => window.frontendHarness.requests[1].resolve({ generatedAt, items: ['retained'], status: 'ok' }), GENERATED_AT);
   await page.clock.runFor(100);
-  expect(await page.evaluate(() => window.frontendHarness.runtime!.getStatus('shared').updatedAt)).toBeNull();
+  expect(await page.evaluate(() => window.frontendHarness.runtime!.getStatus('shared').updatedAt)).toBe(Date.parse(GENERATED_AT));
   await page.evaluate(() => { void window.frontendHarness.runtime!.refreshIds(['shared'], { reason: 'manual' }); });
   await page.evaluate(() => window.frontendHarness.requests[2].reject(new Error('refresh down')));
   await page.clock.runFor(100);
   expect(await page.evaluate(() => window.frontendHarness.runtime!.getStatus('shared').phase)).toBe('degraded');
-  expect(await page.evaluate(() => window.frontendHarness.runtime!.runtimeData.shared)).toEqual({ items: ['retained'], status: 'ok' });
+  expect(await page.evaluate(() => window.frontendHarness.runtime!.runtimeData.shared)).toEqual({ generatedAt: GENERATED_AT, items: ['retained'], status: 'ok' });
   await page.evaluate(() => window.frontendHarness.setPanels([]));
   await page.clock.runFor(10_000);
   expect(await count(page)).toBe(3);
@@ -216,7 +217,7 @@ test('two panel views use one data owner and one cache', async ({ page }) => {
   await page.clock.runFor(100);
   expect(await count(page)).toBe(1);
   expect(await page.evaluate(() => window.frontendHarness.requests[0].signal.aborted)).toBe(false);
-  await page.evaluate(() => window.frontendHarness.requests[0].resolve({ items: ['same'] }));
+  await page.evaluate(generatedAt => window.frontendHarness.requests[0].resolve({ generatedAt, items: ['same'] }), GENERATED_AT);
   await page.clock.runFor(100);
   expect(await page.evaluate(() => {
     const r = window.frontendHarness.runtime!;
@@ -767,4 +768,41 @@ test('infrastructure preserves a failed dateline half and accepts its later empt
   mode='empty';await page.clock.fastForward(5001);
   await expect.poll(async()=> (await result())?.events.length).toBe(0);
   expect((await result())?.sources[0]?.phase).toBe('partial');
+});
+
+
+test('slow-tier cadence remains independent of freshness and hung siblings recover', async ({ page }) => {
+  await harness(page, 'runtime-policy');
+  expect(await count(page)).toBe(2);
+  await page.evaluate(generatedAt => window.frontendHarness.requests.find(r => r.id === 'frequent')!.resolve({ generatedAt, items: ['first'] }), GENERATED_AT);
+  await page.clock.runFor(5100);
+  expect(await page.evaluate(() => window.frontendHarness.requests.filter(r => r.id === 'frequent').length)).toBe(2);
+  expect(await page.evaluate(() => window.frontendHarness.requests.filter(r => r.id === 'blocked').length)).toBe(1);
+  await page.evaluate(generatedAt => window.frontendHarness.requests.filter(r => r.id === 'frequent')[1].resolve({ generatedAt, items: ['second'] }), GENERATED_AT);
+  await page.clock.runFor(100);
+  expect(await page.evaluate(() => window.frontendHarness.runtime!.getData('frequent'))).toMatchObject({ items: ['second'] });
+  expect(await page.evaluate(() => window.frontendHarness.runtime!.getStatus('frequent').checkedAt)).toBeGreaterThan(Date.parse(GENERATED_AT) + 5000);
+  await page.clock.runFor(6000);
+  expect(await page.evaluate(() => window.frontendHarness.requests.filter(r => r.id === 'blocked').length)).toBe(2);
+  expect(await page.evaluate(() => window.frontendHarness.requests.find(r => r.id === 'blocked')!.signal.aborted)).toBe(true);
+  await page.evaluate(generatedAt => {
+    const blocked = window.frontendHarness.requests.filter(r => r.id === 'blocked');
+    blocked[1].resolve({ generatedAt, items: ['recovered'] });
+    blocked[0].resolve({ generatedAt, items: ['obsolete'] });
+  }, GENERATED_AT);
+  await page.clock.runFor(100);
+  expect(await page.evaluate(() => window.frontendHarness.runtime!.getData('blocked'))).toMatchObject({ items: ['recovered'] });
+  const before = await count(page);
+  await page.evaluate(() => window.frontendHarness.unmount());
+  await page.clock.runFor(60_000);
+  expect(await count(page)).toBe(before);
+});
+
+test('an unknown source timestamp cannot become a successful ready snapshot', async ({ page }) => {
+  await harness(page, 'runtime');
+  await page.evaluate(() => window.frontendHarness.requests[0].resolve({ status: 'ok', items: ['undated'] }));
+  await page.clock.runFor(100);
+  expect(await page.evaluate(() => window.frontendHarness.runtime!.getStatus('shared').phase)).toBe('error');
+  expect(await page.evaluate(() => window.frontendHarness.runtime!.getStatus('shared').checkedAt ?? null)).toBeNull();
+  expect(await page.evaluate(() => window.frontendHarness.runtime!.getData('shared'))).toBeUndefined();
 });

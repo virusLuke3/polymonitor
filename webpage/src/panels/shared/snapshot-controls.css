@@ -1,0 +1,4 @@
+.wm-snapshot-controls { display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; margin-bottom:10px; color:var(--text-dim,#888); font-size:11px; }
+.wm-snapshot-controls button { margin-left:auto; padding:3px 8px; background:var(--bg-secondary,#182129); color:var(--text-primary,#eee); border:1px solid var(--border-color,#485964); cursor:pointer; }
+.wm-snapshot-controls button:disabled { opacity:.6; cursor:wait; }
+.wm-snapshot-controls > div { display:flex; flex-wrap:wrap; gap:6px 12px; width:100%; }

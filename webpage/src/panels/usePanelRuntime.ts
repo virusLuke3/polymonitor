@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import {
   fetchPanelRuntimeData,
   mergeRuntimeData,
+  runtimeTimestamp,
 } from './runtime-store';
 import {
   type PanelFetchContext,
@@ -12,6 +13,7 @@ import {
 } from './types';
 import type { RuntimePanelMetadata } from '@/services/api';
 import { ApiHttpError } from '@/services/api';
+import { readResourceCache, writeResourceCache, resourceIsCurrent } from './resource-cache';
 
 const DEFAULT_STALE_AFTER_MS: Record<PanelRefreshTier, number> = {
   bootstrap: 5 * 60_000,
@@ -48,22 +50,12 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error || 'Panel refresh failed.');
 }
 
-function payloadTimestamp(value: unknown): number | null {
-  if (!value || typeof value !== 'object') return null;
-  const payload = value as Record<string, unknown>;
-  const candidate = payload.generatedAt || payload.updatedAt || payload.asOf || payload.timestamp;
-  if (typeof candidate === 'number' && Number.isFinite(candidate)) {
-    return candidate > 10_000_000_000 ? candidate : candidate * 1_000;
-  }
-  const parsed = Date.parse(String(candidate || ''));
-  return Number.isFinite(parsed) ? parsed : null;
-}
 
 function payloadIsDegraded(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false;
   const payload = value as { status?: unknown; generationMode?: unknown };
   const status = String(payload.status || '').trim().toLowerCase();
-  return payload.generationMode === 'rules' || ['degraded', 'error', 'failed', 'warming', 'gateway-error', 'agent-error', 'missing-api-key', 'invalid-agent-output'].includes(status);
+  return payload.generationMode === 'rules' || ['degraded', 'partial', 'invalid', 'unknown', 'unavailable', 'error', 'failed', 'warming', 'gateway-error', 'agent-error', 'missing-api-key', 'invalid-agent-output'].includes(status);
 }
 
 function metadataTimestamp(metadata?: RuntimePanelMetadata): number | null {
@@ -74,7 +66,7 @@ function metadataTimestamp(metadata?: RuntimePanelMetadata): number | null {
 function metadataPhase(metadata?: RuntimePanelMetadata): PanelRuntimeStatus['phase'] | null {
   const freshness = String(metadata?.freshness?.state || '').trim().toLowerCase();
   if (freshness === 'stale') return 'stale';
-  if (freshness === 'degraded' || freshness === 'error' || freshness === 'unavailable') return 'degraded';
+  if (freshness === 'degraded' || freshness === 'error' || freshness === 'unavailable' || freshness === 'unknown') return 'degraded';
   return null;
 }
 
@@ -91,7 +83,17 @@ function retryDelay(panel: PanelModule, failureCount: number): number | null {
 export function usePanelRuntime({ panels, activePanelIds, initialData = {}, suspended = false, waitForVisibility = false }: UsePanelRuntimeOptions) {
   const byId = useMemo(() => new Map(panels.map((panel) => [panel.id, panel])), [panels]);
   const sourceId = useCallback((id: string) => byId.get(id)?.dataSourceId || id, [byId]);
-  const [runtimeData, setData] = useState<PanelRuntimeData>(() => typeof initialData === 'function' ? initialData() : initialData);
+  const [runtimeData, setData] = useState<PanelRuntimeData>(() => {
+    const restored = { ...(typeof initialData === 'function' ? initialData() : initialData) };
+    panels.forEach(panel => {
+      if (!panel.snapshot) return;
+      try {
+        const cached = readResourceCache(panel.snapshot, window.localStorage);
+        if (cached != null && (restored[panel.id] == null || (panel.snapshot.updatedAt(cached) ?? 0) > (runtimeTimestamp(restored[panel.id]) ?? 0))) restored[panel.id] = cached;
+      } catch { /* Public persistence is optional. */ }
+    });
+    return restored;
+  });
   const [statuses, setStatuses] = useState<Record<string, PanelRuntimeStatus>>({});
   const [documentHidden, setDocumentHidden] = useState(() => typeof document !== 'undefined' && document.hidden);
   const [, demandChanged] = useState(0);
@@ -159,36 +161,50 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
       if (running) { pending.add(running); return false; }
       const status = statusesRef.current[panel.id];
       if (!options.force && status?.error && (status.retryable === false || (status.nextRetryAt ?? 0) > Date.now())) return false;
-      if (!options.force && ['interval', 'refresh'].includes(options.reason || 'refresh')
-        && panel.refreshPolicy?.tier === 'slow' && status?.updatedAt
-        && Date.now() - status.updatedAt < (panel.refreshPolicy.staleAfterMs ?? DEFAULT_STALE_AFTER_MS.slow)) return false;
       return true;
     });
     if (eligible.length) {
-      const controller = new AbortController();
-      const panelIds = eligible.map((panel) => panel.id);
+      const panelIds = eligible.map(panel => panel.id);
       const now = Date.now();
-      panelIds.forEach((id) => controllers.current.set(id, controller));
-      const isCurrent = (id: string) => mounted.current && !controller.signal.aborted && controllers.current.get(id) === controller;
+      const lanes = new Map(eligible.map(panel => {
+        const controller = new AbortController();
+        let complete!: (value: PanelRuntimeData) => void;
+        const promise = new Promise<PanelRuntimeData>(resolve => { complete = resolve; });
+        controllers.current.set(panel.id, controller);
+        inflight.current.set(panel.id, promise);
+        pending.add(promise);
+        const lane = { controller, complete, result: {} as PanelRuntimeData };
+        return [panel.id, lane] as const;
+      }));
+      const isCurrent = (id: string) => mounted.current && !lanes.get(id)!.controller.signal.aborted && controllers.current.get(id) === lanes.get(id)!.controller;
       updateStatuses(panelIds, (current, id) => ({ ...current,
         phase: dataRef.current[id] === undefined ? 'loading' : current.phase,
         lastAttemptAt: now, fetching: true, error: null,
       }));
-      const request = fetchPanelRuntimeData(eligible, {
-        signal: controller.signal, reason: options.reason || 'refresh',
+      void fetchPanelRuntimeData(eligible, {
+        signal: new AbortController().signal,
+        panelSignals: Object.fromEntries([...lanes].map(([id, lane]) => [id, lane.controller.signal])), reason: options.reason || 'refresh',
         maxBatchSize: Math.min(12, ...eligible.map((panel) => Math.max(1, panel.maxBatchSize || 12))),
-        onPanelData: (id, value, metadata) => {
+        onPanelData: (id, value, metadata, raw) => {
           if (!isCurrent(id)) return;
           const policy = eligible.find((panel) => panel.id === id)?.refreshPolicy;
           const merged = mergeRuntimeData(dataRef.current, { [id]: value });
           const retained = merged[id] !== value;
-          const updatedAt = retained ? statusesRef.current[id]?.updatedAt ?? payloadTimestamp(merged[id])
-            : metadataTimestamp(metadata) ?? payloadTimestamp(value);
+          const updatedAt = retained ? statusesRef.current[id]?.updatedAt ?? runtimeTimestamp(merged[id])
+            : eligible.find(panel => panel.id === id)?.snapshot?.updatedAt(value) ?? runtimeTimestamp(value) ?? metadataTimestamp(metadata);
           const staleAfter = policy?.staleAfterMs ?? DEFAULT_STALE_AFTER_MS[policy?.tier || 'manual'];
           const phase = metadataPhase(metadata) ?? ((value as { status?: string } | null)?.status === 'stale' ? 'stale' : payloadIsDegraded(value) ? 'degraded'
             : updatedAt != null && Date.now() - updatedAt > staleAfter ? 'stale' : 'ready');
           const retry = retries.current.get(id);
           if (retry != null) { window.clearTimeout(retry); retries.current.delete(id); }
+          lanes.get(id)!.result = { [id]: value };
+          const contract = eligible.find(panel => panel.id === id)?.snapshot;
+          if (contract) {
+            try {
+              const previous = contract.shouldPersist ? readResourceCache(contract, window.localStorage) : null;
+              if (!contract.shouldPersist || contract.shouldPersist(value, previous)) writeResourceCache(contract, raw ?? value, window.localStorage);
+            } catch { /* A cache failure cannot fail the displayed snapshot. */ }
+          }
           setRuntimeData(merged);
           updateStatuses([id], () => ({ phase, updatedAt, lastAttemptAt: now, checkedAt: Date.now(), fetching: false, failureCount: 0, error: null,
             cacheMode: metadata?.cache?.mode || null, freshness: metadata?.freshness?.state || null,
@@ -212,14 +228,15 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
             nextRetryAt: retryable ? Date.now() + delay : null,
           }; });
         },
-      }).then(({ data }) => controller.signal.aborted ? {} : data).finally(() => {
-        panelIds.forEach((id) => {
-          if (controllers.current.get(id) !== controller) return;
-          controllers.current.delete(id); inflight.current.delete(id);
-        });
+        onPanelSettled: id => {
+          const lane = lanes.get(id)!;
+          if (controllers.current.get(id) === lane.controller) {
+            controllers.current.delete(id);
+            inflight.current.delete(id);
+          }
+          lane.complete(lane.result);
+        },
       });
-      panelIds.forEach((id) => inflight.current.set(id, request));
-      pending.add(request);
     }
     const results = await Promise.all(pending);
     return Object.assign({}, ...results);
@@ -234,7 +251,7 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
     return () => document.removeEventListener('visibilitychange', onVisibility);
   }, []);
   useEffect(() => {
-    // A batch is aborted only when all of its consumers have gone away.
+    // The transport releases a batch only after all resource demand is gone.
     const unused = new Set(controllers.current.values());
     if (!runtimeSuspended) controllers.current.forEach((controller, id) => {
       if (demandRef.current.has(id)) unused.delete(controller);
@@ -274,11 +291,19 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
           && now - status.updatedAt > (panel.refreshPolicy.staleAfterMs ?? DEFAULT_STALE_AFTER_MS[panel.refreshPolicy.tier]);
       });
       updateStatuses(stale.map((panel) => panel.id), (status) => ({ ...status, phase: 'stale' }));
+      const expired = panels.filter(panel => {
+        const contract = panel.snapshot, value = dataRef.current[panel.id];
+        return contract && value != null && !resourceIsCurrent(contract.updatedAt(value), Math.max(contract.maxAgeMs, contract.staleAgeMs ?? contract.maxAgeMs));
+      });
+      if (expired.length) {
+        setRuntimeData(current => { const next = { ...current }; expired.forEach(panel => delete next[panel.id]); return next; });
+        updateStatuses(expired.map(panel => panel.id), status => ({ ...status, phase: 'stale' }));
+      }
     };
     tick();
     const timer = window.setInterval(tick, 1_000);
     return () => window.clearInterval(timer);
-  }, [demandKey, panels, refreshPanels, runtimeSuspended, updateStatuses]);
+  }, [demandKey, panels, refreshPanels, runtimeSuspended, updateStatuses, setRuntimeData]);
   useEffect(() => {
     if (runtimeSuspended) return;
     panels.forEach((panel) => {
@@ -307,7 +332,7 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
     ids.forEach(id => {
       const controller = controllers.current.get(id);
       controllers.current.delete(id); inflight.current.delete(id);
-      if (controller && ![...controllers.current.values()].includes(controller)) controller.abort();
+      controller?.abort();
       const retry = retries.current.get(id);
       if (retry != null) window.clearTimeout(retry);
       retries.current.delete(id);

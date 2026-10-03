@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -64,10 +65,11 @@ def test_funding_keeps_asset_order_and_shorts_pay_sign(context):
     assert payload["sources"] == {"funding": "degraded"}
 
 
-def test_stale_snapshot_retains_evidence_and_trims_without_mutating_cache(context):
+def test_stale_snapshot_retains_evidence_and_trims_without_mutating_cache(context, monkeypatch):
+    monkeypatch.setattr(service.seed_recovery, "recover_seed", lambda *args: False)
     cached = {
         "panelId": "stablecoin-monitor",
-        "generatedAt": "2026-09-28T00:00:00Z",
+        "generatedAt": (datetime.now(timezone.utc) - timedelta(seconds=1000)).isoformat(),
         "status": "degraded",
         "sources": {"financeExternal": "stale"},
         "items": [{"id": str(index)} for index in range(8)],
@@ -78,7 +80,7 @@ def test_stale_snapshot_retains_evidence_and_trims_without_mutating_cache(contex
     payload = service.get_finance_watch_panel_snapshot(context, "stablecoin-monitor", 3)
     assert payload["cacheMode"] == "stale-seed"
     assert payload["generatedAt"] == cached["generatedAt"]
-    assert payload["status"] == "degraded"
+    assert payload["status"] == "stale"
     assert payload["sources"] == cached["sources"]
     assert payload["summary"] == {"count": 3, "totalCount": 8}
     assert len(cached["items"]) == 8

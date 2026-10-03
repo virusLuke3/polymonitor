@@ -123,10 +123,19 @@ class TechPanelsWatcher:
         return payload
 
     def get_cached_runtime_payload(self, namespace: str, cache_key: str) -> Optional[Dict[str, Any]]:
-        return self._runtime_cache.get(f"{namespace}:{cache_key}")
+        key = f"{namespace}:{cache_key}"
+        entry = self._runtime_cache.get(key)
+        if not entry:
+            return None
+        if entry["expires_at"] <= time.monotonic():
+            self._runtime_cache.pop(key, None)
+            return None
+        return entry["payload"]
 
     def set_cached_runtime_payload(self, namespace: str, cache_key: str, payload: Dict[str, Any], ttl_seconds: int = 300) -> Dict[str, Any]:
-        self._runtime_cache[f"{namespace}:{cache_key}"] = payload
+        self._runtime_cache[f"{namespace}:{cache_key}"] = {
+            "payload": payload, "expires_at": time.monotonic() + max(1, ttl_seconds),
+        }
         return payload
 
     def get_snapshot_payload(self, namespace: str, cache_key: str, builder, *, ttl_seconds: int) -> Any:
@@ -272,11 +281,12 @@ def main() -> int:
         print(json.dumps(watcher.run_once(), ensure_ascii=True, default=str))
         return 0
     while True:
+        started_at = time.monotonic()
         try:
             print(json.dumps(watcher.run_once(), ensure_ascii=True, default=str), flush=True)
         except Exception as exc:
             print(f"[tech-panels] ERROR run failed: {exc}", file=sys.stderr)
-        time.sleep(watcher.interval_seconds)
+        time.sleep(max(5, watcher.interval_seconds - (time.monotonic() - started_at)))
 
 
 if __name__ == "__main__":

@@ -21,7 +21,7 @@ import { fixtureMarkets } from './dashboard';
 import { GENERATED_AT } from './world-event-map';
 
 const root = document.getElementById('root')!;
-type HarnessKind = 'runtime' | 'observed-runtime' | 'registered-runtime' | 'dashboard' | 'focus' | 'book' | 'workspace' | 'hazards' | 'dossier' | 'geometry' | 'aviation' | 'map-signals' | 'map-infrastructure';
+type HarnessKind = 'runtime' | 'runtime-policy' | 'observed-runtime' | 'registered-runtime' | 'dashboard' | 'focus' | 'book' | 'workspace' | 'hazards' | 'dossier' | 'geometry' | 'aviation' | 'map-signals' | 'map-infrastructure';
 type HazardView = { layers: string[]; zoom: number; center: [number, number]; active: boolean };
 const noPanels: PanelModule[] = [];
 const translate = (key: string) => key;
@@ -34,6 +34,12 @@ const modules: PanelModule[] = [{
     requests.push({ id: 'shared', signal: context!.signal, resolve, reject });
   }),
 }, { id: 'shared-view', dataSourceId: 'shared', title: 'Second view', eyebrow: 'TEST', description: 'Same source' }];
+const policyModules: PanelModule[] = ['frequent', 'blocked'].map(id => ({
+  id, title: id, eyebrow: 'TEST', description: 'Independent scheduling fixture', batch: false,
+  refreshPolicy: { tier: 'slow', intervalMs: 5000, requestTimeoutMs: id === 'blocked' ? 10_000 : 30_000,
+    retry: { attempts: 2, baseDelayMs: 1000 } },
+  fetchData: context => new Promise((resolve, reject) => requests.push({ id, signal: context!.signal, resolve, reject })),
+}));
 const bootstrap = { generatedAt: GENERATED_AT, activeMarketsPreview: fixtureMarkets, activeMarketGroupsPreview: [] } as unknown as BootstrapPayload;
 const api = {
   requests,
@@ -58,7 +64,7 @@ const api = {
   setHazardView: (_patch: Partial<HazardView>) => {},
   setGeometryEnabled: (_enabled: boolean) => {},
   mount: (kind: HarnessKind) => {
-    render(kind === 'map-signals' ? <Signals /> : kind === 'map-infrastructure' ? <Infrastructure /> : kind === 'dashboard' ? <PanelResourceProvider><Dashboard /></PanelResourceProvider> : kind === 'observed-runtime' ? <Runtime observed /> : kind === 'registered-runtime' ? <Runtime registered /> : kind === 'runtime' ? <Runtime /> : kind === 'focus' ? <Focus /> : kind === 'book' ? <Book />
+    render(kind === 'map-signals' ? <Signals /> : kind === 'map-infrastructure' ? <Infrastructure /> : kind === 'dashboard' ? <PanelResourceProvider><Dashboard /></PanelResourceProvider> : kind === 'observed-runtime' ? <Runtime observed /> : kind === 'registered-runtime' ? <Runtime registered /> : kind === 'runtime-policy' ? <Runtime policy /> : kind === 'runtime' ? <Runtime /> : kind === 'focus' ? <Focus /> : kind === 'book' ? <Book />
       : kind === 'aviation' ? <Aviation /> : kind === 'hazards' ? <Hazards /> : kind === 'dossier' ? <Dossier /> : kind === 'geometry' ? <Geometry /> : <Workspace />, root);
   },
   unmount: () => render(null, root),
@@ -75,10 +81,10 @@ function Infrastructure() {
   api.infrastructure=useMapInfrastructure(active,viewport);
   return <output>{api.infrastructure.events.length}</output>;
 }
-function Runtime({ registered = false, observed = false }: { registered?: boolean; observed?: boolean }) {
-  const [ids, setIds] = useState(registered ? ['price-implications', 'oracle-timeline', 'sample-chain-trades'] : ['shared']);
+function Runtime({ registered = false, observed = false, policy = false }: { registered?: boolean; observed?: boolean; policy?: boolean }) {
+  const [ids, setIds] = useState(registered ? ['price-implications', 'oracle-timeline', 'sample-chain-trades'] : policy ? ['frequent', 'blocked'] : ['shared']);
   api.setPanels = setIds;
-  api.runtime = usePanelRuntime({ panels: registered ? RUNTIME_PANEL_MODULES : modules, activePanelIds: ids, waitForVisibility: observed });
+  api.runtime = usePanelRuntime({ panels: registered ? RUNTIME_PANEL_MODULES : policy ? policyModules : modules, activePanelIds: ids, waitForVisibility: observed });
   return <output>runtime</output>;
 }
 function Dashboard() {

@@ -6,6 +6,8 @@ import type { RuntimeTechPanelItem, RuntimeTechPanelPayload } from '@/types';
 import { formatRelative } from '@/panels/shared/formatters';
 import type { PanelRenderMap } from '@/panels/types';
 import { runtimePanelFromRenderer } from '@/panels/definePanel';
+import { watchSnapshot } from './watch-snapshot';
+import { SnapshotControls } from './SnapshotControls';
 
 type TechPanelMode = 'model-race' | 'market-cap' | 'app-pulse';
 
@@ -141,8 +143,8 @@ function TechPanelBody({ payload, mode }: { payload?: RuntimeTechPanelPayload | 
   if (!items.length) {
     return (
       <div className="wm-tech-empty">
-        <span>STANDBY</span>
-        <strong>{payload?.title || 'Tech panel'} warming</strong>
+        <span>{payload?.status === 'empty' ? 'NO RESULTS' : 'STANDBY'}</span>
+        <strong>{payload?.status === 'empty' ? 'No items in the current snapshot' : `${payload?.title || 'Tech panel'} warming`}</strong>
       </div>
     );
   }
@@ -184,6 +186,7 @@ function TechWatchPanel({ config, payload }: { config: TechPanelConfig; payload?
       className={`wm-market-panel wm-tech-panel mode-${config.mode}`}
       dataPanelId={config.id}
     >
+      <SnapshotControls generatedAt={payload?.generatedAt} />
       <TechPanelBody payload={payload} mode={config.mode} />
     </Panel>
   );
@@ -202,9 +205,12 @@ export function createTechPanel(config: TechPanelConfig) {
     eyebrow: 'tech',
     description: config.description,
     defaultEnabled: true,
+    snapshot: watchSnapshot('tech', config.id, limit),
   }, {
     tier: 'slow',
     intervalMs: 300000,
+    staleAfterMs: 900000,
+    retry: { attempts: 8, baseDelayMs: 2000, maxDelayMs: 15000 },
     limit,
     fetchData: (context, limit) => fetchRuntimeTechPanel(config.id, limit, context?.signal),
   });

@@ -6,6 +6,8 @@ import type { RuntimeFinanceWatchItem, RuntimeFinanceWatchPayload } from '@/type
 import type { PanelRenderMap } from '@/panels/types';
 import { runtimePanelFromRenderer } from '@/panels/definePanel';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
+import { watchSnapshot } from './watch-snapshot';
+import { SnapshotControls } from './SnapshotControls';
 
 type FinancePanelMode = 'rows' | 'feed' | 'grid' | 'sentiment' | 'etf' | 'research';
 
@@ -284,8 +286,8 @@ function FinanceWatchView({ payload, mode, freshKeys }: { payload?: RuntimeFinan
   if (!items.length) {
     return (
       <div className="wm-finance-empty">
-        <span>{shared('standby', 'STANDBY')}</span>
-        <strong>{shared('panelWarmingTitle', '{title} warming', { title: payload?.title || shared('financePanel', 'Finance panel') })}</strong>
+        <span>{payload?.status === 'empty' ? shared('noResults', 'NO RESULTS') : shared('standby', 'STANDBY')}</span>
+        <strong>{payload?.status === 'empty' ? shared('emptySnapshot', 'No items in the current snapshot') : shared('panelWarmingTitle', '{title} warming', { title: payload?.title || shared('financePanel', 'Finance panel') })}</strong>
       </div>
     );
   }
@@ -358,6 +360,7 @@ function FinanceWatchPanel({ config, payload }: { config: FinancePanelConfig; pa
       className={`wm-market-panel wm-finance-watch-panel mode-${mode}${updatePulse > 0 ? ` is-dynamic refresh-pulse-${updatePulse % 2}` : ''}`}
       dataPanelId={config.id}
     >
+      <SnapshotControls generatedAt={payload?.generatedAt} />
       <FinanceWatchView payload={payload} mode={mode} freshKeys={freshKeys} />
     </Panel>
   );
@@ -376,9 +379,12 @@ export function createFinanceWatchPanel(config: FinancePanelConfig) {
     eyebrow: 'finance',
     description: config.description,
     defaultEnabled: true,
+    snapshot: watchSnapshot('finance', config.id, limit),
   }, {
     tier: 'slow',
     intervalMs: 300000,
+    staleAfterMs: 900000,
+    retry: { attempts: 8, baseDelayMs: 2000, maxDelayMs: 15000 },
     limit,
     fetchData: (context, limit) => fetchRuntimeFinanceWatchPanel(config.id, limit, context?.signal),
   });

@@ -13,6 +13,7 @@ from urllib.parse import urlencode
 from xml.etree import ElementTree
 
 from api.context import resolve_optional_service_callable
+from api.services import seed_recovery
 
 try:
     import requests
@@ -1033,44 +1034,6 @@ def build_all_tech_panel_payloads(ctx: dict, limit: int = 24) -> Dict[str, Dict[
     return payloads
 
 
-def _read_seeded_snapshot(
-    ctx: TechPanelsContext,
-    panel_id: str,
-    ttl_seconds: int,
-) -> Optional[Dict[str, Any]]:
-    dependencies = _dependencies(ctx)
-    def usable(payload: Dict[str, Any]) -> bool:
-        if str(payload.get("status") or "").lower() == "error" and not payload.get("items"):
-            return False
-        return True
-
-    namespace = tech_panel_namespace(panel_id)
-    reader = dependencies.get_cached_json
-    if reader is not None:
-        redis_payload = reader(namespace, TECH_PANEL_CACHE_KEY)
-        if isinstance(redis_payload, dict) and usable(redis_payload):
-            dependencies.snapshot_store.set(
-                namespace,
-                TECH_PANEL_CACHE_KEY,
-                redis_payload,
-                ttl_seconds,
-            )
-            return {**redis_payload, "cacheMode": str(redis_payload.get("cacheMode") or "redis-seed")}
-    snapshot_store = dependencies.snapshot_store
-    if snapshot_store is None:
-        return None
-    sqlite_payload = snapshot_store.get(namespace, TECH_PANEL_CACHE_KEY)
-    if isinstance(sqlite_payload, dict) and usable(sqlite_payload):
-        setter = dependencies.set_cached_json
-        if setter is not None:
-            setter(namespace, TECH_PANEL_CACHE_KEY, sqlite_payload, ttl_seconds)
-        return {**sqlite_payload, "cacheMode": str(sqlite_payload.get("cacheMode") or "sqlite-seed")}
-    stale_payload = snapshot_store.get_stale(namespace, TECH_PANEL_CACHE_KEY)
-    if isinstance(stale_payload, dict) and usable(stale_payload):
-        return {**stale_payload, "cacheMode": "stale-seed"}
-    return None
-
-
 def _trim_payload(payload: Dict[str, Any], limit: int) -> Dict[str, Any]:
     items = [item for item in (payload.get("items") or []) if isinstance(item, dict)]
     limit = max(0, int(limit or 10))
@@ -1094,24 +1057,9 @@ def get_tech_panel_snapshot(
     limit = max(3, min(60, int(limit or 10)))
     settings = dependencies.settings
     ttl_seconds = int(getattr(settings, "tech_runtime_ttl_seconds", TECH_PANEL_TTL_SECONDS) or TECH_PANEL_TTL_SECONDS)
-    seeded = _read_seeded_snapshot(dependencies, panel_id, ttl_seconds)
-    if seeded is not None:
-        return _trim_payload(seeded, limit)
-
-    def _builder() -> Dict[str, Any]:
-        return build_tech_panel_payload(
-            dependencies,
-            panel_id,
-            limit=max(limit, 24),
-        )
-
-    if dependencies.get_snapshot_payload is not None:
-        payload = dependencies.get_snapshot_payload(
-            tech_panel_namespace(panel_id),
-            TECH_PANEL_CACHE_KEY,
-            _builder,
-            ttl_seconds=ttl_seconds,
-        )
-    else:
-        payload = _builder()
-    return _trim_payload(payload if isinstance(payload, dict) else {}, limit)
+    payload = seed_recovery.read_watch_seed(
+        namespace=tech_panel_namespace(panel_id), cache_key=TECH_PANEL_CACHE_KEY, panel_id=panel_id,
+        snapshot_store=dependencies.snapshot_store, redis_get=dependencies.get_cached_json, redis_set=dependencies.set_cached_json,
+        builder=lambda: build_tech_panel_payload(dependencies, panel_id, limit=max(limit, 24)), ttl_seconds=ttl_seconds,
+    )
+    return _trim_payload(payload, limit)

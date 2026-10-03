@@ -32,7 +32,7 @@ from api.commodity_symbols import COMMODITY_SYMBOLS
 from api.clients.http_client import http_json_get
 from api.config import load_api_settings
 from api.services import runtime_service
-from api.services import commodities_service
+from api.services import commodities_service, crypto_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
 from runtime.snapshot_store import SnapshotStore
 
@@ -235,8 +235,8 @@ class MarketGroupWatcher:
         try:
             payload = runtime_service.fetch_live_market_group_payload(self.service_context(), items, kind=kind)
         except Exception as exc:
-            if kind == "commodities":
-                payload = commodities_service.merge_snapshot({"items": [], "generatedAt": utc_now_iso()}, previous, items, utc_now_iso())
+            if kind in {"commodities", "crypto"}:
+                payload = (commodities_service if kind == "commodities" else crypto_service).merge_snapshot({"items": [], "generatedAt": utc_now_iso()}, previous, items, utc_now_iso())
                 payload["error"] = str(exc)
                 self.store_payload(namespace, cache_key, {**payload, "cacheMode": "seeded"}, kind=kind)
                 self.store_seed_meta(panel_id=panel_id, status="degraded", record_count=len(payload["items"]),
@@ -254,11 +254,11 @@ class MarketGroupWatcher:
             self.store_seed_meta(panel_id=panel_id, status=status, record_count=record_count, source_states={kind: status}, error_summary=error_summary)
             return {"status": status, "error": error_summary, "recordCount": record_count}
 
-        if kind == "commodities":
-            payload = commodities_service.merge_snapshot(payload, previous, items, utc_now_iso())
+        if kind in {"commodities", "crypto"}:
+            payload = (commodities_service if kind == "commodities" else crypto_service).merge_snapshot(payload, previous, items, utc_now_iso())
             payload["refreshIntervalSeconds"] = self.interval_seconds
         record_count = len(payload.get("items") or [])
-        if previous and record_count <= 0 and kind != "commodities":
+        if previous and record_count <= 0 and kind not in {"commodities", "crypto"}:
             self.store_payload(namespace, cache_key, previous, kind=kind)
             self.store_seed_meta(
                 panel_id=panel_id,

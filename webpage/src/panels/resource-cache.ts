@@ -9,8 +9,15 @@ export interface ResourceCacheContract<T> {
   cache?: { version: number; maxChars?: number };
 }
 
+/** The same validation contract is used for dedicated and batched snapshots. */
+export interface PanelSnapshotContract<T> extends ResourceCacheContract<T> {
+  acceptStale?: boolean;
+  shouldPersist?: (next: T, previous: T | null) => boolean;
+}
+
 const PREFIX = 'polymonitor:panel-resource:';
-const MAX_ENTRIES = 8;
+const MAX_ENTRIES = 32;
+const MAX_TOTAL_CHARS = 2_000_000;
 const MAX_CHARS = 256_000;
 const storageKey = (key: string) => `${PREFIX}${key}`;
 
@@ -40,13 +47,23 @@ export function writeResourceCache<T>(contract: ResourceCacheContract<T>, raw: u
   try {
     const value = contract.parse(raw);
     if (!resourceIsCurrent(contract.updatedAt(value), contract.maxAgeMs, now)) return;
-    const encoded = JSON.stringify({ version: contract.cache.version, value: raw });
+    const encoded = JSON.stringify({ version: contract.cache.version, cachedAt: now, value: raw });
     if (encoded.length > (contract.cache.maxChars ?? MAX_CHARS)) return;
     const key = storageKey(contract.key);
     // Bound this cache without touching other application storage.
     storage.setItem(key, encoded);
-    const keys = Array.from({ length: storage.length }, (_, i) => storage.key(i))
-      .filter((entry): entry is string => Boolean(entry?.startsWith(PREFIX)));
-    for (const entry of keys.filter(entry => entry !== key).slice(0, Math.max(0, keys.length - MAX_ENTRIES))) storage.removeItem(entry);
+    const entries = Array.from({ length: storage.length }, (_, i) => storage.key(i))
+      .filter((entry): entry is string => Boolean(entry?.startsWith(PREFIX)))
+      .map(entry => {
+        const value = storage.getItem(entry) || '';
+        let cachedAt = 0;
+        try { cachedAt = Number(JSON.parse(value).cachedAt) || 0; } catch { /* Evict malformed entries first. */ }
+        return { key: entry, size: value.length, cachedAt };
+      });
+    let count = entries.length, size = entries.reduce((total, entry) => total + entry.size, 0);
+    for (const entry of entries.filter(entry => entry.key !== key).sort((a, b) => a.cachedAt - b.cachedAt)) {
+      if (count <= MAX_ENTRIES && size <= MAX_TOTAL_CHARS) break;
+      storage.removeItem(entry.key); count--; size -= entry.size;
+    }
   } catch { /* Quota, disabled storage or invalid content cannot break a panel. */ }
 }

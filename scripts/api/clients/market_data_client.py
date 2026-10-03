@@ -155,6 +155,20 @@ def get_yahoo_market_snapshot(
         "points": points[-48:],
         **_quote_metadata(meta, current, ctx["_safe_float"]),
     }
+    # Crypto uses an actual 24h lookback, independent of Yahoo's chart baseline.
+    # The provider quote clock anchors the reference; five-minute bars imply a
+    # bounded reference-time approximation, which is exposed in the payload.
+    quote_at = snapshot.get("quoteAt")
+    target = datetime.fromisoformat(quote_at.replace("Z", "+00:00")).timestamp() - 86400 if quote_at else None
+    reference = None
+    if target is not None and current is not None:
+        for point in points:
+            point_ts = datetime.fromisoformat(point["timestamp"].replace("Z", "+00:00")).timestamp()
+            if point_ts <= target and target - point_ts <= max(600, parse_interval_minutes(interval) * 60):
+                reference = point
+    reference_price = reference["value"] if reference else None
+    snapshot["rollingChangePercent24h"] = round((current / reference_price - 1) * 100, 2) if reference_price is not None and reference_price > 0 and _price_scale_compatible(current, reference_price) else None
+    snapshot["reference24hAt"] = reference["timestamp"] if reference else None
     cache_ttl = max(1, int(ttl_seconds if ttl_seconds is not None else ctx["FINANCE_RUNTIME_TTL_SECONDS"]))
     if use_runtime_cache:
         return ctx["set_cached_runtime_payload"]("yahoo-chart", cache_key, snapshot, ttl_seconds=cache_ttl)

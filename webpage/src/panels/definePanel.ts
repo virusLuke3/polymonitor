@@ -8,6 +8,8 @@ type RuntimeOptions = {
   tier: NonNullable<PanelModule['refreshPolicy']>['tier'];
   intervalMs?: number;
   staleAfterMs?: number;
+  requestTimeoutMs?: number;
+  retry?: NonNullable<PanelModule['refreshPolicy']>['retry'];
   batch?: boolean;
   limit?: number;
   fetchData: (context?: PanelFetchContext, limit?: number) => Promise<unknown>;
@@ -50,6 +52,8 @@ export function runtimePanelFromRenderer<K extends PanelContextKey = never>(
       tier: runtime.tier,
       intervalMs: runtime.intervalMs,
       staleAfterMs: runtime.staleAfterMs,
+      requestTimeoutMs: runtime.requestTimeoutMs,
+      retry: runtime.retry,
     },
   });
 }

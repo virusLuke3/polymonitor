@@ -1,5 +1,6 @@
 import type { VNode } from 'preact';
 import type { PanelDefinition, PanelRenderContext } from '@/types';
+import type { PanelSnapshotContract } from './resource-cache';
 
 export type PanelRuntimeData = Record<string, unknown>;
 export type PanelRuntimePhase = 'idle' | 'loading' | 'ready' | 'stale' | 'degraded' | 'error' | 'suspended';
@@ -26,6 +27,8 @@ export type PanelRefreshConfig = {
   tier: PanelRefreshTier;
   intervalMs?: number;
   staleAfterMs?: number;
+  /** Whole request budget, including admission, fallback and response parsing. */
+  requestTimeoutMs?: number;
   retry?: {
     attempts?: number;
     baseDelayMs?: number;
@@ -71,6 +74,8 @@ export type PanelModule = PanelDefinition & {
   batch?: boolean;
   /** Shared by batch requests and the individual fallback. */
   request?: { limit: number };
+  /** Complete resource identity and validation, independent of transport. */
+  snapshot?: PanelSnapshotContract<unknown>;
   refreshPolicy?: PanelRefreshConfig;
   fetchData?: PanelFetchData;
   /** FocusedMarketStrip owns rendering for its fixed price, book and trade panels. */

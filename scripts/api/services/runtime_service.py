@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from api.context import resolve_optional_service_callable, resolve_service_callable
-from api.services import commodities_service
+from api.services import commodities_service, crypto_service, seed_recovery
 
 
 @dataclass(frozen=True)
@@ -92,7 +92,7 @@ def build_market_group_cache_key(items: List[tuple[str, str, str]], *, kind: str
         {
             "kind": kind,
             "symbols": [symbol for _, _, symbol in items],
-            "snapshotVersion": 3,
+            "snapshotVersion": 4 if kind == "crypto" else 3,
         },
         sort_keys=True,
         ensure_ascii=True,
@@ -124,7 +124,7 @@ def fetch_live_market_group_payload(ctx: RuntimeServiceContext, items: List[tupl
             snapshot = _dependencies(ctx).get_yahoo_market_snapshot(
                 symbol,
                 interval="5m" if is_crypto else "30m",
-                range_name="1d" if is_crypto else "5d",
+                range_name="5d",
                 # Market group watcher freshness should reflect a real source fetch
                 # each run; seeded Redis/SQLite handles serving cache for readers.
                 ttl_seconds=5,
@@ -145,11 +145,14 @@ def fetch_live_market_group_payload(ctx: RuntimeServiceContext, items: List[tupl
             "label": label,
             "symbol": symbol,
             "price": snapshot.get("price"),
-            "changePercent": snapshot.get("dailyChangePercent") if kind == "commodities" else snapshot.get("changePercent"),
+            "changePercent": snapshot.get("dailyChangePercent") if kind == "commodities" else snapshot.get("rollingChangePercent24h"),
             "currency": snapshot.get("currency"),
             "volume24h": snapshot.get("volume24h"),
             "points": snapshot.get("points") or [],
             **commodity_fields,
+            **({"quoteAt": snapshot.get("quoteAt"), "fetchedAt": snapshot.get("fetchedAt"), "source": "Yahoo Finance",
+                "changeBasis": "rolling-24h" if snapshot.get("rollingChangePercent24h") is not None else "unknown",
+                "reference24hAt": snapshot.get("reference24hAt"), "volumeBasis": "provider-volume"} if is_crypto else {}),
         }
 
     max_workers = min(8, max(1, len(items)))
@@ -186,15 +189,8 @@ def fetch_live_market_group_payload(ctx: RuntimeServiceContext, items: List[tupl
                 coin = by_id.get(_dependencies(ctx).crypto_coingecko_ids.get(symbol, ""))
                 if not coin:
                     continue
-                spark = (((coin.get("sparkline_in_7d") or {}).get("price")) or [])[-48:]
-                points = [
-                    {
-                        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-                        "value": _dependencies(ctx).safe_float(value),
-                    }
-                    for value in spark
-                    if _dependencies(ctx).safe_float(value) is not None
-                ]
+                # CoinGecko's sparkline has no point clocks. Do not invent them.
+                points = []
                 merged_rows.append(
                     {
                         "id": key,
@@ -206,6 +202,8 @@ def fetch_live_market_group_payload(ctx: RuntimeServiceContext, items: List[tupl
                         "marketCap": _dependencies(ctx).safe_float(coin.get("market_cap")),
                         "volume24h": _dependencies(ctx).safe_float(coin.get("total_volume")),
                         "points": points,
+                        "quoteAt": coin.get("last_updated"), "fetchedAt": _dependencies(ctx).utc_now_iso(),
+                        "source": "CoinGecko", "changeBasis": "rolling-24h", "volumeBasis": "rolling-24h",
                     }
                 )
             rows = merged_rows
@@ -213,7 +211,7 @@ def fetch_live_market_group_payload(ctx: RuntimeServiceContext, items: List[tupl
             _dependencies(ctx).application.logger.exception("coingecko crypto fallback failed")
     now = _dependencies(ctx).utc_now_iso()
     payload = normalize_market_group_payload({"kind": kind, "items": rows, "generatedAt": now}, kind=kind)
-    return commodities_service.merge_snapshot(payload, {}, items, now) if kind == "commodities" else payload
+    return (commodities_service if kind == "commodities" else crypto_service).merge_snapshot(payload, {}, items, now)
 
 
 def get_market_group_snapshot(ctx: RuntimeServiceContext, items: List[tuple[str, str, str]], *, kind: str) -> Dict[str, Any]:
@@ -240,11 +238,31 @@ def get_market_group_snapshot(ctx: RuntimeServiceContext, items: List[tuple[str,
             return commodities_service.seeded_response(normalize_market_group_payload(seeded_payload, kind=kind), now)
         return {"kind": kind, "items": [], "generatedAt": "", "status": "warming", "cacheMode": "warming",
                 "error": "Commodity source is warming; retrying automatically"}
-    if seeded_payload is not None:
-        return normalize_market_group_payload(seeded_payload, kind=kind, generated_at=_dependencies(ctx).utc_now_iso())
+    now = _dependencies(ctx).utc_now_iso()
+    if seeded_payload is None or seed_recovery.age_seconds(seeded_payload.get("generatedAt"), now) >= crypto_service.MAX_SEED_AGE_SECONDS:
+        def recover_crypto() -> None:
+            store = _dependencies(ctx).snapshot_store
+            from contextlib import nullcontext
+            lock = store.fetch_lock(namespace, cache_key, timeout=0) if store is not None and hasattr(store, "fetch_lock") else nullcontext()
+            try:
+                with lock:
+                    current = _read_seeded_snapshot(ctx, namespace=namespace, cache_key=cache_key, ttl_seconds=ttl_seconds)
+                    if current and seed_recovery.age_seconds(current.get("generatedAt"), _dependencies(ctx).utc_now_iso()) < crypto_service.MAX_SEED_AGE_SECONDS:
+                        return
+                    live = fetch_live_market_group_payload(ctx, items, kind=kind)
+                    previous = _read_seeded_snapshot(ctx, namespace=namespace, cache_key=cache_key, ttl_seconds=ttl_seconds) or {}
+                    if seed_recovery.age_seconds(previous.get("generatedAt"), _dependencies(ctx).utc_now_iso()) < seed_recovery.age_seconds(live.get("generatedAt"), _dependencies(ctx).utc_now_iso()):
+                        return
+                    merged = crypto_service.merge_snapshot(live, previous, items, _dependencies(ctx).utc_now_iso())
+                    _store_seed_fallback(ctx, namespace=namespace, cache_key=cache_key, payload={**merged, "cacheMode": "live-fallback"}, ttl_seconds=ttl_seconds)
+            except TimeoutError:
+                return
+        seed_recovery.recover_seed(namespace, recover_crypto)
+    if seeded_payload is not None and seed_recovery.age_seconds(seeded_payload.get("generatedAt"), now) < crypto_service.RETAIN_SECONDS:
+        payload = normalize_market_group_payload(seeded_payload, kind=kind)
+        return {**payload, "status": "stale"} if seed_recovery.age_seconds(payload.get("generatedAt"), now) >= crypto_service.MAX_SEED_AGE_SECONDS else payload
+    return {"kind": kind, "items": [], "generatedAt": "", "status": "warming", "cacheMode": "warming"}
 
-    payload = _with_cache_mode(fetch_live_market_group_payload(ctx, items, kind=kind), "live-fallback")
-    return _store_seed_fallback(ctx, namespace=namespace, cache_key=cache_key, payload=payload, ttl_seconds=ttl_seconds)
 
 
 NBA_SCOREBOARD_NAMESPACE = "snapshot:sports:nba"

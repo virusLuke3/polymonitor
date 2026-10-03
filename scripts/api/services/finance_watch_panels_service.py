@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from api.services import finance_external_sources_service
+from api.services import finance_external_sources_service, seed_recovery
 from api.services.finance_watch.common import (
     FINANCE_WATCH_CACHE_KEY,
     FinanceWatchContext,
@@ -149,52 +149,6 @@ def build_all_finance_watch_panel_payloads(
     return payloads
 
 
-def _read_seeded_snapshot(
-    ctx: FinanceWatchContext,
-    panel_id: str,
-    ttl_seconds: int,
-) -> Optional[Dict[str, Any]]:
-    dependencies = _dependencies(ctx)
-    namespace = finance_watch_namespace(panel_id)
-    if dependencies.get_cached_json is not None:
-        redis_payload = dependencies.get_cached_json(
-            namespace,
-            FINANCE_WATCH_CACHE_KEY,
-        )
-        if isinstance(redis_payload, dict):
-            if dependencies.snapshot_store is None:
-                raise RuntimeError("SNAPSHOT_STORE dependency missing")
-            dependencies.snapshot_store.set(
-                namespace,
-                FINANCE_WATCH_CACHE_KEY,
-                redis_payload,
-                ttl_seconds,
-            )
-            return {**redis_payload, "cacheMode": str(redis_payload.get("cacheMode") or "redis-seed")}
-    if dependencies.snapshot_store is None:
-        return None
-    sqlite_payload = dependencies.snapshot_store.get(
-        namespace,
-        FINANCE_WATCH_CACHE_KEY,
-    )
-    if isinstance(sqlite_payload, dict):
-        if dependencies.set_cached_json is not None:
-            dependencies.set_cached_json(
-                namespace,
-                FINANCE_WATCH_CACHE_KEY,
-                sqlite_payload,
-                ttl_seconds,
-            )
-        return {**sqlite_payload, "cacheMode": str(sqlite_payload.get("cacheMode") or "sqlite-seed")}
-    stale_payload = dependencies.snapshot_store.get_stale(
-        namespace,
-        FINANCE_WATCH_CACHE_KEY,
-    )
-    if isinstance(stale_payload, dict):
-        return {**stale_payload, "cacheMode": "stale-seed"}
-    return None
-
-
 def _trim_payload(payload: Dict[str, Any], limit: int) -> Dict[str, Any]:
     items = [item for item in (payload.get("items") or []) if isinstance(item, dict)]
     return {**payload, "items": items[: max(0, int(limit or 10))], "summary": {**(payload.get("summary") if isinstance(payload.get("summary"), dict) else {}), "count": min(len(items), max(0, int(limit or 10))), "totalCount": len(items)}}
@@ -208,28 +162,9 @@ def get_finance_watch_panel_snapshot(
     dependencies = _dependencies(ctx)
     limit = max(3, min(36, int(limit or 10)))
     ttl_seconds = FINANCE_WATCH_TTL_SECONDS
-    seeded = _read_seeded_snapshot(
-        dependencies,
-        panel_id,
-        ttl_seconds,
+    payload = seed_recovery.read_watch_seed(
+        namespace=finance_watch_namespace(panel_id), cache_key=FINANCE_WATCH_CACHE_KEY, panel_id=panel_id,
+        snapshot_store=dependencies.snapshot_store, redis_get=dependencies.get_cached_json, redis_set=dependencies.set_cached_json,
+        builder=lambda: build_finance_watch_panel_payload(dependencies, panel_id, limit=max(limit, 24)), ttl_seconds=ttl_seconds,
     )
-    if seeded is not None:
-        return _trim_payload(seeded, limit)
-
-    def _builder() -> Dict[str, Any]:
-        return build_finance_watch_panel_payload(
-            dependencies,
-            panel_id,
-            limit=max(limit, 24),
-        )
-
-    if dependencies.get_snapshot_payload is not None:
-        payload = dependencies.get_snapshot_payload(
-            finance_watch_namespace(panel_id),
-            FINANCE_WATCH_CACHE_KEY,
-            _builder,
-            ttl_seconds=ttl_seconds,
-        )
-    else:
-        payload = _builder()
-    return _trim_payload(payload if isinstance(payload, dict) else {}, limit)
+    return _trim_payload(payload, limit)

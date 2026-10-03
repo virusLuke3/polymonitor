@@ -18,6 +18,15 @@ function storage() {
 }
 
 describe('public panel snapshot recovery', () => {
+  it('bounds total storage and evicts old entries while preserving the newest snapshot and user settings', () => {
+    const cache = storage(), large = { ...contract, cache: { version: 1, maxChars: 512_000 } };
+    cache.setItem('user-preference', 'keep');
+    for (let i = 0; i < 8; i++) writeResourceCache({ ...large, key: `large:${i}` }, { ...payload, padding: 'x'.repeat(400_000) }, cache, now + i);
+    const keys = Array.from({ length: cache.length }, (_, i) => cache.key(i)!).filter(key => key.startsWith('polymonitor:panel-resource:'));
+    expect(keys.reduce((sum, key) => sum + cache.getItem(key)!.length, 0)).toBeLessThanOrEqual(2_000_000);
+    expect(readResourceCache({ ...large, key: 'large:7' }, cache, now + 8)).not.toBeNull();
+    expect(cache.getItem('user-preference')).toBe('keep');
+  });
   it('opt-in stale retention keeps original time and never accepts an overdue replacement as fresh', () => {
     const retained = { ...contract, staleAgeMs: 30 * 60_000 };
     const cache = storage();
@@ -70,8 +79,8 @@ describe('public panel snapshot recovery', () => {
   it('isolates public resource keys, bounds storage and survives storage failure', () => {
     const cache = storage();
     cache.setItem('user-preference', 'keep');
-    for (let i = 0; i < 20; i++) writeResourceCache({ ...contract, key: `resource:${i}` }, payload, cache, now);
-    expect(cache.length).toBe(9);
+    for (let i = 0; i < 40; i++) writeResourceCache({ ...contract, key: `resource:${i}` }, payload, cache, now);
+    expect(cache.length).toBe(33);
     expect(cache.getItem('user-preference')).toBe('keep');
     expect(readResourceCache({ ...contract, key: 'another-market' }, cache, now)).toBeNull();
     const blocked = { ...cache, getItem: () => { throw new Error('disabled'); }, setItem: () => { throw new Error('quota'); } };

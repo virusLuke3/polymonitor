@@ -11,6 +11,7 @@ import { RuntimeStatusBadge } from '@/components/design-system/StatusPrimitives'
 import type { PanelRuntimeStatus } from '@/panels/types';
 import { useI18n } from '@/services/i18n';
 import { PanelResourceView, PanelResourceVisibility, usePanelResourceBinding } from '@/panels/usePanelResource';
+import { PanelRuntimeView } from '@/panels/PanelRuntimeView';
 
 const PANEL_ROW_RESIZE_STEP = 200;
 const PANEL_COL_RESIZE_STEP = 260;
@@ -390,7 +391,7 @@ export function PanelWorkspaceSlot({
     >
       {contentReady ? (
         <PanelRuntimeBoundary loading={resource ? false : loading} status={actualStatus} onRetry={resource?.refresh ?? onRetry} resourceManaged={Boolean(resource)}>
-          <PanelResourceView.Provider value={panelId}><PanelResourceVisibility.Provider value={resourceVisible}>{children}</PanelResourceVisibility.Provider></PanelResourceView.Provider>
+          <PanelRuntimeView.Provider value={{ status: actualStatus, refresh: resource?.refresh ?? onRetry }}><PanelResourceView.Provider value={panelId}><PanelResourceVisibility.Provider value={resourceVisible}>{children}</PanelResourceVisibility.Provider></PanelResourceView.Provider></PanelRuntimeView.Provider>
         </PanelRuntimeBoundary>
       ) : <div className="wm-panel-slot-deferred" aria-hidden="true" />}
       {resizeEnabled ? (

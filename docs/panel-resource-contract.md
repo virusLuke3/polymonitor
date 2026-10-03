@@ -1,8 +1,9 @@
 # Parameterized panel resources
 
-Related Intelligence (`related-news`, titled Global Updates in global scope) is
-the first consumer. Other panels adopt this contract incrementally; their existing
-runtime fetch paths remain in place.
+Related Intelligence (`related-news`, titled Global Updates in global scope) was
+the first consumer. Crypto, Commodities, Alpha and trade watch use parameterized
+resources. The Finance/Tech factories declare the same snapshot contract while
+preserving the existing workspace runtime and batched transport.
 
 ## Ownership and dependency direction
 
@@ -54,10 +55,12 @@ unvalidated bootstrap preview into the complete resource.
   Invalid/stale data never becomes the new saved snapshot. This does not exempt displayed content
   from current permission, window and expiry rules.
 - Persistence is only for reviewed public data. Schema version 4, complete keys
-  including the 100-item request limit, revalidation and eight entries bound this
+  including the 100-item request limit, revalidation and 32 entries bound this
   cache. This resource explicitly permits 512,000 characters per entry for the
   larger page; other resources retain their 256,000-character default.
   Storage failure does not fail a panel or remove other application storage.
+  All panel caches together are capped at 2,000,000 encoded characters; older
+  writes are evicted first, and unrelated preferences are never evicted.
 - Every successful scheduled response becomes the displayed list immediately,
   including new entries, revisions and removals. There is no pending-reader state
   or acceptance button. Permission changes and expiry still apply immediately.

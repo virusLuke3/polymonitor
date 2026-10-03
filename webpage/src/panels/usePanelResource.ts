@@ -2,15 +2,12 @@ import { createContext, createElement, type ComponentChildren } from 'preact';
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { PanelFetchContext, PanelModule, PanelRefreshConfig, PanelRuntimeStatus } from './types';
 import { usePanelRuntime } from './usePanelRuntime';
-import { readResourceCache, resourceIsCurrent, writeResourceCache, type ResourceCacheContract } from './resource-cache';
+import { readResourceCache, resourceIsCurrent, type PanelSnapshotContract } from './resource-cache';
 
-export interface PanelResource<T> extends ResourceCacheContract<T> {
+export interface PanelResource<T> extends PanelSnapshotContract<T> {
   title: string;
   fetch: (context?: PanelFetchContext) => Promise<unknown>;
   refreshPolicy: PanelRefreshConfig;
-  shouldPersist?: (next: T, previous: T | null) => boolean;
-  /** Permit validated overdue responses only within the bounded recovery age. */
-  acceptStale?: boolean;
   statusLabel?: (value: T, status: PanelRuntimeStatus) => string | undefined;
 }
 
@@ -79,18 +76,8 @@ function resourcePanel<T>(contract: PanelResource<T>): PanelModule {
   return {
     id: contract.key, title: contract.title, eyebrow: 'resource', description: contract.title,
     batch: false, refreshPolicy: contract.refreshPolicy,
-    fetchData: async context => {
-      const raw = await contract.fetch(context);
-      const value = contract.parse(raw);
-      const acceptedAge = contract.acceptStale ? Math.max(contract.maxAgeMs, contract.staleAgeMs ?? contract.maxAgeMs) : contract.maxAgeMs;
-      if (!resourceIsCurrent(contract.updatedAt(value), acceptedAge)) throw new Error('Resource snapshot time is unknown or overdue');
-      if (context?.signal.aborted) throw new DOMException('Aborted', 'AbortError');
-      try {
-        const previous = contract.shouldPersist ? readResourceCache(contract, window.localStorage) : null;
-        if (!contract.shouldPersist || contract.shouldPersist(value, previous)) writeResourceCache(contract, raw, window.localStorage);
-      } catch { /* Optional public cache. */ }
-      return value;
-    },
+    snapshot: contract as PanelSnapshotContract<unknown>,
+    fetchData: context => contract.fetch(context),
   };
 }
 
@@ -104,6 +91,7 @@ export function usePanelResource<T>(contract: PanelResource<T>, active?: boolean
   // a consumer render must not repeatedly register/cancel the same request.
   const declaration = useMemo(() => contract, [contract.key, contract.maxAgeMs, contract.staleAgeMs, contract.acceptStale, contract.cache?.version, contract.cache?.maxChars,
     contract.refreshPolicy.tier, contract.refreshPolicy.intervalMs, contract.refreshPolicy.staleAfterMs,
+    contract.refreshPolicy.requestTimeoutMs,
     contract.refreshPolicy.retry?.attempts, contract.refreshPolicy.retry?.baseDelayMs, contract.refreshPolicy.retry?.maxDelayMs]);
   const seed = useMemo(() => {
     try { return readResourceCache(declaration, window.localStorage); } catch { return null; }
