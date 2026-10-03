@@ -227,7 +227,8 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
             const retryable = !(error && typeof error === 'object' && 'retryable' in error && error.retryable === false)
               && (!(error instanceof ApiHttpError) || [408, 425, 429].includes(error.status) || error.status >= 500);
             const interval = owner.refreshPolicy?.intervalMs ?? 30_000;
-            const backoff = retryDelay(owner, failures) ?? Math.min(300_000, interval * 2 ** Math.min(4, Math.max(0, failures - 3)));
+            const ceiling = Math.max(interval, owner.refreshPolicy?.retry?.maxDelayMs ?? 60_000);
+            const backoff = retryDelay(owner, failures) ?? Math.min(ceiling, interval * 2 ** Math.min(4, Math.max(0, failures - 3)));
             const delay = Math.max(advised, backoff) + Math.floor(Math.random() * backoff * 0.1);
             return { ...current,
             phase: dataRef.current[id] === undefined ? 'error' : 'degraded', lastAttemptAt: now,
@@ -325,6 +326,24 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
       }, delay));
     });
   }, [demandKey, panels, refreshPanels, runtimeSuspended, statuses]);
+  useEffect(() => {
+    const reconnect = () => {
+      if (suspendedRef.current || document.hidden || navigator.onLine === false) return;
+      const due = panels.filter(panel => demandRef.current.has(panel.id) && panel.fetchData
+        && panel.refreshPolicy && panel.refreshPolicy.tier !== 'manual'
+        && statusesRef.current[panel.id]?.retryable !== false);
+      due.forEach(panel => {
+        const timer = retries.current.get(panel.id);
+        if (timer != null) window.clearTimeout(timer);
+        retries.current.delete(panel.id);
+      });
+      // Connectivity recovery bypasses an old network backoff. Inflight work is
+      // still joined, and only accepted data clears errors or advances clocks.
+      if (due.length) void refreshPanels(due, { panelIds: due.map(panel => panel.id), reason: 'retry', force: true });
+    };
+    window.addEventListener('online', reconnect);
+    return () => window.removeEventListener('online', reconnect);
+  }, [panels, refreshPanels]);
   useEffect(() => {
     mounted.current = true;
     return () => {

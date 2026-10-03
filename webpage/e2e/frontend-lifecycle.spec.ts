@@ -338,6 +338,61 @@ test('late bootstrap defaults do not re-enable panels disabled by the account la
   expect(await page.evaluate(() => window.frontendHarness.workspace!.activePanelIds)).toEqual(['active-markets', 'price-chart']);
 });
 
+test('online recovery bypasses old backoff and joins work without clearing retained evidence', async ({ page }) => {
+  await harness(page, 'runtime');
+  await page.evaluate(generatedAt => window.frontendHarness.requests[0].resolve({ generatedAt, items: ['kept'] }), GENERATED_AT);
+  await page.clock.runFor(100);
+  await page.evaluate(() => { void window.frontendHarness.runtime!.refreshIds(['shared']); });
+  await page.evaluate(() => window.frontendHarness.requests[1].reject(new TypeError('Failed to fetch')));
+  await page.clock.runFor(100);
+  await page.evaluate(() => { window.dispatchEvent(new Event('online')); window.dispatchEvent(new Event('online')); });
+  await page.clock.runFor(100);
+  expect(await count(page)).toBe(3);
+  expect(await page.evaluate(() => window.frontendHarness.runtime!.getStatus('shared')))
+    .toMatchObject({ fetching: true, phase: 'degraded', error: 'Failed to fetch', updatedAt: Date.parse(GENERATED_AT) });
+  expect(await page.evaluate(() => window.frontendHarness.runtime!.getData('shared'))).toMatchObject({ items: ['kept'] });
+  await page.evaluate(generatedAt => window.frontendHarness.requests[2].resolve({ generatedAt, items: ['recovered'] }), GENERATED_AT);
+  await page.clock.runFor(100);
+  expect(await page.evaluate(() => window.frontendHarness.runtime!.getStatus('shared'))).toMatchObject({ phase: 'ready', error: null });
+});
+
+test('online events cannot restart hidden demand or a nonretryable failure', async ({ page }) => {
+  await harness(page, 'runtime');
+  await page.evaluate(() => window.frontendHarness.requests[0].reject(Object.assign(new Error('denied'), { retryable: false })));
+  await page.clock.runFor(100);
+  await page.evaluate(() => window.dispatchEvent(new Event('online')));
+  await page.clock.runFor(100);
+  expect(await count(page)).toBe(1);
+  await page.evaluate(() => { window.frontendHarness.unmount(); window.frontendHarness.mount('runtime'); });
+  await page.clock.runFor(100);
+  expect(await count(page)).toBe(2);
+  await page.evaluate(() => {
+    window.frontendHarness.runtime!.setPanelVisible('shared', false);
+  });
+  await page.clock.runFor(100);
+  expect(await page.evaluate(() => window.frontendHarness.requests[1].signal.aborted)).toBe(true);
+  await page.evaluate(() => window.dispatchEvent(new Event('online')));
+  await page.clock.runFor(100);
+  expect(await count(page)).toBe(2);
+  await page.evaluate(() => window.frontendHarness.unmount());
+  await page.evaluate(() => window.dispatchEvent(new Event('online')));
+  await page.clock.runFor(100);
+  expect(await count(page)).toBe(2);
+});
+
+test('repeated network failures keep retry waiting bounded by the refresh policy', async ({ page }) => {
+  await harness(page, 'runtime');
+  for (let i = 0; i < 7; i++) {
+    await page.evaluate(() => window.frontendHarness.requests.at(-1)!.reject(new TypeError('Failed to fetch')));
+    await page.clock.runFor(100);
+    const delay = await page.evaluate(() => window.frontendHarness.runtime!.getStatus('shared').nextRetryAt! - Date.now());
+    expect(delay).toBeGreaterThan(0);
+    expect(delay).toBeLessThanOrEqual(66_000);
+    await page.clock.runFor(delay + 1200);
+    expect(await count(page)).toBe(i + 2);
+  }
+});
+
 test('verification pending polls past the failure retry budget without renewing data, but has a total deadline', async ({ page }) => {
   await harness(page, 'runtime');
   await page.evaluate(generatedAt => window.frontendHarness.requests[0].resolve({ generatedAt, items: ['verified'] }), GENERATED_AT);
