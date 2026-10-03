@@ -338,6 +338,33 @@ test('late bootstrap defaults do not re-enable panels disabled by the account la
   expect(await page.evaluate(() => window.frontendHarness.workspace!.activePanelIds)).toEqual(['active-markets', 'price-chart']);
 });
 
+test('verification pending polls past the failure retry budget without renewing data, but has a total deadline', async ({ page }) => {
+  await harness(page, 'runtime');
+  await page.evaluate(generatedAt => window.frontendHarness.requests[0].resolve({ generatedAt, items: ['verified'] }), GENERATED_AT);
+  await page.clock.runFor(100);
+  await page.evaluate(() => { void window.frontendHarness.runtime!.refreshIds(['shared']); });
+  for (let i = 1; i <= 5; i++) {
+    await page.evaluate(index => window.frontendHarness.rejectVerification(index), i);
+    await page.clock.runFor(1200);
+    expect(await count(page)).toBe(i + 2);
+  }
+  expect(await page.evaluate(() => window.frontendHarness.runtime!.getStatus('shared')))
+    .toMatchObject({ phase: 'ready', failureCount: 0, error: null, retryPending: true, updatedAt: Date.parse(GENERATED_AT) });
+  expect(await page.evaluate(() => window.frontendHarness.runtime!.getData('shared'))).toMatchObject({ items: ['verified'] });
+  await page.evaluate(generatedAt => window.frontendHarness.requests[6].resolve({ generatedAt, items: ['recovered'] }), GENERATED_AT);
+  await page.clock.runFor(100);
+  expect(await page.evaluate(() => window.frontendHarness.runtime!.getStatus('shared').retryPending ?? false)).toBe(false);
+  await page.evaluate(() => { void window.frontendHarness.runtime!.refreshIds(['shared']); });
+  for (let i = 0; i < 28; i++) {
+    await page.evaluate(() => window.frontendHarness.rejectVerification(window.frontendHarness.requests.length - 1));
+    await page.clock.runFor(1200);
+  }
+  expect(await page.evaluate(() => window.frontendHarness.runtime!.getStatus('shared')))
+    .toMatchObject({ phase: 'degraded', retryPending: false });
+  expect(await page.evaluate(() => window.frontendHarness.runtime!.getStatus('shared').failureCount)).toBeGreaterThan(0);
+  expect(await page.evaluate(() => window.frontendHarness.runtime!.getData('shared'))).toMatchObject({ items: ['recovered'] });
+});
+
 test('focused book pauses and cancels while hidden, then resumes with one request', async ({ page }) => {
   const pending: Array<() => Promise<void>> = [];
   await page.route('**/wm-api/runtime/lob/token/**', route => {

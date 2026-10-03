@@ -106,6 +106,7 @@ def register_http_hooks(app, allowed_origins):
                            error="Current snapshot verification is pending; retry shortly")
         response.status_code = 503
         response.headers["Retry-After"] = "1"
+        response.headers["X-Panel-Verification"] = "pending"
         response.headers["Cache-Control"] = "no-store"
         return response
 

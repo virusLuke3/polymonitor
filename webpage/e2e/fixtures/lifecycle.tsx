@@ -5,6 +5,7 @@ import { render } from 'preact';
 import { useMemo, useState } from 'preact/hooks';
 import { RUNTIME_PANEL_MODULES } from '../../src/panels/registry';
 import { usePanelRuntime } from '../../src/panels/usePanelRuntime';
+import { ApiHttpError } from '../../src/services/api';
 import { PanelResourceProvider } from '../../src/panels/usePanelResource';
 import { useMarketFocus } from '../../src/features/market-focus/useMarketFocus';
 import { useMarketDossier } from '../../src/features/market-focus/useMarketDossier';
@@ -43,6 +44,7 @@ const policyModules: PanelModule[] = ['frequent', 'blocked'].map(id => ({
 const bootstrap = { generatedAt: GENERATED_AT, activeMarketsPreview: fixtureMarkets, activeMarketGroupsPreview: [] } as unknown as BootstrapPayload;
 const api = {
   requests,
+  rejectVerification: (index: number) => requests[index].reject(new ApiHttpError(503, 'fixture', '1', true)),
   signals: null as ReturnType<typeof useMapSignals> | null,
   infrastructure: null as ReturnType<typeof useMapInfrastructure> | null,
   setMapSourceActive: (_active:boolean) => {},

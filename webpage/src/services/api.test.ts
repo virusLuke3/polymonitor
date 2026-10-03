@@ -1,9 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiTimeoutError, withRuntimeRequestBudget, fetchAllActiveMarkets, fetchAviationViewport, fetchMarketWideAiSnapshot, fetchNaturalHazardMapSource, fetchRuntimeGlobalTemperatureMonitor, fetchSystemHealth, fetchWorkspaceBundle } from './api';
+import { ApiTimeoutError, withRuntimeRequestBudget, fetchAllActiveMarkets, fetchAviationViewport, fetchMarketWideAiSnapshot, fetchNaturalHazardMapSource, fetchRuntimeAlpha, fetchRuntimeGlobalTemperatureMonitor, fetchSystemHealth, fetchWorkspaceBundle } from './api';
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('HTTP lifecycle', () => {
+  it.each([[503, 'pending', true], [503, null, false], [500, 'pending', false]] as const)(
+    'recognizes explicit verification pending separately from source failures (%s, %s)', async (status, marker, pending) => {
+      vi.stubGlobal('window', globalThis);
+      const headers = new Headers({ 'Retry-After': '1' });
+      if (marker) headers.set('X-Panel-Verification', marker);
+      vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status, headers })));
+      await expect(fetchRuntimeAlpha()).rejects.toMatchObject({ status, verificationPending: pending, retryAfterMs: 1000 });
+    });
   it('revalidates hazard snapshots instead of accepting a browser-fresh but source-expired body', async () => {
     vi.stubGlobal('window', globalThis);
     const payload = { sources: [{ key: 'nhc', staleAfter: '2026-10-01T12:00:00Z' }], events: [] };

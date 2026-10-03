@@ -214,17 +214,25 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
         onPanelError: (id, error) => {
           if (!isCurrent(id)) return;
           updateStatuses([id], (current) => {
+            const owner = eligible.find(panel => panel.id === id)!;
+            const advised = error instanceof ApiHttpError && Number.isFinite(error.retryAfterMs) ? error.retryAfterMs ?? 0 : 0;
+            const pending = error instanceof ApiHttpError && error.verificationPending;
+            const pendingSince = current.pendingSince ?? Date.now();
+            if (pending && Date.now() - pendingSince < (owner.refreshPolicy?.requestTimeoutMs ?? 30_000)) {
+              return { ...current, phase: dataRef.current[id] === undefined ? 'loading' : current.phase,
+                lastAttemptAt: now, fetching: false, retryPending: true, pendingSince, retryable: true,
+                nextRetryAt: Date.now() + Math.min(5_000, Math.max(1_000, advised)) };
+            }
             const failures = current.failureCount + 1;
             const retryable = !(error && typeof error === 'object' && 'retryable' in error && error.retryable === false)
               && (!(error instanceof ApiHttpError) || [408, 425, 429].includes(error.status) || error.status >= 500);
-            const owner = eligible.find(panel => panel.id === id)!;
             const interval = owner.refreshPolicy?.intervalMs ?? 30_000;
             const backoff = retryDelay(owner, failures) ?? Math.min(300_000, interval * 2 ** Math.min(4, Math.max(0, failures - 3)));
-            const advised = error instanceof ApiHttpError && Number.isFinite(error.retryAfterMs) ? error.retryAfterMs ?? 0 : 0;
             const delay = Math.max(advised, backoff) + Math.floor(Math.random() * backoff * 0.1);
             return { ...current,
             phase: dataRef.current[id] === undefined ? 'error' : 'degraded', lastAttemptAt: now,
             fetching: false, failureCount: failures, error: errorMessage(error), retryable,
+            retryPending: false, pendingSince: pending ? pendingSince : undefined,
             nextRetryAt: retryable ? Date.now() + delay : null,
           }; });
         },
@@ -308,8 +316,8 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
     if (runtimeSuspended) return;
     panels.forEach((panel) => {
       const status = statuses[panel.id];
-      if (!status?.error || status.fetching || status.retryable === false || !demandRef.current.has(panel.id) || retries.current.has(panel.id)) return;
-      const delay = retryDelay(panel, status.failureCount) == null ? null : Math.max(0, (status.nextRetryAt ?? Date.now()) - Date.now());
+      if ((!status?.error && !status?.retryPending) || status.fetching || status.retryable === false || !demandRef.current.has(panel.id) || retries.current.has(panel.id)) return;
+      const delay = !status.retryPending && retryDelay(panel, status.failureCount) == null ? null : Math.max(0, (status.nextRetryAt ?? Date.now()) - Date.now());
       if (delay == null) return;
       retries.current.set(panel.id, window.setTimeout(() => {
         retries.current.delete(panel.id);

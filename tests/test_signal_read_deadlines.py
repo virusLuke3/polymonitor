@@ -127,6 +127,7 @@ def test_pending_routes_return_retry_after_and_no_unverified_payload(registry):
         response = app.test_client().get(path)
         assert response.status_code == 503
         assert response.headers["Retry-After"] == "1"
+        assert response.headers["X-Panel-Verification"] == "pending"
         assert response.headers["Cache-Control"] == "no-store"
         assert response.json["errorCode"] == "signal-verification-pending"
         assert "items" not in response.json and "internal" not in response.json["error"]

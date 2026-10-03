@@ -53,6 +53,8 @@ export type PanelRuntimeStatus = {
   checkedAt?: number | null;
   fetching?: boolean;
   failureCount: number;
+  retryPending?: boolean;
+  pendingSince?: number;
   error: string | null;
   cacheMode?: string | null;
   freshness?: string | null;

@@ -66,7 +66,7 @@ const API_BASE = RAW_BASE.endsWith('/') ? RAW_BASE.slice(0, -1) : RAW_BASE;
 
 export class ApiHttpError extends Error {
   readonly retryAfterMs: number | null;
-  constructor(readonly status: number, path: string, retryAfter: string | null) {
+  constructor(readonly status: number, path: string, retryAfter: string | null, readonly verificationPending = false) {
     super(`API ${status} for ${path}`); this.name = 'ApiHttpError';
     const seconds = Number(retryAfter);
     this.retryAfterMs = retryAfter == null ? null : Number.isFinite(seconds) ? Math.max(0, seconds * 1000) : Math.max(0, Date.parse(retryAfter) - Date.now());
@@ -154,7 +154,8 @@ async function apiGetAdmitted<T>(path: string, timeoutMs = 12000, externalSignal
       signal: controller.signal,
       ...(cache ? { cache } : {}),
     });
-    if (!response.ok) throw new ApiHttpError(response.status, path, response.headers.get('Retry-After'));
+    if (!response.ok) throw new ApiHttpError(response.status, path, response.headers.get('Retry-After'),
+      response.status === 503 && response.headers.get('X-Panel-Verification') === 'pending');
     // Keep timeout and cancellation ownership until the body is consumed.
     return await response.json() as T;
   } catch (error) {
