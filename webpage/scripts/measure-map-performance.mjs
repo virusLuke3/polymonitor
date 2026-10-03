@@ -381,7 +381,8 @@ try {
   const lifecycleResult = await client.send('Runtime.evaluate', {
     expression: `(() => ({
       marks: Object.fromEntries(performance.getEntriesByType('mark')
-        .filter((entry) => entry.name.startsWith('polymonitor:map:first-'))
+        .filter((entry) => entry.name.startsWith('polymonitor:map:first-')
+          || entry.name === 'polymonitor:map:style-ready')
         .map((entry) => [entry.name, entry.startTime])),
       canvases: document.querySelectorAll('.wm-weather-deck-basemap canvas').length,
       aviationCanvases: document.querySelectorAll('.wm-weather-deck-basemap .deck-canvas').length,
