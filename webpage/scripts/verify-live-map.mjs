@@ -138,6 +138,10 @@ async function verifySharedRenderers() {
         await page.getByRole('button', { name: 'Zoom in', exact: true }).click();
         await expect.poll(() => Number(new URL(page.url()).searchParams.get('zoom'))).toBeGreaterThan(zoom);
         await globe.locator('select').selectOption('performance');
+        const quality = await globe.locator('select').boundingBox(), aviation = await page.locator('.wm-aviation-lens').boundingBox();
+        assert(quality && aviation);
+        assert(!(Math.min(quality.x + quality.width, aviation.x + aviation.width) > Math.max(quality.x, aviation.x)
+          && Math.min(quality.y + quality.height, aviation.y + aviation.height) > Math.max(quality.y, aviation.y)), 'Quality control overlaps aviation');
         await capture(page, `shared-3d-${width}`);
         record.states.push({ mode: '3d', url: page.url(), records: await globe.getAttribute('data-globe-records'), rect: await globe.boundingBox() });
         await page.locator('.wm-world-event-list-toggle').click();

@@ -204,6 +204,10 @@ for (const width of [1440, 390]) {
     await globe.locator('select').selectOption('high');
     await expect(globe).toHaveClass(/is-render-idle/);
     await expect.poll(()=>canvas.evaluate(c=>Math.abs(c.getBoundingClientRect().height-c.closest('.wm-globe-renderer')!.clientHeight))).toBeLessThan(1);
+    const qualityBox = (await globe.locator('select').boundingBox())!;
+    const aviationBox = (await page.locator('.wm-aviation-lens').boundingBox())!;
+    expect(Math.min(qualityBox.x + qualityBox.width, aviationBox.x + aviationBox.width) > Math.max(qualityBox.x, aviationBox.x)
+      && Math.min(qualityBox.y + qualityBox.height, aviationBox.y + aviationBox.height) > Math.max(qualityBox.y, aviationBox.y)).toBe(false);
     await expect(globe).toHaveScreenshot(`globe-shared-${width}.png`,{animations:'disabled',maxDiffPixels:0,threshold:0});
     const before=await canvas.screenshot();
     await page.getByRole('button',{name:'Zoom in',exact:true}).click();
