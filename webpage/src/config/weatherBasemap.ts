@@ -91,7 +91,7 @@ export async function buildWorldEventPMTilesStyle(url: string, language: 'en' | 
   }) as StyleSpecification['layers'];
   return {
     version: 8,
-    sprite: `https://protomaps.github.io/basemaps-assets/sprites/v4/${theme === 'positron' ? 'light' : 'dark'}`,
+    sprite: `/map-assets/protomaps-sprites-v4/${theme === 'positron' ? 'light' : 'dark'}`,
     sources: {
       basemap: {
         type: 'vector',

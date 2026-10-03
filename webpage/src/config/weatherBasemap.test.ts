@@ -135,3 +135,24 @@ it('retains the provider boundary paint instead of dimming ordinary countries be
     expect(actual.layers.find(layer => layer.id === border.id)?.paint).toEqual(border.paint);
   }
 });
+
+it('ships complete native-resolution sprite atlases on the application origin', async () => {
+  const {readFileSync}=await import('node:fs');
+  for(const theme of ['dark','light']) {
+    const style=await buildWorldEventPMTilesStyle('/map-tiles/planet.pmtiles','en',theme==='light'?'positron':'dark');
+    expect(style.sprite).toBe(`/map-assets/protomaps-sprites-v4/${theme}`);
+    for(const scale of ['', '@2x']) {
+      const root=`../../public/map-assets/protomaps-sprites-v4/${theme}${scale}`;
+      const atlas=JSON.parse(readFileSync(new URL(root+'.json',import.meta.url),'utf8'));
+      const png=readFileSync(new URL(root+'.png',import.meta.url));
+      expect(png.subarray(0,8).toString('hex')).toBe('89504e470d0a1a0a');
+      const width=png.readUInt32BE(16),height=png.readUInt32BE(20);
+      expect(Object.keys(atlas).length).toBeGreaterThan(0);
+      for(const icon of Object.values(atlas) as Array<{x:number;y:number;width:number;height:number;pixelRatio:number}>) {
+        expect(icon.pixelRatio).toBe(scale?2:1);
+        expect(icon.x+icon.width).toBeLessThanOrEqual(width);
+        expect(icon.y+icon.height).toBeLessThanOrEqual(height);
+      }
+    }
+  }
+});
