@@ -40,6 +40,7 @@ import {
   type GlobeGeometry,
 } from "./globeScene";
 import {
+  MAP_RENDERER_TIMEOUTS,
   splitViewportBounds,
   type MapRenderer,
   type MapRendererCallbacks,
@@ -100,10 +101,51 @@ export class GlobeMapRenderer implements MapRenderer {
   private motionObjects = new Map<string, any>();
   private quality = "auto";
   private fontRevision = 0;
+  private textureRequest: AbortController | null = null;
+  private textureUrl: string | null = null;
+
+  private async loadEarthTexture(): Promise<string> {
+    // globe.gl's image loader has no error callback and can otherwise leave
+    // onGlobeReady pending until the generic renderer deadline. Own this one
+    // asset's bounded request so switching views also cancels its download.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const controller = new AbortController();
+      this.textureRequest = controller;
+      const deadline = setTimeout(() => controller.abort(), MAP_RENDERER_TIMEOUTS.primary);
+      let url: string | null = null;
+      try {
+        const response = await fetch('/textures/earth-topo-bathy.jpg', {
+          signal: controller.signal, cache: attempt ? 'reload' : 'default',
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        url = URL.createObjectURL(await response.blob());
+        const image = new Image();
+        image.src = url;
+        const cancelDecode = () => { image.src = ''; };
+        controller.signal.addEventListener('abort', cancelDecode, { once: true });
+        try { await image.decode(); }
+        finally { controller.signal.removeEventListener('abort', cancelDecode); }
+        if (this.destroyed || controller.signal.aborted) throw new Error('Texture loading cancelled or timed out.');
+        this.textureUrl = url;
+        return url;
+      } catch (error) {
+        if (url) URL.revokeObjectURL(url);
+        if (this.destroyed || attempt === 1) throw new Error(
+          `3D Earth texture could not load: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      } finally {
+        clearTimeout(deadline);
+        if (this.textureRequest === controller) this.textureRequest = null;
+      }
+    }
+    throw new Error('3D Earth texture could not load.');
+  }
 
   async mount(host: HTMLElement, callbacks: MapRendererCallbacks) {
     this.host = host;
     this.callbacks = callbacks;
+    const textureUrl = await this.loadEarthTexture();
+    if (this.destroyed) return;
     host.classList.add("wm-globe-renderer");
     this.tooltip = new RendererTooltip(host);
     const globe = (this.globe = new Globe(host, {
@@ -133,7 +175,7 @@ export class GlobeMapRenderer implements MapRenderer {
           performance.mark("polymonitor:map:first-basemap");
         callbacks.onBasemapStateChange("primary-ready");
       })
-      .globeImageUrl("/textures/earth-topo-bathy.jpg")
+      .globeImageUrl(textureUrl)
       .polygonsTransitionDuration(0)
       .polygonGeoJsonGeometry((d: Area) => d.geometry)
       .polygonAltitude((d: Area) => (d.event ? 0.003 : 0.001))
@@ -879,15 +921,23 @@ export class GlobeMapRenderer implements MapRenderer {
     );
   }
   destroy() {
+    if (this.destroyed) return;
     this.destroyed = true;
+    this.textureRequest?.abort();
     this.pause();
     if (this.contextTimer) clearTimeout(this.contextTimer);
     this.cleanups.forEach((fn) => fn());
     this.cleanups = [];
     this.tooltip?.destroy();
     this.globe?.scene().remove(this.motion);
+    const renderer = this.globe?.renderer();
     this.globe?._destructor();
+    // dispose() frees Three.js resources but not the browser's WebGL context.
+    // Repeated 2D/3D switches must not wait for GC to release that finite slot.
+    renderer?.forceContextLoss();
     this.globe = null;
+    if (this.textureUrl) URL.revokeObjectURL(this.textureUrl);
+    this.textureUrl = null;
     for (const material of this.materials.values()) {
       material.map?.dispose();
       material.dispose();

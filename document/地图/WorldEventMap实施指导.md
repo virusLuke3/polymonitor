@@ -1475,3 +1475,11 @@ Natural Hazards v1.1 只有同时满足以下条件才算完成：
 - 3D 雷达仍未实现：图层及控件明确提示仅限 2D WebGL。3D 地球纹理不冒充 Protomaps 矢量底图，底图/主题选择在该视图禁用。
 - `polymonitor:map:style-ready` 表示样式加载，`first-basemap` 表示可用地图内容。不得把前者当作首次有效底图或把独立 RAF 频率当作绘制 FPS。
 - 回归入口：`globeScene.test.ts`、`frontend-lifecycle.spec.ts`、`frontend-architecture.spec.ts` 的 3D 场景、`globe-map.spec.ts` 及已有 `world-event-map.spec.ts`。新 3D 场景有独立截图基线；2D 容差不变。发布仍须核对真实生产制品及桌面/窄屏交互，测试名称与构建成功不能代替线上验收。
+
+### 2026-10-03：3D 切换与下载故障恢复
+
+- 退出 Globe adapter 必须主动释放 WebGL context，并取消未完成的地球纹理请求；不能仅依赖 Three.js `dispose()` 和浏览器 GC。迟到的纹理不得创建退出视图的地球。
+- 纹理下载/解码失败与 WebGL 创建失败分开报告。纹理最多尝试两次，每次沿用 10 秒预算；保持原始地球图片分辨率。失败后继续提供真实事件的 SVG 及显式重试。
+- 动态模块下载失败后，Chromium 可保留本次文档的失败模块记录。此时不继续用同一 `import()` 消耗自动恢复预算；由用户点击“重新加载地图”，保留当前相机、筛选及请求的 2D/3D 模式后重载文档。禁止自动重载循环。
+- 临时 WebGL 创建失败可通过显式重试重新检测；仍不把软件光栅伪装成硬件渲染。3D 请求落入 SVG 时必须明确标记 3D 不可用。
+- 回归覆盖模块失败→网络解除→重载恢复、纹理失败→重试恢复、切换中取消、context 丢失/恢复与多轮 2D↔3D；生产验证脚本同时检查退出 context 及桌面/窄屏返回 3D 的真实截图。

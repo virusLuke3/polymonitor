@@ -23,6 +23,7 @@ import type {
   MapHoverPosition,
 } from '../renderer/MapRenderer';
 import { inspectWebGL2Support } from '../renderer/webglSupport';
+import { serializeWorldEventMapUrl } from '../state/urlState';
 import { rectIntersectsViewport } from '../renderer/rendererVisibility';
 import {
   worldEventLayerById,
@@ -115,6 +116,7 @@ export function WorldEventMap({
   const callbackRef = useRef({ onViewportChange, onCameraChange, onEventSelect, onRendererKindChange, onVisibilityChange, onPresentationChange });
   const [basemapState, setBasemapState] = useState<BasemapState>('idle');
   const [rendererError, setRendererError] = useState<string | null>(null);
+  const [moduleReloadRequired, setModuleReloadRequired] = useState(false);
   const [rendererLayerErrors, setRendererLayerErrors] = useState<Record<string, string>>({});
   const [basemapIssue, setBasemapIssue] = useState<string | null>(null);
   const retryRendererRef = useRef<(() => void) | null>(null);
@@ -264,10 +266,12 @@ export function WorldEventMap({
     let stableTimer: number | null = null;
     let recoveryAttempts = 0;
     let episodeStarted = 0;
+    let moduleDownloadFailed = false;
     const lightweight = new URLSearchParams(window.location.search).get('renderer') === 'svg';
-    const support = inspectWebGL2Support({ allowSoftware: new URLSearchParams(window.location.search).get('mapPerf') === '1' });
+    const supportOptions = { allowSoftware: new URLSearchParams(window.location.search).get('mapPerf') === '1' };
+    let support = inspectWebGL2Support(supportOptions);
     const scheduleRecovery = () => {
-      if (disposed || lightweight || !support.supported || recoveryTimer != null || recoveryAttempts >= 2) return;
+      if (disposed || lightweight || moduleDownloadFailed || !support.supported || recoveryTimer != null || recoveryAttempts >= 2) return;
       if (!episodeStarted) episodeStarted = Date.now();
       recoveryTimer = window.setTimeout(() => {
         recoveryTimer = null;
@@ -279,9 +283,19 @@ export function WorldEventMap({
     // Start the visible map's download before waiting for CPU admission.
     // Keep a caught promise so a failed speculative download still follows the
     // normal SVG/recovery path and never becomes an unhandled rejection.
-    const downloadRenderer = (): Promise<new () => MapRenderer> => preferredRenderer === 'globe'
-      ? import('../renderer/GlobeMapRenderer').then(module => module.GlobeMapRenderer)
-      : import('../renderer/DeckMapRenderer').then(module => module.DeckMapRenderer);
+    const downloadRenderer = async (): Promise<new () => MapRenderer> => {
+      try {
+        return preferredRenderer === 'globe'
+          ? (await import('../renderer/GlobeMapRenderer')).GlobeMapRenderer
+          : (await import('../renderer/DeckMapRenderer')).DeckMapRenderer;
+      } catch (error) {
+        // Chromium retains failed ESM graph loads in this document. Repeating
+        // import() is not a network retry, even after connectivity recovers.
+        moduleDownloadFailed = true;
+        if (!disposed) setModuleReloadRequired(true);
+        throw error;
+      }
+    };
     let rendererDownload: Promise<new () => MapRenderer> | null = null;
     const preloadRenderer = () => {
       if (!rendererDownload && !disposed && inViewport && !document.hidden && support.supported && !lightweight) {
@@ -468,7 +482,20 @@ export function WorldEventMap({
       } finally { preferredLoading = false; }
     };
     retryRendererRef.current = () => {
-      if (lightweight || !support.supported || preferredLoading || host.dataset.mapRendererReady === preferredRenderer) return;
+      if (lightweight || preferredLoading || host.dataset.mapRendererReady === preferredRenderer) return;
+      // A temporary context limit may have cleared since the initial probe.
+      // Recheck on the user's action; never silently accept software rendering.
+      if (!support.supported) support = inspectWebGL2Support(supportOptions);
+      if (!support.supported) { setRendererError(support.reason); return; }
+      if (moduleDownloadFailed) {
+        // Only the explicit recovery action reloads; never create an automatic
+        // reload loop. Preserve the investigation URL and the requested mode,
+        // which may differ from the view parameter used to enter the page.
+        const target = new URL(serializeWorldEventMapUrl(stateRef.current, window.location.href));
+        target.searchParams.set('view', preferredRenderer === 'globe' ? '3d' : '2d');
+        window.location.assign(target.href);
+        return;
+      }
       if (recoveryAttempts >= 2 && Date.now() - episodeStarted < 300_000) {
         setRendererError('The recovery budget is exhausted. Try again after five minutes.'); return;
       }
@@ -761,7 +788,9 @@ export function WorldEventMap({
       </div>
       <div className="wm-weather-deck-status" hidden={basemapState === 'primary-ready' && !basemapIssue} title={basemapIssue || rendererError || undefined}>
         {rendererKind === 'svg'
-          ? 'SVG FALLBACK'
+          ? preferredRenderer === 'globe'
+            ? (locale === 'zh' ? '3D 暂不可用 · SVG 降级' : '3D UNAVAILABLE · SVG FALLBACK')
+            : 'SVG FALLBACK'
           : basemapState === 'local-fallback-ready'
             ? 'LOCAL BASEMAP'
             : basemapState === 'primary-ready'
@@ -769,7 +798,9 @@ export function WorldEventMap({
               : basemapState.replace(/-/g, ' ').toUpperCase()}
       {rendererKind === 'svg' && new URLSearchParams(window.location.search).get('renderer') !== 'svg' ? (
         <button className="wm-map-renderer-retry" type="button" onClick={() => retryRendererRef.current?.()} title={rendererError || undefined}>
-          {locale === 'zh' ? '重试详细地图' : 'Retry detailed map'}
+          {moduleReloadRequired
+            ? (locale === 'zh' ? '重新加载地图' : 'Reload map')
+            : (locale === 'zh' ? '重试详细地图' : 'Retry detailed map')}
         </button>
       ) : null}
       </div>

@@ -186,6 +186,24 @@ async function verifySharedRenderers() {
         record.sources = await page.locator('.wm-map-source-status').allTextContents();
         await capture(page, `shared-reloaded-${width}`);
       });
+      await check(`${width}: repeated return to 3D releases old contexts and paints the globe`, async () => {
+        for (let cycle = 0; cycle < 3; cycle++) {
+          await page.getByRole('tab', { name: '3D Globe', exact: true }).click();
+          await page.locator('.wm-map-stage').scrollIntoViewIfNeeded();
+          await expect(host).toHaveAttribute('data-map-renderer-ready', 'globe', { timeout: 90_000 });
+          await expect(page.locator('.wm-globe-renderer')).toHaveCount(1);
+          await expect.poll(async () => Number(await page.locator('.wm-globe-renderer').getAttribute('data-globe-records'))).toBeGreaterThan(0);
+          await capture(page, `shared-3d-return-${width}-${cycle}`);
+          record.states.push({ mode: '3d-return', cycle, url: page.url(), renderer: await host.getAttribute('data-map-renderer-ready') });
+          await page.locator('.wm-globe-renderer canvas').first().evaluate(canvas => {
+            window.__retiredGlobeContext = canvas.getContext('webgl2');
+          });
+          await page.getByRole('tab', { name: '2D Map', exact: true }).click();
+          await expect(host).toHaveAttribute('data-map-renderer-ready', 'webgl', { timeout: 60_000 });
+          await expect.poll(() => page.evaluate(() => window.__retiredGlobeContext.isContextLost())).toBe(true);
+          await page.evaluate(() => { delete window.__retiredGlobeContext; });
+        }
+      });
       await check(`${width}: no renderer or published asset errors`, async () => {
         assert.deepEqual(record.errors, []);
         assert.deepEqual(record.assets.filter(asset => asset.status >= 400), []);
