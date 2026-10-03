@@ -7,6 +7,7 @@ import re
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional
+from api.commodity_symbols import COMMODITY_SYMBOLS
 
 try:
     from eth_utils import to_checksum_address
@@ -15,41 +16,6 @@ except ImportError:
 from db.trade_v2 import compat_maker_asset_id_sql, compat_taker_asset_id_sql, uint256_storage_to_text
 from oracle.settlement_parser import parse_oracle_settlement_event
 
-COMMODITY_SYMBOLS = [
-    ("vix", "VIX", "^VIX"),
-    ("gold", "GOLD", "GC=F"),
-    ("silver", "SILVER", "SI=F"),
-    ("copper", "COPPER", "HG=F"),
-    ("platinum", "PLATINUM", "PL=F"),
-    ("palladium", "PALLADIUM", "PA=F"),
-    ("aluminum", "ALUMINUM", "ALI=F"),
-    ("oil", "OIL", "CL=F"),
-    ("brent", "BRENT", "BZ=F"),
-    ("natgas", "NATGAS", "NG=F"),
-    ("ttf", "TTF GAS", "TTF=F"),
-    ("gasoline", "GASOLINE", "RB=F"),
-    ("heating-oil", "HEATING OIL", "HO=F"),
-    ("uranium", "URANIUM", "URA"),
-    ("lithium", "LITHIUM", "LIT"),
-    ("coal", "COAL", "MTF=F"),
-    ("wheat", "WHEAT", "ZW=F"),
-    ("corn", "CORN", "ZC=F"),
-    ("soybeans", "SOYBEANS", "ZS=F"),
-    ("rice", "RICE", "ZR=F"),
-    ("coffee", "COFFEE", "KC=F"),
-    ("sugar", "SUGAR", "SB=F"),
-    ("cocoa", "COCOA", "CC=F"),
-    ("cotton", "COTTON", "CT=F"),
-    ("eurusd", "EUR/USD", "EURUSD=X"),
-    ("gbpusd", "GBP/USD", "GBPUSD=X"),
-    ("usdjpy", "USD/JPY", "USDJPY=X"),
-    ("usdcny", "USD/CNY", "USDCNY=X"),
-    ("usdinr", "USD/INR", "USDINR=X"),
-    ("audusd", "AUD/USD", "AUDUSD=X"),
-    ("usdchf", "USD/CHF", "USDCHF=X"),
-    ("usdcad", "USD/CAD", "USDCAD=X"),
-    ("usdtry", "USD/TRY", "USDTRY=X"),
-]
 CRYPTO_SYMBOLS = [
     ("btc", "BTC", "BTC-USD"),
     ("eth", "ETH", "ETH-USD"),

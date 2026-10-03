@@ -43,7 +43,7 @@ test('commodity resource applies automatic changes, preserves outages and restor
   fail = true;
   await page.evaluate(() => window.panelHarness.mount('commodities-watch'));
   await expect(gold).toContainText('$2,420.00');
-  expect(await page.evaluate(() => localStorage.getItem('polymonitor:panel-resource:commodities:global:previous-close:v3'))).toContain('2420');
+  expect(await page.evaluate(() => localStorage.getItem('polymonitor:panel-resource:commodities:global:previous-close:v4'))).toContain('2420');
 });
 
 test('mobile commodity quotes load autonomously when scrolled into view', async ({ page }) => {

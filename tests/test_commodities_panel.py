@@ -79,6 +79,31 @@ def test_invalid_price_is_not_a_successful_quote():
     assert result["status"] == "degraded"
 
 
+def test_old_contract_quote_cannot_be_rejuvenated_by_a_new_fetch():
+    old = quote("MTF=F", quoteAt="2025-02-06T09:12:41Z")
+    result = commodities_service.merge_snapshot({"items": [old], "generatedAt": NOW}, {}, [("coal", "COAL", "MTF=F")], NOW)
+    assert result["items"] == []
+    assert result["coverage"]["missing"] == 1
+
+
+def test_weekly_closure_overrides_provider_window_and_uses_dst_aware_time():
+    assert commodities_service.trading_state(quote(marketState="open"), NOW)["marketState"] == "closed"
+    assert commodities_service.trading_state(quote("TTF=F", marketState="open"), NOW)["marketState"] == "closed"
+    assert commodities_service.trading_state(quote(marketState="open"), "2026-10-04T21:30:00Z")["marketState"] == "closed"
+    assert commodities_service.trading_state(quote(marketState="open"), "2026-10-04T22:00:00Z")["marketState"] == "open"
+    assert commodities_service.trading_state(quote("BTC-USD", marketState="open"), NOW)["marketState"] == "open"
+
+
+def test_api_and_watcher_share_the_live_universe():
+    from api.commodity_symbols import COMMODITY_SYMBOLS
+    from api.serialization import COMMODITY_SYMBOLS as API_SYMBOLS
+    from runtime.market_group_watcher import COMMODITY_SYMBOLS as SEED_SYMBOLS
+    assert API_SYMBOLS is COMMODITY_SYMBOLS is SEED_SYMBOLS
+    assert len(COMMODITY_SYMBOLS) == 33
+    assert ("coal", "COAL ETF", "COAL") in COMMODITY_SYMBOLS
+    assert all(symbol != "MTF=F" for _, _, symbol in COMMODITY_SYMBOLS)
+
+
 def test_read_through_recovery_is_nonblocking_and_deduplicated():
     entered, release, finished = threading.Event(), threading.Event(), threading.Event()
     def recover():

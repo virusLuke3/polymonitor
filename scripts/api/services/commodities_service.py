@@ -6,6 +6,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from typing import Any, Callable
+from zoneinfo import ZoneInfo
 
 MAX_SEED_AGE_SECONDS = 180
 RETAIN_SECONDS = 900
@@ -30,10 +31,36 @@ def valid_price(row: dict) -> bool:
         return False
 
 
+def usable_quote(row: dict, now: str) -> bool:
+    # An old inactive contract's price is not a usable current observation.
+    return valid_price(row) and (not row.get("quoteAt") or age_seconds(row["quoteAt"], now) < 4 * 86400)
+
+
+def trading_state(row: dict, now: str) -> dict:
+    """Override chart metadata only during established regular weekly closures.
+
+    Yahoo can roll a futures session window across Saturday. These rules apply
+    only to this board's standard CME/ICE contracts, not 24/7 micro contracts.
+    Other hours and holiday exceptions remain provider evidence / unknown.
+    """
+    eastern = datetime.fromisoformat(now.replace("Z", "+00:00")).astimezone(ZoneInfo("America/New_York"))
+    day, minutes = eastern.weekday(), eastern.hour * 60 + eastern.minute
+    cme = {"GC=F", "SI=F", "HG=F", "PL=F", "PA=F", "ALI=F", "CL=F", "NG=F", "RB=F", "HO=F", "ZW=F", "ZC=F", "ZS=F", "ZR=F"}
+    ice = {"BZ=F", "TTF=F", "KC=F", "SB=F", "CC=F", "CT=F"}
+    symbol = row.get("symbol")
+    cme_closed = symbol in cme and ((day == 4 and minutes >= 17 * 60) or day == 5 or (day == 6 and minutes < 18 * 60))
+    # Conservatively cover the common closed weekend interval; provider session
+    # times determine product-specific Friday closes and Sunday reopenings.
+    ice_closed = symbol in ice and ((day == 4 and minutes >= 18 * 60) or day == 5 or (day == 6 and minutes < 17 * 60))
+    if cme_closed or ice_closed:
+        return {**row, "marketState": "closed", "marketStateReason": "regular-weekly-closure"}
+    return row
+
+
 def merge_snapshot(payload: dict, previous: dict, entries: list[tuple[str, str, str]], now: str) -> dict:
     """Retain failed symbols individually without changing their observation clocks."""
-    fresh = {row["symbol"]: row for row in payload.get("items", []) if valid_price(row)}
-    old = {row["symbol"]: row for row in previous.get("items", []) if valid_price(row)}
+    fresh = {row["symbol"]: trading_state(row, now) for row in payload.get("items", []) if usable_quote(row, now)}
+    old = {row["symbol"]: row for row in previous.get("items", []) if usable_quote(row, now)}
     rows, failed, retained, missing = [], [], [], []
     for _, _, symbol in entries:
         if symbol in fresh:

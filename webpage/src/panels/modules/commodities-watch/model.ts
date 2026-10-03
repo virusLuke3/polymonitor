@@ -1,7 +1,7 @@
 import type { RuntimeMarketTicker } from '@/types';
 import type { PanelRuntimeStatus } from '@/panels/types';
 
-export const COMMODITY_SYMBOLS = ['^VIX', 'GC=F', 'SI=F', 'HG=F', 'PL=F', 'PA=F', 'ALI=F', 'CL=F', 'BZ=F', 'NG=F', 'TTF=F', 'RB=F', 'HO=F', 'URA', 'LIT', 'MTF=F', 'ZW=F', 'ZC=F', 'ZS=F', 'ZR=F', 'KC=F', 'SB=F', 'CC=F', 'CT=F'];
+export const COMMODITY_SYMBOLS = ['^VIX', 'GC=F', 'SI=F', 'HG=F', 'PL=F', 'PA=F', 'ALI=F', 'CL=F', 'BZ=F', 'NG=F', 'TTF=F', 'RB=F', 'HO=F', 'URA', 'LIT', 'COAL', 'ZW=F', 'ZC=F', 'ZS=F', 'ZR=F', 'KC=F', 'SB=F', 'CC=F', 'CT=F'];
 export const FX_SYMBOLS = ['EURUSD=X', 'GBPUSD=X', 'USDJPY=X', 'USDCNY=X', 'USDINR=X', 'AUDUSD=X', 'USDCHF=X', 'USDCAD=X', 'USDTRY=X'];
 const SYMBOLS = [...COMMODITY_SYMBOLS, ...FX_SYMBOLS];
 export const REFRESH_MS = 20_000;
@@ -71,7 +71,7 @@ export function dailyMovers(items: Quote[], now = Date.now()) {
 export function commodityClass(item: Quote) {
   if (item.symbol.endsWith('=X')) return 'FX';
   if (item.symbol === '^VIX') return 'INDEX';
-  if (['URA', 'LIT'].includes(item.symbol)) return 'ETF';
+  if (['URA', 'LIT', 'COAL'].includes(item.symbol)) return 'ETF';
   if (['GC=F', 'SI=F', 'HG=F', 'PL=F', 'PA=F', 'ALI=F'].includes(item.symbol)) return 'METALS';
   if (['CL=F', 'BZ=F', 'NG=F', 'TTF=F', 'RB=F', 'HO=F', 'MTF=F'].includes(item.symbol)) return 'ENERGY';
   return 'AGRI';

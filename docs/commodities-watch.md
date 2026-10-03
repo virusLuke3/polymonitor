@@ -1,7 +1,7 @@
 # Commodities Watch
 
 The global board covers 24 non-FX instruments and nine currency pairs. Non-FX
-includes futures, the VIX index, and URA/LIT ETF proxies. It is macro context,
+includes futures, the VIX index, and URA/LIT/COAL ETF proxies. It is macro context,
 not an Alpha qualification or a trade recommendation.
 
 ## Ownership and refresh
@@ -41,6 +41,17 @@ exclude retained, stale or unconfirmed quotes, and expose their denominator.
 The 1.5% indicator counts daily moves, not news alerts or verified Alpha.
 USD/EUR/USX retain dollars/euros/cents respectively; FX displays the pair rate,
 and VIX displays index points. Session volume is not rolling 24-hour volume.
+
+`MTF=F` was removed after production verification found a February 2025 quote.
+The board explicitly displays `COAL ETF` as a coal-sector equity proxy, not a
+coal futures price. Its identity is documented by the [fund issuer](https://www.rangeetfs.com/coal).
+The API and watcher import the same universe from `api/commodity_symbols.py`.
+Quotes older than four days are unusable even after a successful source fetch.
+Standard contract weekly closures override Yahoo's rolling session windows:
+see [CME gold hours](https://www.cmegroup.com/markets/metals/precious/gold.timeAndSales.html)
+and [ICE TTF hours](https://www.ice.com/products/27996665/Dutch-TTF-Natural-Gas-Futures/1000).
+These are conservative regular-week rules, not a complete holiday calendar;
+unconfirmed trading-time evidence remains unknown rather than fabricated.
 
 ## Acceptance
 

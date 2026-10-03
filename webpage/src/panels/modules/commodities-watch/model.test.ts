@@ -28,7 +28,7 @@ describe('Commodity source semantics', () => {
     expect(formatPrice({ ...quote(), symbol: 'ZW=F', price: 683, currency: 'USX' })).toBe('683.00¢');
     expect(formatPrice({ ...quote(), symbol: '^VIX', price: 15.31 })).toBe('15.31');
     expect(formatPrice({ ...quote(), symbol: 'EURUSD=X', price: 1.1762 })).toBe('1.1762');
-    expect(commodityClass({ ...quote(), symbol: 'MTF=F' })).toBe('ENERGY');
+    expect(commodityClass({ ...quote(), symbol: 'COAL' })).toBe('ETF');
     expect(commodityClass({ ...quote(), symbol: 'URA' })).toBe('ETF');
   });
 });
