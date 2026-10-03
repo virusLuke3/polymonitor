@@ -16,7 +16,12 @@ from api.services import hls_proxy_service, youtube_embed_service, youtube_live_
 
 
 def _hazard_http_cache_control(payload: dict[str, Any], maximum_age: int) -> str:
-    """The source snapshot owns stale retention; HTTP caches only keep fresh bodies."""
+    """Leave the source's final ten seconds for browser revalidation.
+
+    Otherwise Nginx can keep returning the old, still-valid response while the
+    browser's refresh loop tries to obtain the already updated source snapshot.
+    The payload's freshness and last-success timestamps remain unchanged.
+    """
     age = maximum_age
     for source in payload.get("sources") or []:
         if source.get("status") not in {"ok", "partial"}:
@@ -24,7 +29,7 @@ def _hazard_http_cache_control(payload: dict[str, Any], maximum_age: int) -> str
         if source.get("staleAfter"):
             try:
                 deadline = datetime.fromisoformat(source["staleAfter"].replace("Z", "+00:00")).timestamp()
-                age = min(age, int(deadline - time.time()))
+                age = min(age, int(deadline - time.time() - 10))
             except (TypeError, ValueError):
                 return "no-store"
     return f"public, max-age={age}, must-revalidate" if age > 0 else "no-store"

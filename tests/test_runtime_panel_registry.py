@@ -16,11 +16,26 @@ from api.services.bootstrap_service import BootstrapPrewarmDependencies
 def test_hazard_http_cache_never_outlives_source_freshness(monkeypatch):
     monkeypatch.setattr(_route_runtime_panels.time, "time", lambda: 1790836920.0)  # 2026-10-01 06:42 UTC
     source = {"status": "ok", "staleAfter": "2026-10-01T06:42:12Z"}
-    assert _route_runtime_panels._hazard_http_cache_control({"sources": [source]}, 30) == "public, max-age=12, must-revalidate"
+    assert _route_runtime_panels._hazard_http_cache_control({"sources": [source]}, 30) == "public, max-age=2, must-revalidate"
     source["staleAfter"] = "2026-10-01T06:41:00Z"
     assert _route_runtime_panels._hazard_http_cache_control({"sources": [source]}, 30) == "no-store"
     source.update(status="degraded", staleAfter="2026-10-01T06:45:00Z")
     assert _route_runtime_panels._hazard_http_cache_control({"sources": [source]}, 30) == "no-store"
+
+
+def test_hazard_http_cache_releases_old_body_before_scheduled_browser_refresh(monkeypatch):
+    now = 1790836920.0
+    monkeypatch.setattr(_route_runtime_panels.time, "time", lambda: now)
+    source = {"status": "partial", "staleAfter": "2026-10-01T06:42:30Z",
+              "lastSuccessAt": "2026-10-01T06:40:30Z"}
+    payload = {"sources": [source]}
+    original = dict(source)
+    # Mirrors the production edge-cache failure: thirty seconds remain in an
+    # old snapshot, but its replacement is available before the browser polls.
+    assert _route_runtime_panels._hazard_http_cache_control(payload, 30) == "public, max-age=20, must-revalidate"
+    now += 20
+    assert _route_runtime_panels._hazard_http_cache_control(payload, 30) == "no-store"
+    assert source == original
 
 
 def test_runtime_panel_modules_have_unique_ids_and_routes():
