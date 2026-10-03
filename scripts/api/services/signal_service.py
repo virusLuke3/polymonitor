@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from . import clickhouse_orderfilled_service, outcome_semantics_service
 from .trade_watch.common import normalize_signal_payload
+from .signal_reads import read_verified_seed
 
 
 SIGNAL_SNAPSHOT_NAMESPACE_ALPHA = "snapshot:signals:alpha"
@@ -119,7 +120,11 @@ def _read_cached_signal_snapshot(
     payload = _load_signal_seed(ctx, namespace=namespace, cache_key=cache_key)
     if payload is None:
         return None
-    payload = _sanitize_signal_payload(ctx, namespace, payload)
+    verification_ctx = ctx.get("alpha_context", ctx)
+    payload = read_verified_seed(
+        verification_ctx, namespace, payload,
+        lambda value: _sanitize_signal_payload(verification_ctx, namespace, value),
+    )
     return _signal_freshness(ctx, payload, ttl_seconds=ttl_seconds)
 
 
@@ -191,7 +196,12 @@ def get_alpha_signal_snapshot(ctx: dict, limit: int = DEFAULT_ALPHA_SIGNAL_LIMIT
         return {"items": [], "candidates": [], "generatedAt": None, "status": "warming", "cacheMode": "seeded"}
     def validate(value):
         return _sanitize_signal_payload(ctx, SIGNAL_SNAPSHOT_NAMESPACE_ALPHA, value)
-    public = read_public_snapshot(ctx, payload, validate=validate)
+    # Alpha already owns its checked-data cache and recovery policy. Only bound
+    # the wait here; a second cache must not extend its verification lifetime.
+    public = read_verified_seed(
+        ctx, SIGNAL_SNAPSHOT_NAMESPACE_ALPHA, payload,
+        lambda value: read_public_snapshot(ctx, value, validate=validate), cache_seconds=0,
+    )
     public = _limit_signal_payload(ctx, public, limit=limit)
     public["candidates"] = public.get("candidates", [])[:max(0, int(limit))]
     return _signal_freshness(ctx, public, ttl_seconds=ctx["SIGNAL_RUNTIME_TTL_SECONDS"])

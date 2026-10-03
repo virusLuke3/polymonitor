@@ -309,6 +309,26 @@ test('warming responses retain the last useful snapshot and its observation time
   expect(await page.evaluate(() => window.frontendHarness.runtime!.getData('shared'))).toMatchObject({ items: ['kept'] });
 });
 
+test('a pending retry keeps the last failure and data until an accepted snapshot recovers', async ({ page }) => {
+  await harness(page, 'runtime');
+  await page.evaluate(generatedAt => window.frontendHarness.requests[0].resolve({ generatedAt, items: ['kept'] }), GENERATED_AT);
+  await page.clock.runFor(100);
+  await page.evaluate(() => { void window.frontendHarness.runtime!.refreshIds(['shared']); });
+  await page.evaluate(() => window.frontendHarness.requests[1].reject(new Error('verification pending')));
+  await page.clock.runFor(1100);
+  expect(await count(page)).toBe(3);
+  expect(await page.evaluate(() => window.frontendHarness.runtime!.getStatus('shared')))
+    .toMatchObject({ fetching: true, phase: 'degraded', error: 'verification pending' });
+  expect(await page.evaluate(() => window.frontendHarness.runtime!.getData('shared'))).toMatchObject({ items: ['kept'] });
+  await page.clock.runFor(5000);
+  expect(await count(page)).toBe(3);
+  await page.evaluate(generatedAt => window.frontendHarness.requests[2].resolve({ generatedAt, items: ['recovered'] }), GENERATED_AT);
+  await page.clock.runFor(100);
+  expect(await page.evaluate(() => window.frontendHarness.runtime!.getStatus('shared')))
+    .toMatchObject({ fetching: false, phase: 'ready', error: null, failureCount: 0 });
+  expect(await page.evaluate(() => window.frontendHarness.runtime!.getData('shared'))).toMatchObject({ items: ['recovered'] });
+});
+
 test('late bootstrap defaults do not re-enable panels disabled by the account layout', async ({ page }) => {
   await workspaceServer(page);
   await harness(page, 'workspace');

@@ -64,11 +64,12 @@ class ServiceRuntime:
         )
         # Label checks must not queue behind unrelated background builders.
         self._alpha_database = replace(self.SETTINGS.database, connection={
-            **self.SETTINGS.database.connection, "statement_timeout_ms": 3000, "connect_timeout": 8,
+            **self.SETTINGS.database.connection, "statement_timeout_ms": 3000, "connect_timeout": 2,
+            "tcp_user_timeout_ms": 4000,
         })
         self._alpha_connection_pool = ApiPostgresConnectionPool(
             connection_factory or self._alpha_database.connect,
-            max_size=1, acquire_timeout_seconds=8,
+            max_size=2, acquire_timeout_seconds=2,
         ) if self.SETTINGS.database.backend in {"postgres", "postgresql"} else None
         self.TRADE_READ_SOURCE = sql_identifier(get_trade_read_source())
         self.CONTENT_RUNTIME_PROVIDER = RuntimeContentProvider()
@@ -276,7 +277,7 @@ class ServiceRuntime:
             if self._claim_startup_prewarm_slot():
                 system_service.prewarm_system_health_payload(self.system_health)
                 if self.SETTINGS.snapshot_prewarm_enabled:
-                    self.prewarm_critical_payloads()
+                    self.resources.start_thread(self.prewarm_critical_payloads, name="startup-prewarm")
             if self.SETTINGS.snapshot_prewarm_enabled and self._claim_snapshot_prewarm_owner():
                 self.start_snapshot_prewarm_thread()
             self._runtime_initialized = True

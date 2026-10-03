@@ -434,19 +434,19 @@ class SignalSnapshotOptimizationTestCase(unittest.TestCase):
             ),
         )
 
-        ctx["_resources"].start_thread = Mock(return_value=True)
         with patch.object(
             signal_service,
             "_build_alpha_signal_payload",
             return_value={"items": [{"title": "fresh"}], "generatedAt": "fresh"},
-        ):
+        ) as builder:
             first = signal_service.get_alpha_signal_snapshot(ctx, limit=8)
             second = signal_service.get_alpha_signal_snapshot(ctx, limit=8)
 
         self.assertEqual(first["items"], [])
         self.assertEqual(second["items"], [])
         self.assertEqual(first["generatedAt"], stale_payload["generatedAt"])
-        ctx["_resources"].start_thread.assert_not_called()
+        # Read verification is allowed; request-driven collection remains forbidden.
+        builder.assert_not_called()
 
     def test_alpha_snapshot_cold_miss_waits_for_watcher(self):
         cache_key = json.dumps({"limit": 8}, sort_keys=True, ensure_ascii=True)

@@ -179,7 +179,7 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
       const isCurrent = (id: string) => mounted.current && !lanes.get(id)!.controller.signal.aborted && controllers.current.get(id) === lanes.get(id)!.controller;
       updateStatuses(panelIds, (current, id) => ({ ...current,
         phase: dataRef.current[id] === undefined ? 'loading' : current.phase,
-        lastAttemptAt: now, fetching: true, error: null,
+        lastAttemptAt: now, fetching: true,
       }));
       void fetchPanelRuntimeData(eligible, {
         signal: new AbortController().signal,
@@ -308,7 +308,7 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
     if (runtimeSuspended) return;
     panels.forEach((panel) => {
       const status = statuses[panel.id];
-      if (!status?.error || status.retryable === false || !demandRef.current.has(panel.id) || retries.current.has(panel.id)) return;
+      if (!status?.error || status.fetching || status.retryable === false || !demandRef.current.has(panel.id) || retries.current.has(panel.id)) return;
       const delay = retryDelay(panel, status.failureCount) == null ? null : Math.max(0, (status.nextRetryAt ?? Date.now()) - Date.now());
       if (delay == null) return;
       retries.current.set(panel.id, window.setTimeout(() => {
