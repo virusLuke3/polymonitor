@@ -10,6 +10,26 @@ test('2D does not download the globe engine or texture',async({page})=>{
   expect(downloads).toEqual([]);
 });
 
+test('3D quality scales high density pixels without dropping records', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
+  try {
+    const page = await context.newPage();
+    await installDashboard(page);
+    await page.clock.install({ time: new Date('2026-08-26T03:00:00Z') });
+    await page.goto('http://127.0.0.1:4174/?view=3d&mapPerf=1&time=all');
+    const globe = page.locator('.wm-globe-renderer');
+    await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', 'globe', { timeout: 60000 });
+    await expect(globe).toHaveAttribute('data-globe-records', '15');
+    const backingScale = () => globe.locator('canvas').first().evaluate(canvas =>
+      (canvas as HTMLCanvasElement).width / canvas.clientWidth);
+    for (const [quality, scale] of [['high', 2], ['performance', 1], ['high', 2]] as const) {
+      await globe.locator('select').selectOption(quality);
+      await expect.poll(backingScale).toBe(scale);
+      await expect(globe).toHaveAttribute('data-globe-records', '15');
+    }
+  } finally { await context.close(); }
+});
+
 test('3D context failure falls back and recovers the same filtered records',async({page})=>{
   test.setTimeout(180000);
   await installDashboard(page);

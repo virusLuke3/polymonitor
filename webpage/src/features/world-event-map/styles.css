@@ -1542,8 +1542,14 @@
   letter-spacing: 0.4px;
 }
 
+/* Globe reuses the event map shell, controls, typography and inspector. */
+.wm-globe-renderer { background: #101619; font-family: var(--font-body, sans-serif); }
+.wm-globe-renderer canvas { display: block; }
+/* Keep quality below the zoom column and beside even an expanded aviation card. */
+.wm-globe-quality-select { position: absolute; right: 12px; top: 164px; z-index: 5; box-sizing: border-box; max-width: 104px; font: inherit; color: #c2c8cd; background: #101619; border: 1px solid #364047; padding: 5px; }
+
 @media (max-width: 860px) {
-  .wm-globe-quality-select { --wm-globe-quality-top: calc(136px + var(--wm-map-top-offset, 0px)); }
+  .wm-globe-quality-select { right: 70px; top: calc(136px + var(--wm-map-top-offset, 0px)); max-width: 110px; }
   .wm-weather-deck-map:has(> .wm-weather-deck-status:not([hidden])) { --wm-map-top-offset: 64px; }
   .wm-map-explore { top: calc(12px + var(--wm-map-top-offset, 0px)); left: 10px; }
   .wm-map-explore > summary { min-height: 44px; box-sizing: border-box; padding: 12px 8px; }
@@ -1682,9 +1688,4 @@
 @media (prefers-reduced-motion: reduce) {
   .wm-world-event-map-toolbar *, .wm-weather-deck-map * { animation: none; transition: none; }
 }
-/* Globe reuses the event map shell, controls, typography and inspector. */
-.wm-globe-renderer { background: #101619; font-family: var(--font-body, sans-serif); }
-.wm-globe-renderer canvas { display: block; }
-.wm-globe-quality-select { position: absolute; right: 70px; top: var(--wm-globe-quality-top, 72px); z-index: 5; max-width: 110px; font: inherit; color: #c2c8cd; background: #101619; border: 1px solid #364047; padding: 5px; }
-
 }

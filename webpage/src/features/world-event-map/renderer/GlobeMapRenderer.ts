@@ -739,7 +739,9 @@ export class GlobeMapRenderer implements MapRenderer {
   }
   private draw() {
     if (!this.globe || this.paused || this.destroyed) return;
-    this.globe.renderer().render(this.globe.scene(), this.globe.camera());
+    // Use globe.gl's same render pass for idle updates and aircraft animation.
+    // Bypassing its composer made the final pixels depend on which loop drew last.
+    this.globe.postProcessingComposer().render();
   }
   private wake() {
     if (!this.globe || this.paused || this.destroyed) return;
@@ -841,18 +843,16 @@ export class GlobeMapRenderer implements MapRenderer {
   resize() {
     if (!this.globe || !this.host) return;
     this.globe.width(this.host.clientWidth).height(this.host.clientHeight);
-    this.globe
-      .renderer()
-      .setPixelRatio(
-        Math.min(
-          this.quality === "battery" || this.quality === "performance"
-            ? 1
-            : this.quality === "balanced"
-              ? 1.5
-              : 2,
-          window.devicePixelRatio || 1,
-        ),
-      );
+    const pixelRatio = Math.min(
+      this.quality === "battery" || this.quality === "performance"
+        ? 1
+        : this.quality === "balanced"
+          ? 1.5
+          : 2,
+      window.devicePixelRatio || 1,
+    );
+    this.globe.renderer().setPixelRatio(pixelRatio);
+    this.globe.postProcessingComposer().setPixelRatio(pixelRatio);
     this.queue();
     this.wake();
   }

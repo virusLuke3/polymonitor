@@ -100,9 +100,10 @@ async function verifySharedRenderers() {
   for (const width of [1440, 390]) {
     const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 900 }, locale: 'en-US' });
     const page = await context.newPage();
-    const record = { width, errors: [], assets: [], sources: [], states: [] };
+    const record = { width, errors: [], assets: [], failedRequests: [], sources: [], states: [] };
     receipt.browsers.push(record);
     page.on('pageerror', error => record.errors.push(error.message));
+    page.on('requestfailed', request => record.failedRequests.push({ url: request.url(), error: request.failure()?.errorText }));
     page.on('response', response => {
       if (/\/assets\//.test(response.url())) record.assets.push({ url: response.url(), status: response.status() });
     });
@@ -138,10 +139,19 @@ async function verifySharedRenderers() {
         await page.getByRole('button', { name: 'Zoom in', exact: true }).click();
         await expect.poll(() => Number(new URL(page.url()).searchParams.get('zoom'))).toBeGreaterThan(zoom);
         await globe.locator('select').selectOption('performance');
-        const quality = await globe.locator('select').boundingBox(), aviation = await page.locator('.wm-aviation-lens').boundingBox();
-        assert(quality && aviation);
-        assert(!(Math.min(quality.x + quality.width, aviation.x + aviation.width) > Math.max(quality.x, aviation.x)
-          && Math.min(quality.y + quality.height, aviation.y + aviation.height) > Math.max(quality.y, aviation.y)), 'Quality control overlaps aviation');
+        const checkQualityPlacement = async () => assert(!await page.evaluate(() => {
+          // Read both rectangles in one frame while live status text can reflow.
+          const quality = document.querySelector('.wm-globe-quality-select').getBoundingClientRect();
+          const aviation = document.querySelector('.wm-aviation-lens').getBoundingClientRect();
+          return Math.min(quality.right, aviation.right) > Math.max(quality.left, aviation.left)
+            && Math.min(quality.bottom, aviation.bottom) > Math.max(quality.top, aviation.top);
+        }), 'Quality control overlaps aviation');
+        await checkQualityPlacement();
+        if (width === 1440) {
+          await page.getByRole('button', { name: 'Expand aviation details' }).click();
+          await checkQualityPlacement();
+          await page.getByRole('button', { name: 'Expand aviation details' }).click();
+        }
         await capture(page, `shared-3d-${width}`);
         record.states.push({ mode: '3d', url: page.url(), records: await globe.getAttribute('data-globe-records'), rect: await globe.boundingBox() });
         await page.locator('.wm-world-event-list-toggle').click();
@@ -179,6 +189,8 @@ async function verifySharedRenderers() {
       await check(`${width}: no renderer or published asset errors`, async () => {
         assert.deepEqual(record.errors, []);
         assert.deepEqual(record.assets.filter(asset => asset.status >= 400), []);
+        assert.deepEqual(record.failedRequests.filter(request => /\/assets\/.*\.(js|css)(?:\?|$)/.test(request.url)
+          && request.error !== 'net::ERR_ABORTED'), []);
       });
     } catch (error) {
       receipt.failure ||= error.message; record.failure = error.message; process.exitCode = 1;
