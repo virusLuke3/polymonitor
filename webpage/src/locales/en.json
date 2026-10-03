@@ -434,6 +434,7 @@
   "panelRuntime.syncing": "Synchronizing live data",
   "panelRuntime.syncingPanel": "Synchronizing this panel's live data",
   "panelRuntime.degraded": "Live refresh failed; the last good data remains visible",
+  "panelRuntime.partial": "Some sources are incomplete; available data remains visible",
   "panelRuntime.stale": "Data is outside its freshness window",
   "panelRuntime.suspended": "Background refresh is suspended",
   "panelRuntime.unavailable": "Live data is temporarily unavailable",

@@ -33,6 +33,8 @@ test('finance and tech share batched validation, check every 5m and publish sour
   await expect(tech).toContainText('VERSION 2');
   expect(batches).toBeGreaterThan(0);
   await expect(tech).toContainText('DEGRADED');
+  await expect(tech).toContainText('Some sources are incomplete');
+  await expect(tech).not.toContainText('Live refresh failed');
   fail = true; version = 3;
   await finance.getByRole('button', { name: 'Refresh', exact: true }).click();
   await expect(finance).toContainText('VERSION 3'); // single fetch uses the same contract

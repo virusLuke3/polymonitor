@@ -431,7 +431,7 @@ function PanelRuntimeBoundary({
     ? formatDateTime(status.updatedAt)
     : null;
   const label = phase === 'degraded'
-    ? t('panelRuntime.degraded')
+    ? t(status?.error ? 'panelRuntime.degraded' : 'panelRuntime.partial')
     : phase === 'stale'
       ? t('panelRuntime.stale')
       : phase === 'suspended'

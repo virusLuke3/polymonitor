@@ -434,6 +434,7 @@
   "panelRuntime.syncing": "正在同步实时数据",
   "panelRuntime.syncingPanel": "正在同步此面板的实时数据",
   "panelRuntime.degraded": "实时刷新失败，继续显示最近一次有效数据",
+  "panelRuntime.partial": "部分来源不完整，继续显示已获取的有效数据",
   "panelRuntime.stale": "数据已超出新鲜度窗口",
   "panelRuntime.suspended": "后台刷新已暂停",
   "panelRuntime.unavailable": "实时数据暂不可用",
