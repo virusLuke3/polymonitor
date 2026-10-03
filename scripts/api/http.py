@@ -9,6 +9,7 @@ from flask import g, jsonify, request
 from werkzeug.exceptions import HTTPException
 
 from api.services import auth_service
+from api.services.signal_reads import SignalReadPending
 
 
 def register_http_hooks(app, allowed_origins):
@@ -97,6 +98,15 @@ def register_http_hooks(app, allowed_origins):
             response.headers["Retry-After"] = str(error.retry_after)
         if error.status_code == 401:
             response.headers["WWW-Authenticate"] = 'Bearer realm="polymonitor"'
+        return response
+
+    @app.errorhandler(SignalReadPending)
+    def handle_signal_verification_pending(_error):
+        response = jsonify(status="warming", errorCode="signal-verification-pending",
+                           error="Current snapshot verification is pending; retry shortly")
+        response.status_code = 503
+        response.headers["Retry-After"] = "1"
+        response.headers["Cache-Control"] = "no-store"
         return response
 
     @app.errorhandler(Exception)

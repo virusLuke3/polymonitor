@@ -10,6 +10,9 @@ import pytest
 
 from api.context import RuntimeResources
 from api.routes.runtime_signals import create_runtime_signals_blueprint
+from api.routes.runtime_panels import create_runtime_panels_blueprint, RuntimePanelRouteDependencies
+from api.runtime_panels.types import RuntimePanelContext
+from api.http import register_http_hooks
 from api.runtime import ServiceRuntime
 from api.services import signal_service
 from api.services.signal_reads import SignalReadPending, read_verified_seed
@@ -103,14 +106,23 @@ def test_verifier_exception_is_not_reclassified_as_pending_or_retried_in_a_loop(
     assert len(calls) == 1
 
 
-def test_pending_routes_return_retry_after_and_no_unverified_payload():
+@pytest.mark.parametrize("registry", [False, True])
+def test_pending_routes_return_retry_after_and_no_unverified_payload(registry):
     def pending(**_kwargs):
         raise SignalReadPending("internal connection details")
     app = Flask(__name__)
-    app.register_blueprint(create_runtime_signals_blueprint({
+    register_http_hooks(app, set())
+    helpers = {
         "get_alpha_signal_snapshot": pending, "get_whale_trades_snapshot": pending,
         "get_suspicious_trades_snapshot": pending,
-    }))
+    }
+    dependencies = RuntimePanelRouteDependencies(
+        panel_context=RuntimePanelContext.from_context(helpers), utc_now_iso=lambda: "2026-10-03T08:00:00Z",
+        natural_hazard_map_snapshot=None, natural_hazard_event_detail=None,
+        natural_hazard_related_markets=None, aviation_viewport_snapshot=None,
+    )
+    app.register_blueprint(create_runtime_panels_blueprint(dependencies) if registry
+                           else create_runtime_signals_blueprint(helpers))
     for path in ("/runtime/signals/alpha", "/runtime/trades/whales", "/runtime/trades/suspicious"):
         response = app.test_client().get(path)
         assert response.status_code == 503

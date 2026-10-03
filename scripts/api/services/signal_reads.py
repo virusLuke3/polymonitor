@@ -28,7 +28,7 @@ class ReadCheck:
 
 
 def read_verified_seed(ctx: dict, channel: str, seed: dict, verify: Callable[[dict], dict], *,
-                       cache_seconds: float = 30, wait_seconds: float = .25) -> dict:
+                       cache_seconds: float = 30, wait_seconds: float = 2) -> dict:
     resources = runtime_resources(ctx)
     with resources.signal_read_lock:
         check = resources.signal_reads.get(channel)

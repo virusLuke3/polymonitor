@@ -1,20 +1,10 @@
 from __future__ import annotations
 
 from flask import Blueprint, jsonify, request
-from api.services.signal_reads import SignalReadPending
 
 
 def create_runtime_signals_blueprint(helpers: dict) -> Blueprint:
     bp = Blueprint("runtime_signal_routes", __name__)
-
-    @bp.errorhandler(SignalReadPending)
-    def verification_pending(_error):
-        response = jsonify(status="warming", errorCode="signal-verification-pending",
-                           error="Current snapshot verification is pending; retry shortly")
-        response.status_code = 503
-        response.headers["Retry-After"] = "1"
-        response.headers["Cache-Control"] = "no-store"
-        return response
 
     @bp.route("/runtime/signals/alpha", methods=["GET"])
     def api_runtime_alpha():

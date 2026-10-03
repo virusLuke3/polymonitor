@@ -64,12 +64,11 @@ class ServiceRuntime:
         )
         # Label checks must not queue behind unrelated background builders.
         self._alpha_database = replace(self.SETTINGS.database, connection={
-            **self.SETTINGS.database.connection, "statement_timeout_ms": 3000, "connect_timeout": 2,
-            "tcp_user_timeout_ms": 4000,
+            **self.SETTINGS.database.connection, "statement_timeout_ms": 3000, "connect_timeout": 8,
         })
         self._alpha_connection_pool = ApiPostgresConnectionPool(
             connection_factory or self._alpha_database.connect,
-            max_size=2, acquire_timeout_seconds=2,
+            max_size=2, acquire_timeout_seconds=8,
         ) if self.SETTINGS.database.backend in {"postgres", "postgresql"} else None
         self.TRADE_READ_SOURCE = sql_identifier(get_trade_read_source())
         self.CONTENT_RUNTIME_PROVIDER = RuntimeContentProvider()
