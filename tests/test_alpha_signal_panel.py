@@ -10,8 +10,13 @@ def context(labels=('Yes', 'No'), directional=False, yes_no=True):
     projected = _rows('up_down_labels' if directional else 'yes_no_labels' if yes_no else 'source_first_second', labels,
                       directional=directional, yes_no=yes_no, tokens=('token-a', 'token-b'))
     return {'_resources': RuntimeResources(clickhouse=ClickHouseSettings()),
-            'get_backend': lambda: 'postgres', 'query_all': lambda sql, params=(): projected if 'registry_token_id' in sql else [],
+            'get_backend': lambda: 'postgres', 'query_all': lambda sql, params=(): projected if 'registry_token_id' in sql else [market()],
             'utc_now_iso': lambda: '2026-10-02T09:00:00Z'}
+
+
+def market(**changes):
+    return {'id': 7, 'title': 'Verified market', 'yes_token_id': 'token-a', 'no_token_id': 'token-b',
+            'active': True, 'closed': False, 'accepting_orders': True, 'end_date': '2026-10-02T10:00:00Z', **changes}
 
 
 def row(**changes):
@@ -55,7 +60,8 @@ def test_up_down_and_sell_direction_are_projected_from_real_token():
 
 def test_unsupported_source_labels_are_not_directional_alpha():
     result = build(context(('Alice', 'Bob'), yes_no=False), [row()])
-    assert result['status'] == 'degraded' and result['items'] == []
+    assert result['status'] == 'empty' and result['items'] == []
+    assert result['coverage']['excludedCount'] == 1 and result['coverage']['unresolvedCount'] == 0
 
 
 def test_empty_failure_partial_and_stale_source_are_distinct():
@@ -85,6 +91,7 @@ def test_query_keeps_exact_tokens_and_never_infers_outcome_codes():
     sql = query.call_args.args[1]
     assert 'outcome_code' not in sql
     assert 'GROUP BY market_id, token_id' in sql and 'LIMIT 96' in sql
+    assert all(call.kwargs['timeout_seconds'] >= 8.0 for call in query.call_args_list)
 
 
 def test_missing_labels_allow_only_canonical_neutral_observations():
@@ -93,7 +100,7 @@ def test_missing_labels_allow_only_canonical_neutral_observations():
         if 'registry_token_id' in sql:
             return [{'market_id': 7, 'registry_token_id': 'token-a', 'label_token_id': None}]
         if 'yes_token_id, no_token_id' in sql:
-            return [{'id': 7, 'yes_token_id': 'token-a', 'no_token_id': 'token-b'}]
+            return [market()]
         return []
     ctx['query_all'] = reader
     result = build(ctx, [row()])
@@ -125,3 +132,98 @@ def test_invalid_cached_alpha_is_not_reclassified_as_healthy_empty():
     result = signal_service._sanitize_signal_payload(ctx, signal_service.SIGNAL_SNAPSHOT_NAMESPACE_ALPHA, data)
     assert result['items'] == [] and result['status'] == 'degraded'
     assert result['coverage']['lastReadRejectedCount'] == 1
+
+
+def test_closed_and_expired_markets_are_normal_exclusions():
+    for changes, reason in [({'closed': True}, 'market_not_trading'),
+                            ({'accepting_orders': False}, 'market_not_trading'),
+                            ({'end_date': '2026-10-02T08:59:00Z'}, 'market_ended')]:
+        ctx = context(); reader = ctx['query_all']
+        ctx['query_all'] = lambda sql, params=(): reader(sql, params) if 'registry_token_id' in sql else [market(**changes)]
+        data = build(ctx, [row()])
+        assert data['items'] == [] and data['status'] == 'empty'
+        assert data['coverage']['rejectionReasons'] == {reason: 1}
+        assert data['coverage']['unresolvedCount'] == 0
+
+
+def test_missing_fill_clock_keeps_source_clock_separate():
+    data = build(context(), [row(timestamp=None, latest_block=123)])
+    item = data['items'][0]
+    assert item['timestamp'] is None and item['observedAt'] == '2026-10-02T08:59:58Z'
+    assert item['latestBlock'] == 123
+
+
+def test_public_cache_revalidates_new_content_and_retains_only_checked_data_on_transport_failure():
+    from api.services import signal_service
+    ctx = context(); seed = build(ctx, [row()]); reader = ctx['query_all']
+    calls = []
+    def query(sql, params=()):
+        calls.append(sql)
+        return reader(sql, params)
+    ctx['query_all'] = query
+    validate = lambda value: signal_service._sanitize_signal_payload(ctx, signal_service.SIGNAL_SNAPSHOT_NAMESPACE_ALPHA, value)
+    first = alpha.read_public_snapshot(ctx, seed, validate=validate)
+    assert len(first['items']) == 1 and len(calls) == 2
+    alpha.read_public_snapshot(ctx, seed, validate=validate)
+    assert len(calls) == 2
+    changed = deepcopy(seed); changed['items'][0]['metrics']['score'] = 89
+    alpha.read_public_snapshot(ctx, changed, validate=validate)
+    assert len(calls) == 4
+    ctx['_resources'].alpha_read_snapshot['checked'] -= 31
+    ctx['query_all'] = lambda *args: (_ for _ in ()).throw(TimeoutError('database unavailable'))
+    failed = alpha.read_public_snapshot(ctx, changed, validate=validate)
+    assert failed['status'] == 'stale' and len(failed['items']) == 1
+    assert failed['generatedAt'] == first['generatedAt'] and failed['readIntegrity'] == 'unavailable'
+    ctx['utc_now_iso'] = lambda: '2026-10-02T09:06:00Z'
+    expired = alpha.read_public_snapshot(ctx, changed, validate=validate)
+    assert expired['status'] == 'degraded' and expired['items'] == []
+
+
+def test_positive_identity_conflict_invalidates_public_cache_instead_of_retaining_old_signals():
+    from api.services import signal_service
+    ctx = context(); seed = build(ctx, [row()])
+    validate = lambda value: signal_service._sanitize_signal_payload(ctx, signal_service.SIGNAL_SNAPSHOT_NAMESPACE_ALPHA, value)
+    alpha.read_public_snapshot(ctx, seed, validate=validate)
+    ctx['_resources'].alpha_read_snapshot['checked'] -= 31
+    reader = ctx['query_all']
+    ctx['query_all'] = lambda sql, params=(): [] if 'registry_token_id' in sql else reader(sql, params)
+    invalid = alpha.read_public_snapshot(ctx, seed, validate=validate)
+    assert invalid['items'] == [] and invalid['readIntegrity'] == 'invalid'
+    assert invalid['status'] == 'degraded'
+
+
+def test_public_read_drops_a_market_closed_after_the_seed_was_built():
+    from api.services import signal_service
+    ctx = context(); seed = build(ctx, [row()]); reader = ctx['query_all']
+    ctx['query_all'] = lambda sql, params=(): reader(sql, params) if 'registry_token_id' in sql else [market(closed=True)]
+    data = alpha.read_public_snapshot(ctx, seed, validate=lambda value: signal_service._sanitize_signal_payload(ctx, signal_service.SIGNAL_SNAPSHOT_NAMESPACE_ALPHA, value))
+    assert data['items'] == [] and data['status'] == 'empty'
+    assert data['coverage']['readExcludedReasons'] == {'market_not_trading': 1}
+
+
+def test_cold_verification_failure_does_not_trust_seed_attestation():
+    from api.services import signal_service
+    ctx = context(); seed = build(ctx, [row()])
+    ctx['query_all'] = lambda *args: (_ for _ in ()).throw(TimeoutError('database unavailable'))
+    data = alpha.read_public_snapshot(ctx, seed, validate=lambda value: signal_service._sanitize_signal_payload(ctx, signal_service.SIGNAL_SNAPSHOT_NAMESPACE_ALPHA, value))
+    assert data['items'] == [] and data['candidates'] == []
+    assert data['readIntegrity'] == 'unavailable' and data['status'] == 'degraded'
+
+
+def test_alpha_query_connection_is_isolated_and_sql_budget_is_scoped(tmp_path):
+    from dataclasses import replace
+    from api.config import load_api_settings
+    from api.runtime import ServiceRuntime
+    from db.db import DatabaseSettings
+    from unittest.mock import Mock
+    connection = Mock()
+    connection.cursor.return_value.fetchall.return_value = []
+    settings = replace(load_api_settings(), database=DatabaseSettings('postgres', '', {}),
+                       snapshot_sqlite_path=str(tmp_path / 'snapshots.sqlite3'))
+    with ServiceRuntime(settings, connection_factory=lambda *args, **kwargs: connection) as runtime:
+        runtime.api_db_context['get_connection'] = lambda *args: (_ for _ in ()).throw(TimeoutError('shared pool occupied'))
+        assert runtime.alpha_signal_context['query_all']('SELECT 1') == []
+        assert runtime._alpha_database.connection['statement_timeout_ms'] == 3000
+        sql_calls = connection.cursor.return_value.execute.call_args_list
+        assert sql_calls[0].args == ('SELECT 1', ())
+    connection.close.assert_called_once()

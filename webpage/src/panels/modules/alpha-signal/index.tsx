@@ -4,15 +4,17 @@ import { panelFromRenderer } from '@/panels/definePanel';
 import type { PanelInputs, PanelRenderMap } from '@/panels/types';
 import { useI18n } from '@/services/i18n';
 import { useAlphaFeed } from './useAlphaFeed';
-import { signalDirection, type AlphaSignal, type AlphaCandidate } from './model';
+import { alphaCoverageSummary, alphaRejectionLabel, signalDirection, type AlphaSignal, type AlphaCandidate } from './model';
 import './styles.css';
 
 function AlphaCard({ item, onSelect }: { item: AlphaSignal | AlphaCandidate; onSelect?: (id: number) => void }) {
   const i18n = useI18n(), cn = i18n.locale.startsWith('zh');
   const verified = 'logicalOutcome' in item;
+  const displayedTime = item.timestamp || item.observedAt;
   const money = (value: number) => new Intl.NumberFormat(i18n.locale, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value);
   return <article className={`wm-alpha-card is-${verified ? signalDirection(item) : 'pending'}`} data-alpha-id={item.id}>
-    <div className="wm-alpha-card-heading"><b>{verified ? `${cn ? '资金流评分' : 'Flow score'} ${item.metrics.score}/100` : cn ? '待核验标签 · 资金流候选' : 'Labels pending · flow candidate'}</b><time dateTime={item.timestamp || undefined}>{item.timestamp ? i18n.formatDateTime(item.timestamp) : cn ? '时间未知' : 'Time unknown'}</time></div>
+    <div className="wm-alpha-card-heading"><b>{verified ? `${cn ? '资金流评分' : 'Flow score'} ${item.metrics.score}/100` : cn ? '待核验标签 · 资金流候选' : 'Labels pending · flow candidate'}</b><time dateTime={displayedTime || undefined}>{displayedTime ? `${item.timestamp ? cn ? '最近成交' : 'Last fill' : cn ? '来源观测' : 'Source observed'} ${i18n.formatDateTime(displayedTime)}` : cn ? '来源时间尚未提供' : 'Source clock unavailable'}</time></div>
+    {!item.timestamp && item.observedAt && <p className="wm-alpha-help">{cn ? '逐笔成交时间待补' : 'Exact fill time pending'}{item.latestBlock && ` · ${cn ? '来源区块' : 'Source block'} ${item.latestBlock}`}</p>}
     <button type="button" className="wm-alpha-market" onClick={() => onSelect?.(item.marketId)}>{item.marketTitle}</button>
     <p>{cn ? '观测方向' : 'Observed flow'}: {item.side === 'BUY' ? cn ? '买入' : 'Buy' : cn ? '卖出' : 'Sell'} {verified ? item.outcome : 'token'}</p>
     {!verified && <p className="wm-alpha-help" title={item.tokenId}>Token {item.tokenId.slice(0, 8)}…{item.tokenId.slice(-6)}</p>}
@@ -33,18 +35,18 @@ function AlphaView({ ctx }: { ctx: PanelInputs<'setSelectedMarketId'> }) {
   const feed = useAlphaFeed(), data = feed.data;
   const checked = feed.status.checkedAt ? new Date(feed.status.checkedAt).toISOString() : null;
   const clock = (value: string) => new Intl.DateTimeFormat(i18n.locale, { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(value));
-  return <Panel title="ALPHA SIGNAL" badge="FLOW" count={data ? data.items.length + data.candidates.length : feed.loading ? '…' : '—'} className="wm-alpha-signal-panel">
+  return <Panel title="ALPHA SIGNAL" badge="FLOW" count={data ? data.items.length : feed.loading ? '…' : '—'} className="wm-alpha-signal-panel">
     <div className="wm-alpha-toolbar"><span>{copy('Global', '全市场')} · {data?.windowMinutes ?? 15}{copy('m flow window', '分钟资金流窗口')}</span><button type="button" disabled={feed.status.fetching} onClick={() => void feed.refresh()}>{feed.status.fetching ? copy('Refreshing…', '刷新中…') : copy('Refresh', '刷新')}</button></div>
     <p className="wm-alpha-clock">{feed.suspended ? copy('Auto refresh paused while hidden.', '不可见时暂停自动刷新。') : copy('Auto 30s · seed 2m', '自动检查30秒 · 后台更新2分钟')}{checked && <span>{copy('Checked', '检查')} <time data-alpha-checked-at dateTime={checked} title={i18n.formatDateTime(checked)}>{clock(checked)}</time></span>}{data && <span>{copy('Snapshot', '快照')} <time data-alpha-updated-at dateTime={data.generatedAt} title={i18n.formatDateTime(data.generatedAt)}>{clock(data.generatedAt)}</time></span>}</p>
     {feed.loading && <PanelLoading />}
     {feed.fromCache && <p role="status">{copy('Showing a saved snapshot while checking updates.', '显示已保存快照，正在检查更新。')}</p>}
     {(feed.error || data?.status === 'degraded') && <p role="status">{copy('Alpha data cannot currently be verified.', '当前无法核验 Alpha 数据。')} {data?.error || feed.error}</p>}
     {data && (data.status === 'stale' || feed.status.phase === 'stale') && <p role="status">{copy('The source or saved snapshot is overdue. Refreshing without clearing verified signals.', '来源或快照已过期，更新期间保留已核验信号。')}</p>}
-    {data?.status === 'partial' && <p className="wm-alpha-help" role="status">{copy('Unverified labels · neutral flow only.', '标签未核验 · 仅展示中性资金流。')}</p>}
-    {data && !data.items.length && ['empty', 'ok'].includes(data.status) && <p role="status">{copy('No verified global flows meet the current thresholds.', '当前暂无满足门槛的已核验全市场资金流。')}</p>}
+    {data && alphaCoverageSummary(data, cn) && <p className="wm-alpha-help" role="status">{alphaCoverageSummary(data, cn)}</p>}
+    {data && !data.items.length && ['empty', 'ok'].includes(data.status) && <p role="status">{copy('No verified flows in this scan meet the active-market policy.', '本轮候选中暂无符合可交易市场策略的已核验资金流。')}</p>}
     {data && <p className="wm-alpha-help">{copy('Verified signals', '已核验信号')} {data.items.length} · {copy('Flow candidates', '资金流候选')} {data.candidates.length}</p>}
-    <div className="wm-alpha-list">{data?.items.map(item => <AlphaCard key={item.id} item={item} onSelect={ctx.setSelectedMarketId} />)}{data?.candidates.map(item => <AlphaCard key={item.id} item={item} onSelect={ctx.setSelectedMarketId} />)}</div>
-    {data && <details className="wm-alpha-source"><summary>{copy('Source and coverage', '来源与覆盖')} · {data.coverage.verifiedCount}/{data.coverage.candidateCount}</summary><p>OrderFilled · {copy('canonical token labels', '已核验 token 标签')}</p><p>{copy('Unclassified token flow carries no outcome prediction. Verified token flow is ranked by a heuristic score.', '待分类 token 资金流不表示结果预测；已核验资金流按启发式评分排序。')}</p>{data.error && <p>{data.error}</p>}<p>{copy('Source time', '来源时间')}: {data.sourceObservedAt ? i18n.formatDateTime(data.sourceObservedAt) : copy('Unknown', '未知')}</p><p>{copy('Candidates', '候选')} {data.coverage.candidateCount} · {copy('Verified', '已核验')} {data.coverage.verifiedCount} · {copy('Excluded', '排除')} {data.coverage.rejectedCount}{data.coverage.truncated ? copy(' · limited candidate coverage', ' · 候选覆盖受限') : ''}</p>{Object.entries(data.coverage.rejectionReasons).map(([reason, count]) => <p key={reason}>{reason}: {count}</p>)}<p>{copy('Block-based window; heuristic score has no validated return forecast.', '窗口按来源区块估算；评分尚未形成经验证的收益预测。')}</p></details>}
+    <div className="wm-alpha-list">{!!data?.items.length && <h3>{copy('Verified token flows', '已核验 token 资金流')}</h3>}{data?.items.map(item => <AlphaCard key={item.id} item={item} onSelect={ctx.setSelectedMarketId} />)}{!!data?.candidates.length && <h3>{copy('Pending official labels', '官方标签待补候选')}</h3>}{data?.candidates.map(item => <AlphaCard key={item.id} item={item} onSelect={ctx.setSelectedMarketId} />)}</div>
+    {data && <details className="wm-alpha-source"><summary>{copy('Source and coverage', '来源与覆盖')} · {data.coverage.verifiedCount}/{data.coverage.candidateCount}</summary><p>OrderFilled · {copy('canonical token labels', '已核验 token 标签')}</p><p>{copy('Unclassified token flow carries no outcome prediction. Verified token flow is ranked by a heuristic score.', '待分类 token 资金流不表示结果预测；已核验资金流按启发式评分排序。')}</p>{data.error && <p>{data.error}</p>}<p>{copy('Source time', '来源时间')}: {data.sourceObservedAt ? i18n.formatDateTime(data.sourceObservedAt) : copy('Unknown', '未知')}</p><p>{copy('Candidates', '候选')} {data.coverage.candidateCount} · {copy('Verified', '已核验')} {data.coverage.verifiedCount} · {copy('Excluded', '排除')} {data.coverage.rejectedCount}{data.coverage.truncated ? copy(' · limited candidate coverage', ' · 候选覆盖受限') : ''}</p>{Object.entries(data.coverage.rejectionReasons).map(([reason, count]) => <p key={reason}>{alphaRejectionLabel(reason, cn)}: {count}</p>)}<p>{copy('Block-based window; heuristic score has no validated return forecast.', '窗口按来源区块估算；评分尚未形成经验证的收益预测。')}</p></details>}
   </Panel>;
 }
 class AlphaBoundary extends Component<{ children: ComponentChildren }, { failed: boolean }> {

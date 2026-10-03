@@ -10,6 +10,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from dataclasses import replace
 
 try:
     import requests
@@ -25,9 +26,10 @@ from runtime.content_runtime import RuntimeContentProvider
 from runtime.snapshot_store import SnapshotStore
 
 from api import cache as api_cache
+from api import db as api_db
 from api.config import ApiSettings, load_api_settings
 from api.context import ApplicationLog, RuntimeResources
-from api.db_pool import build_api_connection_factory
+from api.db_pool import ApiPostgresConnectionPool, build_api_connection_factory
 from api.services import (
     bootstrap_service,
     global_weather_map_service,
@@ -60,6 +62,14 @@ class ServiceRuntime:
         self._api_connection_factory = connection_factory or build_api_connection_factory(
             self.SETTINGS.database.connect, lambda: self.SETTINGS.database.backend
         )
+        # Label checks must not queue behind unrelated background builders.
+        self._alpha_database = replace(self.SETTINGS.database, connection={
+            **self.SETTINGS.database.connection, "statement_timeout_ms": 3000, "connect_timeout": 8,
+        })
+        self._alpha_connection_pool = ApiPostgresConnectionPool(
+            connection_factory or self._alpha_database.connect,
+            max_size=1, acquire_timeout_seconds=8,
+        ) if self.SETTINGS.database.backend in {"postgres", "postgresql"} else None
         self.TRADE_READ_SOURCE = sql_identifier(get_trade_read_source())
         self.CONTENT_RUNTIME_PROVIDER = RuntimeContentProvider()
         self.SNAPSHOT_STORE = SnapshotStore(self.SETTINGS.snapshot_sqlite_path)
@@ -70,6 +80,14 @@ class ServiceRuntime:
         from api.bindings import bind_services
 
         bind_services(self)
+        alpha_db_context = {**self.api_db_context}
+        if self._alpha_connection_pool is not None:
+            alpha_db_context["get_connection"] = self._alpha_connection_pool.acquire
+        self.alpha_signal_context = {
+            **self.signal_context,
+            "query_all": lambda sql, params=None: api_db.query_all(alpha_db_context, sql, params),
+        }
+        self.signal_context["alpha_context"] = self.alpha_signal_context
 
     def _runtime_coordination_dir(self) -> Path:
         candidate = Path(self.SETTINGS.snapshot_sqlite_path).expanduser()
@@ -276,7 +294,7 @@ class ServiceRuntime:
                 return
             self._closed = True
         self.resources.close()
-        for resource in (self._clob_session, self.cache.redis_client, self.CONTENT_RUNTIME_PROVIDER):
+        for resource in (self._clob_session, self.cache.redis_client, self.CONTENT_RUNTIME_PROVIDER, self._alpha_connection_pool):
             close = getattr(resource, "close", None)
             if close is not None:
                 close()

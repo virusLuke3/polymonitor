@@ -79,6 +79,9 @@ def _sanitize_signal_payload(ctx: dict, namespace: str, payload: Dict[str, Any])
             items[index] = row
             currently_verified_positions.add(index)
     if namespace == SIGNAL_SNAPSHOT_NAMESPACE_ALPHA:
+        if any(item.get("outcomeSemanticsStatus") in {"semantics_query_failed", "semantics_database_unavailable"} for item in items):
+            from .alpha_signal_service import AlphaVerificationUnavailable
+            raise AlphaVerificationUnavailable("Current Alpha labels could not be checked")
         items = [
             item
             for index, item in enumerate(items)
@@ -113,6 +116,14 @@ def _sanitize_signal_payload(ctx: dict, namespace: str, payload: Dict[str, Any])
 def _read_cached_signal_snapshot(
     ctx: dict, *, namespace: str, cache_key: str, ttl_seconds: int
 ) -> Optional[Dict[str, Any]]:
+    payload = _load_signal_seed(ctx, namespace=namespace, cache_key=cache_key)
+    if payload is None:
+        return None
+    payload = _sanitize_signal_payload(ctx, namespace, payload)
+    return _signal_freshness(ctx, payload, ttl_seconds=ttl_seconds)
+
+
+def _load_signal_seed(ctx: dict, *, namespace: str, cache_key: str) -> Optional[Dict[str, Any]]:
     reader = ctx.get("get_cached_json")
     payload = reader(namespace, cache_key) if callable(reader) else None
     if not isinstance(payload, dict):
@@ -120,7 +131,10 @@ def _read_cached_signal_snapshot(
         payload = store.get_stale(namespace, cache_key) if store is not None else None
     if not isinstance(payload, dict):
         return None
-    payload = _sanitize_signal_payload(ctx, namespace, payload)
+    return payload
+
+
+def _signal_freshness(ctx: dict, payload: Dict[str, Any], *, ttl_seconds: int) -> Dict[str, Any]:
     try:
         generated = datetime.fromisoformat(str(payload["generatedAt"]).replace("Z", "+00:00"))
         now = datetime.fromisoformat(ctx["utc_now_iso"]().replace("Z", "+00:00"))
@@ -170,12 +184,14 @@ def _build_alpha_signal_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
 
 
 def get_alpha_signal_snapshot(ctx: dict, limit: int = DEFAULT_ALPHA_SIGNAL_LIMIT) -> Dict[str, Any]:
-    from .alpha_signal_service import revalidate_cached_observations
-
-    payload = get_signal_snapshot(
-        ctx, namespace=SIGNAL_SNAPSHOT_NAMESPACE_ALPHA,
-        cache_key=build_alpha_signal_cache_key(), limit=limit,
-    )
-    payload = revalidate_cached_observations(ctx, payload)
-    payload["candidates"] = payload.get("candidates", [])[:max(0, int(limit))]
-    return payload
+    from .alpha_signal_service import read_public_snapshot
+    ctx = ctx.get("alpha_context", ctx)
+    payload = _load_signal_seed(ctx, namespace=SIGNAL_SNAPSHOT_NAMESPACE_ALPHA, cache_key=build_alpha_signal_cache_key())
+    if payload is None:
+        return {"items": [], "candidates": [], "generatedAt": None, "status": "warming", "cacheMode": "seeded"}
+    def validate(value):
+        return _sanitize_signal_payload(ctx, SIGNAL_SNAPSHOT_NAMESPACE_ALPHA, value)
+    public = read_public_snapshot(ctx, payload, validate=validate)
+    public = _limit_signal_payload(ctx, public, limit=limit)
+    public["candidates"] = public.get("candidates", [])[:max(0, int(limit))]
+    return _signal_freshness(ctx, public, ttl_seconds=ctx["SIGNAL_RUNTIME_TTL_SECONDS"])

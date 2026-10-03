@@ -91,7 +91,8 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
         self.assertEqual("empty", result["status"])
         stored = json.loads(fake_redis.get(watcher.redis_key()) or "{}")
         self.assertEqual([], stored["items"])
-        self.assertEqual("new", stored["generatedAt"])
+        self.assertIsNotNone(signals_watcher._parse_item_timestamp(stored["generatedAt"]))
+        self.assertEqual("new", stored["lastAttemptAt"])
         meta = json.loads(fake_redis.get("polydata:seed-meta:signals:alpha-signal") or "{}")
         self.assertEqual("empty", meta["status"])
 

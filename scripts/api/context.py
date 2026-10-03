@@ -59,6 +59,9 @@ class RuntimeResources:
     agent_rate_lock: Any = field(default_factory=threading.Lock)
     agent_rate_buckets: dict[str, list[float]] = field(default_factory=dict)
 
+    alpha_read_lock: Any = field(default_factory=threading.Lock)
+    alpha_read_snapshot: dict[str, Any] = field(default_factory=dict)
+
     hazard_locks: dict[str, Any] = field(default_factory=dict)
     hazard_pending: dict[str, Any] = field(default_factory=dict)
     aviation_executor: ThreadPoolExecutor = field(default_factory=lambda: ThreadPoolExecutor(max_workers=4, thread_name_prefix="aviation-viewport"))

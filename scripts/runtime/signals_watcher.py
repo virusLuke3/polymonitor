@@ -245,7 +245,7 @@ class SignalsWatcher:
         previous = self.load_seed_meta()
         attempted_at = utc_now_iso()
         last_success_at = previous.get("lastSuccessAt")
-        if not preserve_last_success and str(status or "").strip().lower() in {"ok", "degraded", "empty"}:
+        if not preserve_last_success and str(status or "").strip().lower() in {"ok", "degraded", "empty", "partial"}:
             last_success_at = attempted_at
         payload = build_seed_meta_payload(
             panel_id=str(self.spec["panel_id"]),
@@ -278,6 +278,8 @@ class SignalsWatcher:
 
         if not hasattr(self, "_service_runtime"):
             self._service_runtime = ServiceRuntime(self.settings, application=_AppAdapter())
+        if self.component == "alpha":
+            return self._service_runtime.alpha_signal_context
         return self._service_runtime.polybeats_context if self.component == "polybeats" else self._service_runtime.signal_context
 
     def fetch_payload(self) -> Dict[str, Any]:
@@ -348,6 +350,8 @@ class SignalsWatcher:
         if record_count > 0 and isinstance(data_age, int) and data_age > self.stale_after_seconds():
             status = "stale"
         stored_payload = {**payload, "status": status, "cacheMode": "seeded"}
+        if self.component == "alpha":
+            stored_payload.update(generatedAt=utc_now_iso(), lastAttemptAt=payload.get("generatedAt"))
         if self.component in {"whales", "suspicious"}:
             stored_payload.update(lastAttemptAt=utc_now_iso(), refreshIntervalSeconds=self.interval_seconds,
                                   freshnessWindowSeconds=self.ttl_seconds())

@@ -25,3 +25,20 @@ describe('Alpha owned contract', () => {
     expect(alphaStatusLabel(parseAlphaPayload({ ...payload(), items: [], status: 'empty' }), status)).toBe('NO MATCH'); expect(alphaStatusLabel(parseAlphaPayload({ ...payload(), status: 'stale' }), status)).toBe('STALE'); expect(alphaStatusLabel(parseAlphaPayload(payload()), { ...status, error: '503' })).toBeUndefined();
   });
 });
+
+describe('Alpha coverage and time semantics', () => {
+  it('separates source observation time from an unavailable fill time', () => {
+    const data = parseAlphaPayload({ ...payload(), sourceObservedAt: '2026-10-02T09:00:00Z', items: [{ ...item(), timestamp: null, latestBlock: 123 }] });
+    expect(data.items[0]!.timestamp).toBeNull();
+    expect(data.items[0]!.observedAt).toBe('2026-10-02T09:00:00Z');
+    expect(data.items[0]!.latestBlock).toBe(123);
+  });
+  it('keeps explicit invalidation distinct from a transient outage', () => {
+    expect(parseAlphaPayload({ ...payload(), readIntegrity: 'invalid', items: [], status: 'degraded' }).readIntegrity).toBe('invalid');
+    expect(parseAlphaPayload({ ...payload(), readIntegrity: 'unavailable', items: [], status: 'degraded' }).readIntegrity).toBe('unavailable');
+  });
+  it('labels a healthy bounded scan as limited instead of unverified', () => {
+    const data = parseAlphaPayload({ ...payload(), coverage: { ...payload().coverage, truncated: true } });
+    expect(alphaStatusLabel(data, status)).toBe('LIMITED');
+  });
+});

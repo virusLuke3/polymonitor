@@ -7,14 +7,103 @@ This does not grant a mutation proof to legacy tokenless aggregates.
 from __future__ import annotations
 
 from collections import Counter
+from copy import deepcopy
 from datetime import datetime
 import math
+import time
 from typing import Any
 
+from api.context import runtime_resources
 from . import clickhouse_orderfilled_service as trades
 from . import outcome_semantics_service as semantics
 
 POLICY_VERSION = "token-flow-v1"
+READ_CACHE_SECONDS = 30
+READ_RECOVERY_SECONDS = 300
+NORMAL_EXCLUSIONS = {"directional_semantics_unsupported", "market_not_trading", "market_ended"}
+
+
+class AlphaVerificationUnavailable(RuntimeError):
+    """Transport failure, distinct from evidence that an identity is invalid."""
+
+
+def _date(value: Any) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return parsed if parsed.tzinfo else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _market_metadata(ctx: dict, ids: list[int]) -> dict[int, dict]:
+    if not ids:
+        return {}
+    try:
+        rows = ctx["query_all"]("SELECT id, title, yes_token_id, no_token_id, active, closed, accepting_orders, end_date "
+                                "FROM core.markets WHERE id IN (" + ",".join("?" for _ in ids) + ")", tuple(ids))
+    except Exception as exc:
+        raise AlphaVerificationUnavailable("Current market ownership and trading state could not be checked") from exc
+    return {int(row["id"]): row for row in rows}
+
+
+def _eligibility(market: dict, now: datetime | None) -> str | None:
+    flags = [semantics._strict_bool(market.get(key)) for key in ("active", "closed", "accepting_orders")]
+    if flags[0] is False or flags[1] is True or flags[2] is False:
+        return "market_not_trading"
+    end = _date(market.get("end_date"))
+    if end and now and end <= now:
+        return "market_ended"
+    if flags != [True, False, True]:
+        return "market_state_unknown"
+    return None
+
+
+def _fallback(ctx: dict, seed: dict, cache: dict, error: str) -> dict:
+    previous = cache.get("payload")
+    now = _date(ctx["utc_now_iso"]())
+    generated = _date(previous.get("generatedAt")) if previous else None
+    retained = bool(previous and (previous.get("items") or previous.get("candidates"))
+                    and now and generated and 0 <= (now - generated).total_seconds() <= READ_RECOVERY_SECONDS)
+    value = deepcopy(previous if retained else seed)
+    if not retained:
+        value.update(items=[], candidates=[])
+    value.update(status="stale" if retained else "degraded", freshness="stale" if retained else "unknown",
+                 readIntegrity="unavailable", error=error, errorCode="alpha-verification-unavailable",
+                 lastAttemptAt=ctx["utc_now_iso"]())
+    value["sourceStates"] = {**(value.get("sourceStates") or {}), "readVerification": "unavailable"}
+    return value
+
+
+def read_public_snapshot(ctx: dict, seed: dict, *, validate) -> dict:
+    """One bounded application cache of public, read-verified Alpha snapshots.
+
+    New seed content always forces validation. A transport outage can retain only
+    a previously validated snapshot for five minutes, with its original clock.
+    Positive conflicting evidence never qualifies for that recovery path.
+    """
+    resources = runtime_resources(ctx)
+    cache = resources.alpha_read_snapshot
+    if not resources.alpha_read_lock.acquire(timeout=.25):
+        return _fallback(ctx, seed, cache, "Alpha verification is busy; showing the last checked snapshot")
+    try:
+        now = time.monotonic()
+        if cache.get("seed") == seed and now - cache.get("checked", 0) < READ_CACHE_SECONDS:
+            return deepcopy(cache["payload"])
+        if now - cache.get("failedAt", -10) < 5:
+            return _fallback(ctx, seed, cache, cache.get("error") or "Alpha verification unavailable")
+        try:
+            public = validate(deepcopy(seed))
+            public = revalidate_cached_observations(ctx, public, check_trading=True)
+        except AlphaVerificationUnavailable as exc:
+            cache.update(failedAt=now, error=str(exc))
+            return _fallback(ctx, seed, cache, str(exc))
+        public.update(verificationCheckedAt=ctx["utc_now_iso"](), readIntegrity="invalid" if
+                      (public.get("coverage") or {}).get("lastReadRejectedCount") else "verified")
+        public["sourceStates"] = {**(public.get("sourceStates") or {}), "readVerification": "verified"}
+        resources.alpha_read_snapshot = {"seed": deepcopy(seed), "payload": deepcopy(public), "checked": now}
+        return public
+    finally:
+        resources.alpha_read_lock.release()
 
 
 def _owned_tokens(ctx: dict, ids: list[int]) -> dict[int, set[str]]:
@@ -29,9 +118,13 @@ def _owned_tokens(ctx: dict, ids: list[int]) -> dict[int, set[str]]:
         return {}
 
 
-def revalidate_cached_observations(ctx: dict, payload: dict) -> dict:
+def revalidate_cached_observations(ctx: dict, payload: dict, *, check_trading: bool = False) -> dict:
     candidates = [item for item in payload.get("candidates") or [] if isinstance(item, dict)]
-    owners = _owned_tokens(ctx, sorted({value for item in candidates if (value := semantics._market_id(item))}))
+    metadata = _market_metadata(ctx, sorted({value for item in candidates + (payload.get("items") or [])
+                                          if (value := semantics._market_id(item))})) if check_trading else None
+    owners = {key: {semantics._normalize_token_id(row.get("yes_token_id")), semantics._normalize_token_id(row.get("no_token_id"))}
+              for key, row in metadata.items()} if metadata is not None else _owned_tokens(ctx, sorted({
+                  value for item in candidates if (value := semantics._market_id(item))}))
     valid = [item for item in candidates if item.get("qualification") == "labels-unavailable"
              and semantics._normalize_token_id(item.get("tokenId")) in owners.get(semantics._market_id(item), set())]
     result = {**payload, "candidates": valid}
@@ -40,10 +133,37 @@ def revalidate_cached_observations(ctx: dict, payload: dict) -> dict:
                     int((payload.get("coverage") or {}).get("lastReadRejectedCount") or 0) + len(candidates) - len(valid)}
         result.update(coverage=coverage, status="partial" if valid or payload.get("items") else "degraded",
                       error="Some cached token ownerships could not be verified")
+    if metadata is not None:
+        now = _date(ctx["utc_now_iso"]())
+        exclusions = Counter()
+        for key in ("items", "candidates"):
+            kept = []
+            for item in result.get(key) or []:
+                market_id = semantics._market_id(item)
+                if semantics._normalize_token_id(item.get("tokenId")) not in owners.get(market_id, set()):
+                    coverage = result.get("coverage") or {}
+                    result["coverage"] = {**coverage, "lastReadRejectedCount": int(coverage.get("lastReadRejectedCount") or 0) + 1}
+                    result.update(status="partial" if kept else "degraded", error="Current token ownership does not match the cached signal")
+                    continue
+                reason = _eligibility(metadata.get(market_id, {}), now)
+                if reason:
+                    exclusions[reason] += 1
+                else:
+                    kept.append(item)
+            result[key] = kept
+        result["coverage"] = {**(result.get("coverage") or {}), "readExcludedReasons": dict(exclusions),
+                              "displayedVerifiedCount": len(result.get("items") or [])}
+        if exclusions.get("market_state_unknown"):
+            result.update(status="partial" if result["items"] or result["candidates"] else "degraded",
+                          error="Trading state is not proven for some cached markets")
+        elif exclusions and not result["items"] and not result["candidates"] and not result["coverage"].get("lastReadRejectedCount"):
+            result["status"] = "empty"
+        if result["coverage"].get("lastReadRejectedCount"):
+            result["status"] = "partial" if result["items"] or result["candidates"] else "degraded"
     return result
 
 
-def _observations(ctx: dict, rows: list[dict], limit: int, excluded_markets: set[int]) -> list[dict]:
+def _observations(ctx: dict, rows: list[dict], limit: int, excluded_markets: set[int], metadata: dict | None = None) -> list[dict]:
     """Neutral token facts, never a label/probability/direction fallback.
 
     Require current canonical market ownership even for a pending candidate.
@@ -54,7 +174,8 @@ def _observations(ctx: dict, rows: list[dict], limit: int, excluded_markets: set
     ids = sorted({int(row["market_id"]) for row in pending})
     if not ids:
         return []
-    tokens = _owned_tokens(ctx, ids)
+    tokens = {key: {semantics._normalize_token_id(row.get("yes_token_id")), semantics._normalize_token_id(row.get("no_token_id"))}
+              for key, row in metadata.items()} if metadata is not None else _owned_tokens(ctx, ids)
     result, seen = [], set(excluded_markets)
     for row in pending:
         market_id = int(row["market_id"])
@@ -71,6 +192,7 @@ def _observations(ctx: dict, rows: list[dict], limit: int, excluded_markets: set
                        "marketId": market_id, "tokenId": row["token_id"], "marketIdentityVerified": True,
                        "marketTitle": row.get("market_title") or f"Market {market_id}",
                        "side": row["side"], "timestamp": row.get("timestamp"), "metrics": metrics,
+                       "observedAt": row.get("source_observed_at"), "latestBlock": row.get("latest_block"),
                        "qualification": "labels-unavailable", "outcomeSemanticsValid": False,
                        "outcomeSemanticsStatus": row["outcomeSemanticsStatus"]})
         if len(result) >= limit:
@@ -91,7 +213,8 @@ def _candidates(ctx: dict, limit: int) -> list[dict] | None:
     window = policy.alpha_volume_window_minutes * 30
     baseline = max(window, policy.alpha_market_baseline_minutes * 30)
     table = trades._table_sql(ctx)
-    cursor = trades._query_json_rows(ctx, f"SELECT ({trades._latest_fact_block_sql(ctx)}) AS watermark FORMAT JSONEachRow", timeout_seconds=2.0)
+    query_timeout = max(8.0, policy.max_execution_seconds + 2.0)
+    cursor = trades._query_json_rows(ctx, f"SELECT ({trades._latest_fact_block_sql(ctx)}) AS watermark FORMAT JSONEachRow", timeout_seconds=float(query_timeout))
     if not cursor or _number(cursor[0].get("watermark")) is None:
         return None
     watermark = int(cursor[0]["watermark"])
@@ -152,7 +275,7 @@ def _candidates(ctx: dict, limit: int) -> list[dict] | None:
         ORDER BY f.net_flow DESC, f.latest_block DESC, f.market_id, f.token_id
         LIMIT {min(max(limit, 1), 20) * 12}
         FORMAT JSONEachRow
-    """, timeout_seconds=3.5)
+    """, timeout_seconds=float(query_timeout))
 
 
 def _signal(row: dict, window_minutes: int) -> dict | None:
@@ -180,6 +303,8 @@ def _signal(row: dict, window_minutes: int) -> dict | None:
         "marketId": market_id, "tokenId": row["token_id"],
         "marketTitle": row.get("market_title") or f"Market {market_id}",
         "title": f"{window_minutes}m net token flow", "timestamp": row.get("timestamp"),
+        "observedAt": row.get("source_observed_at"), "latestBlock": row.get("latest_block"),
+        "marketState": {"status": "open", "endDate": str(row.get("end_date")) if row.get("end_date") else None},
         "sourceFromBlock": row.get("source_from_block"), "sourceThroughBlock": row.get("source_through_block"),
         "side": side, "logicalOutcome": logical, "outcome": row["sourceOutcomeLabel"],
         "sourceOutcomeLabel": row["sourceOutcomeLabel"], "price": row["price"],
@@ -218,9 +343,17 @@ def fetch_live_alpha_signal_payload(ctx: dict, limit: int = 8) -> dict:
     coverage["truncated"] = len(rows) >= min(max(limit, 1), 20) * 12
     rejected: Counter = Counter()
     # One exact token per group: no outcome_code inference or tokenless mutation claim.
-    annotated = trades._attach_market_titles(ctx, semantics.annotate_raw_trade_rows(ctx, rows))
+    metadata = _market_metadata(ctx, sorted({int(row["market_id"]) for row in rows}))
+    annotated = semantics.annotate_raw_trade_rows(ctx, rows)
     valid = []
     for row in annotated:
+        market = metadata.get(int(row["market_id"]), {})
+        reason = _eligibility(market, _date(generated_at))
+        row["market_title"] = market.get("title") or row.get("market_title")
+        row["end_date"] = market.get("end_date")
+        if reason:
+            rejected[reason] += 1
+            continue
         capabilities = row.get("outcomeSemanticsCapabilities") or {}
         if not row.get("outcomeSemanticsValid") or not (
             capabilities.get("supportsYesNoWording") or capabilities.get("supportsDirectionalSemantics")
@@ -237,6 +370,8 @@ def fetch_live_alpha_signal_payload(ctx: dict, limit: int = 8) -> dict:
         else:
             signals.append(signal)
     coverage.update(verifiedCount=len(signals), rejectedCount=sum(rejected.values()), rejectionReasons=dict(rejected))
+    coverage["excludedCount"] = sum(count for reason, count in rejected.items() if reason in NORMAL_EXCLUSIONS)
+    coverage["unresolvedCount"] = coverage["rejectedCount"] - coverage["excludedCount"]
     signals.sort(key=lambda item: (-item["metrics"]["score"], -item["metrics"]["netFlowNotional"], item["id"]))
     seen = set()
     for item in signals:
@@ -246,9 +381,10 @@ def fetch_live_alpha_signal_payload(ctx: dict, limit: int = 8) -> dict:
         payload["items"].append(item)
         if len(payload["items"]) >= limit:
             break
-    payload["status"] = "partial" if rejected else "ok" if payload["items"] else "empty"
-    payload["candidates"] = _observations(ctx, annotated, limit, seen)
-    if rows and not payload["items"]:
+    payload["status"] = "partial" if coverage["unresolvedCount"] else "ok" if payload["items"] else "empty"
+    eligible = [row for row in annotated if not _eligibility(metadata.get(int(row["market_id"]), {}), _date(generated_at))]
+    payload["candidates"] = _observations(ctx, eligible, limit, seen, metadata)
+    if coverage["unresolvedCount"] and not payload["items"]:
         payload.update(status="partial" if payload["candidates"] else "degraded",
                        freshness="observed" if payload["candidates"] else "degraded",
                        error="Candidate outcome labels are unavailable; token facts are not verified Alpha")
@@ -267,5 +403,5 @@ def fetch_live_alpha_signal_payload(ctx: dict, limit: int = 8) -> dict:
     elif rows:
         # Missing block timestamps are UNKNOWN, not proof that the data expired.
         payload.update(status="partial", freshness="unknown")
-    payload["sourceStates"].update(clickhouse="ok", semantics="partial" if rejected else "verified")
+    payload["sourceStates"].update(clickhouse="ok", semantics="partial" if coverage["unresolvedCount"] else "verified")
     return payload
