@@ -1,3 +1,4 @@
+import { macroSnapshot, macroRefreshPolicy } from '@/panels/shared/macro-runtime';
 import { fetchRuntimeLaborServicesInflationMonitor } from '@/services/api';
 import type { RuntimeMacroRegistryPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
@@ -30,8 +31,9 @@ export const panel = runtimePanelFromRenderer(renderers, {
   eyebrow: 'macro',
   description: 'Labor, wage, claims, and services CPI pressure registry.',
   defaultEnabled: true,
+  snapshot: macroSnapshot('labor-services-inflation-monitor'),
 }, {
-  tier: 'slow',
+  ...macroRefreshPolicy,
   limit: 36,
   fetchData: (context, limit) => fetchRuntimeLaborServicesInflationMonitor(limit, context?.signal),
 });

@@ -1,3 +1,4 @@
+import { macroSnapshot, macroRefreshPolicy } from '@/panels/shared/macro-runtime';
 import { fetchRuntimeFedReactionGrowthRiskBoard } from '@/services/api';
 import type { RuntimeMacroRegistryPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
@@ -30,8 +31,9 @@ export const panel = runtimePanelFromRenderer(renderers, {
   eyebrow: 'macro',
   description: 'Fed, rates, growth, demand, and recession-risk registry.',
   defaultEnabled: true,
+  snapshot: macroSnapshot('fed-reaction-growth-risk-board'),
 }, {
-  tier: 'slow',
+  ...macroRefreshPolicy,
   limit: 36,
   fetchData: (context, limit) => fetchRuntimeFedReactionGrowthRiskBoard(limit, context?.signal),
 });

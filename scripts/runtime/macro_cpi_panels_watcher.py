@@ -65,7 +65,7 @@ class MacroCpiPanelsWatcher:
         self.requests.headers.update({"User-Agent": "polydata-macro-cpi-panels-watcher/1.0"})
 
     def ttl_seconds(self) -> int:
-        return max(1800, int(getattr(self.settings, "macro_cpi_panel_ttl_seconds", macro_cpi_panels_service.DEFAULT_TTL_SECONDS) or macro_cpi_panels_service.DEFAULT_TTL_SECONDS))
+        return max(self.interval_seconds * 3, 1800, int(getattr(self.settings, "macro_cpi_panel_ttl_seconds", macro_cpi_panels_service.DEFAULT_TTL_SECONDS) or macro_cpi_panels_service.DEFAULT_TTL_SECONDS))
 
     def namespace(self, panel_id: str) -> str:
         return macro_cpi_panels_service._snapshot_namespace(panel_id)
@@ -123,7 +123,7 @@ class MacroCpiPanelsWatcher:
     def store_meta(self, panel_id: str, *, status: str, record_count: int, source_states: Dict[str, Any] | None = None, error_summary: str | None = None, preserve: bool = False, cache_mode: str | None = None, payload_status: str | None = None) -> None:
         previous = self.seed_meta_store.load(SEED_META_NAMESPACE, panel_id) or {}
         attempted = utc_now_iso()
-        last_success = previous.get("lastSuccessAt") if preserve else attempted
+        last_success = previous.get("lastSuccessAt") if preserve or status != "ok" else attempted
         payload = build_seed_meta_payload(
             panel_id=panel_id,
             namespace=SEED_META_NAMESPACE,
@@ -140,6 +140,7 @@ class MacroCpiPanelsWatcher:
             payload_status=payload_status,
             metadata={"result": status},
         )
+        payload["lastSuccessAt"] = last_success
         self.seed_meta_store.store(SEED_META_NAMESPACE, panel_id, payload)
 
     def run_panel(self, panel_id: str) -> Dict[str, Any]:
@@ -157,7 +158,7 @@ class MacroCpiPanelsWatcher:
             self.store_payload(panel_id, previous)
             self.store_meta(panel_id, status="preserved", record_count=len(previous.get("items") or []), source_states=payload.get("sources"), error_summary="Preserved previous snapshot because new macro CPI payload was empty", preserve=True)
             return {"panelId": panel_id, "status": "preserved"}
-        payload = {**payload, "cacheMode": "seeded"}
+        payload = {**payload, "cacheMode": "seeded", "expectedIntervalSeconds": self.interval_seconds}
         self.store_payload(panel_id, payload)
         status = "ok" if payload.get("status") == "ok" else str(payload.get("status") or "degraded")
         self.store_meta(panel_id, status=status, record_count=len(payload.get("items") or []), source_states=payload.get("sources"), cache_mode="seeded", payload_status=payload.get("status"))

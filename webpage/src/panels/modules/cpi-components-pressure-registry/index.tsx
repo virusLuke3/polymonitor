@@ -1,3 +1,4 @@
+import { macroSnapshot, macroRefreshPolicy } from '@/panels/shared/macro-runtime';
 import { fetchRuntimeCpiComponentsPressureRegistry } from '@/services/api';
 import type { RuntimeMacroRegistryPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
@@ -30,8 +31,9 @@ export const panel = runtimePanelFromRenderer(renderers, {
   eyebrow: 'macro',
   description: 'Energy, food, shelter, and CPI component pressure registry.',
   defaultEnabled: true,
+  snapshot: macroSnapshot('cpi-components-pressure-registry'),
 }, {
-  tier: 'slow',
+  ...macroRefreshPolicy,
   limit: 48,
   fetchData: (context, limit) => fetchRuntimeCpiComponentsPressureRegistry(limit, context?.signal),
 });

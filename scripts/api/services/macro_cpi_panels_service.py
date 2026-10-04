@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from api.context import resolve_optional_service_callable, resolve_service_callable
+from api.services.macro_data_contract import describe_series, month_key
 
 
 SNAPSHOT_NAMESPACE_PREFIX = "snapshot:macro:"
@@ -17,7 +18,7 @@ DEFAULT_ITEM_LIMIT = 8
 MAX_ITEM_LIMIT = 60
 DEFAULT_TTL_SECONDS = 21600
 FRED_SOURCE = "FRED CSV / public macro series"
-CACHE_KEY = "panel-v2"
+CACHE_KEY = "panel-v3"
 FRED_CSV_LOOKBACK_YEARS = 4
 MACRO_CPI_PANEL_IDS = (
     "supply-tariff-import-watch",
@@ -266,7 +267,7 @@ def _fetch_fred_series(
     for row in reader:
         value = _float(row.get(series_id))
         date = _fred_row_date(row)
-        if value is None or not date:
+        if value is None or month_key(date) is None:
             continue
         rows.append({"date": date, "value": value})
     rows.sort(key=lambda item: item["date"])
@@ -274,31 +275,15 @@ def _fetch_fred_series(
         raise ValueError(f"not enough observations for {series_id}")
     latest = rows[-1]
     prev = rows[-2]
-    year_ago = rows[-13] if len(rows) >= 13 else rows[0]
-    change = latest["value"] - prev["value"]
-    change_pct = None
-    if prev["value"]:
-        change_pct = (latest["value"] / prev["value"] - 1.0) * 100.0
-    yoy_pct = None
-    if year_ago["value"]:
-        yoy_pct = (latest["value"] / year_ago["value"] - 1.0) * 100.0
-    tone = _series_tone(spec, change, change_pct, latest["value"])
+    contract = describe_series(spec, rows, _utc_now_iso(dependencies))
+    tone = _series_tone(spec, contract["change"] or 0, contract["changePct"], latest["value"])
     return {
-        "key": spec["key"],
-        "seriesId": series_id,
-        "label": spec["label"],
-        "group": spec.get("group") or spec["key"],
-        "icon": spec.get("icon") or "source",
-        "metric": spec.get("metric") or "level",
-        "unit": spec.get("unit"),
-        "date": latest["date"],
-        "value": round(latest["value"], 3),
-        "change": round(change, 3),
-        "changePct": round(change_pct, 2) if change_pct is not None else None,
-        "yoyPct": round(yoy_pct, 2) if yoy_pct is not None else None,
-        "tone": tone,
-        "source": FRED_SOURCE,
-        "sourceUrl": url,
+        "key": spec["key"], "seriesId": series_id, "label": spec["label"],
+        "group": spec.get("group") or spec["key"], "icon": spec.get("icon") or "source",
+        "metric": spec.get("metric") or "level", "date": latest["date"],
+        "value": round(latest["value"], 3), "tone": tone,
+        "source": FRED_SOURCE, "sourceUrl": f"https://fred.stlouisfed.org/series/{series_id}",
+        **contract,
     }
 
 
@@ -408,6 +393,8 @@ def build_macro_cpi_panel_payload(
     config = PANEL_CONFIGS[panel_id]
     items: List[Dict[str, Any]] = []
     sources: Dict[str, str] = {}
+    prior = _read_seeded(dependencies, panel_id) or {}
+    prior_items = {item.get("key"): item for item in prior.get("items", [])}
     for spec in config.get("series") or []:
         key = str(spec.get("key") or spec.get("seriesId"))
         try:
@@ -415,6 +402,8 @@ def build_macro_cpi_panel_payload(
             sources[key] = "ok"
         except Exception as exc:
             sources[key] = "error"
+            if key in prior_items:
+                items.append({**prior_items[key], "retained": True, "sourceStatus": "error"})
             logger = getattr(dependencies.application, "logger", None)
             if logger is not None:
                 logger.exception("macro cpi panel source failed panel=%s source=%s error=%s", panel_id, key, exc)
@@ -432,6 +421,8 @@ def build_macro_cpi_panel_payload(
     limited_items = items[: max(1, min(int(limit or DEFAULT_ITEM_LIMIT), MAX_ITEM_LIMIT))]
     return {
         "generatedAt": _utc_now_iso(dependencies),
+        "schemaVersion": 3,
+        "expectedIntervalSeconds": 21600,
         "source": config.get("source") or FRED_SOURCE,
         "sourceUrl": config.get("sourceUrl") or "https://fred.stlouisfed.org/",
         "status": status,
@@ -449,6 +440,8 @@ def _empty(
     config = PANEL_CONFIGS[panel_id]
     return {
         "generatedAt": _utc_now_iso(dependencies),
+        "schemaVersion": 3,
+        "expectedIntervalSeconds": 21600,
         "source": config.get("source") or FRED_SOURCE,
         "sourceUrl": config.get("sourceUrl") or "https://fred.stlouisfed.org/",
         "status": status,

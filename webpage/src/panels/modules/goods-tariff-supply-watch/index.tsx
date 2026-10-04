@@ -1,3 +1,4 @@
+import { macroSnapshot, macroRefreshPolicy } from '@/panels/shared/macro-runtime';
 import { fetchRuntimeGoodsTariffSupplyWatch } from '@/services/api';
 import type { RuntimeMacroRegistryPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
@@ -30,8 +31,9 @@ export const panel = runtimePanelFromRenderer(renderers, {
   eyebrow: 'macro',
   description: 'Goods inflation, tariff, import-price, and supply-chain registry.',
   defaultEnabled: true,
+  snapshot: macroSnapshot('goods-tariff-supply-watch'),
 }, {
-  tier: 'slow',
+  ...macroRefreshPolicy,
   limit: 36,
   fetchData: (context, limit) => fetchRuntimeGoodsTariffSupplyWatch(limit, context?.signal),
 });

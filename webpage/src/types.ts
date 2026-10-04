@@ -1499,6 +1499,8 @@ export type RuntimeMacroDriverPayload = {
 };
 
 export type RuntimeMacroRegistryItem = {
+  periodLabel?: string | null;
+  metadata?: Record<string, unknown>;
   key?: string | null;
   type?: string | null;
   group?: string | null;
@@ -1521,6 +1523,8 @@ export type RuntimeMacroRegistryItem = {
 };
 
 export type RuntimeMacroRegistrySummary = {
+  providerCount?: number;
+  interpretation?: string;
   panelId?: string | null;
   signal?: string | null;
   signalLabel?: string | null;
@@ -1539,6 +1543,8 @@ export type RuntimeMacroRegistrySummary = {
 };
 
 export type RuntimeMacroRegistryPayload = {
+  schemaVersion?: number;
+  expectedIntervalSeconds?: number;
   generatedAt?: string;
   panelId?: string | null;
   source?: string | null;
@@ -1551,6 +1557,9 @@ export type RuntimeMacroRegistryPayload = {
 };
 
 export type RuntimeCpiReleaseCommandEvent = {
+  adjustment?: string;
+  forecastAsOf?: string | null;
+  limitation?: string | null;
   key?: string | null;
   title?: string | null;
   period?: string | null;

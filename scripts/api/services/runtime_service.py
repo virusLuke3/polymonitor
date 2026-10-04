@@ -719,8 +719,10 @@ def fetch_live_inflation_nowcast_payload(ctx: RuntimeServiceContext) -> Dict[str
                 continue
             if "month-over-month percent change" in caption_text:
                 payload["monthOverMonth"] = rows[0]
+                payload.setdefault("monthlyPeriods", {})["monthOverMonth"] = rows
             elif "year-over-year percent change" in caption_text:
                 payload["yearOverYear"] = rows[0]
+                payload.setdefault("monthlyPeriods", {})["yearOverYear"] = rows
             elif "quarterly annualized percent change" in caption_text:
                 payload["quarterly"] = rows[:4]
     except Exception:

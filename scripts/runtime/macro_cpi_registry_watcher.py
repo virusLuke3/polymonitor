@@ -15,6 +15,7 @@ if str(_scripts_root) not in sys.path:
     sys.path.insert(0, str(_scripts_root))
 
 import redis
+import requests
 
 from api.config import load_api_settings
 from api.services import macro_cpi_registry_service
@@ -44,11 +45,13 @@ class MacroCpiRegistryWatcher:
         self.redis_prefix = redis_prefix or ""
         self.interval_seconds = max(300, int(interval_seconds or DEFAULT_INTERVAL_SECONDS))
         self.redis_client = redis.from_url(redis_url, decode_responses=True)
+        self.requests = requests.Session()
+        self.requests.trust_env = False
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
 
     def ttl_seconds(self) -> int:
-        return macro_cpi_registry_service.ttl_seconds({"SETTINGS": self.settings})
+        return max(self.interval_seconds * 3, macro_cpi_registry_service.ttl_seconds({"SETTINGS": self.settings}))
 
     def namespace(self, panel_id: str) -> str:
         return macro_cpi_registry_service._snapshot_namespace(panel_id)
@@ -69,6 +72,11 @@ class MacroCpiRegistryWatcher:
     def _set_cached_json(self, namespace: str, cache_key: str, payload: Dict[str, Any], ttl: int) -> None:
         self.redis_client.set(_redis_key(self.redis_prefix, namespace, cache_key), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl)
 
+    def _http_text_get(self, url: str, **kwargs: Any) -> str:
+        response = self.requests.get(url, **kwargs)
+        response.raise_for_status()
+        return response.text
+
     def context(self) -> Dict[str, Any]:
         return {
             "SETTINGS": self.settings,
@@ -76,6 +84,7 @@ class MacroCpiRegistryWatcher:
             "get_cached_json": self._get_cached_json,
             "set_cached_json": self._set_cached_json,
             "utc_now_iso": utc_now_iso,
+            "http_text_get": self._http_text_get,
         }
 
     def previous(self, panel_id: str) -> Dict[str, Any]:
@@ -93,7 +102,7 @@ class MacroCpiRegistryWatcher:
     def store_meta(self, panel_id: str, *, status: str, record_count: int, source_states: Dict[str, Any] | None = None, error_summary: str | None = None, preserve: bool = False, cache_mode: str | None = None, payload_status: str | None = None) -> None:
         previous = self.seed_meta_store.load(SEED_META_NAMESPACE, panel_id) or {}
         attempted = utc_now_iso()
-        last_success = previous.get("lastSuccessAt") if preserve else attempted
+        last_success = previous.get("lastSuccessAt") if preserve or status != "ok" else attempted
         payload = build_seed_meta_payload(
             panel_id=panel_id,
             namespace=SEED_META_NAMESPACE,
@@ -110,12 +119,13 @@ class MacroCpiRegistryWatcher:
             payload_status=payload_status,
             metadata={"result": status},
         )
+        payload["lastSuccessAt"] = last_success
         self.seed_meta_store.store(SEED_META_NAMESPACE, panel_id, payload)
 
     def run_panel(self, panel_id: str) -> Dict[str, Any]:
         previous = self.previous(panel_id)
         try:
-            payload = macro_cpi_registry_service.build_macro_cpi_registry_payload(self.context(), panel_id, limit=macro_cpi_registry_service.MAX_ITEM_LIMIT)
+            payload = macro_cpi_registry_service.build_macro_cpi_registry_payload({**self.context(), "previousRegistry": previous}, panel_id, limit=macro_cpi_registry_service.MAX_ITEM_LIMIT)
         except Exception as exc:
             if previous:
                 self.store_payload(panel_id, previous)
@@ -127,7 +137,7 @@ class MacroCpiRegistryWatcher:
             self.store_payload(panel_id, previous)
             self.store_meta(panel_id, status="preserved", record_count=len(previous.get("items") or []), source_states=payload.get("sources"), error_summary="Preserved previous registry snapshot because new payload was empty", preserve=True)
             return {"panelId": panel_id, "status": "preserved"}
-        payload = {**payload, "cacheMode": "redis-seed"}
+        payload = {**payload, "cacheMode": "redis-seed", "expectedIntervalSeconds": self.interval_seconds}
         self.store_payload(panel_id, payload)
         telegram_sent = publish_cached_panel_snapshot(panel_id, payload)
         status = "ok" if payload.get("status") == "ok" else str(payload.get("status") or "degraded")

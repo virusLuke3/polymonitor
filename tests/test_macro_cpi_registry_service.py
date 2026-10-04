@@ -41,12 +41,12 @@ def test_cpi_release_command_center_composes_calendar_and_nowcast(monkeypatch):
         },
     )
 
-    payload = macro_cpi_registry_service.get_cpi_release_command_center_snapshot(_ctx(), limit=10)
+    payload = macro_cpi_registry_service.build_cpi_release_command_center_snapshot(_ctx(), limit=10)
 
-    assert payload["status"] == "ok"
+    assert payload["status"] == "degraded"
     assert payload["cacheMode"] == "composed-seed"
     assert payload["summary"]["rowCount"] == 4
-    assert payload["summary"]["hotCount"] >= 2
+    assert payload["summary"]["forecastCount"] == 0  # Unknown nowcast month must not bind
     assert [item["group"] for item in payload["items"]][:2] == ["CPI", "NOWCAST"]
 
 
@@ -79,12 +79,12 @@ def test_components_registry_composes_energy_food_and_shelter(monkeypatch):
         },
     )
 
-    payload = macro_cpi_registry_service.get_cpi_components_pressure_registry_snapshot(_ctx(), limit=10)
+    payload = macro_cpi_registry_service.build_cpi_components_pressure_registry_snapshot(_ctx(), limit=10)
 
-    assert payload["status"] == "ok"
+    assert payload["status"] == "degraded"
     assert payload["summary"]["rowCount"] == 3
     assert {item["group"] for item in payload["items"]} == {"ENERGY", "FOOD", "RENT"}
-    assert payload["summary"]["topMover"]["label"] == "WTI crude"
+    assert payload["summary"]["topMover"] is None  # Dollars and percent moves cannot be ranked
 
 
 def test_registry_panels_return_capped_rows(monkeypatch):
@@ -98,7 +98,7 @@ def test_registry_panels_return_capped_rows(monkeypatch):
         lambda ctx, limit=30: {"status": "ok", "sources": {"fred": "redis-seed"}, "items": many_rows},
     )
 
-    payload = macro_cpi_registry_service.get_goods_tariff_supply_watch_snapshot(_ctx(), limit=999)
+    payload = macro_cpi_registry_service.build_goods_tariff_supply_watch_snapshot(_ctx(), limit=999)
 
     assert payload["status"] == "ok"
     assert len(payload["items"]) == macro_cpi_registry_service.MAX_ITEM_LIMIT
@@ -140,8 +140,8 @@ def test_registry_calendar_and_component_sources_are_seed_only(monkeypatch):
         lambda ctx, limit=12: {"status": "warming", "cacheMode": "seed-miss", "sources": {}, "items": []},
     )
 
-    release = macro_cpi_registry_service.get_cpi_release_command_center_snapshot(_ctx(), limit=10)
-    components = macro_cpi_registry_service.get_cpi_components_pressure_registry_snapshot(_ctx(), limit=10)
+    release = macro_cpi_registry_service.build_cpi_release_command_center_snapshot(_ctx(), limit=10)
+    components = macro_cpi_registry_service.build_cpi_components_pressure_registry_snapshot(_ctx(), limit=10)
 
     assert release["status"] == "warming"
     assert components["status"] == "warming"

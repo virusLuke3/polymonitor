@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from api.services.macro_data_contract import month_key, monthly_metric, shift_month, value_label, number
 from api.context import resolve_optional_service_callable
 from api.services import cpi_release_calendar_service, energy_gasoline_shock_service, food_retail_basket_service, macro_cpi_panels_service, runtime_service
 
@@ -16,14 +17,14 @@ from api.services import cpi_release_calendar_service, energy_gasoline_shock_ser
 DEFAULT_ITEM_LIMIT = 36
 MAX_ITEM_LIMIT = 60
 SNAPSHOT_NAMESPACE_PREFIX = "snapshot:macro-registry:"
-CACHE_KEY = "panel-v1"
+CACHE_KEY = "panel-v2"
 FRED_CSV_LOOKBACK_YEARS = 4
 
 CPI_EVENT_SPECS = (
     {
         "key": "headline-yoy",
         "title": "Inflation Rate YoY",
-        "seriesId": "CPIAUCSL",
+        "seriesId": "CPIAUCNS",
         "metric": "yoy",
         "nowcastKey": "CPI",
         "bucket": "yearOverYear",
@@ -31,8 +32,7 @@ CPI_EVENT_SPECS = (
     {
         "key": "core-yoy",
         "title": "Core Inflation Rate YoY",
-        "seriesId": "CPILFESL",
-        "seriesCandidates": ("CPILFESL", "CPILFENS"),
+        "seriesId": "CPILFENS",
         "metric": "yoy",
         "nowcastKey": "Core CPI",
         "bucket": "yearOverYear",
@@ -49,7 +49,6 @@ CPI_EVENT_SPECS = (
         "key": "core-mom",
         "title": "Core Inflation Rate MoM",
         "seriesId": "CPILFESL",
-        "seriesCandidates": ("CPILFESL", "CPILFENS"),
         "metric": "mom",
         "nowcastKey": "Core CPI",
         "bucket": "monthOverMonth",
@@ -130,11 +129,7 @@ def _utc_now_iso(
 
 
 def _float(value: Any) -> Optional[float]:
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return None
-    return number if number == number else None
+    return number(value)
 
 
 def _limit(limit: int) -> int:
@@ -181,19 +176,7 @@ def _signed(value: Any, *, suffix: str = "", decimals: int = 2) -> str:
 
 
 def _value_label(value: Any, unit: Any = None) -> str:
-    number = _float(value)
-    if number is None:
-        return "--"
-    unit_text = str(unit or "").strip()
-    if unit_text == "%":
-        return f"{number:.2f}%"
-    if unit_text in {"pp", "z"}:
-        return f"{number:.2f}{unit_text}"
-    if unit_text == "$":
-        return f"${number:.2f}"
-    if abs(number) >= 1000:
-        return f"{number / 1000:.1f}K"
-    return f"{number:.2f}" if abs(number) < 100 else f"{number:.1f}"
+    return value_label(value, unit)
 
 
 def _pct_value_label(value: Any) -> str:
@@ -331,16 +314,22 @@ def _row(
     }
 
 
-def _sort_key(row: Dict[str, Any]) -> tuple[int, float, str]:
+def _sort_key(row: Dict[str, Any]) -> tuple[int, str, str]:
     tone_rank = {"hot": 0, "watch": 1, "cool": 2, "neutral": 3}.get(str(row.get("tone") or "neutral"), 4)
     if str(row.get("type") or "").lower() == "release":
         tone_rank = -1
-    magnitude = abs(_float(row.get("change")) or 0.0)
-    return (tone_rank, -magnitude, str(row.get("label") or ""))
+    return (tone_rank, str(row.get("group") or ""), str(row.get("date") or "") if tone_rank == -1 else str(row.get("label") or ""))
 
 
 def _rank_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    ranked = sorted(rows, key=_sort_key)
+    unique = {}
+    for row in rows:
+        series_id = (row.get("metadata") or {}).get("seriesId")
+        identity = (series_id, row.get("date")) if series_id else row.get("key")
+        existing = unique.get(identity)
+        if existing is None or str((row.get("metadata") or {}).get("fetchedAt") or "") > str((existing.get("metadata") or {}).get("fetchedAt") or ""):
+            unique[identity] = row
+    ranked = sorted(unique.values(), key=_sort_key)
     for index, row in enumerate(ranked, start=1):
         row["rank"] = index
     return ranked
@@ -358,7 +347,7 @@ def _enrich_row(row: Dict[str, Any]) -> Dict[str, Any]:
     enriched = dict(row)
     enriched["tone"] = tone
     enriched["valueLabel"] = str(row.get("valueLabel") or _value_label(row.get("value"), row.get("unit")))
-    if unit == "pp" and _float(raw_change) is not None:
+    if not row.get("changeLabel") and unit == "pp" and _float(raw_change) is not None:
         enriched["change"] = raw_change
         enriched["changeLabel"] = _signed(raw_change, suffix="pp")
     else:
@@ -371,6 +360,8 @@ def _enrich_row(row: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _snapshot_status(payload: Dict[str, Any]) -> str:
+    if payload.get("cacheMode") == "stale-seed":
+        return "stale"
     return str(payload.get("status") or ("ok" if payload.get("items") else "warming"))
 
 
@@ -379,8 +370,14 @@ def _merge_sources(sources: Dict[str, str], prefix: str, payload: Dict[str, Any]
     if not source_states:
         sources[prefix] = _snapshot_status(payload)
         return
+    sources.pop(prefix, None)
     for key, value in source_states.items():
-        sources[f"{prefix}.{key}"] = str(value)
+        sources[f"{prefix}.{key}"] = "stale" if payload.get("cacheMode") == "stale-seed" else str(value)
+    generated = _parse_datetime(payload.get("generatedAt"))
+    interval = int(payload.get("expectedIntervalSeconds") or (3600 if prefix == "calendar" else 21600))
+    if generated and (datetime.now(timezone.utc) - generated).total_seconds() > interval * 1.5:
+        for key in source_states:
+            sources[f"{prefix}.{key}"] = "stale"
 
 
 def _calendar_rows(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -417,56 +414,27 @@ def _calendar_rows(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def _nowcast_rows(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
-    rows: List[Dict[str, Any]] = []
+    rows = []
     for bucket_name in ("monthOverMonth", "yearOverYear"):
-        bucket = payload.get(bucket_name)
-        if not isinstance(bucket, dict):
-            continue
-        for key, value in bucket.items():
-            number = _float(value)
-            if number is None:
+        buckets = (payload.get("monthlyPeriods") or {}).get(bucket_name)
+        if not isinstance(buckets, list):
+            buckets = [payload.get(bucket_name)]
+        for bucket in buckets:
+            if not isinstance(bucket, dict):
                 continue
-            tone = "hot" if number >= (0.35 if bucket_name == "monthOverMonth" else 3.2) else ("cool" if number <= (0.2 if bucket_name == "monthOverMonth" else 2.6) else "watch")
-            rows.append(
-                _row(
-                    key=f"nowcast-{bucket_name}-{key}",
-                    row_type="model",
-                    group="NOWCAST",
-                    label=str(key),
-                    value=number,
-                    unit="%",
-                    change=number,
-                    change_label=f"{number:.2f}%",
-                    date=payload.get("generatedAt"),
-                    tone=tone,
-                    source=str(payload.get("source") or "Cleveland Fed"),
-                    source_url=str(payload.get("url") or ""),
-                    implication="inflation bucket pressure",
-                    metadata={"bucket": bucket_name, "nowcastKey": key},
-                )
-            )
-    for index, item in enumerate(payload.get("quarterly") or []):
-        if not isinstance(item, dict):
-            continue
-        label = str(next(iter(item.keys()), "Quarterly nowcast"))
-        value = next((value for value in item.values() if _float(value) is not None), None)
-        rows.append(
-            _row(
-                key=f"nowcast-quarterly-{index}",
-                row_type="model",
-                group="QTR",
-                label=label,
-                value=value,
-                unit="%",
-                change=value,
-                change_label=f"{_float(value):.2f}%" if _float(value) is not None else "--",
-                date=payload.get("generatedAt"),
-                tone=_status_tone("watch"),
-                source=str(payload.get("source") or "Cleveland Fed"),
-                source_url=str(payload.get("url") or ""),
-                implication="quarterly inflation run-rate",
-            )
-        )
+            period = month_key(bucket.get("Month"))
+            for key, value in bucket.items():
+                number = _float(value)
+                if number is None or key not in {"CPI", "Core CPI"}:
+                    continue
+                row = _row(key=f"nowcast-{bucket_name}-{period}-{key}", row_type="model", group="NOWCAST",
+                           label=str(key), value=number, unit="%", change=None, change_label="Model estimate",
+                           date=payload.get("generatedAt"), tone="neutral", source=str(payload.get("source") or "Cleveland Fed"),
+                           source_url=str(payload.get("url") or ""), implication="Model nowcast, not market consensus",
+                           metadata={"bucket": bucket_name, "nowcastKey": key, "period": period,
+                                     "providerUpdated": bucket.get("Updated"), "fetchedAt": payload.get("generatedAt")})
+                row["periodLabel"] = bucket.get("Month") or "Unknown period"
+                rows.append(row)
     return rows
 
 
@@ -510,59 +478,31 @@ def _series_candidates(series_id: str) -> List[str]:
     return [series_id]
 
 
-def _fetch_cpi_series_stats(
-    dependencies: MacroCpiRegistryDependencies,
-) -> Dict[str, Dict[str, Any]]:
+def _fetch_cpi_series_stats(dependencies: MacroCpiRegistryDependencies) -> Dict[str, Dict[str, Any]]:
+    """Collector-only: retain dates so consumers cannot rebind the latest value."""
     if dependencies.http_text_get is None:
         return {}
-    stats: Dict[str, Dict[str, Any]] = {}
-    for primary_series_id in sorted({str(spec["seriesId"]) for spec in CPI_EVENT_SPECS}):
-        for series_id in _series_candidates(primary_series_id):
-            try:
-                url = _fred_url(dependencies, series_id)
-                text = dependencies.http_text_get(
-                    url,
-                    timeout=12,
-                    headers={
-                        "User-Agent": "polydata-cpi-release-command/1.0"
-                    },
-                )
-                if not str(text or "").lstrip().lower().startswith("observation_date"):
-                    continue
-                reader = csv.DictReader(io.StringIO(str(text or "")))
-                rows: List[Dict[str, Any]] = []
-                for row in reader:
-                    value = _float(row.get(series_id))
-                    date = _fred_row_date(row)
-                    if value is not None and date:
-                        rows.append({"date": date, "value": value})
-                rows.sort(key=lambda item: item["date"])
-                if len(rows) < 14:
-                    continue
-                latest = rows[-1]
-                previous = rows[-2]
-                prior = rows[-3]
-                year_ago = rows[-13]
-                prev_year_ago = rows[-14]
-                latest_mom = (latest["value"] / previous["value"] - 1.0) * 100.0 if previous["value"] else None
-                previous_mom = (previous["value"] / prior["value"] - 1.0) * 100.0 if prior["value"] else None
-                latest_yoy = (latest["value"] / year_ago["value"] - 1.0) * 100.0 if year_ago["value"] else None
-                previous_yoy = (previous["value"] / prev_year_ago["value"] - 1.0) * 100.0 if prev_year_ago["value"] else None
-                stats[primary_series_id] = {
-                    "seriesId": primary_series_id,
-                    "resolvedSeriesId": series_id,
-                    "date": latest["date"],
-                    "source": "FRED / BLS CPI",
-                    "sourceUrl": url,
-                    "latestValue": round(latest["value"], 3),
-                    "mom": round(latest_mom, 2) if latest_mom is not None else None,
-                    "previousMom": round(previous_mom, 2) if previous_mom is not None else None,
-                    "yoy": round(latest_yoy, 2) if latest_yoy is not None else None,
-                    "previousYoy": round(previous_yoy, 2) if previous_yoy is not None else None,
-                }
-                break
-            except Exception:
-                continue
+    stats = {}
+    for series_id in sorted({str(spec["seriesId"]) for spec in CPI_EVENT_SPECS}):
+        try:
+            url = _fred_url(dependencies, series_id)
+            text = dependencies.http_text_get(url, timeout=12, headers={"User-Agent": "polydata-cpi-release-command/2.0"})
+            rows = []
+            for row in csv.DictReader(io.StringIO(str(text or ""))):
+                value, date = _float(row.get(series_id)), _fred_row_date(row)
+                if value is not None and month_key(date):
+                    rows.append({"date": date, "value": value})
+            rows.sort(key=lambda row: row["date"])
+            if rows:
+                stats[series_id] = {"seriesId": series_id, "date": rows[-1]["date"], "observations": rows,
+                                    "source": "FRED / BLS CPI", "sourceUrl": f"https://fred.stlouisfed.org/series/{series_id}",
+                                    "fetchedAt": _utc_now_iso(dependencies)}
+        except Exception:
+            continue
+    prior = (dependencies.source.get("previousRegistry") or {}).get("actualSeries", {})
+    for series_id, stat in prior.items():
+        if series_id not in stats:
+            stats[series_id] = {**stat, "retained": True}
     return stats
 
 
@@ -586,11 +526,14 @@ def _event_hours_to_release(release_at: Any) -> Optional[float]:
     return round((parsed - datetime.now(timezone.utc)).total_seconds() / 3600.0, 1)
 
 
-def _release_from_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _release_from_rows(rows: List[Dict[str, Any]], now: datetime | None = None) -> Dict[str, Any]:
     releases = [row for row in rows if str(row.get("type") or "").lower() == "release" and str(row.get("group") or "").upper() == "CPI"]
     if not releases:
         return {}
-    now = datetime.now(timezone.utc)
+    now = now or datetime.now(timezone.utc)
+    recent = [row for row in releases if (parsed := _parse_datetime(row.get("date"))) and 0 <= (now - parsed).total_seconds() <= 3 * 86400]
+    if recent:
+        releases = recent
     def release_sort(row: Dict[str, Any]) -> tuple[int, datetime]:
         parsed = _parse_datetime(row.get("date")) or datetime.max.replace(tzinfo=timezone.utc)
         return (0 if parsed >= now else 1, parsed)
@@ -623,9 +566,9 @@ def _nowcast_lookup_from_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             continue
         if not bucket:
             bucket = "yearOverYear" if abs(value) >= 1.0 else "monthOverMonth"
-        lookup[f"{bucket}:{label}"] = {
+        lookup[f"{metadata.get('period')}:{bucket}:{label}"] = {
             "value": round(value, 2),
-            "label": _pct_value_label(value),
+            "label": f"{value:.2f}%",
             "source": row.get("source") or "Cleveland Fed Inflation Nowcasting",
             "sourceUrl": row.get("sourceUrl"),
             "generatedAt": row.get("date"),
@@ -652,21 +595,30 @@ def _compose_cpi_release_events(
     dependencies: MacroCpiRegistryDependencies,
     rows: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
-    release = _release_from_rows(rows)
+    now = _parse_datetime(_utc_now_iso(dependencies)) or datetime.now(timezone.utc)
+    release = _release_from_rows(rows, now)
     release_at = _parse_datetime(release.get("releaseAt"))
-    is_released = bool(release_at and release_at <= datetime.now(timezone.utc))
+    is_released = bool(release_at and release_at <= now)
     period = _period_from_release(release)
+    period_key = month_key(period)
     nowcasts = _nowcast_lookup_from_rows(rows)
     actual_series = _fetch_cpi_series_stats(dependencies)
     events: List[Dict[str, Any]] = []
     for spec in CPI_EVENT_SPECS:
         stat = actual_series.get(str(spec["seriesId"])) or {}
         metric = str(spec["metric"])
-        latest_metric = stat.get(metric)
-        previous_metric = stat.get(f"previous{metric.title()}")
-        actual = latest_metric if is_released else None
-        previous = previous_metric if is_released else latest_metric
-        forecast = nowcasts.get(f"{spec['bucket']}:{str(spec['nowcastKey']).lower()}") or {}
+        actual = monthly_metric(stat.get("observations", []), period_key, metric) if is_released else None
+        previous = monthly_metric(stat.get("observations", []), shift_month(period_key, -1), metric) if period_key else None
+        actual = round(actual, 1) if actual is not None else None
+        previous = round(previous, 1) if previous is not None else None
+        forecast = nowcasts.get(f"{period_key}:{spec['bucket']}:{str(spec['nowcastKey']).lower()}") or {}
+        previous_seed = dependencies.source.get("previousRegistry") or {}
+        prior_event = next((event for event in previous_seed.get("events", []) if event.get("key") == spec["key"] and month_key(event.get("period")) == period_key), {})
+        if is_released:
+            frozen_at = _parse_datetime(prior_event.get("forecastAsOf"))
+            forecast = {"value": prior_event.get("forecast"), "label": prior_event.get("forecastLabel"),
+                        "source": prior_event.get("forecastSource"), "sourceUrl": prior_event.get("forecastSourceUrl"),
+                        "generatedAt": prior_event.get("forecastAsOf")} if frozen_at and release_at and frozen_at < release_at else {}
         surprise = None
         if actual is not None and _float(forecast.get("value")) is not None:
             surprise = round(float(actual) - float(forecast["value"]), 2)
@@ -682,7 +634,10 @@ def _compose_cpi_release_events(
                 "actualLabel": _pct_value_label(actual),
                 "forecast": forecast.get("value"),
                 "forecastLabel": forecast.get("label") or "--",
-                "forecastKind": "Nowcast",
+                "forecastKind": "Nowcast (model)",
+                "forecastAsOf": forecast.get("generatedAt"),
+                "adjustment": "NSA" if metric == "yoy" else "SA",
+                "limitation": "No period-matched pre-release nowcast" if not forecast else None,
                 "previous": previous,
                 "previousLabel": _pct_value_label(previous),
                 "surprise": surprise,
@@ -693,6 +648,7 @@ def _compose_cpi_release_events(
                 "forecastSource": forecast.get("source") or "Cleveland Fed Inflation Nowcasting",
                 "forecastSourceUrl": forecast.get("sourceUrl") or "",
                 "asOf": stat.get("date"),
+                "actualBasis": "Derived from latest FRED index vintage; not an archived first-release print",
             }
         )
     forecast_count = sum(1 for item in events if _float(item.get("forecast")) is not None)
@@ -732,12 +688,13 @@ def _energy_rows(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
                 value=item.get("value"),
                 unit=item.get("unit"),
                 change=change,
-                change_label=f"{_signed(change)}W",
+                change_label=f"{_signed(change)} {item.get('unit') or 'units'} WoW",
                 date=item.get("date"),
                 tone=tone,
                 source=str(item.get("source") or "EIA"),
                 source_url=str(item.get("sourceUrl") or ""),
-                implication="headline CPI energy impulse",
+                implication="Commodity price proxy, not weighted CPI contribution",
+                metadata={"contextOnly": True, "fetchedAt": payload.get("generatedAt"), "publishedAt": None, "frequency": "weekly", "adjustment": "Source basis"},
             )
         )
     return rows
@@ -764,7 +721,8 @@ def _food_rows(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
                 tone=tone,
                 source=str(item.get("source") or "FRED / BLS CPI"),
                 source_url=str(item.get("sourceUrl") or ""),
-                implication="headline CPI food component",
+                implication="Food CPI observation, not weighted contribution",
+                metadata={"seriesId": item.get("seriesId"), "fetchedAt": payload.get("generatedAt"), "publishedAt": None, "frequency": "monthly", "adjustment": "Source basis"},
             )
         )
     return rows
@@ -776,13 +734,8 @@ def _macro_driver_rows(payload: Dict[str, Any], *, default_group: str, implicati
         if not isinstance(item, dict):
             continue
         item_metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
-        unit = str(item.get("unit") or "").strip().lower()
-        if unit == "pp":
-            change = item.get("change")
-            metric = "pp"
-        else:
-            change = item.get("changePct") if _float(item.get("changePct")) is not None else item.get("change")
-            metric = "%" if _float(item.get("changePct")) is not None else ""
+        change = item.get("changeValue")
+        metric = item.get("changeUnit") or ""
         rows.append(
             _row(
                 key=f"{default_group.lower()}-{item.get('key') or item.get('seriesId') or item.get('label')}",
@@ -792,7 +745,7 @@ def _macro_driver_rows(payload: Dict[str, Any], *, default_group: str, implicati
                 value=item.get("value"),
                 unit=item.get("unit"),
                 change=change,
-                change_label=f"{_signed(change, suffix=metric)}",
+                change_label=item.get("changeLabel") or "Change unavailable",
                 date=item.get("date"),
                 tone=str(item.get("tone") or "neutral"),
                 source=str(item.get("source") or payload.get("source") or "Public macro source"),
@@ -800,6 +753,8 @@ def _macro_driver_rows(payload: Dict[str, Any], *, default_group: str, implicati
                 implication=implication,
                 metadata={
                     **item_metadata,
+                    **{key: item.get(key) for key in ("periodLabel", "frequency", "adjustment", "fetchedAt", "publishedAt", "changeUnit", "changeWindow", "contextOnly", "levelLabel", "levelBasis", "retained")},
+                    "valueLabel": item.get("valueLabel"),
                     "rawChange": item.get("change"),
                     "rawChangePct": item.get("changePct"),
                     "metric": item.get("metric"),
@@ -808,6 +763,9 @@ def _macro_driver_rows(payload: Dict[str, Any], *, default_group: str, implicati
                 },
             )
         )
+    for row in rows:
+        row["valueLabel"] = (row.get("metadata") or {}).get("valueLabel") or row["valueLabel"]
+        row["periodLabel"] = (row.get("metadata") or {}).get("periodLabel") or row.get("date")
     return rows
 
 
@@ -815,22 +773,11 @@ def _summarize(panel_id: str, rows: List[Dict[str, Any]], sources: Dict[str, str
     hot = sum(1 for row in rows if row.get("tone") == "hot")
     cool = sum(1 for row in rows if row.get("tone") == "cool")
     watch = sum(1 for row in rows if row.get("tone") == "watch")
-    if hot > cool and hot >= watch:
-        signal = "INFLATION PRESSURE HOT"
-        bias = "hot"
-    elif cool > hot and cool >= watch:
-        signal = "DISINFLATION PRESSURE"
-        bias = "cool"
-    elif rows:
-        signal = "MIXED MACRO WATCH"
-        bias = "watch"
-    else:
-        signal = str(config.get("emptySignal") or "REGISTRY WARMING")
-        bias = "unknown"
-    top = None
-    numeric = [row for row in rows if _float(row.get("change")) is not None and str(row.get("type") or "").lower() != "release"]
-    if numeric:
-        top = max(numeric, key=lambda row: abs(_float(row.get("change")) or 0.0))
+    signal = "OBSERVED MACRO DATA" if rows else str(config.get("emptySignal") or "REGISTRY WARMING")
+    bias = "neutral" if rows else "unknown"
+    top = None  # Units and time windows differ; no cross-unit ranking or causal vote.
+    leaves = {key: value for key, value in sources.items() if not any(other.startswith(key + ".") for other in sources)}
+    providers = {urlsplit(str(row.get("sourceUrl") or "")).hostname or ("FRED" if "FRED" in str(row.get("source") or "").upper() else str(row.get("sourceLabel") or "Unknown")) for row in rows}
     return {
         "panelId": panel_id,
         "signal": signal,
@@ -840,8 +787,10 @@ def _summarize(panel_id: str, rows: List[Dict[str, Any]], sources: Dict[str, str
         "coolCount": cool,
         "watchCount": watch,
         "rowCount": len(rows),
-        "coverage": sum(1 for value in sources.values() if str(value).lower() in {"ok", "redis-seed", "sqlite-seed", "stale-seed"}),
-        "sourceCount": len(sources),
+        "coverage": sum(1 for value in leaves.values() if str(value).lower() in {"ok", "redis-seed", "sqlite-seed", "empty"}),
+        "sourceCount": len(leaves),
+        "providerCount": len(providers),
+        "interpretation": "Directional observations, not independent evidence or weighted CPI contributions",
         "topMover": top,
         "topLabel": top.get("label") if top else None,
         "topValueLabel": top.get("valueLabel") if top else None,
@@ -859,17 +808,33 @@ def _payload(
     limit: int,
 ) -> Dict[str, Any]:
     config = PANEL_CONFIGS[panel_id]
+    previous = dependencies.source.get("previousRegistry") or {}
+    present = {row.get("key") for row in rows}
+    if any(state not in {"ok", "empty", "redis-seed", "sqlite-seed"} for state in sources.values()):
+        rows += [{**row, "metadata": {**(row.get("metadata") or {}), "retained": True}} for row in previous.get("items", []) if row.get("key") not in present and row.get("type") != "release"]
     capped = _rank_rows(rows)[: _limit(limit)]
     cpi_release = (
-        _compose_cpi_release_events(dependencies, capped)
+        _compose_cpi_release_events(dependencies, rows)
         if panel_id == "cpi-release-command-center"
         else {}
     )
     summary = _summarize(panel_id, capped, sources, config)
     if panel_id == "cpi-release-command-center":
         summary = {**summary, **(cpi_release.get("eventSummary") or {})}
-    status = "ok" if capped and any(str(value).lower() in {"ok", "redis-seed", "sqlite-seed", "stale-seed"} for value in sources.values()) else ("degraded" if capped else "warming")
+    status = "ok" if capped and all(str(value).lower() in {"ok", "empty", "redis-seed", "sqlite-seed"} for value in sources.values()) else ("degraded" if capped else "warming")
+    if panel_id == "cpi-release-command-center":
+        for spec in CPI_EVENT_SPECS:
+            sources[f"actuals.{spec['seriesId']}"] = "ok" if spec["seriesId"] in cpi_release.get("actualSeries", {}) and not cpi_release["actualSeries"][spec["seriesId"]].get("retained") else "error"
+        event_summary = cpi_release.get("eventSummary") or {}
+        if event_summary.get("previousCount") != 4 or (event_summary.get("status") == "released" and event_summary.get("actualCount") != 4):
+            sources["referenceValues"] = "incomplete"
+        summary.update(_summarize(panel_id, capped, sources, config))
+        summary.update(cpi_release.get("eventSummary") or {})
+        if capped and (any(value not in {"ok", "empty", "redis-seed", "sqlite-seed"} for value in sources.values()) or summary.get("forecastCount") != 4):
+            status = "degraded"
     payload = {
+        "schemaVersion": 2,
+        "expectedIntervalSeconds": 1800,
         "generatedAt": _utc_now_iso(dependencies),
         "panelId": panel_id,
         "source": config.get("source"),
@@ -933,11 +898,15 @@ def _inflation_nowcast_seeded_snapshot(
             if not isinstance(payload, dict):
                 payload = store.get_stale(runtime_service.INFLATION_NOWCAST_NAMESPACE, runtime_service.INFLATION_NOWCAST_CACHE_KEY)
     if isinstance(payload, dict):
-        return runtime_service.normalize_inflation_nowcast_payload(
+        result = runtime_service.normalize_inflation_nowcast_payload(
             payload,
             ctx=dependencies.source,
             generated_at=_utc_now_iso(dependencies),
         )
+        collected = _parse_datetime(payload.get("generatedAt"))
+        if collected is None or (datetime.now(timezone.utc) - collected).total_seconds() > 2700:
+            result["status"] = "stale"
+        return result
     return runtime_service.normalize_inflation_nowcast_payload(
         {"status": "seed-miss"},
         ctx=dependencies.source,
@@ -1003,7 +972,7 @@ def build_cpi_components_pressure_registry_snapshot(
         _energy_rows(energy)
         + _food_rows(food)
         + _macro_driver_rows(shelter, default_group="SHELTER", implication="core CPI shelter stickiness")
-        + _macro_driver_rows(goods, default_group="GOODS", implication="core goods CPI pressure")
+        + [row for row in _macro_driver_rows(goods, default_group="GOODS", implication="CPI goods observation") if str((row.get("metadata") or {}).get("seriesId") or "").startswith(("CUSR", "CPI"))]
     )
     sources: Dict[str, str] = {"energy": _snapshot_status(energy), "food": _snapshot_status(food), "shelter": _snapshot_status(shelter), "goods": _snapshot_status(goods)}
     _merge_sources(sources, "energy", energy)
@@ -1137,16 +1106,8 @@ def get_macro_cpi_registry_snapshot(
             panel_id=panel_id,
             limit=limit,
         )
-    return _normalize_macro_cpi_registry_payload(
-        build_macro_cpi_registry_payload(
-            dependencies.source,
-            panel_id,
-            limit=limit,
-        ),
-        dependencies=dependencies,
-        panel_id=panel_id,
-        limit=limit,
-    )
+    return {"schemaVersion": 2, "panelId": panel_id, "status": "warming", "cacheMode": "seed-miss",
+            "generatedAt": None, "items": [], "sources": {}, "summary": {"rowCount": 0}}
 
 
 def get_cpi_release_command_center_snapshot(
@@ -1211,9 +1172,7 @@ def _normalize_macro_cpi_registry_payload(
     result = json.loads(json.dumps(payload, ensure_ascii=True, default=str))
     rows = [_enrich_row(row) for row in (result.get("items") or []) if isinstance(row, dict)]
     result["items"] = _rank_rows(rows)[: _limit(limit)]
-    result["generatedAt"] = str(
-        result.get("generatedAt") or _utc_now_iso(dependencies)
-    )
+    result["generatedAt"] = result.get("generatedAt")
     result["panelId"] = str(result.get("panelId") or panel_id)
     result["status"] = str(result.get("status") or ("ok" if rows else "warming"))
     result["cacheMode"] = str(result.get("cacheMode") or "composed-seed")
@@ -1221,10 +1180,5 @@ def _normalize_macro_cpi_registry_payload(
     result["sources"] = result.get("sources") if isinstance(result.get("sources"), dict) else {}
     result["summary"] = _summarize(panel_id, result["items"], result["sources"], PANEL_CONFIGS.get(panel_id, {}))
     if panel_id == "cpi-release-command-center":
-        cpi_release = _compose_cpi_release_events(
-            dependencies,
-            result["items"],
-        )
-        result.update(cpi_release)
-        result["summary"] = {**result["summary"], **(cpi_release.get("eventSummary") or {})}
+        result["summary"].update(result.get("eventSummary") or {})
     return result

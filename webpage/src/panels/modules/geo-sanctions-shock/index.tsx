@@ -1,3 +1,4 @@
+import { macroSnapshot, macroRefreshPolicy, MacroRefresh } from '@/panels/shared/macro-runtime';
 import { panelStatus as panelTone } from '@/panels/shared/formatters';
 import { useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
@@ -18,10 +19,10 @@ const UCDP_TABS: { key: UcdpTab; label: string }[] = [
 
 function badgeLabel(status?: string | null) {
   const normalized = String(status || '').toLowerCase();
-  if (normalized === 'ok') return 'LIVE';
+  if (normalized === 'ok') return 'CONTEXT';
   if (normalized === 'empty') return 'QUIET';
   if (normalized === 'degraded') return 'DEGRADED';
-  return 'LIVE';
+  return 'WARMING';
 }
 
 function formatDate(value?: string | null) {
@@ -65,6 +66,8 @@ function GeoShockPanel({ payload }: {
   payload?: RuntimeGeoSanctionsShockPayload | null;
 }) {
   const [showHelp, setShowHelp] = useState(false);
+  const [view, setView] = useState<'sanctions' | 'conflicts'>('sanctions');
+  const sanctions = (payload?.items || []).filter(item => ['sanction', 'notice', 'policy'].includes(String(item.kind || '').toLowerCase()));
   const [activeTab, setActiveTab] = useState<UcdpTab>('state-based');
   const events = useMemo(
     () => (payload?.items || []).filter(isUcdpConflict),
@@ -98,17 +101,31 @@ function GeoShockPanel({ payload }: {
       )}
       badge={badgeLabel(payload?.status)}
       status={panelTone(payload?.status)}
-      count={activeCount || undefined}
+      count={view === 'sanctions' ? sanctions.length : activeCount}
       headerOverlay={showHelp ? (
         <div className="wm-panel-help-popover">
-          <strong>UCDP conflict events</strong>
-          <p>Mirrors WorldMonitor: cache up to 2,000 UCDP events, group by violence type, and render the first 50 rows for the selected category.</p>
+          <strong>Sanctions and conflict context</strong>
+          <p>OFAC list entries and dated Federal Register notices are separate from historical UCDP conflict observations. List entries are not necessarily new sanctions. Historical deaths do not measure current escalation.</p>
         </div>
       ) : null}
       className="wm-market-panel wm-geo-shock-panel"
       dataPanelId="geo-sanctions-shock"
     >
-      <div className="wm-geo-ucdp-panel">
+      <MacroRefresh payload={payload} sourceMinutes={5} />
+      <div className="wm-macro-filters" aria-label="Geopolitical data view">
+        <button type="button" aria-pressed={view === 'sanctions'} onClick={() => setView('sanctions')}>Sanctions / policy {sanctions.length}</button>
+        <button type="button" aria-pressed={view === 'conflicts'} onClick={() => setView('conflicts')}>Conflict history {events.length}</button>
+      </div>
+      {view === 'sanctions' ? <div>
+        <small className="wm-macro-observation">OFAC list entries are context, not a count of new sanctions. Policy notices keep their publication dates.</small>
+        {sanctions.length ? sanctions.map(item => <article key={item.id} className="wm-macro-registry-row">
+          <div><strong>{item.headline}</strong><p>{item.summary}</p>
+            <small className="wm-macro-observation">{item.source} · Published {formatDate(item.occurredAt)}</small>
+            <a className="wm-macro-source-link" href={item.sourceUrl || 'https://ofac.treasury.gov/sanctions-list-service'} target="_blank" rel="noopener noreferrer">Source</a>
+          </div>
+        </article>) : <p>No sanctions / policy observations available. Check source status above.</p>}
+      </div> : <div className="wm-geo-ucdp-panel">
+        <small className="wm-macro-observation">Historical UCDP dataset · Latest observation {events.map(item => item.occurredAt || '').sort().slice(-1)[0]?.slice(0, 10) || '--'}. Not a live conflict alert.</small>
         <div className="wm-geo-ucdp-header">
           <div className="wm-geo-ucdp-tabs" role="tablist" aria-label="UCDP violence type">
             {UCDP_TABS.map((tab) => (
@@ -167,7 +184,7 @@ function GeoShockPanel({ payload }: {
             <span>Cache {formatCompactNumber(events.length)}</span>
           </div>
         ) : null}
-      </div>
+      </div>}
     </Panel>
   );
 }
@@ -187,8 +204,10 @@ export const panel = runtimePanelFromRenderer(renderers, {
   eyebrow: 'world',
   description: 'UCDP conflict events, sanctions changes, and linked macro-risk markets.',
   defaultEnabled: true,
+  snapshot: macroSnapshot('geo-sanctions-shock', true),
 }, {
-  tier: 'slow',
+  ...macroRefreshPolicy,
+  staleAfterMs: 10 * 60_000,
   limit: 2000,
   fetchData: (context, limit) => fetchRuntimeGeoSanctionsShock(limit, context?.signal),
 });

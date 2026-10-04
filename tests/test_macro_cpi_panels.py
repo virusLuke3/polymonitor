@@ -19,7 +19,7 @@ class FakeApp:
 def fred_csv(series_id: str, values: list[float]) -> str:
     rows = ["observation_date," + series_id]
     for index, value in enumerate(values, start=1):
-        rows.append(f"2025-{index:02d}-01,{value}")
+        rows.append(f"{2025 + (index - 1) // 12}-{(index - 1) % 12 + 1:02d}-01,{value}")
     return "\n".join(rows)
 
 

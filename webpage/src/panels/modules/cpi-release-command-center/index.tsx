@@ -1,3 +1,4 @@
+import { macroSnapshot, macroRefreshPolicy, MacroRefresh } from '@/panels/shared/macro-runtime';
 import { displayValue as display } from '@/panels/shared/macro-intel';
 import { panelStatus } from '@/panels/shared/formatters';
 import { useMemo, useState } from 'preact/hooks';
@@ -22,6 +23,7 @@ function formatReleaseTime(value?: string | null) {
 }
 
 function formatHours(value?: number | string | null) {
+  if (value == null || value === '') return '--';
   const hours = Number(value);
   if (!Number.isFinite(hours)) return '--';
   if (hours <= 0) return 'released';
@@ -29,21 +31,7 @@ function formatHours(value?: number | string | null) {
   return `${(hours / 24).toFixed(1)}d`;
 }
 
-function eventTone(event: RuntimeCpiReleaseCommandEvent) {
-  const surprise = Number(event.surprise);
-  if (Number.isFinite(surprise)) {
-    if (surprise >= 0.1) return 'hot';
-    if (surprise <= -0.1) return 'cool';
-  }
-  const forecast = Number(event.forecast);
-  if (Number.isFinite(forecast)) {
-    const hotLine = String(event.key || '').includes('mom') ? 0.35 : 3.2;
-    const coolLine = String(event.key || '').includes('mom') ? 0.2 : 2.6;
-    if (forecast >= hotLine) return 'hot';
-    if (forecast <= coolLine) return 'cool';
-  }
-  return 'watch';
-}
+function eventTone(_event: RuntimeCpiReleaseCommandEvent) { return 'neutral'; }
 
 function Metric({ label, value, tone }: { label: string; value?: number | string | null; tone?: string }) {
   return (
@@ -73,6 +61,9 @@ function EventCard({ event }: { event: RuntimeCpiReleaseCommandEvent }) {
         <span>{event.seriesId || 'BLS'}</span>
         <span>{event.forecastSource ? `${shared('forecast', 'Forecast')}: ` : ''}{event.forecastSource || copy('noConsensus', 'No consensus feed')}</span>
       </div>
+      <small className="wm-macro-observation">{event.adjustment} · {event.status} · {event.limitation || `Nowcast checked ${event.forecastAsOf || '--'}`}</small>
+      {event.sourceUrl ? <a className="wm-macro-source-link" href={event.sourceUrl} target="_blank" rel="noopener noreferrer">BLS / FRED series</a> : null}
+      {event.forecastSourceUrl ? <> · <a className="wm-macro-source-link" href={event.forecastSourceUrl} target="_blank" rel="noopener noreferrer">Nowcast source</a></> : null}
     </article>
   );
 }
@@ -81,6 +72,8 @@ function ReleaseQueue({ items }: { items: RuntimeMacroRegistryItem[] }) {
   const { copy } = useSpecialistCopy('cpi-release-command-center');
   const releases = items
     .filter((item) => String(item.type || '').toLowerCase() === 'release')
+    .filter(item => Date.parse(item.date || '') >= Date.now())
+    .sort((a, b) => Date.parse(a.date || '') - Date.parse(b.date || ''))
     .slice(0, 5);
   if (!releases.length) return null;
   return (
@@ -137,6 +130,8 @@ function CpiReleaseCommandPanel({ payload }: { payload?: RuntimeCpiReleaseComman
       className="wm-market-panel wm-cpi-command-panel"
       dataPanelId="cpi-release-command-center"
     >
+      <MacroRefresh payload={payload} />
+      <small className="wm-macro-observation">Model nowcast is not market consensus. Actual is pending until the matching BLS period is published.</small>
       <div className="wm-cpi-command-hero">
         <div>
           <span>{copy('nextPrint', 'NEXT CPI PRINT')}</span>
@@ -144,7 +139,7 @@ function CpiReleaseCommandPanel({ payload }: { payload?: RuntimeCpiReleaseComman
           <em>{summary?.period ? copy('reference', 'Reference {period}', { period: summary.period }) : sourceLine}</em>
         </div>
         <div className="wm-cpi-command-clock">
-          <strong>{formatHours(summary?.hoursToEvent)}</strong>
+          <strong>{formatHours(releaseAt ? (Date.parse(releaseAt) - Date.now()) / 3_600_000 : null)}</strong>
           <span>{releaseTime}</span>
         </div>
       </div>
@@ -188,8 +183,9 @@ export const panel = runtimePanelFromRenderer(renderers, {
   eyebrow: 'macro',
   description: 'Official release timing with CPI event cards, nowcast forecast signal, and BLS/FRED previous values.',
   defaultEnabled: true,
+  snapshot: macroSnapshot('cpi-release-command-center'),
 }, {
-  tier: 'slow',
+  ...macroRefreshPolicy,
   limit: 36,
   fetchData: (context, limit) => fetchRuntimeCpiReleaseCommandCenter(limit, context?.signal),
 });

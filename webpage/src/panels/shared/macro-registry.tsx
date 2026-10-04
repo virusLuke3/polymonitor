@@ -1,9 +1,9 @@
+import { MacroRefresh } from './macro-runtime';
 import {
   displayValue,
   numberLabel as compactNumber,
   RowGlyph,
   StatusBadge,
-  signalToneClass,
   type PanelGlyphName,
 } from '@/panels/shared/macro-intel';
 import { panelStatus } from '@/panels/shared/formatters';
@@ -72,6 +72,12 @@ function RegistryRow({ item, panelId }: { item: RuntimeMacroRegistryItem; panelI
           {item.ageLabel ? <span className="wm-macro-registry-age">{item.ageLabel}</span> : null}
         </div>
         <strong>{item.label || shared('macroRegistryRow', 'Macro registry row')}</strong>
+        <span className="wm-macro-observation">Period {item.periodLabel || item.date || '--'} · {String(item.metadata?.adjustment || 'Source basis')}</span>
+        {item.metadata?.levelLabel && String(item.label).includes('payrolls') ? <small className="wm-macro-observation">Total {String(item.metadata.levelLabel)}</small> : null}
+        {item.metadata?.contextOnly ? <small className="wm-macro-observation">Context indicator; not a direct CPI component</small> : null}
+        {item.metadata?.retained ? <small className="wm-macro-observation">Saved observation · source refresh failed</small> : null}
+        <small className="wm-macro-observation">Collected {item.metadata?.fetchedAt ? new Date(String(item.metadata.fetchedAt)).toLocaleString() : 'See snapshot'} · Publication {String(item.metadata?.publishedAt || 'not supplied')}</small>
+        {item.sourceUrl ? <a className="wm-macro-source-link" href={item.sourceUrl} target="_blank" rel="noopener noreferrer">Source</a> : null}
       </div>
       <div className="wm-macro-registry-right">
         <strong className="wm-macro-registry-value">{displayValue(item.valueLabel || item.value)}</strong>
@@ -84,12 +90,13 @@ function RegistryRow({ item, panelId }: { item: RuntimeMacroRegistryItem; panelI
 export function MacroRegistryPanel({ config, payload }: { config: MacroRegistryConfig; payload?: RuntimeMacroRegistryPayload | null }) {
   const { copy, shared } = useSpecialistCopy(config.panelId);
   const [showHelp, setShowHelp] = useState(false);
+  const [group, setGroup] = useState('All');
   const summary = payload?.summary;
   const items = payload?.items || [];
-  const tone = signalToneClass(summary?.signal || summary?.bias || payload?.status);
   const status = String(payload?.status || '').toLowerCase();
   const badge = status && status !== 'ok' ? String(payload?.status || 'WARMING').toUpperCase() : undefined;
-  const topMover = summary?.topMover;
+  const groups = ['All', ...new Set(items.map(item => item.group || 'Macro'))];
+  const visible = group === 'All' ? items : items.filter(item => item.group === group);
   const title = copy('title', config.title);
   return (
     <Panel
@@ -117,18 +124,18 @@ export function MacroRegistryPanel({ config, payload }: { config: MacroRegistryC
       className="wm-market-panel wm-macro-registry-panel"
       dataPanelId={config.panelId}
     >
-      <div className="wm-macro-registry-data-strip" aria-label={shared('dataSummary', '{title} data summary', { title })}>
-        <DataMetric label={shared('top', 'Top')} value={topMover?.label || summary?.topLabel || '--'} />
-        <DataMetric label={shared('value', 'Value')} value={topMover?.valueLabel || topMover?.value || summary?.topValueLabel || '--'} />
-        <DataMetric label={shared('move', 'Move')} value={topMover?.changeLabel || summary?.topChangeLabel || '--'} tone={tone} />
-        <DataMetric label={shared('sources', 'Sources')} value={`${compactNumber(summary?.coverage)}/${compactNumber(summary?.sourceCount)}`} />
-        <DataMetric label={shared('alert', 'Alert')} value={summary?.hotCount ?? 0} tone="hot" />
-        <DataMetric label={shared('cool', 'Cool')} value={summary?.coolCount ?? 0} tone="cool" />
-        <DataMetric label={shared('watch', 'Watch')} value={summary?.watchCount ?? 0} tone="watch" />
-        <DataMetric label={shared('rows', 'Rows')} value={summary?.rowCount ?? items.length} />
+      <MacroRefresh payload={payload} />
+      <div className="wm-macro-registry-data-strip">
+        <DataMetric label="Series checks" value={`${compactNumber(summary?.coverage)}/${compactNumber(summary?.sourceCount)}`} />
+        <DataMetric label="Source services" value={summary?.providerCount ?? '--'} />
+        <DataMetric label="Rows" value={items.length} />
+      </div>
+      <small className="wm-macro-observation">Observed moves use each row's unit and period. These are not weighted CPI contributions or a forecast.</small>
+      <div className="wm-macro-filters" aria-label="Macro group filter">
+        {groups.map(value => <button key={value} type="button" aria-pressed={group === value} onClick={() => setGroup(value)}>{value}</button>)}
       </div>
       <div className="wm-macro-registry-list">
-        {items.length ? items.map((item) => <RegistryRow key={item.key || `${item.group}-${item.label}`} item={item} panelId={config.panelId} />) : (
+        {visible.length ? visible.map((item) => <RegistryRow key={item.key || `${item.group}-${item.label}`} item={item} panelId={config.panelId} />) : (
           <div className="wm-empty-state">
             <strong>{copy('emptyTitle', config.emptyTitle)}</strong>
             <em>{shared('registryWarming', 'Seed cache has not composed this registry yet.')}</em>
