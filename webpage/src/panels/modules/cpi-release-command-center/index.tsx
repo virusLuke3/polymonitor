@@ -147,7 +147,7 @@ function CpiReleaseCommandPanel({ payload }: { payload?: RuntimeCpiReleaseComman
 
       <div className="wm-cpi-command-strip">
         <Metric label={shared('actual', 'Actual')} value={`${display(summary?.actualCount)}/${display(summary?.eventCount)}`} />
-        <Metric label={shared('forecast', 'Forecast')} value={`${display(summary?.forecastCount)}/${display(summary?.eventCount)}`} tone="watch" />
+        <Metric label="Model nowcast" value={`${display(summary?.forecastCount)}/${display(summary?.eventCount)}`} tone="watch" />
         <Metric label={shared('previous', 'Previous')} value={`${display(summary?.previousCount)}/${display(summary?.eventCount)}`} />
         <Metric label={shared('source', 'Source')} value={payload?.cacheMode || payload?.status || '--'} />
       </div>
