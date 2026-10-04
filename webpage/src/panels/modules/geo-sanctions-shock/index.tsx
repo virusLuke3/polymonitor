@@ -67,7 +67,7 @@ function GeoShockPanel({ payload }: {
 }) {
   const [showHelp, setShowHelp] = useState(false);
   const [view, setView] = useState<'sanctions' | 'conflicts'>('sanctions');
-  const sanctions = (payload?.items || []).filter(item => ['sanction', 'notice', 'policy'].includes(String(item.kind || '').toLowerCase()));
+  const sanctions = (payload?.sanctionsItems ?? payload?.items ?? []).filter(item => ['sanction', 'notice', 'policy'].includes(String(item.kind || '').toLowerCase()));
   const [activeTab, setActiveTab] = useState<UcdpTab>('state-based');
   const events = useMemo(
     () => (payload?.items || []).filter(isUcdpConflict),
@@ -121,6 +121,7 @@ function GeoShockPanel({ payload }: {
         {sanctions.length ? sanctions.map(item => <article key={item.id} className="wm-macro-registry-row">
           <div><strong>{item.headline}</strong><p>{item.summary}</p>
             <small className="wm-macro-observation">{item.source} · Published {formatDate(item.occurredAt)}</small>
+            <small className="wm-macro-observation">Collected {item.collectedAt ? new Date(item.collectedAt).toLocaleString() : 'Unknown'}{item.retained ? ' · Saved record; source refresh failed' : ''}</small>
             <a className="wm-macro-source-link" href={item.sourceUrl || 'https://ofac.treasury.gov/sanctions-list-service'} target="_blank" rel="noopener noreferrer">Source</a>
           </div>
         </article>) : <p>No sanctions / policy observations available. Check source status above.</p>}

@@ -1070,6 +1070,8 @@ export type RuntimeGeoSanctionsShockSummary = {
 };
 
 export type RuntimeGeoSanctionsShockItem = {
+  collectedAt?: string | null;
+  retained?: boolean;
   id?: string | null;
   kind?: string | null;
   headline?: string | null;
@@ -1120,6 +1122,7 @@ export type RuntimeGeoSanctionsShockPayload = {
   conflictState?: string | null;
   summary?: RuntimeGeoSanctionsShockSummary | null;
   items?: RuntimeGeoSanctionsShockItem[];
+  sanctionsItems?: RuntimeGeoSanctionsShockItem[];
   targetBreakdown?: RuntimeGeoSanctionsShockTargetBreakdown[];
   sanctionsTargetBreakdown?: RuntimeGeoSanctionsShockTargetBreakdown[];
   countryRiskBreakdown?: RuntimeGeoSanctionsShockTargetBreakdown[];

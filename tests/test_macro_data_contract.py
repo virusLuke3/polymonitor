@@ -181,3 +181,22 @@ def test_component_coverage_does_not_depend_on_unused_trade_turnover_or_policy(m
     assert 'goods.federal_register' not in result['sources']
     states['cpi_commodities'] = 'error'
     assert registry.build_cpi_components_pressure_registry_snapshot({})['status'] == 'degraded'
+
+
+def test_geo_conflict_cap_does_not_hide_collected_sanctions_and_retains_failures(monkeypatch):
+    from api.services import geo_sanctions_shock_service as geo
+    # Use its existing collector context without reaching any external service.
+    from test_geo_sanctions_shock import GeoSanctionsShockSeedBuilderTestCase, FakeRequests
+    ctx = GeoSanctionsShockSeedBuilderTestCase().make_context(requests_lib=FakeRequests())
+    conflicts = [{'id': f'conflict-{i}', 'kind': 'conflict', 'source': 'UCDP', 'headline': 'Historical event'} for i in range(2000)]
+    monkeypatch.setattr(geo, '_fetch_conflict_snapshot', lambda *a, **k: {'state': 'ok', 'provider': 'UCDP', 'items': conflicts})
+    result = geo.build_geo_sanctions_shock_seed_payload(ctx)
+    assert len(result['items']) == 2000
+    assert all(item['kind'] == 'conflict' for item in result['items'])
+    assert len(result['sanctionsItems']) > 0
+    assert geo._with_limit(result, 3)['sanctionsItems'] == result['sanctionsItems']
+    original = next(item for item in result['sanctionsItems'] if item['source'] == 'OFAC SDN')
+    monkeypatch.setattr(geo, '_fetch_ofac_snapshot', lambda *a, **k: {'states': {'ofacSdn': 'error', 'ofacConsolidated': 'error'}})
+    failed = geo.build_geo_sanctions_shock_seed_payload(ctx, previous=result)
+    kept = next(item for item in failed['sanctionsItems'] if item['id'] == original['id'])
+    assert kept['retained'] is True and kept['collectedAt'] == original['collectedAt']

@@ -19,6 +19,8 @@ export function macroSnapshot(panelId: string, geo = false): PanelSnapshotContra
       if (!Array.isArray(payload.items) || typeof payload.status !== 'string') throw new Error('Invalid macro rows/status');
       if (payload.items.length && !Number.isFinite(Date.parse(payload.generatedAt || ''))) throw new Error('Missing macro collection timestamp');
       if (!geo && payload.items.length && (payload.schemaVersion !== 2 || payload.panelId !== panelId)) throw new Error('Incompatible macro snapshot');
+      const sanctions = (value as { sanctionsItems?: unknown }).sanctionsItems;
+      if (geo && sanctions != null && (!Array.isArray(sanctions) || sanctions.some(row => !row || typeof row !== 'object'))) throw new Error('Invalid sanctions sample');
       for (const row of payload.items) {
         if (!row || typeof row !== 'object') throw new Error('Invalid macro row');
         for (const key of ['value', 'change'] as const) {

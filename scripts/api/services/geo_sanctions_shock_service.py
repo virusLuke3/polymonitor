@@ -334,6 +334,11 @@ def _with_limit(payload: Dict[str, Any], limit: int) -> Dict[str, Any]:
         result["items"] = items[:normalized_limit]
     else:
         result["items"] = []
+    # Keep the conflict sample compatible while exposing the independently bounded policy sample.
+    sanctions = result.get("sanctionsItems")
+    if not isinstance(sanctions, list):
+        sanctions = [item for item in result["items"] if isinstance(item, dict) and item.get("kind") in {"sanction", "notice", "policy"}]
+    result["sanctionsItems"] = [item for item in sanctions if isinstance(item, dict)][:60]
     result["linkedMarkets"] = []
     return result
 
@@ -1471,6 +1476,16 @@ def build_geo_sanctions_shock_seed_payload(
         *(ofac_snapshot.get("focusEntries") or []),
         *(notices_snapshot.get("items") or []),
     ]
+    policy_collected_at = dependencies.utc_now_iso()
+    panel_sanctions = [{**item, "collectedAt": policy_collected_at} for item in sanctions_items if isinstance(item, dict)]
+    present_policy_ids = {item.get("id") for item in panel_sanctions}
+    source_keys = {"OFAC SDN": "ofacSdn", "OFAC Consolidated": "ofacConsolidated", "Federal Register": "federalRegister"}
+    for item in previous_payload.get("sanctionsItems") or []:
+        if not isinstance(item, dict) or item.get("id") in present_policy_ids:
+            continue
+        source_key = source_keys.get(item.get("source"))
+        if source_key and source_states.get(source_key) not in {"ok", "empty"}:
+            panel_sanctions.append({**item, "retained": True})
     conflict_items = [
         *(conflict_snapshot.get("items") or []),
     ]
@@ -1512,6 +1527,7 @@ def build_geo_sanctions_shock_seed_payload(
                 "militaryFeed": _military_feed_label(str(conflict_snapshot.get("state") or ""), conflict_snapshot.get("items") or []),
             },
             "items": items,
+            "sanctionsItems": _sort_shock_items(panel_sanctions)[:60],
             "targetBreakdown": _build_target_breakdown(all_items, target_scores),
             "sanctionsTargetBreakdown": _build_target_breakdown(
                 sanctions_items,

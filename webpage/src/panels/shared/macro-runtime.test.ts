@@ -31,4 +31,12 @@ describe('macro snapshot and refresh contract', () => {
     expect(readResourceCache(contract, storage, now + 60_000)).toEqual(payload);
     expect(readResourceCache(contract, storage, now + 24 * 60 * 60_000 + 1)).toBeNull();
   });
+  it('validates the independent sanctions sample without changing the existing conflict contract', () => {
+    const geo = macroSnapshot('geo-sanctions-shock', true);
+    const raw = { status: 'ok', generatedAt: payload.generatedAt, items: [{ id: 'conflict-1', kind: 'conflict' }],
+      sanctionsItems: [{ id: 'ofac-1', kind: 'sanction', headline: 'List entry' }] };
+    expect(geo.parse(raw)).toEqual(raw);
+    expect(() => geo.parse({ ...raw, sanctionsItems: [null] })).toThrow();
+    expect(() => geo.parse({ ...raw, sanctionsItems: 'broken' })).toThrow();
+  });
 });

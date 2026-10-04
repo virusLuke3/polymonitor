@@ -61,7 +61,9 @@ after release cannot fabricate that history.
   means all series are in the latest official publication period.
 
 Geo separates OFAC list entries and dated policy notices from UCDP historical
-conflict observations. List membership is not evidence of a new sanction action;
+conflict observations. A separately bounded `sanctionsItems` sample prevents the
+2,000-record conflict cap from hiding already collected policy records. Existing
+conflict items and map coordinates remain unchanged. List membership is not evidence of a new sanction action;
 historical death estimates are not a live escalation metric.
 
 ## Verification
