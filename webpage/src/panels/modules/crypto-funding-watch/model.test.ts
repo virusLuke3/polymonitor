@@ -40,6 +40,7 @@ describe('qualified funding domain contract', () => {
   it('rejects inactive instruments, malformed numbers, wrong underliers and future clocks', () => {
     for (const change of [
       { contractStatus: 'SETTLING' }, { eligible: false }, { fundingRate: null, fundingRatePercent: null },
+      { acquisitionState: 'error' }, { acquisitionState: undefined },
       { fundingRatePercent: Infinity }, { fundingRatePercent: -40 }, { settleCoin: 'USDC' },
       { symbol: 'ETHUSDT', id: 'binance:ETHUSDT' }, { eligibilityCheckedAt: '2026-10-05T00:00:00Z' },
       { updatedAt: '2026-10-04T11:00:00Z', quoteObservedAt: '2026-10-04T11:00:00Z' },

@@ -31,6 +31,7 @@ function parseQuote(value: unknown, asset: string, now: number): FundingQuote | 
   const updatedAt = date(raw.updatedAt), fetchedAt = date(raw.fetchedAt), eligibilityCheckedAt = date(raw.eligibilityCheckedAt);
   if (!symbol || raw.asset !== asset || percent == null || ratio == null || Math.abs(ratio) > 1 || Math.abs(percent - ratio * 100) > 1e-8) return null;
   if (raw.eligible !== true || raw.contractType !== 'perpetual' || raw.settleCoin !== 'USDT') return null;
+  if (raw.acquisitionState !== 'ok' && raw.acquisitionState !== 'retained') return null;
   if (raw.exchange !== 'Binance' && raw.exchange !== 'Bybit') return null;
   if (raw.contractStatus !== (raw.exchange === 'Binance' ? 'TRADING' : 'Trading')) return null;
   if (raw.id !== `${raw.exchange.toLowerCase()}:${symbol}` || !symbol.endsWith('USDT')) return null;
