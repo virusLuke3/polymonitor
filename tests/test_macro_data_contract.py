@@ -160,3 +160,24 @@ def test_optional_employment_calendar_does_not_fail_verified_cpi(monkeypatch):
     assert result['sources']['calendar.blsCpi'] == 'ok'
     assert result['optionalSources']['calendar.blsEmployment'] == 'fallback'
     assert result['summary']['forecastCount'] == result['summary']['previousCount'] == 4
+
+
+def test_component_coverage_does_not_depend_on_unused_trade_turnover_or_policy(monkeypatch):
+    monkeypatch.setattr(registry.energy_gasoline_shock_service, 'get_energy_gasoline_shock_snapshot',
+        lambda *a, **k: {'status': 'ok', 'sources': {'eia': 'ok'}, 'items': []})
+    monkeypatch.setattr(registry.food_retail_basket_service, 'get_food_retail_basket_snapshot',
+        lambda *a, **k: {'status': 'ok', 'sources': {'fred': 'ok'}, 'items': []})
+    monkeypatch.setattr(drivers, 'get_shelter_rent_oer_pressure_snapshot',
+        lambda *a, **k: {'status': 'ok', 'sources': {'rent': 'ok'}, 'items': []})
+    specs = drivers.PANEL_CONFIGS['supply-tariff-import-watch']['series']
+    states = {spec['key']: 'ok' for spec in specs}
+    states.update(imports='error', export_import='error', federal_register='error')
+    monkeypatch.setattr(drivers, 'get_supply_tariff_import_watch_snapshot',
+        lambda *a, **k: {'status': 'degraded', 'sources': states,
+                        'items': [{'key': 'cpi_commodities', 'seriesId': 'CUSR0000SAC', 'value': 100}]})
+    result = registry.build_cpi_components_pressure_registry_snapshot({})
+    assert result['status'] == 'ok'
+    assert 'goods.imports' not in result['sources']
+    assert 'goods.federal_register' not in result['sources']
+    states['cpi_commodities'] = 'error'
+    assert registry.build_cpi_components_pressure_registry_snapshot({})['status'] == 'degraded'

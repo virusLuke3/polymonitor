@@ -983,7 +983,9 @@ def build_cpi_components_pressure_registry_snapshot(
     _merge_sources(sources, "energy", energy)
     _merge_sources(sources, "food", food)
     _merge_sources(sources, "shelter", shelter)
-    _merge_sources(sources, "goods", goods)
+    required_goods = {spec["key"] for spec in macro_cpi_panels_service.PANEL_CONFIGS["supply-tariff-import-watch"]["series"] if spec["seriesId"].startswith(("CUSR", "CPI"))}
+    goods_states = goods.get("sources") or {}
+    _merge_sources(sources, "goods", {**goods, "sources": {key: goods_states.get(key, "missing") for key in required_goods}})
     return _payload(
         dependencies,
         "cpi-components-pressure-registry",
