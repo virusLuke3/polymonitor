@@ -816,6 +816,7 @@ export class GlobeMapRenderer implements MapRenderer {
       // resumeAnimation performs one complete public globe.gl tick (controls,
       // composer, hover and tweens). Cancel its successor immediately: this RAF
       // is the only draw owner, including aircraft and data updates.
+      const occluded = this.staticBatch.cull(this.globe.camera().position);
       this.globe.resumeAnimation();
       this.globe.pauseAnimation();
       if (this.ready && !this.readyReported) {
@@ -833,6 +834,7 @@ export class GlobeMapRenderer implements MapRenderer {
       }
       if (this.host) {
         this.host.dataset.globeFrames = String(Number(this.host.dataset.globeFrames || 0) + 1);
+        this.host.dataset.globeOccludedObjects = String(occluded);
         this.host.dataset.globeDrawCalls = String(this.globe.renderer().info.render.calls);
         this.host.classList.add("is-render-idle");
       }

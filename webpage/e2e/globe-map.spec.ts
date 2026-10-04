@@ -230,6 +230,7 @@ test('static batching keeps exact globe pixels and native event picking', async 
   const native = await globe.screenshot({ path: "artifacts/map-performance-optimization-20261004/batch-native.png" });
   await toggle(true); await page.waitForTimeout(100);
   expect((await globe.screenshot({ path: "artifacts/map-performance-optimization-20261004/batch-candidate.png" })).equals(native)).toBe(true);
+  await expect.poll(async () => Number(await globe.getAttribute('data-globe-occluded-objects'))).toBeGreaterThan(0);
   const before = Number(await globe.getAttribute('data-globe-frames'));
   await page.waitForTimeout(500);
   expect(Number(await globe.getAttribute('data-globe-frames')) - before).toBeLessThanOrEqual(1);
@@ -247,6 +248,16 @@ test('static batching keeps exact globe pixels and native event picking', async 
   }
   await page.mouse.up();
   await expect.poll(() => new URL(page.url()).searchParams.get('center')).not.toBe(beforeDrag);
+  // Occlusion is conservative at a moved camera and at two globe distances.
+  for (const action of ['Zoom in', 'Zoom out']) {
+    await page.getByRole('button', { name: action, exact: true }).click();
+    await page.mouse.move(0, 0);
+    await page.waitForTimeout(500);
+    await toggle(false); await page.waitForTimeout(100);
+    const allGeometry = await globe.screenshot({ path: `artifacts/map-performance-optimization-20261004/${action}-native.png` });
+    await toggle(true); await page.waitForTimeout(100);
+    expect((await globe.screenshot({ path: `artifacts/map-performance-optimization-20261004/${action}-culled.png` })).equals(allGeometry)).toBe(true);
+  }
   const beforeExit = new URL(page.url()).searchParams.get('center');
   await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
   await page.mouse.down();

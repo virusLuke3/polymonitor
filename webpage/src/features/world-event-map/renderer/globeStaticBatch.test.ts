@@ -29,3 +29,18 @@ it('batches opaque outlines without changing transparent cap order, picking or o
   expect(batch.rebuild(scene)).toEqual({ objects: 12, batches: 1 });
   batch.clear();
 });
+
+it('only culls bounds fully hidden by the opaque Earth and restores them on camera change', () => {
+  const scene = new THREE.Scene(), sources: any[] = [];
+  for (const [x, z, radius] of [[0, -100, 2], [0, 100, 2], [100, 0, 8], [0, -60, 90]]) {
+    const group = new THREE.Group(); group.__globeObjType = 'polygon';
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(radius, 8, 8), new THREE.MeshBasicMaterial({ transparent: true, opacity: .2 }));
+    mesh.position.set(x, 0, z); group.add(mesh); scene.add(group); sources.push(mesh);
+  }
+  const batch = new GlobeStaticBatch(); batch.rebuild(scene);
+  expect(batch.cull(new THREE.Vector3(0, 0, 300))).toBe(1);
+  expect(sources.map(object => object.visible)).toEqual([false, true, true, true]);
+  expect(batch.cull(new THREE.Vector3(0, 0, -300))).toBe(1);
+  expect(sources.map(object => object.visible)).toEqual([true, false, true, true]);
+  batch.clear(); expect(sources.every(object => object.visible)).toBe(true);
+});

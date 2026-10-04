@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { afterEach, expect, it, vi } from 'vitest';
 vi.mock('globe.gl', () => ({ default: vi.fn() }));
 import { GlobeMapRenderer } from './GlobeMapRenderer';
@@ -8,7 +9,7 @@ it('coalesces data, input and animation wakes into one native tick and cancels o
   vi.stubGlobal('requestAnimationFrame', (fn: () => void) => setTimeout(fn, 16));
   vi.stubGlobal('cancelAnimationFrame', (id: ReturnType<typeof setTimeout>) => clearTimeout(id));
   const renderer = new GlobeMapRenderer() as any;
-  renderer.globe = { resumeAnimation: vi.fn(), pauseAnimation: vi.fn() };
+  renderer.globe = { resumeAnimation: vi.fn(), pauseAnimation: vi.fn(), camera: () => ({ position: new THREE.Vector3(0, 0, 300) }) };
   for (let i = 0; i < 50; i++) renderer.wake();
   await vi.advanceTimersByTimeAsync(16);
   expect(renderer.globe.resumeAnimation).toHaveBeenCalledTimes(1);
