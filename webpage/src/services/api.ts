@@ -20,7 +20,6 @@ import type {
   PriceSummary,
   RuntimeMarketGroup,
   RuntimeBreakingEventRadarPayload,
-  RuntimeCryptoFundingPayload,
   RuntimeCommodityTransmissionPayload,
   RuntimeCpiReleaseCalendarPayload,
   RuntimeDefiTokenWatchPayload,
@@ -137,7 +136,7 @@ function apiGetWithTimeout<T>(path: string, timeoutMs = 12000, externalSignal?: 
   if (!path.startsWith('/runtime/')) return run();
   // Visible quote/signal consumers share the first tier with primary hazards
   // and interactive detail. Bulk map layers cannot starve their refreshes.
-  const priority = /^\/runtime\/(signals|trades|markets)\/|natural-hazards\/map.*source=(usgs|nhc|nws)\b|detail|aviation.*viewport|map-query/.test(path) ? 0
+  const priority = /^\/runtime\/(?:(signals|trades|markets)\/|crypto\/funding-watch)|natural-hazards\/map.*source=(usgs|nhc|nws)\b|detail|aviation.*viewport|map-query/.test(path) ? 0
     : /natural-hazards|global-transport|transport\/global-shipping|geo-sanctions/.test(path) ? 1 : 2;
   return withRuntimeRequestBudget(run, externalSignal, priority);
 }
@@ -283,8 +282,8 @@ export function fetchRuntimeCrypto(signal?: AbortSignal) {
   return apiGet<RuntimeMarketGroup>('/runtime/markets/crypto', signal);
 }
 
-export function fetchRuntimeCryptoFundingWatch(limit = 18, signal?: AbortSignal) {
-  return apiGet<RuntimeCryptoFundingPayload>(`/runtime/crypto/funding-watch?limit=${limit}`, signal);
+export function fetchRuntimeCryptoFundingWatch(limit = 80, signal?: AbortSignal) {
+  return apiGetWithTimeout<unknown>(`/runtime/crypto/funding-watch?limit=${limit}`, 8000, signal, 'no-store');
 }
 
 export function fetchRuntimeDefiTokenWatch(limit = 10, signal?: AbortSignal) {

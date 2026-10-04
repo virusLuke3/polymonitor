@@ -4,9 +4,9 @@ from api.runtime_panels.types import PanelPayload, RuntimePanelContext
 
 PANEL_ID = "crypto-funding-watch"
 ROUTE = "/runtime/crypto/funding-watch"
-DEFAULT_LIMIT = 18
+DEFAULT_LIMIT = 80
 MIN_LIMIT = 4
-MAX_LIMIT = 40
+MAX_LIMIT = 120
 
 
 def get_snapshot(

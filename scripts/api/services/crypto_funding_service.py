@@ -3,148 +3,17 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Callable, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict
 
 from api.context import resolve_optional_service_callable, resolve_service_callable
-
-
-def _safe_float(value: Any) -> Optional[float]:
-    if value in (None, ""):
-        return None
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return None
-    return number if number == number else None
-
-
-def _safe_int(value: Any) -> Optional[int]:
-    if value in (None, ""):
-        return None
-    try:
-        return int(float(value))
-    except (TypeError, ValueError):
-        return None
-
-
-def _millis_to_iso(value: Any) -> Optional[str]:
-    millis = _safe_int(value)
-    if millis is None or millis <= 0:
-        return None
-    return datetime.fromtimestamp(millis / 1000, tz=timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _asset_from_symbol(symbol: str) -> str:
-    text = str(symbol or "").upper().strip()
-    for suffix in ("USDT", "USDC", "USD", "PERP"):
-        if text.endswith(suffix) and len(text) > len(suffix):
-            return text[: -len(suffix)]
-    return text or "N/A"
-
-
-def _severity(rate: Optional[float]) -> tuple[str, str, float]:
-    if rate is None:
-        return "unknown", "neutral", 0.0
-    abs_percent = abs(rate * 100)
-    if abs_percent >= 0.015:
-        return "extreme funding", "critical", abs_percent
-    if abs_percent >= 0.008:
-        return "elevated funding", "warning", abs_percent
-    return "normal funding", "normal", abs_percent
-
-
-def _direction(rate: Optional[float]) -> str:
-    if rate is None:
-        return "flat"
-    if rate > 0:
-        return "positive"
-    if rate < 0:
-        return "negative"
-    return "flat"
-
-
-def _market_state(direction: str) -> str:
-    if direction == "positive":
-        return "longs-pay-shorts"
-    if direction == "negative":
-        return "shorts-pay-longs"
-    return "flat"
-
-
-def _heat_band(rate_percent: Optional[float]) -> str:
-    value = abs(float(rate_percent or 0))
-    if value >= 0.015:
-        return "extreme"
-    if value >= 0.008:
-        return "strong"
-    if value >= 0.003:
-        return "medium"
-    if value > 0:
-        return "light"
-    return "flat"
-
-
-def _normalize_item(
-    *,
-    exchange: str,
-    raw: Dict[str, Any],
-    symbol: str,
-    funding_rate: Any,
-    mark_price: Any = None,
-    index_price: Any = None,
-    next_funding_time: Any = None,
-    updated_at: Any = None,
-) -> Optional[Dict[str, Any]]:
-    normalized_symbol = str(symbol or "").upper().strip()
-    if not normalized_symbol:
-        return None
-    rate = _safe_float(funding_rate)
-    if rate is None:
-        return None
-    severity, tone, score = _severity(rate)
-    asset = _asset_from_symbol(normalized_symbol)
-    funding_rate_percent = rate * 100
-    direction = _direction(rate)
-    return {
-        "id": f"{exchange.lower()}:{normalized_symbol}",
-        "exchange": exchange,
-        "symbol": normalized_symbol,
-        "asset": asset,
-        "pair": normalized_symbol,
-        "fundingRate": rate,
-        "fundingRatePercent": funding_rate_percent,
-        "annualizedPercent": rate * 3 * 365 * 100,
-        "severity": severity,
-        "tone": tone,
-        "abnormalScore": score,
-        "direction": direction,
-        "marketState": _market_state(direction),
-        "heatBand": _heat_band(funding_rate_percent),
-        "markPrice": _safe_float(mark_price),
-        "indexPrice": _safe_float(index_price),
-        "nextFundingTime": _millis_to_iso(next_funding_time),
-        "updatedAt": _millis_to_iso(updated_at),
-        "rawSource": raw.get("symbol") if isinstance(raw, dict) else None,
-    }
-
-
-def _headers(api_key: str = "", *, bybit: bool = False) -> Dict[str, str]:
-    headers = {"Accept": "application/json", "User-Agent": "polydata-runtime/1.0"}
-    if api_key:
-        headers["X-BAPI-API-KEY" if bybit else "X-MBX-APIKEY"] = api_key
-    return headers
-
-
-def _url_fingerprint(*urls: str) -> str:
-    joined = "|".join(str(url or "") for url in urls)
-    return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:12]
-
+from .crypto_funding import contracts, providers, universe
 
 CRYPTO_FUNDING_NAMESPACE = "snapshot:crypto:funding-watch"
-DEFAULT_CRYPTO_FUNDING_LIMIT = 18
-
+DEFAULT_CRYPTO_FUNDING_LIMIT = contracts.DEFAULT_LIMIT
+CATALOG_NAMESPACE = "snapshot:crypto:funding-catalog"
+UNIVERSE_NAMESPACE = "snapshot:crypto:funding-universe"
 
 @dataclass(frozen=True)
 class CryptoFundingDependencies:
@@ -156,6 +25,9 @@ class CryptoFundingDependencies:
     get_cached_json: Callable[..., Any] | None
     set_cached_json: Callable[..., Any] | None
     get_snapshot_payload: Callable[..., Any] | None
+    executor: Any = None
+    market_executor: Any = None
+    market_jobs: Any = None
 
     @classmethod
     def from_context(
@@ -182,6 +54,9 @@ class CryptoFundingDependencies:
                 context,
                 "get_snapshot_payload",
             ),
+            executor=context.get("funding_executor"),
+            market_executor=context.get("funding_market_executor"),
+            market_jobs=context.get("funding_market_jobs"),
         )
 
     @property
@@ -200,398 +75,212 @@ def _dependencies(
     return CryptoFundingDependencies.from_context(context)
 
 
-def _filter_symbols(items: Iterable[Dict[str, Any]], symbols: set[str]) -> List[Dict[str, Any]]:
-    return [item for item in items if str(item.get("symbol") or "").upper().strip() in symbols]
+
+def build_crypto_funding_cache_key(settings: Any, *, limit: int = DEFAULT_CRYPTO_FUNDING_LIMIT) -> str:
+    # One canonical seed; limit is presentation, not a different acquisition.
+    return json.dumps({"version": contracts.SCHEMA_VERSION,
+        "symbols": sorted(str(value) for value in settings.crypto_funding_watch_symbols),
+        "venues": [settings.crypto_funding_watch_api_url, settings.crypto_funding_watch_bybit_api_url]}, sort_keys=True)
 
 
-def _nearest_timestamp(values: Iterable[Optional[str]]) -> Optional[str]:
-    timestamps = [value for value in values if value]
-    if not timestamps:
-        return None
-    return min(timestamps)
-
-
-def _group_asset_rows(items: List[Dict[str, Any]], *, limit: int) -> tuple[List[str], List[Dict[str, Any]], List[Dict[str, Any]]]:
-    venue_order: List[str] = []
-    grouped: Dict[str, Dict[str, Any]] = {}
-
-    for item in items:
-        exchange = str(item.get("exchange") or "Exchange")
-        if exchange not in venue_order:
-            venue_order.append(exchange)
-        asset_key = str(item.get("asset") or item.get("symbol") or item.get("id"))
-        bucket = grouped.setdefault(
-            asset_key,
-            {
-                "id": asset_key,
-                "asset": item.get("asset") or item.get("symbol") or asset_key,
-                "symbol": item.get("asset") or item.get("symbol") or asset_key,
-                "quotes": [],
-            },
-        )
-        bucket["quotes"].append(item)
-
-    rows: List[Dict[str, Any]] = []
-    for asset_key, bucket in grouped.items():
-        quotes = sorted(
-            bucket["quotes"],
-            key=lambda quote: (
-                venue_order.index(str(quote.get("exchange") or "Exchange")),
-                str(quote.get("symbol") or ""),
-            ),
-        )
-        rates = [float(quote["fundingRatePercent"]) for quote in quotes if isinstance(quote.get("fundingRatePercent"), (int, float))]
-        max_abs_percent = max((abs(rate) for rate in rates), default=0.0)
-        spread_percent = max(rates) - min(rates) if len(rates) >= 2 else 0.0
-        consensus_percent = sum(rates) / len(rates) if rates else 0.0
-        positive_count = sum(1 for quote in quotes if quote.get("direction") == "positive")
-        negative_count = sum(1 for quote in quotes if quote.get("direction") == "negative")
-        if positive_count and negative_count:
-            bias = "mixed"
-        elif positive_count:
-            bias = "longs-pay"
-        elif negative_count:
-            bias = "shorts-pay"
-        else:
-            bias = "flat"
-        if max_abs_percent >= 0.015:
-            row_tone = "critical"
-        elif max_abs_percent >= 0.008 or spread_percent >= 0.01:
-            row_tone = "warning"
-        else:
-            row_tone = "normal"
-
-        rows.append(
-            {
-                "id": asset_key,
-                "asset": bucket["asset"],
-                "symbol": bucket["symbol"],
-                "venues": len(quotes),
-                "bias": bias,
-                "consensusFundingPercent": consensus_percent,
-                "spreadPercent": spread_percent,
-                "maxAbsFundingPercent": max_abs_percent,
-                "tone": row_tone,
-                "nextFundingTime": _nearest_timestamp(quote.get("nextFundingTime") for quote in quotes),
-                "quotes": quotes,
-            }
-        )
-
-    rows.sort(
-        key=lambda row: (
-            float(row.get("maxAbsFundingPercent") or 0),
-            float(row.get("spreadPercent") or 0),
-            str(row.get("asset") or ""),
-        ),
-        reverse=True,
-    )
-    limited_rows = rows[:limit]
-    limited_items = [quote for row in limited_rows for quote in row.get("quotes", [])]
-    return venue_order, limited_rows, limited_items
-
-
-def _fetch_binance(
-    dependencies: CryptoFundingDependencies,
-    symbols: set[str],
-) -> tuple[List[Dict[str, Any]], str]:
-    settings = dependencies.settings
-    url = str(settings.crypto_funding_watch_api_url or "").strip()
-    if not url:
-        return [], "missing-url"
-    payload = dependencies.http_json_get(
-        url,
-        timeout=12,
-        headers=_headers(settings.crypto_funding_watch_api_key),
-    )
-    rows = payload if isinstance(payload, list) else [payload] if isinstance(payload, dict) else []
-    items = []
-    for row in _filter_symbols((row for row in rows if isinstance(row, dict)), symbols):
-        item = _normalize_item(
-            exchange="Binance",
-            raw=row,
-            symbol=row.get("symbol"),
-            funding_rate=row.get("lastFundingRate"),
-            mark_price=row.get("markPrice"),
-            index_price=row.get("indexPrice"),
-            next_funding_time=row.get("nextFundingTime"),
-            updated_at=row.get("time"),
-        )
-        if item is not None:
-            items.append(item)
-    return items, "ok" if items else "empty"
-
-
-def _fetch_bybit(
-    dependencies: CryptoFundingDependencies,
-    symbols: set[str],
-) -> tuple[List[Dict[str, Any]], str]:
-    settings = dependencies.settings
-    url = str(settings.crypto_funding_watch_bybit_api_url or "").strip()
-    if not url:
-        return [], "missing-url"
-    payload = dependencies.http_json_get(
-        url,
-        params={"category": "linear"},
-        timeout=12,
-        headers=_headers(settings.crypto_funding_watch_bybit_api_key, bybit=True),
-    )
-    result = payload.get("result") if isinstance(payload, dict) else None
-    rows = result.get("list") if isinstance(result, dict) else []
-    items = []
-    for row in _filter_symbols((row for row in (rows or []) if isinstance(row, dict)), symbols):
-        item = _normalize_item(
-            exchange="Bybit",
-            raw=row,
-            symbol=row.get("symbol"),
-            funding_rate=row.get("fundingRate"),
-            mark_price=row.get("markPrice"),
-            index_price=row.get("indexPrice"),
-            next_funding_time=row.get("nextFundingTime"),
-            updated_at=None,
-        )
-        if item is not None:
-            items.append(item)
-    return items, "ok" if items else "empty"
-
-
-def build_crypto_funding_cache_key(settings: Any, *, limit: int = 16) -> str:
-    symbols = tuple(str(symbol).upper().strip() for symbol in settings.crypto_funding_watch_symbols if str(symbol).strip())
-    return json.dumps(
-        {
-            "limit": limit,
-            "symbols": symbols,
-            "urlSet": _url_fingerprint(settings.crypto_funding_watch_api_url, settings.crypto_funding_watch_bybit_api_url),
-            "version": 2,
-        },
-        sort_keys=True,
-        ensure_ascii=True,
-    )
-
-
-def normalize_crypto_funding_payload(payload: Any, *, settings: Any, limit: int = DEFAULT_CRYPTO_FUNDING_LIMIT, generated_at: str | None = None) -> Dict[str, Any]:
-    if not isinstance(payload, dict):
-        return {
-            "generatedAt": str(generated_at or ""),
-            "source": "binance/bybit-funding",
-            "sourceUrl": str(settings.crypto_funding_watch_source_url or ""),
-            "status": "invalid",
-            "sources": {},
-            "venues": [],
-            "assets": [],
-            "items": [],
-        }
-    assets = [item for item in (payload.get("assets") or []) if isinstance(item, dict)][:limit]
-    items = [item for item in (payload.get("items") or []) if isinstance(item, dict)]
-    return {
-        **payload,
-        "generatedAt": str(payload.get("generatedAt") or generated_at or ""),
-        "source": str(payload.get("source") or "binance/bybit-funding"),
-        "sourceUrl": str(payload.get("sourceUrl") or settings.crypto_funding_watch_source_url or ""),
-        "status": str(payload.get("status") or ("ok" if assets or items else "empty")),
-        "sources": payload.get("sources") if isinstance(payload.get("sources"), dict) else {},
-        "venues": payload.get("venues") if isinstance(payload.get("venues"), list) else [],
-        "assets": assets,
-        "items": items,
-    }
-
-
-def _with_cache_mode(payload: Dict[str, Any], cache_mode: str) -> Dict[str, Any]:
-    return {**payload, "cacheMode": str(payload.get("cacheMode") or cache_mode)}
-
-
-def _read_seeded_snapshot(
-    dependencies: CryptoFundingDependencies,
-    *,
-    namespace: str,
-    cache_key: str,
-    ttl_seconds: int,
-) -> Optional[Dict[str, Any]]:
-    if dependencies.get_cached_json is not None:
-        redis_payload = dependencies.get_cached_json(namespace, cache_key)
-        if isinstance(redis_payload, dict):
-            if dependencies.snapshot_store is not None:
-                dependencies.snapshot_store.set(
-                    namespace,
-                    cache_key,
-                    redis_payload,
-                    ttl_seconds,
-                )
-            return _with_cache_mode(redis_payload, "redis-seed")
-    if dependencies.snapshot_store is None:
-        return None
-    sqlite_payload = dependencies.snapshot_store.get(namespace, cache_key)
-    if isinstance(sqlite_payload, dict):
-        if dependencies.set_cached_json is not None:
-            dependencies.set_cached_json(
-                namespace,
-                cache_key,
-                sqlite_payload,
-                ttl_seconds,
-            )
-        return _with_cache_mode(sqlite_payload, "sqlite-seed")
-    stale_payload = dependencies.snapshot_store.get_stale(
-        namespace,
-        cache_key,
-    )
-    if isinstance(stale_payload, dict):
-        if dependencies.set_cached_json is not None:
-            dependencies.set_cached_json(
-                namespace,
-                cache_key,
-                stale_payload,
-                min(15, ttl_seconds),
-            )
-        return _with_cache_mode(stale_payload, "stale-seed")
+def _cached(dependencies: CryptoFundingDependencies, namespace: str, key: str) -> dict | None:
+    try:
+        value = dependencies.get_cached_json(namespace, key) if dependencies.get_cached_json else None
+        if isinstance(value, dict):
+            return value
+    except Exception:
+        pass
+    if dependencies.snapshot_store is not None:
+        value = dependencies.snapshot_store.get_stale(namespace, key)
+        if isinstance(value, dict):
+            return value
     return None
 
 
-def _store_seed_fallback(
-    dependencies: CryptoFundingDependencies,
-    *,
-    namespace: str,
-    cache_key: str,
-    payload: Dict[str, Any],
-    ttl_seconds: int,
-) -> Dict[str, Any]:
+def _store(dependencies: CryptoFundingDependencies, namespace: str, key: str, value: dict, ttl: int) -> None:
     if dependencies.snapshot_store is not None:
-        dependencies.snapshot_store.set(
-            namespace,
-            cache_key,
-            payload,
-            ttl_seconds,
-        )
+        dependencies.snapshot_store.set(namespace, key, value, ttl)
     if dependencies.set_cached_json is not None:
-        dependencies.set_cached_json(
-            namespace,
-            cache_key,
-            payload,
-            ttl_seconds,
-        )
-    return payload
+        dependencies.set_cached_json(namespace, key, value, ttl)
 
 
-def fetch_live_crypto_funding_watch_payload(
-    ctx: CryptoFundingContext,
-    limit: int = DEFAULT_CRYPTO_FUNDING_LIMIT,
-) -> Dict[str, Any]:
+def catalog_key(exchange: str, url: str) -> str:
+    return exchange.lower() + ":" + hashlib.sha256(str(url).encode()).hexdigest()[:16]
+
+
+def _market_universe(dependencies: CryptoFundingDependencies, catalogs: dict[str, dict], now: str) -> dict:
+    base = str(getattr(dependencies.settings, "gamma_api_base", "") or "")
+    key = hashlib.sha256(base.encode()).hexdigest()[:16]
+    cached = _cached(dependencies, UNIVERSE_NAMESPACE, key) or {}
+    if contracts.current(cached.get("observedAt"), now, universe.UNIVERSE_SECONDS):
+        return cached
+    if cached.get("status") != "ok" and contracts.current(cached.get("attemptedAt"), now, 120):
+        return cached
+    if dependencies.market_executor is not None:
+        pending = dependencies.market_jobs.get(key)
+        if pending is None or pending.done():
+            dependencies.market_jobs[key] = dependencies.market_executor.submit(
+                _refresh_market_universe, dependencies, catalogs, now, key, base, cached)
+        retained = contracts.current(cached.get("observedAt"), now, universe.UNIVERSE_SECONDS * 2)
+        return {**cached, "status": "stale" if retained else "warming", "assets": cached.get("assets", {}) if retained else {}}
+    return _refresh_market_universe(dependencies, catalogs, now, key, base, cached)
+
+
+def _refresh_market_universe(dependencies: CryptoFundingDependencies, catalogs: dict[str, dict], now: str, key: str, base: str, cached: dict) -> dict:
+    eligible = {item["asset"] for catalog in catalogs.values() for item in catalog.get("instruments", {}).values()}
+    try:
+        value = universe.discover_markets(dependencies.http_json_get, base_url=base, eligible_assets=eligible, now=now,
+                                         clock=dependencies.utc_now_iso)
+        if value["status"] == "ok":
+            _store(dependencies, UNIVERSE_NAMESPACE, key, value, universe.UNIVERSE_SECONDS)
+        return value
+    except Exception as exc:
+        # Failed discovery must not block funding. Old associations are labelled
+        # and never make a current-coverage claim.
+        retained = contracts.current(cached.get("observedAt"), now, universe.UNIVERSE_SECONDS * 2)
+        value = {**cached, "status": "stale" if retained else "unavailable", "assets": cached.get("assets", {}) if retained else {},
+                 "errorCode": type(exc).__name__, "attemptedAt": now}
+        _store(dependencies, UNIVERSE_NAMESPACE, key, value, 120)
+        return value
+
+
+def fetch_live_crypto_funding_watch_payload(ctx: CryptoFundingContext, limit: int = DEFAULT_CRYPTO_FUNDING_LIMIT,
+                                           previous: dict | None = None) -> dict:
     dependencies = _dependencies(ctx)
-    settings = dependencies.settings
-    symbols = tuple(str(symbol).upper().strip() for symbol in settings.crypto_funding_watch_symbols if str(symbol).strip())
-    symbol_set = set(symbols)
-    source_status: Dict[str, str] = {}
-    items: List[Dict[str, Any]] = []
-
-    for source, fetcher in (("binance", _fetch_binance), ("bybit", _fetch_bybit)):
+    now = dependencies.utc_now_iso()
+    urls = {"Binance": dependencies.settings.crypto_funding_watch_api_url,
+            "Bybit": dependencies.settings.crypto_funding_watch_bybit_api_url}
+    pool = dependencies.executor or ThreadPoolExecutor(max_workers=2, thread_name_prefix="funding-venue")
+    futures = {}
+    for exchange, url in urls.items():
+        key = catalog_key(exchange, url)
+        cached = _cached(dependencies, CATALOG_NAMESPACE, key)
+        futures[pool.submit(providers.collect_venue, exchange, url=url, get=dependencies.http_json_get, now=now,
+                            clock=dependencies.utc_now_iso,
+                            cached_catalog=cached, save_catalog=lambda value, key=key: _store(dependencies,
+                                CATALOG_NAMESPACE, key, value, contracts.CATALOG_SECONDS))] = exchange
+    done, pending = wait(futures, timeout=providers.SOURCE_BUDGET_SECONDS + 1)
+    results = {}
+    for future in done:
+        exchange = futures[future]
         try:
-            source_items, status = fetcher(dependencies, symbol_set)
-            source_status[source] = status
-            items.extend(source_items)
-        except Exception:
-            if dependencies.logger is not None:
-                dependencies.logger.exception(
-                    "crypto funding source failed source=%s",
-                    source,
-                )
-            source_status[source] = "error"
+            results[exchange] = future.result()
+        except Exception as exc:
+            results[exchange] = {"status": "error", "catalogStatus": "unavailable", "catalog": {},
+                                 "quotes": [], "errorCode": type(exc).__name__}
+    for future in pending:
+        future.cancel()
+        results[futures[future]] = {"status": "error", "catalogStatus": "unavailable", "catalog": {},
+                                   "quotes": [], "errorCode": "venue-deadline"}
+    if dependencies.executor is None:
+        pool.shutdown(wait=False, cancel_futures=True)
+    now = dependencies.utc_now_iso()
+    catalogs = {name: result.get("catalog", {}) for name, result in results.items()}
+    market_universe = _market_universe(dependencies, catalogs, now)
+    now = dependencies.utc_now_iso()
+    selected = universe.select_assets(catalogs, market_universe, dependencies.settings.crypto_funding_watch_symbols)
+    selected_set = set(selected)
+    previous = previous if isinstance(previous, dict) and previous.get("schemaVersion") == contracts.SCHEMA_VERSION else {}
+    previous_quotes = {q["id"]: q for q in previous.get("items", []) if isinstance(q, dict) and q.get("id")}
+    quotes: dict[str, dict] = {}
+    expected_ids: set[str] = set()
+    supported_assets: set[str] = set()
+    source_details = {}
+    for exchange in urls:
+        result = results[exchange]
+        catalog = catalogs[exchange].get("instruments", {})
+        canonical: dict[str, str] = {}
+        for symbol, row in catalog.items():
+            if not row.get("eligible") or row["asset"] not in selected_set:
+                continue
+            asset = row["asset"]
+            old_symbol = canonical.get(asset)
+            if old_symbol is None or (symbol != asset + "USDT", len(symbol), symbol) < (old_symbol != asset + "USDT", len(old_symbol), old_symbol):
+                canonical[asset] = symbol
+        expected = {f"{exchange.lower()}:{symbol}" for symbol in canonical.values()}
+        expected_ids.update(expected)
+        supported_assets.update(row["asset"] for row in catalog.values() if row.get("eligible") and row["asset"] in selected_set)
+        fresh = {q["id"]: q for q in result.get("quotes", []) if q["id"] in expected}
+        quotes.update(fresh)
+        retained = 0
+        for quote_id, old in previous_quotes.items():
+            if quote_id in quotes or old.get("exchange") != exchange or old.get("asset") not in selected_set:
+                continue
+            qualified = catalog.get(old.get("symbol"))
+            if qualified is not None and not qualified.get("eligible"):
+                continue
+            if catalog and quote_id not in expected:
+                continue
+            if old.get("eligible") is not True or not contracts.current(old.get("updatedAt"), now, contracts.RETAIN_SECONDS):
+                continue
+            if not contracts.current(old.get("eligibilityCheckedAt"), now, contracts.CATALOG_RETAIN_SECONDS):
+                continue
+            quotes[quote_id] = {**old, "acquisitionState": "retained"}
+            retained += 1
+        state = result["status"]
+        if state == "ok" and (expected - fresh.keys() or retained or result["catalogStatus"] != "ok"):
+            state = "degraded"
+        old_details = previous.get("sourceDetails", {}).get(exchange.lower(), {})
+        source_details[exchange.lower()] = {"exchange": exchange, "status": state,
+            "lastAttemptAt": now, "lastSuccessAt": result.get("fetchedAt") if fresh else old_details.get("lastSuccessAt"),
+            "responseAt": result.get("responseAt"), "catalogStatus": result.get("catalogStatus"),
+            "eligibilityCheckedAt": catalogs[exchange].get("checkedAt"),
+            "expected": len(expected), "succeeded": len(fresh), "retained": retained,
+            "missing": len(expected - fresh.keys() - quotes.keys()), "errorCode": result.get("errorCode")}
+    fresh_quotes = [quote for quote in quotes.values() if quote.get("acquisitionState") == "ok"]
+    generated = now if fresh_quotes else previous.get("generatedAt")
+    assets = contracts.group_assets(list(quotes.values()), markets=market_universe.get("assets", {}), order=selected, now=now)
+    missing = len(expected_ids - quotes.keys())
+    retained_count = sum(q.get("acquisitionState") == "retained" for q in quotes.values())
+    unknown_period = sum(q.get("fundingIntervalHours") is None for q in fresh_quotes)
+    status = "ok" if fresh_quotes and not missing and not retained_count and not unknown_period and all(row["status"] == "ok" for row in source_details.values()) else "degraded" if fresh_quotes else "stale" if quotes else "unavailable"
+    unavailable = []
+    for asset in selected:
+        if asset in supported_assets:
+            continue
+        known = all(result.get("catalogStatus") in {"ok", "retained"} for result in results.values())
+        unavailable.append({"asset": asset, "reason": "no-trading-usdt-perpetual" if known else "eligibility-unknown",
+                            "marketCount": market_universe.get("assets", {}).get(asset, {}).get("marketCount", 0)})
+    return {"schemaVersion": contracts.SCHEMA_VERSION, "kind": "crypto-funding", "generatedAt": generated,
+        "lastAttemptAt": now, "lastSuccessAt": now if fresh_quotes else previous.get("lastSuccessAt"),
+        "status": status, "source": "binance/bybit-funding", "cacheMode": "seeded",
+        "refreshIntervalSeconds": 30, "freshnessWindowSeconds": contracts.FRESH_SECONDS,
+        "sources": {name: detail["status"] for name, detail in source_details.items()}, "sourceDetails": source_details,
+        "venues": [name for name in urls if any(q["exchange"] == name for q in quotes.values())],
+        "assets": assets, "items": list(quotes.values()),
+        "coverage": {"requestedAssets": len(selected), "eligibleAssets": len(supported_assets),
+                     "availableAssets": len(assets), "expectedQuotes": len(expected_ids), "succeeded": len(fresh_quotes),
+                     "retained": retained_count, "missing": missing, "unknownPeriod": unknown_period,
+                     "unavailableAssets": unavailable},
+        "marketUniverse": {key: value for key, value in market_universe.items() if key != "assets"},
+        "marketLinkedAssets": sum(row["marketCount"] > 0 for row in assets),
+        "priceLinkedAssets": sum(row["priceMarketCount"] > 0 for row in assets),
+        "limitations": ["Funding is perpetual cost context, not a Polymarket probability or settlement-price feed.",
+                         "8h rates are linear time-normalized comparisons; future realized funding can change.",
+                         "Market associations use a bounded active crypto scan, not complete market coverage."]}
 
-    items.sort(
-        key=lambda item: (
-            float(item.get("abnormalScore") or 0),
-            1 if item.get("tone") == "critical" else 0,
-            str(item.get("asset") or ""),
-        ),
-        reverse=True,
-    )
-    venue_order, asset_rows, limited_items = _group_asset_rows(items, limit=limit)
-    ok_sources = [status for status in source_status.values() if status == "ok"]
-    if asset_rows and len(ok_sources) == len(source_status):
-        status = "ok"
-    elif asset_rows:
-        status = "degraded"
-    elif any(value == "missing-url" for value in source_status.values()):
-        status = "degraded"
-    elif all(value == "empty" for value in source_status.values()):
-        status = "empty"
-    else:
-        status = "invalid"
 
-    return normalize_crypto_funding_payload(
-        {
-            "generatedAt": dependencies.utc_now_iso(),
-            "source": "binance/bybit-funding",
-            "sourceUrl": str(settings.crypto_funding_watch_source_url or ""),
-            "status": status,
-            "sources": source_status,
-            "venues": venue_order,
-            "legend": {
-                "positive": "longs pay shorts",
-                "negative": "shorts pay longs",
-            },
-            "assets": asset_rows,
-            "items": limited_items,
-        },
-        settings=settings,
-        limit=limit,
-    )
+def normalize_crypto_funding_payload(payload: Any, *, settings: Any, limit: int = DEFAULT_CRYPTO_FUNDING_LIMIT,
+                                    generated_at: str | None = None) -> dict:
+    if not isinstance(payload, dict) or payload.get("schemaVersion") != contracts.SCHEMA_VERSION:
+        return {"schemaVersion": contracts.SCHEMA_VERSION, "kind": "crypto-funding", "generatedAt": None,
+                "status": "warming", "assets": [], "items": [], "refreshIntervalSeconds": 30}
+    assets = payload.get("assets", [])[:max(1, min(contracts.MAX_LIMIT, limit))]
+    ids = {q["id"] for row in assets for q in row.get("quotes", [])}
+    return {**payload, "assets": assets, "items": [q for q in payload.get("items", []) if q.get("id") in ids],
+            "displayedAssets": len(assets), "totalAssets": len(payload.get("assets", []))}
 
 
-def get_crypto_funding_watch_snapshot(
-    ctx: CryptoFundingContext,
-    limit: int = DEFAULT_CRYPTO_FUNDING_LIMIT,
-) -> Dict[str, Any]:
+def get_crypto_funding_watch_snapshot(ctx: CryptoFundingContext, limit: int = DEFAULT_CRYPTO_FUNDING_LIMIT) -> dict:
+    """Serving is read-only and seed-first; it never waits on external venues."""
     dependencies = _dependencies(ctx)
-    settings = dependencies.settings
-    ttl_seconds = max(10, int(settings.crypto_funding_watch_ttl_seconds or 15))
-    cache_key = build_crypto_funding_cache_key(settings, limit=limit)
-    seeded_payload = _read_seeded_snapshot(
-        dependencies,
-        namespace=CRYPTO_FUNDING_NAMESPACE,
-        cache_key=cache_key,
-        ttl_seconds=ttl_seconds,
-    )
-    if seeded_payload is None and int(limit or 0) != DEFAULT_CRYPTO_FUNDING_LIMIT:
-        seeded_payload = _read_seeded_snapshot(
-            dependencies,
-            namespace=CRYPTO_FUNDING_NAMESPACE,
-            cache_key=build_crypto_funding_cache_key(settings, limit=DEFAULT_CRYPTO_FUNDING_LIMIT),
-            ttl_seconds=ttl_seconds,
-        )
-    if seeded_payload is not None:
-        return normalize_crypto_funding_payload(
-            seeded_payload,
-            settings=settings,
-            limit=limit,
-            generated_at=dependencies.utc_now_iso(),
-        )
-
-    def _builder() -> Dict[str, Any]:
-        return fetch_live_crypto_funding_watch_payload(
-            dependencies,
-            limit=limit,
-        )
-
-    if (
-        dependencies.snapshot_store is None
-        and dependencies.get_snapshot_payload is not None
-    ):
-        return dependencies.get_snapshot_payload(
-            CRYPTO_FUNDING_NAMESPACE,
-            cache_key,
-            _builder,
-            ttl_seconds=ttl_seconds,
-        )
-
-    payload = _with_cache_mode(
-        fetch_live_crypto_funding_watch_payload(
-            dependencies,
-            limit=limit,
-        ),
-        "live-fallback",
-    )
-    return _store_seed_fallback(
-        dependencies,
-        namespace=CRYPTO_FUNDING_NAMESPACE,
-        cache_key=cache_key,
-        payload=payload,
-        ttl_seconds=ttl_seconds,
-    )
+    key = build_crypto_funding_cache_key(dependencies.settings)
+    payload = _cached(dependencies, CRYPTO_FUNDING_NAMESPACE, key)
+    mode = "seed"
+    if not isinstance(payload, dict) or payload.get("schemaVersion") != contracts.SCHEMA_VERSION:
+        return normalize_crypto_funding_payload(None, settings=dependencies.settings, limit=limit)
+    now = dependencies.utc_now_iso()
+    if not contracts.current(payload.get("generatedAt"), now):
+        mode = "stale-seed"
+        payload = {**payload, "status": "stale"}
+    return {**normalize_crypto_funding_payload(payload, settings=dependencies.settings, limit=limit), "cacheMode": mode}

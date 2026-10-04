@@ -9,6 +9,8 @@ import json
 import os
 import sys
 import time
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -34,7 +36,7 @@ from runtime.snapshot_store import SnapshotStore
 
 
 DEFAULT_INTERVAL_SECONDS = 30
-DEFAULT_LIMIT = 18
+DEFAULT_LIMIT = crypto_funding_service.DEFAULT_CRYPTO_FUNDING_LIMIT
 SEED_META_NAMESPACE = "seed-meta:crypto"
 SEED_META_CACHE_KEY = "funding-watch"
 SEED_META_SERVICE_NAME = "polydata-crypto-funding-seed.service"
@@ -81,8 +83,12 @@ class CryptoFundingWatcher:
         self.redis_client = redis.from_url(redis_url, decode_responses=True)
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
-        self.requests = requests.Session()
-        self.requests.trust_env = False
+        self.http_local = threading.local()
+        self.http_sessions = []
+        self.http_lock = threading.Lock()
+        self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="funding-venue")
+        self.market_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="funding-market")
+        self.market_jobs = {}
 
     def ttl_seconds(self) -> int:
         configured = int(os.environ.get("POLYDATA_CRYPTO_FUNDING_SEED_TTL_SECONDS", "0") or 0)
@@ -100,7 +106,14 @@ class CryptoFundingWatcher:
         return _redis_key(self.redis_prefix, self.namespace(), self.cache_key())
 
     def http_json_get(self, url: str, params: Optional[Dict[str, Any]] = None, timeout: int = 12, headers: Optional[Dict[str, str]] = None) -> Any:
-        response = self.requests.get(url, params=params, timeout=timeout, headers=headers)
+        session = getattr(self.http_local, "session", None)
+        if session is None:
+            session = requests.Session()
+            session.trust_env = False
+            self.http_local.session = session
+            with self.http_lock:
+                self.http_sessions.append(session)
+        response = session.get(url, params=params, timeout=timeout, headers=headers)
         response.raise_for_status()
         if not response.content:
             return None
@@ -112,7 +125,26 @@ class CryptoFundingWatcher:
             "app": _AppAdapter(),
             "http_json_get": self.http_json_get,
             "utc_now_iso": utc_now_iso,
+            "SNAPSHOT_STORE": self.snapshot_store,
+            "get_cached_json": self.get_cached_json,
+            "set_cached_json": self.set_cached_json,
+            "funding_executor": self.executor,
+            "funding_market_executor": self.market_executor,
+            "funding_market_jobs": self.market_jobs,
         }
+
+    def get_cached_json(self, namespace: str, key: str) -> dict | None:
+        raw = self.redis_client.get(_redis_key(self.redis_prefix, namespace, key))
+        return json.loads(raw) if raw else None
+
+    def set_cached_json(self, namespace: str, key: str, value: dict, ttl: int) -> None:
+        self.redis_client.set(_redis_key(self.redis_prefix, namespace, key), json.dumps(value, allow_nan=False), ex=ttl)
+
+    def close(self) -> None:
+        self.executor.shutdown(wait=True, cancel_futures=True)
+        self.market_executor.shutdown(wait=True, cancel_futures=True)
+        for session in self.http_sessions:
+            session.close()
 
     def load_previous_payload(self) -> Dict[str, Any]:
         try:
@@ -145,7 +177,7 @@ class CryptoFundingWatcher:
             expected_interval_seconds=self.interval_seconds,
             status=status,
             last_attempt_at=attempted_at,
-            last_success_at=last_success_at or attempted_at,
+            last_success_at=last_success_at,
             record_count=record_count,
             source_states=source_states,
             error_summary=error_summary,
@@ -153,48 +185,44 @@ class CryptoFundingWatcher:
             payload_status=status,
             metadata={"result": "stored", "limit": self.limit},
         )
+        payload["lastSuccessAt"] = last_success_at
         self.seed_meta_store.store(SEED_META_NAMESPACE, SEED_META_CACHE_KEY, payload)
 
     def run_once(self) -> Dict[str, Any]:
         previous = self.load_previous_payload()
         try:
-            payload = crypto_funding_service.fetch_live_crypto_funding_watch_payload(self.service_context(), limit=self.limit)
+            payload = crypto_funding_service.fetch_live_crypto_funding_watch_payload(
+                self.service_context(), limit=self.limit, previous=previous)
         except Exception as exc:
-            if previous:
-                self.store_payload(previous)
-                self.store_seed_meta(
-                    status="preserved",
-                    record_count=len(previous.get("assets") or previous.get("items") or []),
-                    source_states={"cryptoFunding": "error"},
-                    error_summary=str(exc),
-                    preserve_last_success=True,
-                )
-                return {"status": "preserved", "payload": previous}
-            self.store_seed_meta(status="error", record_count=0, source_states={"cryptoFunding": "error"}, error_summary=str(exc), preserve_last_success=True)
-            raise
-
-        record_count = len(payload.get("assets") or payload.get("items") or [])
-        if previous and record_count <= 0:
-            self.store_payload(previous)
-            self.store_seed_meta(
-                status="preserved",
-                record_count=len(previous.get("assets") or previous.get("items") or []),
-                source_states=payload.get("sources") if isinstance(payload.get("sources"), dict) else {"cryptoFunding": "empty"},
-                error_summary="Preserved previous crypto funding snapshot because new payload was empty",
-                preserve_last_success=True,
-            )
-            return {"status": "preserved", "payload": previous}
-
-        payload = {**payload, "cacheMode": "seeded"}
+            # Publish the failure without moving the saved snapshot's clock.
+            attempted_at = utc_now_iso()
+            items = [{**quote, "acquisitionState": "retained"} for quote in previous.get("items", [])]
+            by_id = {quote["id"]: quote for quote in items}
+            payload = {**previous, "schemaVersion": 3, "kind": "crypto-funding",
+                "generatedAt": previous.get("generatedAt"), "lastAttemptAt": attempted_at,
+                "lastSuccessAt": previous.get("lastSuccessAt"), "status": "stale" if items else "unavailable",
+                "sources": {"binance": "error", "bybit": "error"}, "items": items,
+                "sourceDetails": {name: {**previous.get("sourceDetails", {}).get(name, {}),
+                    "status": "error", "lastAttemptAt": attempted_at, "errorCode": type(exc).__name__}
+                    for name in ("binance", "bybit")},
+                "assets": [{**asset, "quotes": [by_id[q["id"]] for q in asset.get("quotes", []) if q["id"] in by_id],
+                            "strongestFundingPercent8h": None, "consensusFundingPercent8h": None, "status": "stale"}
+                           for asset in previous.get("assets", [])],
+                "coverage": {**previous.get("coverage", {}), "succeeded": 0, "retained": len(items)},
+                "errorCode": type(exc).__name__}
+        payload["refreshIntervalSeconds"] = self.interval_seconds
         self.store_payload(payload)
-        status = str(payload.get("status") or ("ok" if record_count else "degraded"))
-        self.store_seed_meta(
-            status=status if status in {"ok", "degraded"} else "degraded",
-            record_count=record_count,
-            source_states=payload.get("sources") if isinstance(payload.get("sources"), dict) else {},
-            error_summary=None if record_count else "Crypto funding payload contained no assets",
-        )
-        return {"status": status, "payload": payload}
+        status = str(payload.get("status") or "unavailable")
+        succeeded = int(payload.get("coverage", {}).get("succeeded", 0))
+        self.store_seed_meta(status=status, record_count=len(payload.get("assets", [])),
+            source_states=payload.get("sources", {}),
+            error_summary=None if status == "ok" else "Some sources or qualifications are unavailable; usable quotes retained",
+            preserve_last_success=succeeded <= 0)
+        return {"status": status, "generatedAt": payload.get("generatedAt"),
+                "assets": len(payload.get("assets", [])), "sources": payload.get("sources", {}),
+                "succeeded": succeeded, "retained": payload.get("coverage", {}).get("retained", 0),
+                "missing": payload.get("coverage", {}).get("missing", 0),
+                "marketUniverse": payload.get("marketUniverse", {}).get("status")}
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -220,18 +248,26 @@ def main() -> int:
     )
     watcher.redis_client.ping()
     print(f"[crypto-funding] redis_key={watcher.redis_key()} sqlite={settings.snapshot_sqlite_path}", file=sys.stderr)
-    if not args.watch:
-        print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
-        return 0
-    interval_seconds = max(15, int(args.interval or DEFAULT_INTERVAL_SECONDS))
-    while True:
-        try:
+    try:
+        if not args.watch:
             print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
-        except KeyboardInterrupt:
             return 0
-        except Exception as exc:
-            print(f"[crypto-funding] ERROR watch loop failed: {exc}", file=sys.stderr)
-        time.sleep(interval_seconds)
+        interval_seconds = max(15, int(args.interval or DEFAULT_INTERVAL_SECONDS))
+        while True:
+            started = time.monotonic()
+            try:
+                print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
+            except KeyboardInterrupt:
+                return 0
+            except Exception as exc:
+                watcher.store_seed_meta(status="error", record_count=0, source_states={"collector": "error"},
+                    error_summary=type(exc).__name__, preserve_last_success=True)
+                print(f"[crypto-funding] ERROR watch loop failed: {type(exc).__name__}", file=sys.stderr)
+            time.sleep(max(1, interval_seconds - (time.monotonic() - started)))
+    except KeyboardInterrupt:
+        return 0
+    finally:
+        watcher.close()
 
 
 if __name__ == "__main__":
