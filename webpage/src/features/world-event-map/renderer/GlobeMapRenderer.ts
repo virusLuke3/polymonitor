@@ -1,4 +1,6 @@
 import Globe from "globe.gl";
+import { GlobeTexture } from "./globeTexture";
+import { GlobeStaticBatch } from "./globeStaticBatch";
 import * as THREE from "three";
 import type {
   CountryGeometry,
@@ -40,7 +42,6 @@ import {
   type GlobeGeometry,
 } from "./globeScene";
 import {
-  MAP_RENDERER_TIMEOUTS,
   splitViewportBounds,
   type MapRenderer,
   type MapRendererCallbacks,
@@ -71,6 +72,8 @@ export class GlobeMapRenderer implements MapRenderer {
   private countries: CountryGeometryIndex | null = null;
   private countryAreas: Area[] = [];
   private eventGeometry = new Map<GeoEvent, GlobeGeometry[]>();
+  private renderedPaths: GlobeGeometry[] = [];
+  private renderedAreas: Array<Area | GlobeGeometry> = [];
   private index = new EventClusterIndex();
   private tooltip: RendererTooltip | null = null;
   private language: "en" | "zh" = "en";
@@ -78,8 +81,18 @@ export class GlobeMapRenderer implements MapRenderer {
   private reduced = false;
   private destroyed = false;
   private ready = false;
+  private readyReported = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
-  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  private frame: number | null = null;
+  private batchTimer: ReturnType<typeof setTimeout> | null = null;
+  private cameraTimer: ReturnType<typeof setTimeout> | null = null;
+  private pointerTimer: ReturnType<typeof setTimeout> | null = null;
+  private staticBatch = new GlobeStaticBatch();
+  private positionSamples = new Map<GeoEvent, Array<[number, number]>>();
+  private cameraPending = false;
+  private cameraInteracting = false;
+  private inputCamera = { center: this.state.center, zoom: this.state.zoom };
+  private sweepMaterials = false;
   private contextTimer: ReturnType<typeof setTimeout> | null = null;
   private animationTimer: ReturnType<typeof setTimeout> | null = null;
   private animationTime = 0;
@@ -101,50 +114,12 @@ export class GlobeMapRenderer implements MapRenderer {
   private motionObjects = new Map<string, any>();
   private quality = "auto";
   private fontRevision = 0;
-  private textureRequest: AbortController | null = null;
-  private textureUrl: string | null = null;
-
-  private async loadEarthTexture(): Promise<string> {
-    // globe.gl's image loader has no error callback and can otherwise leave
-    // onGlobeReady pending until the generic renderer deadline. Own this one
-    // asset's bounded request so switching views also cancels its download.
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const controller = new AbortController();
-      this.textureRequest = controller;
-      const deadline = setTimeout(() => controller.abort(), MAP_RENDERER_TIMEOUTS.primary);
-      let url: string | null = null;
-      try {
-        const response = await fetch('/textures/earth-topo-bathy.jpg', {
-          signal: controller.signal, cache: attempt ? 'reload' : 'default',
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        url = URL.createObjectURL(await response.blob());
-        const image = new Image();
-        image.src = url;
-        const cancelDecode = () => { image.src = ''; };
-        controller.signal.addEventListener('abort', cancelDecode, { once: true });
-        try { await image.decode(); }
-        finally { controller.signal.removeEventListener('abort', cancelDecode); }
-        if (this.destroyed || controller.signal.aborted) throw new Error('Texture loading cancelled or timed out.');
-        this.textureUrl = url;
-        return url;
-      } catch (error) {
-        if (url) URL.revokeObjectURL(url);
-        if (this.destroyed || attempt === 1) throw new Error(
-          `3D Earth texture could not load: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      } finally {
-        clearTimeout(deadline);
-        if (this.textureRequest === controller) this.textureRequest = null;
-      }
-    }
-    throw new Error('3D Earth texture could not load.');
-  }
+  constructor(private texture = new GlobeTexture()) {}
 
   async mount(host: HTMLElement, callbacks: MapRendererCallbacks) {
     this.host = host;
     this.callbacks = callbacks;
-    const textureUrl = await this.loadEarthTexture();
+    const textureUrl = await this.texture.load();
     if (this.destroyed) return;
     host.classList.add("wm-globe-renderer");
     this.tooltip = new RendererTooltip(host);
@@ -152,6 +127,7 @@ export class GlobeMapRenderer implements MapRenderer {
       animateIn: false,
       rendererConfig: { antialias: true, powerPreference: "high-performance" },
     }));
+    globe.pauseAnimation();
     this.quality = (() => {
       try {
         return localStorage.getItem("polydata-globe-quality-v1") || "auto";
@@ -168,12 +144,7 @@ export class GlobeMapRenderer implements MapRenderer {
         if (this.destroyed) return;
         this.ready = true;
         this.flush();
-        this.draw();
-        if (
-          !performance.getEntriesByName("polymonitor:map:first-basemap").length
-        )
-          performance.mark("polymonitor:map:first-basemap");
-        callbacks.onBasemapStateChange("primary-ready");
+        this.wake();
       })
       .globeImageUrl(textureUrl)
       .polygonsTransitionDuration(0)
@@ -266,16 +237,31 @@ export class GlobeMapRenderer implements MapRenderer {
       )
         return;
       this.geometryDirty ||=
-        Math.floor(this.state.zoom) !== Math.floor(camera.zoom);
+        this.state.zoom !== camera.zoom;
       this.state = { ...this.state, ...camera };
-      callbacks.onCameraChange(camera);
-      this.queue();
+      this.cameraPending = true;
+      // Keep pointer/camera work local. Persist and request a new viewport only
+      // after the gesture settles, instead of rerendering the dashboard per move.
+      if (!this.cameraInteracting) this.settleCamera();
       this.wake();
     };
+    const cameraStart = () => {
+      this.cameraInteracting = true;
+      if (this.cameraTimer) clearTimeout(this.cameraTimer);
+      this.cameraTimer = null;
+    };
+    const cameraEnd = () => {
+      this.cameraInteracting = false;
+      if (this.cameraPending) this.settleCamera();
+    };
     controls.addEventListener("change", cameraChanged);
-    this.cleanups.push(() =>
-      controls.removeEventListener("change", cameraChanged),
-    );
+    controls.addEventListener("start", cameraStart);
+    controls.addEventListener("end", cameraEnd);
+    this.cleanups.push(() => {
+      controls.removeEventListener("change", cameraChanged);
+      controls.removeEventListener("start", cameraStart);
+      controls.removeEventListener("end", cameraEnd);
+    });
     const canvas = globe.renderer().domElement as HTMLCanvasElement;
     const lost = (e: Event) => {
       e.preventDefault();
@@ -296,6 +282,7 @@ export class GlobeMapRenderer implements MapRenderer {
       if (this.contextTimer) clearTimeout(this.contextTimer);
       this.contextTimer = null;
       this.geometryDirty = true;
+      this.renderedPaths = []; this.renderedAreas = [];
       this.resume();
       callbacks.onBasemapStateChange("primary-ready");
     };
@@ -309,9 +296,17 @@ export class GlobeMapRenderer implements MapRenderer {
       const box = host.getBoundingClientRect();
       this.pointer = { x: e.clientX - box.left, y: e.clientY - box.top };
       this.wake();
+      // Native picking is throttled to 50ms. One trailing wake settles hover
+      // after the last move even when reduced motion leaves the scene idle.
+      if (this.pointerTimer) clearTimeout(this.pointerTimer);
+      this.pointerTimer = setTimeout(() => { this.pointerTimer = null; this.wake(); }, 60);
     };
     host.addEventListener("pointermove", pointer);
-    this.cleanups.push(() => host.removeEventListener("pointermove", pointer));
+    host.addEventListener("pointerdown", pointer, true);
+    this.cleanups.push(() => {
+      host.removeEventListener("pointermove", pointer);
+      host.removeEventListener("pointerdown", pointer, true);
+    });
     const key = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement).closest("button,input,select,textarea"))
         return;
@@ -367,6 +362,14 @@ export class GlobeMapRenderer implements MapRenderer {
       document.fonts.removeEventListener("loadingdone", fontsReady),
     );
     this.addControls();
+    if (new URLSearchParams(location.search).get('mapPerf') === '1') {
+      const diagnostic = host as HTMLElement & { __polymonitorGlobeBatch?: (enabled: boolean) => void };
+      diagnostic.__polymonitorGlobeBatch = enabled => {
+        if (enabled) this.staticBatch.rebuild(globe.scene()); else this.staticBatch.clear();
+        this.wake();
+      };
+      this.cleanups.push(() => { delete diagnostic.__polymonitorGlobeBatch; });
+    }
     this.resize();
     this.applyCamera();
     this.flush();
@@ -524,8 +527,24 @@ export class GlobeMapRenderer implements MapRenderer {
       },
       0,
     );
+    // The public setter changes position/target; OrbitControls applies the
+    // corresponding orientation on update. Settle it before bbox ray casting.
+    this.globe.controls().update();
     this.cameraWrite = false;
     this.wake();
+  }
+  private settleCamera() {
+    if (this.cameraTimer) clearTimeout(this.cameraTimer);
+    this.cameraTimer = setTimeout(() => {
+      this.cameraTimer = null;
+      this.publishCamera();
+      this.queue();
+    }, 120);
+  }
+  private publishCamera() {
+    if (!this.cameraPending) return;
+    this.cameraPending = false;
+    this.callbacks?.onCameraChange({ center: this.state.center, zoom: this.state.zoom });
   }
   private visible(point: [number, number]) {
     const g = this.globe;
@@ -554,6 +573,9 @@ export class GlobeMapRenderer implements MapRenderer {
     ].join(":");
     if (key === this.viewportKey) return;
     this.viewportKey = key;
+    // pointOfView changes the camera before the scheduled draw. Ray casting
+    // must use that pose now, not the matrix from the previous rendered frame.
+    this.globe.camera().updateMatrixWorld(true);
     const samples: Array<{ lng: number; lat: number }> = [];
     for (let y = 0; y <= 12; y++)
       for (let x = 0; x <= 20; x++) {
@@ -639,6 +661,7 @@ export class GlobeMapRenderer implements MapRenderer {
       );
     if (changed) {
       this.markers = markers;
+      this.sweepMaterials = true;
       this.markerObjects.clear();
       this.globe.customLayerData(markers);
     } else
@@ -666,25 +689,32 @@ export class GlobeMapRenderer implements MapRenderer {
         return value;
       });
       this.eventGeometry = cache;
-      this.globe.pathsData(
-        geometry.filter((g) => g.geometry.type === "LineString"),
-      );
-      this.globe.polygonsData([
-        ...this.countryAreas,
-        ...geometry.filter(
-          (g) =>
-            g.geometry.type === "Polygon" || g.geometry.type === "MultiPolygon",
-        ),
-      ]);
+      const paths = geometry.filter(g => g.geometry.type === "LineString");
+      if (paths.length !== this.renderedPaths.length || paths.some((g, i) => g !== this.renderedPaths[i])) {
+        this.renderedPaths = paths;
+        this.globe.pathsData(paths);
+      }
+      const areas = [...this.countryAreas, ...geometry.filter(g => g.geometry.type === "Polygon" || g.geometry.type === "MultiPolygon")];
+      if (areas.length !== this.renderedAreas.length || areas.some((g, i) => g !== this.renderedAreas[i])) {
+        this.renderedAreas = areas;
+        this.staticBatch.clear();
+        this.globe.polygonsData(areas);
+        if (this.batchTimer) clearTimeout(this.batchTimer);
+        // Wait for the library's yielded digest before batching its new buffers.
+        this.batchTimer = setTimeout(() => {
+          this.batchTimer = null;
+          if (this.destroyed || !this.globe) return;
+          const counts = this.staticBatch.rebuild(this.globe.scene());
+          if (this.host) {
+            this.host.dataset.globeBatchedObjects = String(counts.objects);
+            this.host.dataset.globeBatches = String(counts.batches);
+          }
+          this.wake();
+        }, 0);
+      }
       this.geometryDirty = false;
     }
-    const inView = this.events.filter((e) =>
-      coordinatePositions(e.geometry?.coordinates).some(
-        (p, i, all) =>
-          i % Math.max(1, Math.floor(all.length / 16)) === 0 &&
-          this.visible([p[0]!, p[1]!]),
-      ),
-    );
+    const inView = this.events.filter(e => this.positionSamples.get(e)?.some(p => this.visible(p)));
     const presentation = {
       inView: inView.length,
       inViewIds: inView.map((e) => e.id),
@@ -710,7 +740,6 @@ export class GlobeMapRenderer implements MapRenderer {
       ).length,
     );
     this.publishViewport();
-    this.draw();
     this.wake();
     this.startMotion();
   }
@@ -764,7 +793,7 @@ export class GlobeMapRenderer implements MapRenderer {
           this.motion.remove(sprite);
           this.motionObjects.delete(id);
         }
-      this.draw();
+      this.wake();
       if (
         this.aviation.routeMotionGroups.length ||
         this.aviation.flightMotionGroups.length
@@ -779,36 +808,47 @@ export class GlobeMapRenderer implements MapRenderer {
       this.quality === "battery" ? 80 : 40,
     );
   }
-  private draw() {
-    if (!this.globe || this.paused || this.destroyed) return;
-    // Use globe.gl's same render pass for idle updates and aircraft animation.
-    // Bypassing its composer made the final pixels depend on which loop drew last.
-    this.globe.postProcessingComposer().render();
-  }
   private wake() {
-    if (!this.globe || this.paused || this.destroyed) return;
-    this.globe.resumeAnimation();
-    if (this.idleTimer) clearTimeout(this.idleTimer);
-    this.idleTimer = setTimeout(() => {
-      this.globe?.pauseAnimation();
-      const live = new Set(
-        [...this.markerObjects.values(), ...this.motionObjects.values()].map(
-          (object) => object.material,
-        ),
-      );
-      for (const [key, material] of this.materials)
-        if (!live.has(material)) {
-          material.map?.dispose();
-          material.dispose();
-          this.materials.delete(key);
+    if (!this.globe || this.paused || this.destroyed || this.frame !== null) return;
+    this.frame = requestAnimationFrame(() => {
+      this.frame = null;
+      if (!this.globe || this.paused || this.destroyed) return;
+      // resumeAnimation performs one complete public globe.gl tick (controls,
+      // composer, hover and tweens). Cancel its successor immediately: this RAF
+      // is the only draw owner, including aircraft and data updates.
+      this.globe.resumeAnimation();
+      this.globe.pauseAnimation();
+      if (this.ready && !this.readyReported) {
+        this.readyReported = true;
+        if (!performance.getEntriesByName("polymonitor:map:first-basemap").length)
+          performance.mark("polymonitor:map:first-basemap");
+        this.callbacks?.onBasemapStateChange("primary-ready");
+      }
+      if (this.sweepMaterials) {
+        this.sweepMaterials = false;
+        const live = new Set([...this.markerObjects.values(), ...this.motionObjects.values()].map(object => object.material));
+        for (const [key, material] of this.materials) if (!live.has(material)) {
+          material.map?.dispose(); material.dispose(); this.materials.delete(key);
         }
-      this.idleTimer = null;
-      this.host?.classList.add("is-render-idle");
-    }, 180);
-    this.host?.classList.remove("is-render-idle");
+      }
+      if (this.host) {
+        this.host.dataset.globeFrames = String(Number(this.host.dataset.globeFrames || 0) + 1);
+        this.host.dataset.globeDrawCalls = String(this.globe.renderer().info.render.calls);
+        this.host.classList.add("is-render-idle");
+      }
+    });
   }
   setState(state: WorldEventMapState) {
     if (state === this.state) return;
+    const externalCameraChanged = this.inputCamera.center.lon !== state.center.lon
+      || this.inputCamera.center.lat !== state.center.lat || this.inputCamera.zoom !== state.zoom;
+    this.inputCamera = { center: state.center, zoom: state.zoom };
+    if (this.cameraPending && !externalCameraChanged) state = { ...state, center: this.state.center, zoom: this.state.zoom };
+    else if (externalCameraChanged) {
+      this.cameraPending = false;
+      if (this.cameraTimer) clearTimeout(this.cameraTimer);
+      this.cameraTimer = null;
+    }
     const moved =
       this.state.center.lon !== state.center.lon ||
       this.state.center.lat !== state.center.lat ||
@@ -824,6 +864,16 @@ export class GlobeMapRenderer implements MapRenderer {
   }
   setEvents(events: GeoEvent[]) {
     if (events === this.events) return;
+    const samples = new Map<GeoEvent, Array<[number, number]>>();
+    for (const event of events) {
+      const existing = this.positionSamples.get(event);
+      if (existing) { samples.set(event, existing); continue; }
+      const positions = coordinatePositions(event.geometry?.coordinates);
+      const step = Math.max(1, Math.floor(positions.length / 16));
+      samples.set(event, positions.filter((_, i) => i % step === 0)
+        .map(p => [p[0]!, p[1]!]));
+    }
+    this.positionSamples = samples;
     this.events = events;
     this.index.update(events);
     this.geometryDirty = true;
@@ -900,9 +950,13 @@ export class GlobeMapRenderer implements MapRenderer {
   }
   pause() {
     this.paused = true;
-    for (const timer of [this.timer, this.idleTimer, this.animationTimer])
+    this.cameraInteracting = false;
+    for (const timer of [this.timer, this.cameraTimer, this.pointerTimer, this.animationTimer])
       if (timer) clearTimeout(timer);
-    this.timer = this.idleTimer = this.animationTimer = null;
+    this.timer = this.cameraTimer = this.pointerTimer = this.animationTimer = null;
+    if (this.frame !== null) cancelAnimationFrame(this.frame);
+    this.frame = null;
+    this.publishCamera();
     this.globe?.pauseAnimation();
     this.tooltip?.clear();
     this.host?.setAttribute("data-render-paused", "true");
@@ -923,12 +977,15 @@ export class GlobeMapRenderer implements MapRenderer {
   destroy() {
     if (this.destroyed) return;
     this.destroyed = true;
-    this.textureRequest?.abort();
+    this.texture.dispose();
     this.pause();
     if (this.contextTimer) clearTimeout(this.contextTimer);
     this.cleanups.forEach((fn) => fn());
     this.cleanups = [];
     this.tooltip?.destroy();
+    if (this.batchTimer) clearTimeout(this.batchTimer);
+    this.staticBatch.clear();
+    this.positionSamples.clear();
     this.globe?.scene().remove(this.motion);
     const renderer = this.globe?.renderer();
     this.globe?._destructor();
@@ -936,8 +993,6 @@ export class GlobeMapRenderer implements MapRenderer {
     // Repeated 2D/3D switches must not wait for GC to release that finite slot.
     renderer?.forceContextLoss();
     this.globe = null;
-    if (this.textureUrl) URL.revokeObjectURL(this.textureUrl);
-    this.textureUrl = null;
     for (const material of this.materials.values()) {
       material.map?.dispose();
       material.dispose();

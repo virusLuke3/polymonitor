@@ -1,3 +1,4 @@
+import { EventGeometryCache, createEventGeometryLayers } from './eventGeometryLayers';
 import { mapPresentationCounts } from '../eventDisclosure';
 import { createEventPointLayers } from './eventPointLayer';
 import type { Layer } from '@deck.gl/core';
@@ -79,6 +80,17 @@ const aviationState = () => {
 };
 
 describe('world event layer factories', () => {
+  it('reuses identical hazard presentation across fractional zoom but invalidates real disclosure changes', () => {
+    const cache = new EventGeometryCache(), events = [hazardArea('area', 10, 10)];
+    const first = createEventGeometryLayers(events, null, 3.1, undefined, undefined, cache);
+    const same = createEventGeometryLayers(events, null, 3.2, undefined, undefined, cache);
+    expect(same[0]).toBe(first[0]);
+    const changed = createEventGeometryLayers(events, null, 6, undefined, undefined, cache);
+    expect(changed[0]).not.toBe(first[0]);
+    createEventGeometryLayers([], null, 6, undefined, undefined, cache);
+    expect(createEventGeometryLayers(events, null, 3.1, undefined, undefined, cache)[0]).not.toBe(first[0]);
+  });
+
   it('uses stable layer ids and clusters only genuinely dense global points', () => {
     const state = defaultWorldEventMapState();
     const layers = createWorldEventLayers(Array.from({ length: 6 }, (_, index) => (

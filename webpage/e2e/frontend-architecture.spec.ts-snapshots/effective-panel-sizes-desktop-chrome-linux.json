@@ -252,13 +252,13 @@
         "id": "market-tv-wire",
         "column": "span 1",
         "row": "span 2",
-        "width": 552.296875
+        "width": 748
       },
       {
         "id": "market-youtube-channels",
         "column": "span 1",
         "row": "span 2",
-        "width": 195.703125
+        "width": 0
       },
       {
         "id": "breaking-event-radar",
@@ -276,7 +276,7 @@
         "id": "global-temperature-monitor",
         "column": "span 1",
         "row": "span 1",
-        "width": 552.296875
+        "width": 748
       },
       {
         "id": "market-summary",
@@ -293,13 +293,13 @@
         "id": "market-tv-wire",
         "column": "span 1",
         "row": "span 2",
-        "width": 182.296875
+        "width": 378
       },
       {
         "id": "market-youtube-channels",
         "column": "span 1",
         "row": "span 2",
-        "width": 195.703125
+        "width": 0
       },
       {
         "id": "breaking-event-radar",
@@ -317,7 +317,7 @@
         "id": "global-temperature-monitor",
         "column": "span 1",
         "row": "span 1",
-        "width": 182.296875
+        "width": 378
       },
       {
         "id": "market-summary",

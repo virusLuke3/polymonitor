@@ -1,3 +1,4 @@
+import { GlobeTexture } from '../renderer/globeTexture';
 import { MapExplore } from './MapExplore';
 import { CountryBrief } from './CountryBrief';
 import type { RendererViewport } from '../renderer/MapRenderer';
@@ -256,6 +257,7 @@ export function WorldEventMap({
       else renderer.resume();
     };
 
+    const globeTexture = new GlobeTexture();
     let rendererGeneration = 0;
     let committedGeneration = 0;
     let candidate: MapRenderer | null = null;
@@ -291,10 +293,16 @@ export function WorldEventMap({
     };
     const downloadRenderer = async (): Promise<new () => MapRenderer> => {
       try {
-        return preferredRenderer === 'globe'
-          ? (await import('../renderer/GlobeMapRenderer')).GlobeMapRenderer
-          : (await import('../renderer/DeckMapRenderer')).DeckMapRenderer;
+        if (preferredRenderer === 'globe') {
+          // Texture and engine use the same intent/lifecycle; 2D never fetches
+          // either. Retrying a retired candidate receives a fresh owned asset.
+          void globeTexture.load().catch(() => {});
+          const { GlobeMapRenderer } = await import('../renderer/GlobeMapRenderer');
+          return class extends GlobeMapRenderer { constructor() { super(globeTexture.claim()); } };
+        }
+        return (await import('../renderer/DeckMapRenderer')).DeckMapRenderer;
       } catch (error) {
+        globeTexture.disposeUnclaimed();
         markModuleDownloadFailed();
         throw error;
       }
@@ -617,7 +625,11 @@ export function WorldEventMap({
       scheduleRendererInstall();
     }, 2_500);
     return () => {
+      // Flush a renderer's final local camera before invalidating callbacks.
+      // Switching views inside the debounce window must not lose the gesture.
+      rendererRef.current?.pause();
       disposed = true;
+      globeTexture.disposeUnclaimed();
       retryRendererRef.current = null;
       ++rendererGeneration;
       ++preferredLoadGeneration;

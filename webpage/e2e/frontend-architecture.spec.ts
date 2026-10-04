@@ -1,7 +1,7 @@
 import { gotoMapScene, selectMapLayers } from './fixtures/browser';
 import { expect, test, type Page } from '@playwright/test';
-import { fixtureBundle, installDashboard } from './fixtures/dashboard';
-import { installFixtures } from './fixtures/world-event-map';
+import { fixtureBundle, fixtureMarkets, installDashboard } from './fixtures/dashboard';
+import { GENERATED_AT, installFixtures } from './fixtures/world-event-map';
 
 test.afterEach(async ({ page }) => {
   // Assertions have finished. Detach routes before aborting the document so
@@ -22,6 +22,25 @@ async function visual(page: Page, name: string) {
   await expect.soft(page).toHaveScreenshot(name, { animations: 'disabled', maxDiffPixels: 0, threshold: 0 });
 }
 
+test('memoized market rows keep relative time live without reloading the catalogue', async ({ page }) => {
+  await installDashboard(page);
+  let requests = 0;
+  await page.route('**/wm-api/markets?**', route => {
+    requests++;
+    return route.fulfill({ json: {
+      items: fixtureMarkets.map(market => ({ ...market, createdAt: new Date(Date.parse(GENERATED_AT) - 10_000).toISOString() })),
+      pagination: { page: 1, total: 2, totalPages: 1, hasMore: false },
+    } });
+  });
+  await page.goto('/?view=2d&renderer=svg');
+  const timing = page.locator('.wm-poly-market-card[title^="Fixture market 1"] .wm-poly-market-meta');
+  await expect(timing).toContainText('10 sec. ago');
+  const loaded = requests;
+  await page.clock.setFixedTime(new Date(Date.parse(GENERATED_AT) + 31_000));
+  await expect(timing).toContainText('41 sec. ago');
+  expect(requests).toBe(loaded);
+});
+
 for (const width of [1440, 390]) {
   for (const locale of ['en', 'zh']) {
     test(`dashboard ${width} ${locale}: map, focus, panels, settings and commands`, async ({ page }) => {
@@ -40,6 +59,10 @@ for (const width of [1440, 390]) {
       await page.locator('.wm-more-nav summary').click();
       await page.getByRole('menuitem', { name: /settings|设置/i }).click();
       await expect(page.locator('.wm-settings-modal')).toBeVisible();
+      // Recompose the blurred SVG background at the same final viewport.
+      // Chrome otherwise retains two raster variants of the unchanged glow.
+      await page.setViewportSize({ width, height: (width === 390 ? 844 : 900) + 1 });
+      await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
       await visual(page, `settings-${width}-${locale}.png`);
       await page.keyboard.press('Escape');
       await page.keyboard.press('Control+k');

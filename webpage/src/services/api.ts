@@ -87,7 +87,7 @@ function isAbortLikeError(error: unknown) {
     || String(maybe.message || '').toLowerCase().includes('signal is aborted');
 }
 
-type RuntimeRequest = { priority: number; start: () => void; signal?: AbortSignal; abort: () => void };
+type RuntimeRequest = { priority: number; queuedAt: number; start: () => void; signal?: AbortSignal; abort: () => void };
 const runtimeRequests: RuntimeRequest[] = [];
 let runtimeRunning = 0;
 let runtimePumpScheduled = false;
@@ -101,7 +101,7 @@ export function withRuntimeRequestBudget<T>(run: () => Promise<T>, signal?: Abor
       signal?.removeEventListener('abort', abort);
       reject(new DOMException('Aborted', 'AbortError'));
     };
-    const task: RuntimeRequest = { priority, signal, abort, start: () => {
+    const task: RuntimeRequest = { priority, queuedAt: performance.now(), signal, abort, start: () => {
       signal?.removeEventListener('abort', abort);
       runtimeRunning++;
       // The API deadline begins inside run(), after admission, and covers JSON.
@@ -123,7 +123,9 @@ function pumpRuntimeRequests() {
   setTimeout(() => {
     runtimePumpScheduled = false;
     const limit = typeof matchMedia === 'function' && matchMedia('(max-width: 720px)').matches ? 2 : 3;
-    runtimeRequests.sort((a, b) => a.priority - b.priority);
+    const now = performance.now();
+    const effectivePriority = (task: RuntimeRequest) => Math.max(0, task.priority - Math.floor((now - task.queuedAt) / 4000));
+    runtimeRequests.sort((a, b) => effectivePriority(a) - effectivePriority(b) || a.queuedAt - b.queuedAt);
     while (runtimeRunning < limit && runtimeRequests.length) {
       const task = runtimeRequests.shift()!;
       if (task.signal?.aborted) task.abort(); else task.start();
@@ -133,7 +135,11 @@ function pumpRuntimeRequests() {
 
 function apiGetWithTimeout<T>(path: string, timeoutMs = 12000, externalSignal?: AbortSignal, cache?: RequestCache): Promise<T> {
   const run = () => apiGetAdmitted<T>(path, timeoutMs, externalSignal, cache);
-  if (!path.startsWith('/runtime/')) return run();
+  // Bulk dashboard GETs used to bypass the same limit as the map sources.
+  // Interactive details/bootstrap still start immediately; catalogue/summary
+  // bodies share admission with runtime to avoid a first-screen download burst.
+  const bulkDashboard = /^\/(?:market-groups|markets)(?:\?|$)|^\/(?:content|trades\/recent|oracle\/recent|system\/health)(?:\?|$)/.test(path);
+  if (!path.startsWith('/runtime/') && !bulkDashboard) return run();
   // Visible quote/signal consumers share the first tier with primary hazards
   // and interactive detail. Bulk map layers cannot starve their refreshes.
   const priority = /^\/runtime\/(?:(signals|trades|markets)\/|crypto\/funding-watch)|natural-hazards\/map.*source=(usgs|nhc|nws)\b|detail|aviation.*viewport|map-query/.test(path) ? 0

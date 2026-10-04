@@ -159,6 +159,11 @@ async function waitForMappedEvents(client, hazardsRequired, timeoutMs = 60000) {
   return lastState;
 }
 
+if (args.includes('--compare-views')) {
+  await profileBothViews();
+  process.exit(0);
+}
+
 let client;
 let browser;
 try {
@@ -479,4 +484,106 @@ try {
 } finally {
   await client?.close();
   await browser?.close();
+}
+
+
+/** Real delivery path, including the active service worker. Main-thread busy
+ * time and RAF gaps are reported separately from rendered-frame counters. */
+async function profileBothViews() {
+  target.searchParams.delete('mapPerf');
+  const directory = dirname(output);
+  mkdirSync(directory, { recursive: true });
+  const browser = await chromium.launch({ channel: 'chrome', headless: true,
+    ...(proxyServer ? { proxy: { server: proxyServer } } : {}),
+    args: ['--disable-partial-raster', ...(useAngle ? [`--use-angle=${useAngle}`, ...(useAngle === 'vulkan' ? ['--enable-features=Vulkan'] : [])] : [])] });
+  const context = await browser.newContext({ viewport: { width: viewportWidth, height: viewportHeight },
+    deviceScaleFactor: 1, locale: 'en-US' });
+  const page = await context.newPage();
+  const errors = [], failures = [], httpErrors = [], phases = [];
+  page.on('pageerror', error => errors.push(error.message));
+  page.on('requestfailed', request => failures.push({ url: request.url(), error: request.failure()?.errorText }));
+  page.on('response', response => { if (response.status() >= 400) httpErrors.push({ url: response.url(), status: response.status() }); });
+  await context.tracing.start({ screenshots: true, snapshots: true });
+  await page.addInitScript(() => {
+    window.__viewAudit = { longTasks: [], gaps: [], previous: 0, ready: [] };
+    new PerformanceObserver(list => { for (const e of list.getEntries()) window.__viewAudit.longTasks.push({ at: e.startTime, duration: e.duration }); }).observe({ type: 'longtask', buffered: true });
+    const tick = now => { const a = window.__viewAudit; if (a.previous) a.gaps.push({ at: now, duration: now - a.previous }); a.previous = now; requestAnimationFrame(tick); };
+    requestAnimationFrame(tick);
+  });
+  const cdp = await context.newCDPSession(page);
+  await cdp.send('Performance.enable'); await cdp.send('Profiler.enable');
+  await cdp.send('Profiler.setSamplingInterval', { interval: 1000 });
+  const metrics = async () => Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics.map(item => [item.name, item.value]));
+  const sample = async (name, action) => {
+    const start = await page.evaluate(() => performance.now()), before = await metrics();
+    const firstFrame = await page.evaluate(() => Number(document.querySelector('.wm-globe-renderer')?.dataset.globeFrames || 0));
+    await cdp.send('Profiler.start');
+    await action();
+    const { profile } = await cdp.send('Profiler.stop');
+    const after = await metrics(), end = await page.evaluate(() => performance.now());
+    writeFileSync(resolve(directory, `${viewportWidth}-${name}.cpuprofile`), JSON.stringify(profile));
+    const state = await page.evaluate(({ start, end }) => {
+      const audit = window.__viewAudit;
+      return { longTasks: audit.longTasks.filter(item => item.at >= start && item.at < end),
+        gaps: audit.gaps.filter(item => item.at >= start && item.at < end),
+        globe: { ...document.querySelector('.wm-globe-renderer')?.dataset },
+        events: document.querySelector('.wm-world-event-list-toggle')?.textContent };
+    }, { start, end });
+    const gaps = state.gaps.map(item => item.duration).sort((a, b) => a - b);
+    const durationMs = end - start;
+    const result = { name, durationMs, taskBusyPercent: (after.TaskDuration - before.TaskDuration) * 100000 / durationMs,
+      maxLongTaskMs: Math.max(0, ...state.longTasks.map(item => item.duration)), rafGapP95Ms: gaps[Math.floor(gaps.length * .95)] || 0,
+      globe: state.globe, drawnFrames: state.globe.globeFrames == null ? null : Number(state.globe.globeFrames) - firstFrame, events: state.events };
+    phases.push(result); progress(JSON.stringify(result));
+  };
+  const ready = kind => page.locator('.wm-weather-deck-basemap').waitFor({ state: 'visible' }).then(() =>
+    page.waitForFunction(kind => document.querySelector('.wm-weather-deck-basemap')?.getAttribute('data-map-renderer-ready') === kind, kind, { timeout: 90000 }));
+  const drag = async () => {
+    const box = await page.locator('.wm-weather-deck-basemap').boundingBox();
+    const x = box.x + box.width * .52, y = box.y + box.height * .55;
+    await page.mouse.move(x, y); await page.mouse.down();
+    for (let i = 0; i < 50; i++) {
+      await page.mouse.move(x + Math.sin(i / 12) * 75, y + Math.cos(i / 12) * 20);
+      await page.waitForTimeout(17);
+    }
+    await page.mouse.up(); await page.waitForTimeout(600);
+    await page.mouse.wheel(0, -150); await page.waitForTimeout(1400);
+  };
+  try {
+    progress('opening real site with normal service worker');
+    await page.goto(target.href, { waitUntil: 'domcontentloaded', timeout: 90000 });
+    await ready('webgl');
+    progress('2D ready; waiting for real source records');
+    await page.waitForFunction(() => Number(document.querySelector('.wm-world-event-list-toggle strong')?.textContent?.replace(/[^0-9]/g, '')) > 0, undefined, { timeout: 60000 });
+    await page.locator('.wm-weather-deck-basemap').scrollIntoViewIfNeeded();
+    await sample('2d-idle', () => page.waitForTimeout(10000));
+    await sample('2d-interaction', drag);
+    await page.screenshot({ path: resolve(directory, `${viewportWidth}-2d.png`) });
+    await sample('3d-first-switch', async () => { await page.getByRole('tab', { name: '3D Globe', exact: true }).click(); await ready('globe'); });
+    await sample('3d-idle', () => page.waitForTimeout(10000));
+    await sample('3d-interaction', drag);
+    await page.screenshot({ path: resolve(directory, `${viewportWidth}-3d.png`) });
+    await page.getByRole('tab', { name: '2D Map', exact: true }).click(); await ready('webgl');
+    await sample('3d-warm-switch', async () => { await page.getByRole('tab', { name: '3D Globe', exact: true }).click(); await ready('globe'); });
+    const resources = await page.evaluate(() => ({
+      marks: performance.getEntriesByType('mark').map(e => e.toJSON()),
+      resources: performance.getEntriesByType('resource').map(e => e.toJSON()),
+      serviceWorker: navigator.serviceWorker.controller?.scriptURL,
+      gpu: (() => { const gl = document.querySelector('.wm-globe-renderer canvas')?.getContext('webgl2');
+        const debug = gl?.getExtension('WEBGL_debug_renderer_info'); return debug && gl.getParameter(debug.UNMASKED_RENDERER_WEBGL); })(),
+      version: document.querySelector('meta[name="build-id"]')?.getAttribute('content'),
+      sources: Array.from(document.querySelectorAll('.wm-map-source-status')).map(el => el.textContent),
+    }));
+    const release = (await (await context.request.get(new URL('/release-sha', target).href)).text()).trim();
+    writeFileSync(output, JSON.stringify({ release, url: target.href, viewportWidth, viewportHeight, deviceScaleFactor: 1,
+      measuredAt: new Date().toISOString(), profilerEnabled: true, phases, errors, failures, httpErrors, ...resources }, null, 2));
+  } catch (error) {
+    await page.screenshot({ path: resolve(directory, `${viewportWidth}-failure.png`) }).catch(() => {});
+    writeFileSync(output, JSON.stringify({ url: target.href, viewportWidth, viewportHeight,
+      measuredAt: new Date().toISOString(), failure: String(error), phases, errors, failures, httpErrors }, null, 2));
+    throw error;
+  } finally {
+    await context.tracing.stop({ path: resolve(directory, `${viewportWidth}-interaction-trace.zip`) });
+    await browser.close();
+  }
 }

@@ -365,7 +365,7 @@ test('a single isolated layer remains quarantined for the same data and recovers
   }finally{await page.goto('about:blank');await page.unrouteAll({behavior:'ignoreErrors'});await assets.dispose();}
 });
 
-test('date-line halves, corner aircraft, late responses and off/empty/partial/failure recovery',async({page})=>{
+test('globe date-line halves, corner aircraft, late responses and off/empty/partial/failure recovery',async({page})=>{
   test.skip(phase==='before');test.setTimeout(120_000);mkdirSync(root,{recursive:true});
   await page.setViewportSize({width:1536,height:1000});await page.clock.install({time:new Date(GENERATED_AT)});
   await installFixtures(page);const assets=await installRealMapAssets(page);
@@ -378,9 +378,11 @@ test('date-line halves, corner aircraft, late responses and off/empty/partial/fa
     try {if(mode==='failure')await route.fulfill({status:503,body:'Controlled aviation outage'});else await route.fulfill({json:{schemaVersion:'aviation-viewport.v1',generatedAt:GENERATED_AT,status:unavailableHalf?'unavailable':mode==='partial'?'partial':aircraft.length?'ok':'empty',aircraft,aircraftCount:aircraft.length,availableAircraftCount:aircraft.length,coverage:{complete:mode!=='partial',mode:'bounded sector query'},source:'Controlled corner observation',bbox,zoom:3}});}catch{/* Superseded HTTP is explicitly cancelled. */}
   });
   const resume=()=>page.evaluate(()=>window.dispatchEvent(new Event('online')));
+  // The single-world 2D camera clamps at the edge. Exercise an actual
+  // cross-date-line viewport with the globe, retaining both request halves.
   try{
-    await gotoMapScene(page, '/?view=2d&mapPerf=1&basemap=pmtiles&center=179,20&zoom=3&time=all&layers=air-routes&air=all&presentation=records');
-    const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-renderer-ready','webgl');
+    await gotoMapScene(page, '/?view=3d&mapPerf=1&basemap=pmtiles&center=179,20&zoom=3&time=all&layers=air-routes&air=all&presentation=records');
+    const host=page.locator('[data-map-renderer-ready]');await expect(host).toHaveAttribute('data-map-renderer-ready','globe');
     await expect.poll(()=>requests.length).toBeGreaterThanOrEqual(2);
     await page.setViewportSize({width:1536,height:850});await expect.poll(()=>requests.length).toBeGreaterThan(2);
     await expect(page.locator('[data-aviation-phase]')).toHaveAttribute('data-aviation-phase','READY');
@@ -402,7 +404,7 @@ test('date-line halves, corner aircraft, late responses and off/empty/partial/fa
 
     mode='hemisphere';await resume();await expect(page.locator('[data-aviation-phase]')).toHaveAttribute('data-aviation-phase','PARTIAL');
     await expect(page.locator('.wm-aviation-lens')).toContainText('4 / 4');
-    mode='failure';await resume();await expect(page.locator('[data-aviation-phase]')).toHaveAttribute('data-aviation-phase','STALE');await expect(host).toHaveAttribute('data-map-renderer-ready','webgl');
+    mode='failure';await resume();await expect(page.locator('[data-aviation-phase]')).toHaveAttribute('data-aviation-phase','STALE');await expect(host).toHaveAttribute('data-map-renderer-ready','globe');
     await page.clock.fastForward(121_000);await expect(page.locator('[data-aviation-phase]')).toHaveAttribute('data-aviation-phase','UNAVAILABLE');
     mode='empty';await resume();await expect(page.locator('[data-aviation-phase]')).toHaveAttribute('data-aviation-phase','EMPTY');
     mode='ready';await resume();await expect(page.locator('[data-aviation-phase]')).toHaveAttribute('data-aviation-phase','READY');

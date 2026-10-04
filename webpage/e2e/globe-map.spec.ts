@@ -1,3 +1,4 @@
+import { hazard, mapResponse } from './fixtures/world-event-map';
 import { expect, test } from '@playwright/test';
 import { installDashboard } from './fixtures/dashboard';
 
@@ -13,7 +14,8 @@ test.describe('production globe asset delivery', () => {
     });
     // mapPerf disables registration at startup. Claim the real worker first,
     // then enable the renderer harness for CI's software WebGL if needed.
-    await page.goto('/?view=2d&time=all&basemap=openfreemap');
+    const origin = `http://127.0.0.1:${process.env.POLYMONITOR_E2E_PORT || '4174'}`;
+    await page.goto(`${origin}/?view=2d&time=all&basemap=openfreemap`);
     await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(true);
     await page.evaluate(() => {
       const url = new URL(location.href); url.searchParams.set('mapPerf', '1');
@@ -202,4 +204,57 @@ test('3D context failure falls back and recovers the same filtered records',asyn
   await expect(page.locator('.wm-map-renderer-retry')).toHaveCount(0);
   }
   await page.screenshot({path:'artifacts/map-unified-renderer-20261003/candidate/globe-recovered.png'});
+});
+
+
+test('static batching keeps exact globe pixels and native event picking', async ({ page }) => {
+  await installDashboard(page);
+  await page.clock.install({ time: new Date('2026-08-26T03:00:00Z') });
+  const areas = Array.from({ length: 12 }, (_, i) => {
+    const x = -20 + (i % 4) * 10, y = 10 + Math.floor(i / 4) * 10;
+    return hazard({ id: `batch-fixture:${i}`, title: `Batch fixture ${i}`, hazardKind: 'flood',
+      metrics: { kind: 'weather-alert' }, geometry: { type: 'Polygon', coordinates: [[[x,y],[x+12,y],[x+12,y+12],[x,y+12],[x,y]]] } });
+  });
+  await page.route('**/wm-api/runtime/world/natural-hazards/map?**', route => {
+    if (new URL(route.request().url()).searchParams.get('source') === 'nws') return route.fulfill({ json: mapResponse('nws', areas) });
+    return route.fallback();
+  });
+  await page.goto('/?view=3d&mapPerf=1&time=all&center=0,25&zoom=1.5');
+  const globe = page.locator('.wm-globe-renderer');
+  await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', 'globe', { timeout: 60000 });
+  await expect.poll(async () => Number(await globe.getAttribute('data-globe-records'))).toBeGreaterThan(20);
+  await page.evaluate(() => document.fonts.ready);
+  await page.waitForTimeout(500);
+  const toggle = (enabled: boolean) => globe.evaluate((element, enabled) => (element as any).__polymonitorGlobeBatch(enabled), enabled);
+  await toggle(false); await page.waitForTimeout(100);
+  const native = await globe.screenshot({ path: "artifacts/map-performance-optimization-20261004/batch-native.png" });
+  await toggle(true); await page.waitForTimeout(100);
+  expect((await globe.screenshot({ path: "artifacts/map-performance-optimization-20261004/batch-candidate.png" })).equals(native)).toBe(true);
+  const before = Number(await globe.getAttribute('data-globe-frames'));
+  await page.waitForTimeout(500);
+  expect(Number(await globe.getAttribute('data-globe-frames')) - before).toBeLessThanOrEqual(1);
+  const canvas = globe.locator('canvas').first(), box = await canvas.boundingBox();
+  await page.mouse.click(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await expect(page.locator('.wm-event-inspector-titleline')).toBeVisible();
+  await page.locator('.wm-event-inspector-close').click();
+  const beforeDrag = new URL(page.url()).searchParams.get('center');
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await page.mouse.down();
+  for (let i = 1; i <= 5; i++) {
+    await page.mouse.move(box!.x + box!.width / 2 + i * 12, box!.y + box!.height / 2);
+    await page.waitForTimeout(160); // slower than debounce: a held gesture still stays local
+    expect(new URL(page.url()).searchParams.get('center')).toBe(beforeDrag);
+  }
+  await page.mouse.up();
+  await expect.poll(() => new URL(page.url()).searchParams.get('center')).not.toBe(beforeDrag);
+  const beforeExit = new URL(page.url()).searchParams.get('center');
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box!.x + box!.width / 2 + 50, box!.y + box!.height / 2);
+  await page.mouse.up();
+  // Switch before the 120ms settle timer: the retiring renderer must preserve
+  // its final camera, while still invalidating all later asynchronous results.
+  await page.getByRole('tab', { name: '2D Map', exact: true }).evaluate(button => (button as HTMLElement).click());
+  await expect.poll(() => new URL(page.url()).searchParams.get('center')).not.toBe(beforeExit);
+  await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', 'webgl');
 });

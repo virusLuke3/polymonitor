@@ -52,6 +52,19 @@ export function LocaleProvider({ children }: { children: ComponentChildren }) {
   }, [locale]);
   const value = useMemo<I18nValue>(() => {
     const intlLocale = locale === 'zh' ? 'zh-CN' : 'en-US';
+    const dates = new Intl.DateTimeFormat(intlLocale, { dateStyle: 'medium', timeStyle: 'short' });
+    const relative = new Intl.RelativeTimeFormat(intlLocale, { numeric: 'auto', style: 'short' });
+    const numbers = new Map<string, Intl.NumberFormat>();
+    const numberFormat = (options?: Intl.NumberFormatOptions) => {
+      const key = JSON.stringify(Object.entries(options || {}).sort(([a], [b]) => a.localeCompare(b)));
+      let formatter = numbers.get(key);
+      if (!formatter) {
+        formatter = new Intl.NumberFormat(intlLocale, options);
+        if (numbers.size >= 64) numbers.delete(numbers.keys().next().value!);
+        numbers.set(key, formatter);
+      }
+      return formatter;
+    };
     const setLocale = (next: Locale) => {
       try {
         window.localStorage.setItem(STORAGE_KEY, next);
@@ -69,7 +82,7 @@ export function LocaleProvider({ children }: { children: ComponentChildren }) {
         const date = input instanceof Date ? input : new Date(input);
         return Number.isNaN(date.getTime())
           ? '—'
-          : new Intl.DateTimeFormat(intlLocale, { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+          : dates.format(date);
       },
       formatRelativeTime: (input) => {
         if (input == null || input === '') return '—';
@@ -84,7 +97,7 @@ export function LocaleProvider({ children }: { children: ComponentChildren }) {
             : absoluteSeconds < 86_400
               ? [3_600, 'hour']
               : [86_400, 'day'];
-        return new Intl.RelativeTimeFormat(intlLocale, { numeric: 'auto', style: 'short' })
+        return relative
           .format(Math.round(diffSeconds / divisor), unit);
       },
       formatDuration: (seconds) => {
@@ -96,15 +109,15 @@ export function LocaleProvider({ children }: { children: ComponentChildren }) {
             : seconds < 86_400
               ? [seconds / 3_600, 'hour']
               : [seconds / 86_400, 'day'];
-        return new Intl.NumberFormat(intlLocale, {
+        return numberFormat({
           style: 'unit',
           unit,
           unitDisplay: 'narrow',
           maximumFractionDigits: 0,
         }).format(Math.round(value));
       },
-      formatNumber: (input, options) => new Intl.NumberFormat(intlLocale, options).format(input),
-      formatPercent: (input, options) => new Intl.NumberFormat(intlLocale, {
+      formatNumber: (input, options) => numberFormat(options).format(input),
+      formatPercent: (input, options) => numberFormat({
         style: 'percent',
         maximumFractionDigits: 1,
         ...options,

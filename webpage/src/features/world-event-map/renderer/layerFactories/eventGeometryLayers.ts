@@ -133,9 +133,9 @@ export function createEventGeometryLayers(
   ));
   const layers: LayersList = [];
 
-  const cached = (id: string, inputs: GeoEvent[], build: () => LayersList, zoomDependent = false) => {
+  const cached = (id: string, inputs: GeoEvent[], build: () => LayersList, presentationScope: string | null = null) => {
     const selected = inputs.some(event => event.id === selectedEventId) ? selectedEventId : null;
-    return cache ? cache.get(id, inputs, JSON.stringify([selected, beforeId, zoomDependent ? zoom : null]), build) : build();
+    return cache ? cache.get(id, inputs, JSON.stringify([selected, beforeId, presentationScope]), build) : build();
   };
   const countries = visibleEvents.filter(isCountryRiskArea);
   if (countries.length) layers.push(...cached('country-risk', countries,
@@ -218,7 +218,7 @@ export function createEventGeometryLayers(
       autoHighlight: false,
       wrapLongitude: true,
       beforeId,
-    })], true));
+    })], JSON.stringify(hazardAreas.map(item => item.presentation))));
   }
 
   if (contextAreas.length) {

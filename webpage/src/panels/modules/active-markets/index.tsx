@@ -1,5 +1,6 @@
 import { numericValue } from '@/panels/shared/formatters';
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { createContext } from 'preact';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import type { MarketGroupItem, MarketGroupOutcome, MarketGroupSort, MarketListItem } from '@/types';
 import type { PanelRenderMap } from '@/panels/types';
@@ -209,12 +210,15 @@ function groupOutcomeIsFocusable(outcome: MarketGroupOutcome, requireActivity = 
   return true;
 }
 
+// API snapshots are immutable; selection/sorts/clock ticks reuse this derivation.
+const defaultOutcomes = new WeakMap<MarketGroupItem, MarketGroupOutcome | null>();
 function groupDefaultOutcome(group: MarketGroupItem) {
+  if (defaultOutcomes.has(group)) return defaultOutcomes.get(group)!;
   const outcomes = uniqueGroupOutcomes([...(group.outcomes || []), ...(group.topOutcomes || [])])
     .filter((outcome) => outcome.marketId || outcome.yesTokenId);
   const liveOutcomes = outcomes.filter((outcome) => groupOutcomeIsFocusable(outcome, false));
   const candidates = liveOutcomes.length ? liveOutcomes : outcomes;
-  return candidates
+  const selected = candidates
     .slice()
     .sort((left, right) => {
       const leftPrice = Number(groupOutcomePrice(left));
@@ -243,6 +247,8 @@ function groupDefaultOutcome(group: MarketGroupItem) {
         - (Number.isFinite(rightPrice) && Math.abs(rightPrice - 0.5) < 0.0001 && rightTrades <= 0 && rightVolume < 25 ? 45 : 0);
       return rightScore - leftScore || rightVolume - leftVolume || rightTrades - leftTrades;
     })[0] || null;
+  defaultOutcomes.set(group, selected);
+  return selected;
 }
 
 function groupHasFocusableDefault(group: MarketGroupItem, requireActivity = true) {
@@ -440,7 +446,7 @@ function activeMarketGroupsList(
                 <span className="wm-poly-market-dot" />
                 <span>{groupTopic(group)}</span>
                 <span>·</span>
-                <span>{groupTiming(group, i18n)}</span>
+                <span><MarketTiming group={group} i18n={i18n} /></span>
                 <span>·</span>
                 <span>{groupOutcomeLabel(group, i18n)}</span>
               </div>
@@ -503,7 +509,7 @@ function activeMarketsList(
                 <span className="wm-poly-market-dot" />
                 <span>{marketTopic(market)}</span>
                 <span>·</span>
-                <span>{marketTiming(market, i18n)}</span>
+                <span><MarketTiming market={market} i18n={i18n} /></span>
                 <span>·</span>
                 <span>{marketOutcomeLabel(market, i18n)}</span>
               </div>
@@ -522,6 +528,12 @@ function activeMarketsList(
       })}
     </div>
   );
+}
+
+const CatalogClock = createContext(0);
+function MarketTiming({ group, market, i18n }: { group?: MarketGroupItem; market?: MarketListItem; i18n: MarketI18n }) {
+  useContext(CatalogClock); // Only changing relative-time text consumes the clock.
+  return <>{group ? groupTiming(group, i18n) : marketTiming(market!, i18n)}</>;
 }
 
 function ActiveMarketsPanel({
@@ -557,14 +569,14 @@ function ActiveMarketsPanel({
   const [clockNow, setClockNow] = useState(() => Date.now());
   const prefetchTimerRef = useRef<number | undefined>(undefined);
 
-  const cancelMarketPrefetch = () => {
+  const cancelMarketPrefetch = useCallback(() => {
     if (prefetchTimerRef.current !== undefined) {
       window.clearTimeout(prefetchTimerRef.current);
       prefetchTimerRef.current = undefined;
     }
-  };
+  }, []);
 
-  const queueMarketPrefetch = (marketIds: number[]) => {
+  const queueMarketPrefetch = useCallback((marketIds: number[]) => {
     cancelMarketPrefetch();
     const uniqueMarketIds = [...new Set(marketIds.filter((marketId) => Number.isFinite(marketId)))].slice(0, 3);
     if (!uniqueMarketIds.length) return;
@@ -572,7 +584,7 @@ function ActiveMarketsPanel({
       prefetchTimerRef.current = undefined;
       prefetchMarketFocus(uniqueMarketIds);
     }, 150);
-  };
+  }, [prefetchMarketFocus, cancelMarketPrefetch]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setClockNow(Date.now()), 1_000);
@@ -640,8 +652,8 @@ function ActiveMarketsPanel({
 
   const hasGroups = marketGroups.length > 0 && visibleGroups.some(groupHasMarketCoverage);
   const panelCount = hasGroups ? visibleGroups.length : visibleMarkets.length;
-  const catalogGeneratedAt = marketCatalogGeneratedAt(marketGroups);
-  const catalogActivityAt = marketCatalogActivityAt(marketGroups);
+  const catalogGeneratedAt = useMemo(() => marketCatalogGeneratedAt(marketGroups), [marketGroups]);
+  const catalogActivityAt = useMemo(() => marketCatalogActivityAt(marketGroups), [marketGroups]);
   const catalogSyncAge = catalogGeneratedAt ? Math.max(0, clockNow - catalogGeneratedAt) : Number.POSITIVE_INFINITY;
   const catalogActivityAge = catalogActivityAt ? Math.max(0, clockNow - catalogActivityAt) : Number.POSITIVE_INFINITY;
   const catalogTone = marketCatalogError
@@ -673,6 +685,12 @@ function ActiveMarketsPanel({
     ? i18n.formatRelativeTime(new Date(catalogActivityAt).toISOString())
     : '--';
   const sortHelp = t(MARKET_SORT_HELP_KEYS[marketGroupSort]);
+  const rows = useMemo(() => hasGroups
+    ? activeMarketGroupsList(visibleGroups, selectedMarketId, selectedMarketGroupId, focusMarketGroup, prefetchMarketFocus, queueMarketPrefetch, cancelMarketPrefetch, i18n)
+    : activeMarketsList(visibleMarkets, selectedMarketId, setSelectedMarketId, prefetchMarketFocus, queueMarketPrefetch, cancelMarketPrefetch, i18n),
+    [hasGroups, visibleGroups, visibleMarkets, selectedMarketId, selectedMarketGroupId, focusMarketGroup,
+      setSelectedMarketId, prefetchMarketFocus, queueMarketPrefetch, cancelMarketPrefetch, i18n]);
+
 
   return (
     <Panel
@@ -729,9 +747,7 @@ function ActiveMarketsPanel({
         <span>{sortHelp}</span>
         <em>{t('atlasMarket.catalog.sync', { time: generatedAtLabel })} · {t('atlasMarket.catalog.auto', { seconds: MARKET_CATALOG_AUTO_REFRESH_MS / 1000 })}</em>
       </div>
-      {hasGroups
-        ? activeMarketGroupsList(visibleGroups, selectedMarketId, selectedMarketGroupId, focusMarketGroup, prefetchMarketFocus, queueMarketPrefetch, cancelMarketPrefetch, i18n)
-        : activeMarketsList(visibleMarkets, selectedMarketId, setSelectedMarketId, prefetchMarketFocus, queueMarketPrefetch, cancelMarketPrefetch, i18n)}
+      <CatalogClock.Provider value={clockNow}>{rows}</CatalogClock.Provider>
     </Panel>
   );
 }

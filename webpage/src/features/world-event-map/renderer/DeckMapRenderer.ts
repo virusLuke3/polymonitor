@@ -274,6 +274,9 @@ export class DeckMapRenderer implements MapRenderer {
   private geometryNeedsCommit = true;
   private occupiedScreenBoxes: ScreenBox[] = [];
   private basemapLabelBoxes: ScreenBox[] | null = null;
+  private labelWidths = new Map<string, number>();
+  private interactionCache: { events: GeoEvent[]; selected: string | null; hovered: string | null;
+    cluster: EventCluster | null; layers: LayersList } | null = null;
   private readonly labelMeasureContext = typeof document === 'undefined' ? null : document.createElement('canvas').getContext('2d');
   private readonly clusterIndex = new EventClusterIndex();
   private readonly renderScheduler: MapRenderScheduler;
@@ -370,6 +373,7 @@ export class DeckMapRenderer implements MapRenderer {
   setLanguage(language: 'en' | 'zh') {
     if (this.language === language) return;
     this.language = language;
+    this.labelWidths.clear();
     this.basemapLabelBoxes = null;
     if (this.map) reinforceWorldEventBasemapLabels(this.map, language);
     this.requestRender({ points: true });
@@ -393,6 +397,7 @@ export class DeckMapRenderer implements MapRenderer {
     void loadMapFonts().then(() => {
       if (this.destroyed) return;
       this.mapFontsReady = true;
+      this.labelWidths.clear();
       this.basemapLabelBoxes = null;
       this.pointLayers = null;
       this.aviationLayerSections = null;
@@ -732,6 +737,8 @@ export class DeckMapRenderer implements MapRenderer {
   }
 
   destroy() {
+    this.interactionCache = null;
+    this.labelWidths.clear();
     this.destroyed = true;
     this.readinessCancel?.();
     if (this.missingTileRetryTimer != null) window.clearTimeout(this.missingTileRetryTimer);
@@ -878,8 +885,15 @@ export class DeckMapRenderer implements MapRenderer {
       const measureContext = this.labelMeasureContext;
       const measureLabel = (text: string, size: number) => {
         if (!measureContext) return 220;
-        measureContext.font = `500 ${size}px ${mapLabelFontFamily()}`;
-        return measureContext.measureText(text).width;
+        const font = `500 ${size}px ${mapLabelFontFamily()}`;
+        const key = `${font}:${text}`;
+        const previous = this.labelWidths.get(key);
+        if (previous != null) return previous;
+        measureContext.font = font;
+        const width = measureContext.measureText(text).width;
+        if (this.labelWidths.size >= 2048) this.labelWidths.delete(this.labelWidths.keys().next().value!);
+        this.labelWidths.set(key, width);
+        return width;
       };
       const host = map?.getContainer?.();
       if (map && this.basemapLabelBoxes == null) {
@@ -1008,12 +1022,15 @@ export class DeckMapRenderer implements MapRenderer {
         pulseTime: this.hazardPulseTime,
         zoom: this.state.zoom,
       });
-    const interactionLayers = createEventInteractionLayers(
-      this.events,
-      this.state.selectedEventId,
-      this.hoveredDeckEventId,
-      this.hoveredDeckCluster,
-    );
+    const interaction = this.interactionCache;
+    if (!interaction || interaction.events !== this.events || interaction.selected !== this.state.selectedEventId
+      || interaction.hovered !== this.hoveredDeckEventId || interaction.cluster !== this.hoveredDeckCluster) {
+      this.interactionCache = { events: this.events, selected: this.state.selectedEventId,
+        hovered: this.hoveredDeckEventId, cluster: this.hoveredDeckCluster,
+        layers: createEventInteractionLayers(this.events, this.state.selectedEventId,
+          this.hoveredDeckEventId, this.hoveredDeckCluster) };
+    }
+    const interactionLayers = this.interactionCache!.layers;
     const staticBaseLayers = [
       ...this.geometryLayers.filter(
         (layer): layer is Layer => Boolean(layer) && !Array.isArray(layer),
@@ -1332,6 +1349,7 @@ export class DeckMapRenderer implements MapRenderer {
   };
 
   private handleStyleLoad = () => {
+    this.interactionCache = null;
     this.basemapLabelBoxes = null;
     this.geometryCache.clear();
     if (!this.map || this.destroyed) return;
@@ -1761,6 +1779,7 @@ export class DeckMapRenderer implements MapRenderer {
     // Drop every cached instance so the recovery commit cannot reinsert it.
     this.geometryLayers = [];
     this.geometryCache.clear();
+    this.interactionCache = null;
     this.pointLayers = null;
     this.aviationLayerSections = null;
     this.emitBasemapState('initializing');
@@ -1882,6 +1901,7 @@ export class DeckMapRenderer implements MapRenderer {
     }
     if (this.quarantinedLayerIds.has(layerId)) return;
     this.quarantinedLayerIds.add(layerId);
+    this.interactionCache = null;
     this.geometryCache.clear();
     this.quarantinedLayerData.set(layerId, this.layerInputFingerprint(layer!));
     this.callbacks?.onLayerDegraded?.(layerId, error);

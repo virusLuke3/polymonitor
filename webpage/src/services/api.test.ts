@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiTimeoutError, withRuntimeRequestBudget, fetchAllActiveMarkets, fetchAviationViewport, fetchMarketWideAiSnapshot, fetchNaturalHazardMapSource, fetchRuntimeAlpha, fetchRuntimeGeoSanctionsShock, fetchRuntimeGlobalTemperatureMonitor, fetchSystemHealth, fetchWorkspaceBundle } from './api';
+import { ApiTimeoutError, withRuntimeRequestBudget, fetchAllActiveMarkets, fetchMarketGroups, fetchAviationViewport, fetchMarketWideAiSnapshot, fetchNaturalHazardMapSource, fetchRuntimeAlpha, fetchRuntimeGeoSanctionsShock, fetchRuntimeGlobalTemperatureMonitor, fetchSystemHealth, fetchWorkspaceBundle } from './api';
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
@@ -108,6 +108,21 @@ describe('HTTP lifecycle', () => {
 
 
 describe('shared Runtime admission', () => {
+  it('queues bulk market catalogues in the shared budget and cancels before downloading', async () => {
+    vi.stubGlobal('window', globalThis);
+    const releases: (() => void)[] = [];
+    const held = [0, 1, 2].map(() => withRuntimeRequestBudget(() => new Promise<void>(resolve => releases.push(resolve))));
+    await new Promise(resolve => setTimeout(resolve, 10));
+    vi.stubGlobal('fetch', vi.fn());
+    const abort = new AbortController();
+    const request = fetchMarketGroups('', 80, 'active', abort.signal);
+    const rejection = expect(request).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fetch).not.toHaveBeenCalled();
+    abort.abort(); await rejection;
+    releases.forEach(release => release()); await Promise.all(held);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it('admits a visible signal before queued background geography without expanding concurrency', async () => {
     vi.stubGlobal('window', globalThis);
     const releases: (() => void)[] = [], started: string[] = [];
@@ -146,6 +161,24 @@ describe('shared Runtime admission', () => {
     await map; await background;
     expect(started).toEqual(['0','1','2','map','background']);
     releases.forEach(release=>release()); await Promise.all(active);
+  });
+  it('ages queued background work without increasing the shared concurrency limit', async () => {
+    let clock = 0;
+    const now = vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    const started: string[] = [], releases: (() => void)[] = [];
+    const active = [0, 1, 2].map(() => withRuntimeRequestBudget(() => new Promise<void>(resolve => releases.push(resolve))));
+    await new Promise(resolve => setTimeout(resolve, 10));
+    const background = withRuntimeRequestBudget(async () => { started.push('background'); }, undefined, 2);
+    clock = 8001;
+    const interactive = withRuntimeRequestBudget(async () => { started.push('interactive'); }, undefined, 0);
+    expect(started).toHaveLength(0);
+    releases.shift()!();
+    try {
+      await Promise.all([background, interactive]);
+      expect(started).toEqual(['background', 'interactive']);
+    } finally {
+      releases.forEach(release => release()); await Promise.all(active); now.mockRestore();
+    }
   });
   it('uses the small-screen budget without coupling source cancellation', async () => {
     vi.stubGlobal('matchMedia', () => ({matches:true}));

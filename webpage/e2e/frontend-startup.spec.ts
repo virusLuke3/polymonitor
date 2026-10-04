@@ -15,8 +15,10 @@ async function readyFallback(page: Page) {
 }
 
 test.afterEach(async ({ page }) => {
+  // Assertions above own fault/recovery outcomes. A cancelled intercepted
+  // request can remain pending in Playwright; do not wait for it after exit.
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
   await page.goto('about:blank');
-  await page.unrouteAll({ behavior: 'wait' });
 });
 
 test('anonymous dashboard uses public health and never polls administrator operations', async ({ page }) => {
@@ -156,14 +158,15 @@ test('a slow WebGL download shows temporary SVG then restores the primary map an
 
 test('leaving a temporary map invalidates the pending WebGL promotion', async ({ page }) => {
   await installDashboard(page);
+  // Globe's debounced digest needs an advancing clock (as in globe-map.spec).
+  await page.clock.install({ time: new Date(GENERATED_AT) });
   let pending: Route | undefined;
   await page.route(deckModule, route => { pending = route; });
   await gotoMapScene(page, mapURL);
   await readyFallback(page);
   await page.getByRole('tab', { name: '3D Globe', exact: true }).click();
-  await expect(page.locator('[data-map-renderer-ready]')).toHaveCount(0);
   await pending!.fallback();
-  await page.waitForTimeout(800);
+  await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', 'globe', { timeout: 60000 });
   await expect(page.locator('.maplibregl-canvas')).toHaveCount(0);
   await expect(page.locator('.wm-world-event-svg-map')).toHaveCount(0);
 });
@@ -183,6 +186,7 @@ test('a successfully replaced basemap remains primary beyond its loading deadlin
 for (const leave of [false, true]) {
   test(`a late SVG download ${leave ? 'cannot mount after leaving the map' : 'recovers after the download warning'}`, async ({ page }) => {
     await installDashboard(page);
+    if (leave) await page.clock.install({ time: new Date(GENERATED_AT) });
     await page.setViewportSize({ width: 390, height: 844 });
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
@@ -193,12 +197,19 @@ for (const leave of [false, true]) {
     await gotoMapScene(page, `${mapURL}&renderer=svg`);
     await expect(page.locator('.wm-weather-deck-map [role="alert"]')).toContainText('still downloading', { timeout: 20_000 });
     expect(pending).toBeDefined();
-    if (leave) await page.getByRole('tab', { name: '3D Globe', exact: true }).click();
+    if (leave) {
+      // End the explicit SVG diagnostic before choosing the real 3D renderer.
+      // Keeping renderer=svg intentionally requests SVG in either view.
+      await page.evaluate(() => {
+        const url = new URL(location.href); url.searchParams.delete('renderer');
+        history.replaceState(null, '', url);
+      });
+      await page.getByRole('tab', { name: '3D Globe', exact: true }).click();
+    }
     await pending!.fallback();
     if (leave) {
-      await page.waitForTimeout(800);
+      await expect(page.locator('[data-map-renderer-ready]')).toHaveAttribute('data-map-renderer-ready', 'globe', { timeout: 60000 });
       await expect(page.locator('.wm-world-event-svg-map')).toHaveCount(0);
-      await expect(page.locator('[data-map-renderer-ready]')).toHaveCount(0);
     } else {
       await readyFallback(page);
       await expect(page.locator('.wm-weather-deck-map [role="alert"]')).toHaveCount(0);
