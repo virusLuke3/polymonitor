@@ -118,9 +118,9 @@ function GeoShockPanel({ payload }: {
       </div>
       {view === 'sanctions' ? <div>
         <small className="wm-macro-observation">OFAC list entries are context, not a count of new sanctions. Policy notices keep their publication dates.</small>
-        {sanctions.length ? sanctions.map(item => <article key={item.id} className="wm-macro-registry-row">
+        {sanctions.length ? sanctions.map(item => <article key={item.id} className="wm-geo-policy-row">
           <div><strong>{item.headline}</strong><p>{item.summary}</p>
-            <small className="wm-macro-observation">{item.source} · Published {formatDate(item.occurredAt)}</small>
+            <small className="wm-macro-observation">{item.source} · {item.kind === 'sanction' ? 'List published' : 'Published'} {formatDate(item.occurredAt)}</small>
             <small className="wm-macro-observation">Collected {item.collectedAt ? new Date(item.collectedAt).toLocaleString() : 'Unknown'}{item.retained ? ' · Saved record; source refresh failed' : ''}</small>
             <a className="wm-macro-source-link" href={item.sourceUrl || 'https://ofac.treasury.gov/sanctions-list-service'} target="_blank" rel="noopener noreferrer">Source</a>
           </div>

@@ -8,4 +8,10 @@
 .wm-macro-filters button[aria-pressed="true"] { color: #67d7f5; border-color: #67d7f5; }
 .wm-macro-observation { display: block; font-size: 11px; color: #aab4b0; margin-top: 5px; overflow-wrap: anywhere; }
 .wm-macro-observation a, .wm-macro-source-link { color: #67d7f5; }
-.wm-macro-registry-right { max-width: 48%; white-space: normal; overflow-wrap: anywhere; }
+.wm-macro-registry-row { grid-template-columns: 4px minmax(0, 1fr) minmax(76px, 130px); }
+.wm-macro-registry-right { max-width: 130px; white-space: normal; overflow-wrap: anywhere; }
+.wm-macro-registry-right .wm-status-badge { white-space: normal; text-align: right; }
+.wm-macro-registry-main .wm-macro-observation { white-space: normal; overflow: visible; letter-spacing: normal; text-transform: none; }
+.wm-geo-policy-row { display: block; min-width: 0; padding: 10px 0; border-bottom: 1px solid #252525; overflow-wrap: anywhere; }
+.wm-geo-policy-row strong { display: block; font-size: 13px; }
+.wm-geo-policy-row p { margin: 6px 0; color: #aab4b0; }

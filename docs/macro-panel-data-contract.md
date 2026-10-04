@@ -65,6 +65,8 @@ conflict observations. A separately bounded `sanctionsItems` sample prevents the
 2,000-record conflict cap from hiding already collected policy records. Existing
 conflict items and map coordinates remain unchanged. List membership is not evidence of a new sanction action;
 historical death estimates are not a live escalation metric.
+Policy records use their own single-column layout; macro series keep readable
+period and unit labels on desktop and mobile.
 
 ## Verification
 
