@@ -9,7 +9,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 export class GlobeStaticBatch {
   private originals: Array<{ object: any; auto: boolean; worldAuto: boolean; visible: boolean }> = [];
   private group = new THREE.Group();
-  private occlusion: Array<{ object: any; sphere: THREE.Sphere; visible: boolean }> = [];
+  private occlusion: Array<{ object: any; sphere: { center: { x: number; y: number; z: number }; radius: number }; visible: boolean }> = [];
   private camera = new THREE.Vector3(NaN, NaN, NaN);
   private hidden = 0;
 
@@ -58,13 +58,13 @@ export class GlobeStaticBatch {
   }
   /** Conservative sphere-vs-opaque-Earth occlusion. Never cull a limb-crossing
    * bound, a near-side region or any part merely outside the camera frustum. */
-  cull(camera: THREE.Vector3, earthRadius = 100) {
+  cull(camera: { x: number; y: number; z: number }, earthRadius = 100) {
     if (this.camera.equals(camera)) return this.hidden;
     this.camera.copy(camera); this.hidden = 0;
-    const distance = camera.length();
+    const distance = this.camera.length();
     const earthAngle = distance > earthRadius ? Math.asin(earthRadius / distance) : 0;
     const tangentDistance = Math.sqrt(Math.max(0, distance * distance - earthRadius * earthRadius));
-    const towardEarth = camera.clone().negate().normalize();
+    const towardEarth = this.camera.clone().negate().normalize();
     const offset = new THREE.Vector3();
     for (const { object, sphere, visible } of this.occlusion) {
       offset.copy(sphere.center).sub(camera);
