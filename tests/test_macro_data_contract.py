@@ -145,3 +145,18 @@ def test_cpi_event_inputs_are_not_truncated_by_display_limit():
     assert len(result['items']) == 1
     assert result['summary']['forecastCount'] == 4
     assert result['summary']['previousCount'] == 4
+
+
+def test_optional_employment_calendar_does_not_fail_verified_cpi(monkeypatch):
+    ctx = cpi_context()
+    fixture_rows = cpi_rows()
+    monkeypatch.setattr(registry.cpi_release_calendar_service, 'get_cpi_release_calendar_snapshot',
+        lambda *a, **k: {'status': 'degraded', 'sources': {'blsCpi': 'ok', 'blsEmployment': 'fallback'}, 'items': []})
+    monkeypatch.setattr(registry, '_calendar_rows', lambda payload: fixture_rows[:1])
+    monkeypatch.setattr(registry, '_inflation_nowcast_seeded_snapshot', lambda deps: {'status': 'ok'})
+    monkeypatch.setattr(registry, '_nowcast_rows', lambda payload: fixture_rows[1:])
+    result = registry.build_cpi_release_command_center_snapshot(ctx)
+    assert result['status'] == 'ok'
+    assert result['sources']['calendar.blsCpi'] == 'ok'
+    assert result['optionalSources']['calendar.blsEmployment'] == 'fallback'
+    assert result['summary']['forecastCount'] == result['summary']['previousCount'] == 4

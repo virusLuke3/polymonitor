@@ -931,14 +931,19 @@ def build_cpi_release_command_center_snapshot(
     )
     rows = _calendar_rows(calendar) + _nowcast_rows(nowcast)
     sources: Dict[str, str] = {"calendar": _snapshot_status(calendar), "nowcast": _snapshot_status(nowcast)}
-    _merge_sources(sources, "calendar", calendar)
-    return _payload(
+    # Only the CPI calendar determines this panel's primary release validity.
+    calendar_states = calendar.get("sources") or {}
+    required_calendar = {**calendar, "sources": {key: value for key, value in calendar_states.items() if key == "blsCpi"}}
+    _merge_sources(sources, "calendar", required_calendar if required_calendar["sources"] else calendar)
+    payload = _payload(
         dependencies,
         "cpi-release-command-center",
         rows,
         sources,
         limit=limit,
     )
+    payload["optionalSources"] = {f"calendar.{key}": value for key, value in calendar_states.items() if key != "blsCpi"}
+    return payload
 
 
 def build_cpi_components_pressure_registry_snapshot(
@@ -1061,7 +1066,9 @@ def build_fed_reaction_growth_risk_board_snapshot(
     sources: Dict[str, str] = {"fed": _snapshot_status(fed), "growth": _snapshot_status(growth), "calendar": _snapshot_status(calendar)}
     _merge_sources(sources, "fed", fed)
     _merge_sources(sources, "growth", growth)
-    _merge_sources(sources, "calendar", calendar)
+    calendar_states = calendar.get("sources") or {}
+    fomc_calendar = {**calendar, "sources": {key: value for key, value in calendar_states.items() if key == "fomc"}}
+    _merge_sources(sources, "calendar", fomc_calendar if fomc_calendar["sources"] else calendar)
     return _payload(
         dependencies,
         "fed-reaction-growth-risk-board",

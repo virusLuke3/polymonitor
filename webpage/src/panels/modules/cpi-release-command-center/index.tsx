@@ -83,6 +83,7 @@ function ReleaseQueue({ items }: { items: RuntimeMacroRegistryItem[] }) {
           <span>{display(item.group)}</span>
           <strong>{display(item.label)}</strong>
           <em>{formatReleaseTime(item.date)}</em>
+          {String(item.source || '').includes('fallback') ? <small>Saved fallback schedule · verify official dates</small> : null}
         </div>
       ))}
     </div>
@@ -131,7 +132,7 @@ function CpiReleaseCommandPanel({ payload }: { payload?: RuntimeCpiReleaseComman
       dataPanelId="cpi-release-command-center"
     >
       <MacroRefresh payload={payload} />
-      <small className="wm-macro-observation">Model nowcast is not market consensus. Actual is pending until the matching BLS period is published.</small>
+      <small className="wm-macro-observation">Actual rates use the latest FRED vintage; verify the original BLS release for settlement. Model nowcast is not market consensus. Actual is pending until the matching BLS period is published.</small>
       <div className="wm-cpi-command-hero">
         <div>
           <span>{copy('nextPrint', 'NEXT CPI PRINT')}</span>

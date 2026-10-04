@@ -42,11 +42,11 @@ function time(value?: string | number | null) {
 }
 
 export function MacroRefresh({ payload, sourceMinutes = 30 }: {
-  payload?: { generatedAt?: string; status?: string | null; sources?: Record<string, string>; expectedIntervalSeconds?: number } | null;
+  payload?: { generatedAt?: string; status?: string | null; sources?: Record<string, string>; optionalSources?: Record<string, string>; expectedIntervalSeconds?: number } | null;
   sourceMinutes?: number;
 }) {
   const runtime = usePanelRuntimeView();
-  const problems = Object.entries(payload?.sources || {}).filter(([, state]) => !['ok', 'empty', 'redis-seed', 'sqlite-seed'].includes(state));
+  const problems = Object.entries({...payload?.sources, ...Object.fromEntries(Object.entries(payload?.optionalSources || {}).map(([key, value]) => [`Optional ${key}`, value]))}).filter(([, state]) => !['ok', 'empty', 'redis-seed', 'sqlite-seed'].includes(state));
   return <div className="wm-macro-refresh" aria-live="polite">
     <div><span>Auto check 30s · Seed {Math.round((payload?.expectedIntervalSeconds ?? sourceMinutes * 60) / 60)}m</span>
       <button type="button" disabled={Boolean(runtime?.status?.fetching)} onClick={() => runtime?.refresh?.()}>

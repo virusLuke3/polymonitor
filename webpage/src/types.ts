@@ -1543,6 +1543,7 @@ export type RuntimeMacroRegistrySummary = {
 };
 
 export type RuntimeMacroRegistryPayload = {
+  optionalSources?: Record<string, string>;
   schemaVersion?: number;
   expectedIntervalSeconds?: number;
   generatedAt?: string;
