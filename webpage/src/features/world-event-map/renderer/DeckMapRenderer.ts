@@ -275,7 +275,8 @@ export class DeckMapRenderer implements MapRenderer {
   private occupiedScreenBoxes: ScreenBox[] = [];
   private basemapLabelBoxes: ScreenBox[] | null = null;
   private labelWidths = new Map<string, number>();
-  private interactionCache: { events: GeoEvent[]; selected: string | null; hovered: string | null;
+  private eventsById = new Map<string, GeoEvent>();
+  private interactionCache: { selected: GeoEvent | null; hovered: GeoEvent | null;
     cluster: EventCluster | null; layers: LayersList } | null = null;
   private readonly labelMeasureContext = typeof document === 'undefined' ? null : document.createElement('canvas').getContext('2d');
   private readonly clusterIndex = new EventClusterIndex();
@@ -634,6 +635,7 @@ export class DeckMapRenderer implements MapRenderer {
       if (!nextIds.has(eventId)) this.eventFirstSeenAt.delete(eventId);
     }
     this.events = events;
+    this.eventsById = new Map(events.map(event => [event.id, event]));
     this.aviationMotionAvailable = events.some(event => event.category === 'infrastructure'
       && (event.properties.mapEntity === 'air-route' || event.properties.mapEntity === 'air-flight'));
     this.eventVersion++;
@@ -810,6 +812,7 @@ export class DeckMapRenderer implements MapRenderer {
     this.pointLayers = null;
     this.geometryLayers = [];
     this.geometryCache.clear();
+    this.eventsById.clear();
     this.aviationLayerSections = null;
     this.aviationDynamicLayers = null;
     this.seededAircraftPickPoints = [];
@@ -1023,11 +1026,12 @@ export class DeckMapRenderer implements MapRenderer {
         zoom: this.state.zoom,
       });
     const interaction = this.interactionCache;
-    if (!interaction || interaction.events !== this.events || interaction.selected !== this.state.selectedEventId
-      || interaction.hovered !== this.hoveredDeckEventId || interaction.cluster !== this.hoveredDeckCluster) {
-      this.interactionCache = { events: this.events, selected: this.state.selectedEventId,
-        hovered: this.hoveredDeckEventId, cluster: this.hoveredDeckCluster,
-        layers: createEventInteractionLayers(this.events, this.state.selectedEventId,
+    const selected = this.eventsById.get(this.state.selectedEventId || '') || null;
+    const hovered = this.eventsById.get(this.hoveredDeckEventId || '') || null;
+    if (!interaction || interaction.selected !== selected
+      || interaction.hovered !== hovered || interaction.cluster !== this.hoveredDeckCluster) {
+      this.interactionCache = { selected, hovered, cluster: this.hoveredDeckCluster,
+        layers: createEventInteractionLayers([selected, hovered].filter((event): event is GeoEvent => Boolean(event)), this.state.selectedEventId,
           this.hoveredDeckEventId, this.hoveredDeckCluster) };
     }
     const interactionLayers = this.interactionCache!.layers;

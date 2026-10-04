@@ -1,6 +1,91 @@
 import { test, expect } from '@playwright/test';
 import { installFixtures, GENERATED_AT } from './fixtures/world-event-map';
 import { installRealMapAssets } from './fixtures/real-map-assets';
+import { installDashboard } from './fixtures/dashboard';
+import { hazard, mapResponse } from './fixtures/world-event-map';
+import { createHash } from 'node:crypto';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+// Opt-in workload benchmark; ordinary regression runs keep the focused tests below.
+// Synthetic coordinates are test data only, never a production source or visual golden.
+if (process.env.MAP_PERFORMANCE_RUN) for (const count of [2000, 4500]) for (const width of [1440, 390]) {
+  test(`fixed workload ${count} records at ${width}`, async ({ page }) => {
+    test.setTimeout(240000);
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await installDashboard(page);
+    // globe.gl's debouncer needs an advancing Date clock. A permanently fixed
+    // Date with running timers prevents its initial digest from ever settling.
+    await page.clock.install({ time: new Date(GENERATED_AT) });
+    const records = Array.from({ length: count }, (_, i) => {
+      const x = -170 + (i % 100) * 3.4, y = -65 + Math.floor(i / 100) * 2.6;
+      return hazard({ id: `performance-fixture:${i}`, title: `Performance fixture ${i}`,
+        hazardKind: i % 3 ? 'earthquake' : 'flood', severity: i % 7 ? 'watch' : 'warning',
+        metrics: i % 3 ? { kind: 'earthquake', magnitude: 4.1 } : { kind: 'weather-alert' },
+        geometry: i % 3 ? { type: 'Point', coordinates: [x, y] }
+          : { type: 'Polygon', coordinates: [[[x,y],[x+2,y],[x+2,y+2],[x,y+2],[x,y]]] },
+      });
+    });
+    await page.route('**/wm-api/runtime/world/natural-hazards/map?**', route =>
+      new URL(route.request().url()).searchParams.get('source') === 'nws'
+        ? route.fulfill({ json: mapResponse('nws', records) }) : route.fallback());
+    await page.addInitScript(() => {
+      (window as any).__perfTasks = [];
+      new PerformanceObserver(list => (window as any).__perfTasks.push(...list.getEntries().map(e => ({at:e.startTime,ms:e.duration}))))
+        .observe({ type: 'longtask', buffered: true });
+    });
+    const directory = resolve(`artifacts/map-performance-closure-20261004/${process.env.MAP_PERFORMANCE_RUN}`);
+    mkdirSync(directory, { recursive: true });
+    const identity = { count, width, fixture: createHash('sha256').update(JSON.stringify(records)).digest('hex') };
+    const measurements = [];
+    await page.goto('/?view=2d&basemap=openfreemap&mapPerf=1&time=all&center=0,20&zoom=1.5');
+    const host = page.locator('[data-map-renderer-ready]');
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Performance.enable');
+    const metrics = async () => Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics.map((e:any) => [e.name,e.value]));
+    for (const kind of ['webgl', 'globe']) {
+      await page.evaluate(() => { (window as any).__perfTasks = []; });
+      const switchStart = Date.now();
+      if (kind === 'globe') await page.getByRole('tab', { name: '3D Globe', exact: true }).click();
+      await expect(host).toHaveAttribute('data-map-renderer-ready', kind, { timeout: 90000 });
+      await expect.poll(async () => Number((await page.locator('.wm-world-event-list-toggle strong').textContent())?.replace(/\D/g,''))).toBeGreaterThanOrEqual(count);
+      const readyMs = Date.now() - switchStart;
+      const startupLongTasks = await page.evaluate(() => [...(window as any).__perfTasks]);
+      await page.locator('.wm-map-stage').scrollIntoViewIfNeeded();
+      await page.evaluate(() => document.fonts.ready);
+      await page.waitForTimeout(3000);
+      await page.mouse.move(0,0);
+      const filename = `${kind}-${count}-${width}.png`;
+      const pixels = await page.locator('.wm-map-stage').screenshot({ path: resolve(directory, filename) });
+      if (process.env.MAP_PERFORMANCE_BASELINE) {
+        expect(pixels.equals(readFileSync(resolve(process.env.MAP_PERFORMANCE_BASELINE, filename)))).toBe(true);
+      }
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
+      await page.waitForTimeout(500);
+      const start = await metrics();
+      const frames = () => page.locator('.wm-globe-renderer').count().then(n => n ? page.locator('.wm-globe-renderer').getAttribute('data-globe-frames').then(Number) : 0);
+      const firstFrame = await frames(), startTime = Date.now();
+      await page.waitForTimeout(5000);
+      const elapsedMs = Date.now()-startTime, drawnFrames = await frames()-firstFrame, end = await metrics();
+      const box = (await host.boundingBox())!;
+      const interactionStart = Date.now();
+      await page.mouse.move(box.x+box.width*.5,box.y+box.height*.5); await page.mouse.down();
+      for (let step=0;step<15;step++) await page.mouse.move(box.x+box.width*.5+step*3,box.y+box.height*.5);
+      await page.mouse.up(); await page.mouse.wheel(0,-100); await page.waitForTimeout(500);
+      measurements.push({kind,readyMs,startupLongTasks,elapsedMs,drawnFrames:kind==='globe'?drawnFrames:null,fps:kind==='globe'?drawnFrames*1000/elapsedMs:null,
+        busyPercent:(end.TaskDuration-start.TaskDuration)*100000/elapsedMs,interactionMs:Date.now()-interactionStart,
+        longTasks:await page.evaluate(() => (window as any).__perfTasks),
+        globe:await page.locator('.wm-globe-renderer').count() ? await page.locator('.wm-globe-renderer').evaluate(e=>({... (e as HTMLElement).dataset})) : null});
+      await page.emulateMedia({reducedMotion:'reduce'});
+      // Restore the exact camera through the existing shared URL state for the next view.
+      if(kind==='webgl') {
+        await page.goto('/?view=2d&basemap=openfreemap&mapPerf=1&time=all&center=0,20&zoom=1.5');
+        await expect(host).toHaveAttribute('data-map-renderer-ready','webgl');
+      }
+    }
+    writeFileSync(resolve(directory, `${count}-${width}.json`), JSON.stringify({ ...identity, measurements },null,2));
+  });
+}
 
 // Performance and pixel comparisons use the same Chrome raster backend as
 // their pre-change baseline. Do not silently compare it with SwiftShader.

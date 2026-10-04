@@ -65,6 +65,24 @@ describe('map render work ownership',()=>{
     renderer.resize();renderer.flushRender({...flags,points:true});expect(query).toHaveBeenCalledTimes(2);
     renderer.map=null;renderer.overlay=null;renderer.destroy();
   });
+  it('retains selected geometry across unrelated source refreshes, but replaces or removes its own revision',()=>{
+    const renderer = new DeckMapRenderer() as any;
+    renderer.state = {...defaultWorldEventMapState(), activeLayerIds:[], selectedEventId:path.id};
+    renderer.overlay = {setProps:vi.fn()}; renderer.schedulePickingWarmup = vi.fn();
+    const draw = (events:GeoEvent[]) => {
+      renderer.setEvents(events); renderer.geometryNeedsCommit = false;
+      renderer.flushRender({...flags,interaction:true});
+      return renderer.interactionCache.layers;
+    };
+    const first = draw([path,point]);
+    expect(draw([path,{...point,title:'Updated elsewhere'}])).toBe(first);
+    const revised = {...path,severity:'critical' as const};
+    const next = draw([revised,point]);
+    expect(next).not.toBe(first);
+    expect(next.find((layer:any)=>layer.id==='world-event-selected-path-outline').props.data).toEqual([revised]);
+    expect(draw([point])).toEqual([]);
+    renderer.overlay = null; renderer.destroy();
+  });
   it('retries transient radar tiles promptly, stops at the budget and respects rate limits',()=>{
     const renderer=new DeckMapRenderer() as any;vi.useFakeTimers();vi.stubGlobal('window',globalThis);
     renderer.radarFrame={time:1,tiles:'fixture',coverageTiles:'coverage'};renderer.applyRadar=vi.fn();

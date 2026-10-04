@@ -74,6 +74,8 @@ export class GlobeMapRenderer implements MapRenderer {
   private eventGeometry = new Map<GeoEvent, GlobeGeometry[]>();
   private renderedPaths: GlobeGeometry[] = [];
   private renderedAreas: Array<Area | GlobeGeometry> = [];
+  private appliedAreas: Array<Area | GlobeGeometry> = [];
+  private areasPending = false;
   private index = new EventClusterIndex();
   private tooltip: RendererTooltip | null = null;
   private language: "en" | "zh" = "en";
@@ -84,6 +86,7 @@ export class GlobeMapRenderer implements MapRenderer {
   private readyReported = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private frame: number | null = null;
+  private nativeTickRequested = false;
   private batchTimer: ReturnType<typeof setTimeout> | null = null;
   private cameraTimer: ReturnType<typeof setTimeout> | null = null;
   private pointerTimer: ReturnType<typeof setTimeout> | null = null;
@@ -266,6 +269,7 @@ export class GlobeMapRenderer implements MapRenderer {
     const lost = (e: Event) => {
       e.preventDefault();
       this.pause();
+      this.readyReported = false;
       callbacks.onError(
         new Error("3D graphics context lost; attempting bounded recovery."),
       );
@@ -283,8 +287,8 @@ export class GlobeMapRenderer implements MapRenderer {
       this.contextTimer = null;
       this.geometryDirty = true;
       this.renderedPaths = []; this.renderedAreas = [];
+      this.appliedAreas = [];
       this.resume();
-      callbacks.onBasemapStateChange("primary-ready");
     };
     canvas.addEventListener("webglcontextlost", lost);
     canvas.addEventListener("webglcontextrestored", restored);
@@ -636,6 +640,7 @@ export class GlobeMapRenderer implements MapRenderer {
       this.state.presentationMode === "records" ? 18 : this.state.zoom,
       selected,
     );
+    const previousMarkers = new Map(this.markers.map(marker => [marker.cluster?.id || marker.event!.id, marker]));
     const markers: Marker[] = [
       ...[
         ...new Map(
@@ -651,7 +656,10 @@ export class GlobeMapRenderer implements MapRenderer {
         coordinates: cluster.coordinates,
         cluster,
       })),
-    ];
+    ].map((marker: Marker) => {
+      const previous = previousMarkers.get(marker.cluster?.id || marker.event!.id);
+      return previous && previous.event === marker.event && previous.cluster === marker.cluster ? previous : marker;
+    });
     const changed =
       markers.length !== this.markers.length ||
       markers.some(
@@ -662,7 +670,8 @@ export class GlobeMapRenderer implements MapRenderer {
     if (changed) {
       this.markers = markers;
       this.sweepMaterials = true;
-      this.markerObjects.clear();
+      const activeIds = new Set(markers.map(marker => marker.cluster?.id || marker.event!.id));
+      for (const id of this.markerObjects.keys()) if (!activeIds.has(id)) this.markerObjects.delete(id);
       this.globe.customLayerData(markers);
     } else
       for (const marker of this.markers) {
@@ -695,22 +704,9 @@ export class GlobeMapRenderer implements MapRenderer {
         this.globe.pathsData(paths);
       }
       const areas = [...this.countryAreas, ...geometry.filter(g => g.geometry.type === "Polygon" || g.geometry.type === "MultiPolygon")];
-      if (areas.length !== this.renderedAreas.length || areas.some((g, i) => g !== this.renderedAreas[i])) {
-        this.renderedAreas = areas;
-        this.staticBatch.clear();
-        this.globe.polygonsData(areas);
-        if (this.batchTimer) clearTimeout(this.batchTimer);
-        // Wait for the library's yielded digest before batching its new buffers.
-        this.batchTimer = setTimeout(() => {
-          this.batchTimer = null;
-          if (this.destroyed || !this.globe) return;
-          const counts = this.staticBatch.rebuild(this.globe.scene());
-          if (this.host) {
-            this.host.dataset.globeBatchedObjects = String(counts.objects);
-            this.host.dataset.globeBatches = String(counts.batches);
-          }
-          this.wake();
-        }, 0);
+      if ((this.areasPending && this.batchTimer === null)
+        || areas.length !== this.renderedAreas.length || areas.some((g, i) => g !== this.renderedAreas[i])) {
+        this.stageAreas(areas);
       }
       this.geometryDirty = false;
     }
@@ -743,6 +739,41 @@ export class GlobeMapRenderer implements MapRenderer {
     this.wake();
     this.startMotion();
   }
+  private stageAreas(areas: Array<Area | GlobeGeometry>) {
+    if (this.batchTimer) clearTimeout(this.batchTimer);
+    this.renderedAreas = areas;
+    this.staticBatch.clear();
+    const included = new Set(this.appliedAreas);
+    const pending = areas.filter(area => !included.has(area));
+    let offset = 0;
+    this.areasPending = true;
+    // The library digests polygons asynchronously but tessellates the whole
+    // addition synchronously. Bound additions per task; retain native objects,
+    // coordinates and final ordering. Never present a truncated result as ready.
+    const advance = () => {
+      this.batchTimer = null;
+      if (this.destroyed || this.paused || !this.globe) return;
+      if (offset < pending.length || this.appliedAreas !== areas) {
+        for (const area of pending.slice(offset, offset + 192)) included.add(area);
+        offset = Math.min(pending.length, offset + 192);
+        this.appliedAreas = offset === pending.length ? areas : areas.filter(area => included.has(area));
+        this.globe.polygonsData(this.appliedAreas);
+        if (this.host) this.host.dataset.globePendingAreas = String(pending.length - offset);
+        // Let native digest, input and a browser frame run before the next batch.
+        this.batchTimer = setTimeout(advance, 16);
+        return;
+      }
+      this.areasPending = false;
+      const counts = this.staticBatch.rebuild(this.globe.scene());
+      if (this.host) {
+        this.host.dataset.globeBatchedObjects = String(counts.objects);
+        this.host.dataset.globeBatches = String(counts.batches);
+      }
+      this.wake();
+      this.startMotion();
+    };
+    advance();
+  }
   private queue() {
     if (this.paused || this.destroyed || this.timer) return;
     this.timer = setTimeout(() => this.flush(), 100);
@@ -750,6 +781,7 @@ export class GlobeMapRenderer implements MapRenderer {
   private startMotion() {
     if (
       this.animationTimer ||
+      this.areasPending ||
       this.paused ||
       this.reduced ||
       this.destroyed ||
@@ -793,7 +825,7 @@ export class GlobeMapRenderer implements MapRenderer {
           this.motion.remove(sprite);
           this.motionObjects.delete(id);
         }
-      this.wake();
+      this.wake(false);
       if (
         this.aviation.routeMotionGroups.length ||
         this.aviation.flightMotionGroups.length
@@ -808,18 +840,25 @@ export class GlobeMapRenderer implements MapRenderer {
       this.quality === "battery" ? 80 : 40,
     );
   }
-  private wake() {
-    if (!this.globe || this.paused || this.destroyed || this.frame !== null) return;
+  private wake(nativeTick = true) {
+    if (!this.globe || this.paused || this.destroyed) return;
+    this.nativeTickRequested ||= nativeTick;
+    if (this.frame !== null) return;
     this.frame = requestAnimationFrame(() => {
       this.frame = null;
       if (!this.globe || this.paused || this.destroyed) return;
-      // resumeAnimation performs one complete public globe.gl tick (controls,
-      // composer, hover and tweens). Cancel its successor immediately: this RAF
-      // is the only draw owner, including aircraft and data updates.
+      // Input/data changes need the public tick for controls, hover and tweens.
+      // Only reference aircraft move between those changes; a motion-only frame
+      // needs the same full-resolution composer, not another native raycast and
+      // CSS2D traversal of every static polygon. Both paths share this one RAF.
       const occluded = this.staticBatch.cull(this.globe.camera().position);
-      this.globe.resumeAnimation();
-      this.globe.pauseAnimation();
-      if (this.ready && !this.readyReported) {
+      const native = this.nativeTickRequested;
+      this.nativeTickRequested = false;
+      if (native) {
+        this.globe.resumeAnimation();
+        this.globe.pauseAnimation();
+      } else this.globe.postProcessingComposer().render();
+      if (this.ready && !this.areasPending && !this.readyReported) {
         this.readyReported = true;
         if (!performance.getEntriesByName("polymonitor:map:first-basemap").length)
           performance.mark("polymonitor:map:first-basemap");
@@ -834,6 +873,7 @@ export class GlobeMapRenderer implements MapRenderer {
       }
       if (this.host) {
         this.host.dataset.globeFrames = String(Number(this.host.dataset.globeFrames || 0) + 1);
+        if (native) this.host.dataset.globeNativeTicks = String(Number(this.host.dataset.globeNativeTicks || 0) + 1);
         this.host.dataset.globeOccludedObjects = String(occluded);
         this.host.dataset.globeDrawCalls = String(this.globe.renderer().info.render.calls);
         this.host.classList.add("is-render-idle");
@@ -926,6 +966,7 @@ export class GlobeMapRenderer implements MapRenderer {
       this.motion.visible = true;
       this.startMotion();
     }
+    this.wake();
   }
   fitCountry(country: MapCountryTarget) {
     const [a, b] = country.bounds;
@@ -953,9 +994,13 @@ export class GlobeMapRenderer implements MapRenderer {
   pause() {
     this.paused = true;
     this.cameraInteracting = false;
-    for (const timer of [this.timer, this.cameraTimer, this.pointerTimer, this.animationTimer])
+    for (const timer of [this.timer, this.cameraTimer, this.pointerTimer, this.animationTimer, this.batchTimer])
       if (timer) clearTimeout(timer);
-    this.timer = this.cameraTimer = this.pointerTimer = this.animationTimer = null;
+    this.timer = this.cameraTimer = this.pointerTimer = this.animationTimer = this.batchTimer = null;
+    if (this.areasPending) {
+      this.renderedAreas = this.appliedAreas;
+      this.geometryDirty = true;
+    }
     if (this.frame !== null) cancelAnimationFrame(this.frame);
     this.frame = null;
     this.publishCamera();
@@ -972,6 +1017,7 @@ export class GlobeMapRenderer implements MapRenderer {
   async verifyReady() {
     return (
       this.ready &&
+      !this.areasPending &&
       !this.destroyed &&
       Boolean(this.globe?.renderer().info.render.calls)
     );

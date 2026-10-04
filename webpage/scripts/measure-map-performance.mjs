@@ -491,6 +491,8 @@ try {
  * time and RAF gaps are reported separately from rendered-frame counters. */
 async function profileBothViews() {
   target.searchParams.delete('mapPerf');
+  const profilerEnabled = !args.includes('--no-profiler');
+  const traceEnabled = !args.includes('--no-trace');
   const directory = dirname(output);
   mkdirSync(directory, { recursive: true });
   const browser = await chromium.launch({ channel: 'chrome', headless: true,
@@ -503,7 +505,7 @@ async function profileBothViews() {
   page.on('pageerror', error => errors.push(error.message));
   page.on('requestfailed', request => failures.push({ url: request.url(), error: request.failure()?.errorText }));
   page.on('response', response => { if (response.status() >= 400) httpErrors.push({ url: response.url(), status: response.status() }); });
-  await context.tracing.start({ screenshots: true, snapshots: true });
+  if (traceEnabled) await context.tracing.start({ screenshots: true, snapshots: true });
   await page.addInitScript(() => {
     window.__viewAudit = { longTasks: [], gaps: [], previous: 0, ready: [] };
     new PerformanceObserver(list => { for (const e of list.getEntries()) window.__viewAudit.longTasks.push({ at: e.startTime, duration: e.duration }); }).observe({ type: 'longtask', buffered: true });
@@ -511,17 +513,22 @@ async function profileBothViews() {
     requestAnimationFrame(tick);
   });
   const cdp = await context.newCDPSession(page);
-  await cdp.send('Performance.enable'); await cdp.send('Profiler.enable');
-  await cdp.send('Profiler.setSamplingInterval', { interval: 1000 });
+  await cdp.send('Performance.enable');
+  if (profilerEnabled) {
+    await cdp.send('Profiler.enable');
+    await cdp.send('Profiler.setSamplingInterval', { interval: 1000 });
+  }
   const metrics = async () => Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics.map(item => [item.name, item.value]));
   const sample = async (name, action) => {
     const start = await page.evaluate(() => performance.now()), before = await metrics();
     const firstFrame = await page.evaluate(() => Number(document.querySelector('.wm-globe-renderer')?.dataset.globeFrames || 0));
-    await cdp.send('Profiler.start');
+    if (profilerEnabled) await cdp.send('Profiler.start');
     await action();
-    const { profile } = await cdp.send('Profiler.stop');
+    if (profilerEnabled) {
+      const { profile } = await cdp.send('Profiler.stop');
+      writeFileSync(resolve(directory, `${viewportWidth}-${name}.cpuprofile`), JSON.stringify(profile));
+    }
     const after = await metrics(), end = await page.evaluate(() => performance.now());
-    writeFileSync(resolve(directory, `${viewportWidth}-${name}.cpuprofile`), JSON.stringify(profile));
     const state = await page.evaluate(({ start, end }) => {
       const audit = window.__viewAudit;
       return { longTasks: audit.longTasks.filter(item => item.at >= start && item.at < end),
@@ -533,7 +540,9 @@ async function profileBothViews() {
     const durationMs = end - start;
     const result = { name, durationMs, taskBusyPercent: (after.TaskDuration - before.TaskDuration) * 100000 / durationMs,
       maxLongTaskMs: Math.max(0, ...state.longTasks.map(item => item.duration)), rafGapP95Ms: gaps[Math.floor(gaps.length * .95)] || 0,
-      globe: state.globe, drawnFrames: state.globe.globeFrames == null ? null : Number(state.globe.globeFrames) - firstFrame, events: state.events };
+      globe: state.globe, drawnFrames: state.globe.globeFrames == null ? null : Number(state.globe.globeFrames) - firstFrame,
+      drawnFps: state.globe.globeFrames == null ? null : (Number(state.globe.globeFrames) - firstFrame) * 1000 / durationMs,
+      events: state.events };
     phases.push(result); progress(JSON.stringify(result));
   };
   const ready = kind => page.locator('.wm-weather-deck-basemap').waitFor({ state: 'visible' }).then(() =>
@@ -576,14 +585,14 @@ async function profileBothViews() {
     }));
     const release = (await (await context.request.get(new URL('/release-sha', target).href)).text()).trim();
     writeFileSync(output, JSON.stringify({ release, url: target.href, viewportWidth, viewportHeight, deviceScaleFactor: 1,
-      measuredAt: new Date().toISOString(), profilerEnabled: true, phases, errors, failures, httpErrors, ...resources }, null, 2));
+      measuredAt: new Date().toISOString(), profilerEnabled, traceEnabled, phases, errors, failures, httpErrors, ...resources }, null, 2));
   } catch (error) {
     await page.screenshot({ path: resolve(directory, `${viewportWidth}-failure.png`) }).catch(() => {});
     writeFileSync(output, JSON.stringify({ url: target.href, viewportWidth, viewportHeight,
       measuredAt: new Date().toISOString(), failure: String(error), phases, errors, failures, httpErrors }, null, 2));
     throw error;
   } finally {
-    await context.tracing.stop({ path: resolve(directory, `${viewportWidth}-interaction-trace.zip`) });
+    if (traceEnabled) await context.tracing.stop({ path: resolve(directory, `${viewportWidth}-interaction-trace.zip`) });
     await browser.close();
   }
 }

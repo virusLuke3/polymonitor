@@ -20,6 +20,26 @@ it('coalesces data, input and animation wakes into one native tick and cancels o
   await vi.advanceTimersByTimeAsync(16);
   expect(renderer.globe.resumeAnimation).toHaveBeenCalledTimes(1);
 });
+it('motion-only draws skip native hover traversal, while coalesced input retains the full tick', async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal('requestAnimationFrame', (fn: () => void) => setTimeout(fn, 16));
+  vi.stubGlobal('cancelAnimationFrame', (id: ReturnType<typeof setTimeout>) => clearTimeout(id));
+  const renderer = new GlobeMapRenderer() as any;
+  const draw = vi.fn();
+  renderer.globe = { resumeAnimation: vi.fn(), pauseAnimation: vi.fn(),
+    postProcessingComposer: () => ({ render: draw }), camera: () => ({ position: new THREE.Vector3(0,0,300) }) };
+  for (let i=0;i<20;i++) renderer.wake(false);
+  await vi.advanceTimersByTimeAsync(16);
+  expect(draw).toHaveBeenCalledTimes(1);
+  expect(renderer.globe.resumeAnimation).not.toHaveBeenCalled();
+  renderer.wake(false); renderer.wake(); renderer.wake(false);
+  await vi.advanceTimersByTimeAsync(16);
+  expect(renderer.globe.resumeAnimation).toHaveBeenCalledTimes(1);
+  expect(draw).toHaveBeenCalledTimes(1);
+  renderer.wake(false); renderer.pause();
+  await vi.advanceTimersByTimeAsync(100);
+  expect(draw).toHaveBeenCalledTimes(1);
+});
 it('precomputes immutable coordinate samples once and retires removed snapshots', () => {
   const renderer = new GlobeMapRenderer() as any;
   renderer.paused = true;
@@ -31,6 +51,34 @@ it('precomputes immutable coordinate samples once and retires removed snapshots'
   expect(renderer.positionSamples.get(event)).toBe(samples);
   renderer.setEvents([]);
   expect(renderer.positionSamples.size).toBe(0);
+});
+it('yields native polygon additions without losing records and cancels superseded or paused work', async () => {
+  vi.useFakeTimers();
+  const renderer = new GlobeMapRenderer() as any;
+  renderer.wake = vi.fn(); renderer.staticBatch = { clear: vi.fn(), rebuild: vi.fn(() => ({objects:0,batches:0})) };
+  renderer.globe = { polygonsData: vi.fn(), scene: () => ({}), pauseAnimation: vi.fn(), renderer: () => ({info:{render:{calls:1}}}) };
+  renderer.ready = true;
+  const areas = Array.from({length:577},(_,id)=>({id}));
+  renderer.stageAreas(areas);
+  expect(renderer.globe.polygonsData.mock.lastCall[0]).toHaveLength(192);
+  expect(await renderer.verifyReady()).toBe(false);
+  await vi.runAllTimersAsync();
+  expect(renderer.globe.polygonsData.mock.lastCall[0]).toEqual(areas);
+  expect(await renderer.verifyReady()).toBe(true);
+  expect(renderer.staticBatch.rebuild).toHaveBeenCalledOnce();
+  const revised = Array.from({length:600},(_,id)=>({id:`new-${id}`}));
+  renderer.stageAreas(revised); renderer.stageAreas([areas[0]]);
+  await vi.runAllTimersAsync();
+  expect(renderer.globe.polygonsData.mock.lastCall[0]).toEqual([areas[0]]);
+  renderer.stageAreas(revised); renderer.pause();
+  const calls = renderer.globe.polygonsData.mock.calls.length;
+  await vi.runAllTimersAsync();
+  expect(renderer.globe.polygonsData).toHaveBeenCalledTimes(calls);
+  expect(await renderer.verifyReady()).toBe(false);
+  renderer.paused = false; renderer.stageAreas(revised);
+  await vi.runAllTimersAsync();
+  expect(renderer.globe.polygonsData.mock.lastCall[0]).toEqual(revised);
+  expect(await renderer.verifyReady()).toBe(true);
 });
 it('does not snap an in-progress gesture back when a source update carries the last published camera', () => {
   const renderer = new GlobeMapRenderer() as any;
@@ -45,4 +93,22 @@ it('does not snap an in-progress gesture back when a source update carries the l
   renderer.setState({ ...previous, center: { lon: -20, lat: 10 } });
   expect(renderer.state.center).toEqual({ lon: -20, lat: 10 });
   expect(renderer.cameraPending).toBe(false);
+});
+it('finishes a polygon digest paused between its last submission and completion', async () => {
+  vi.useFakeTimers();
+  const renderer = new GlobeMapRenderer() as any;
+  renderer.ready = true; renderer.wake = vi.fn(); renderer.publishViewport = vi.fn();
+  renderer.host = {dataset:{},setAttribute:vi.fn()};
+  renderer.staticBatch = {clear:vi.fn(),rebuild:vi.fn(()=>({objects:0,batches:0}))};
+  renderer.globe = {polygonsData:vi.fn(),scene:()=>({}),pauseAnimation:vi.fn(),renderer:()=>({info:{render:{calls:1}}})};
+  const areas = Array.from({length:200},(_,id)=>({id}));
+  renderer.countryAreas = areas;
+  renderer.stageAreas(areas);
+  await vi.advanceTimersByTimeAsync(16); // all areas submitted; native completion still queued
+  expect(renderer.appliedAreas).toEqual(areas);
+  renderer.pause(); renderer.resume();
+  await vi.runAllTimersAsync();
+  expect(await renderer.verifyReady()).toBe(true);
+  expect(renderer.staticBatch.rebuild).toHaveBeenCalledOnce();
+  expect(renderer.globe.polygonsData.mock.lastCall[0]).toEqual(areas);
 });

@@ -88,13 +88,14 @@ export function createEventGeometryLayers(
   cache?: EventGeometryCache,
 ): LayersList {
   cache?.begin();
+  const geometryEvents = events.filter(isGeometryEvent);
   const visibleEvents = viewport
-    ? events.filter((event) => {
+    ? geometryEvents.filter((event) => {
       if (event.id === selectedEventId) return true;
       const bounds = eventGeometryBounds(event);
       return !bounds || boundsIntersect(bounds, viewport);
     })
-    : events;
+    : geometryEvents;
   const lines = visibleEvents.filter((event) => (
     event.properties.mapEntity !== 'air-route'
     && event.properties.mapEntity !== 'air-flight'
