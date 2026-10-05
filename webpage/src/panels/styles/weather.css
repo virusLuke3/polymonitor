@@ -1,6 +1,12 @@
 /* weather panels: shared body styles and their state/responsive variants. */
 
 @layer base {
+.wm-weather-source-status { display: grid; gap: 4px; padding: 6px 0; font-size: 11px; line-height: 1.5; color: var(--text-dim, #a5afa9); overflow-wrap: anywhere; }
+.wm-weather-source-status strong { color: #e8bf65; font-weight: 500; }
+.wm-weather-refresh-row { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+.wm-weather-refresh-row button { background: #18232a; color: #7edcff; border: 1px solid #3b5965; padding: 5px 8px; cursor: pointer; }
+.wm-weather-refresh-row button:disabled { opacity: .6; cursor: default; }
+
 
 .wm-weather-city-snapshot-panel .wm-panel-body {
   display: grid;

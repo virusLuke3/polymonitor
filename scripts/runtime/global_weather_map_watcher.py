@@ -116,7 +116,7 @@ class GlobalWeatherMapWatcher:
         return _redis_key(self.redis_prefix, self.namespace(), self.cache_key())
 
     def ttl_seconds(self) -> int:
-        return max(60, int(getattr(self.settings, "global_weather_map_ttl_seconds", 300) or 300))
+        return max(self.interval_seconds * 2, int(getattr(self.settings, "global_weather_map_ttl_seconds", 300) or 300))
 
     def _http_json_get(self, url: str, *, params: Dict[str, Any] | None = None, timeout: int = 12, headers: Dict[str, str] | None = None) -> Any:
         response = self.requests.get(url, params=params, timeout=timeout, headers=headers)
@@ -207,7 +207,8 @@ class GlobalWeatherMapWatcher:
             self.store_meta(status="preserved", record_count=len(previous.get("items") or []), source_states=payload.get("sources"), error_summary="Preserved previous snapshot because new weather map payload lost live weather values", preserve=True)
             return {"status": "preserved", "payload": previous}
         payload = global_weather_map_service.merge_weather_series_from_previous(payload, previous)
-        payload = {**payload, "cacheMode": "seeded"}
+        interval = getattr(self, "interval_seconds", DEFAULT_INTERVAL_SECONDS)
+        payload = {**payload, "cacheMode": "seeded", "refresh": {"intervalSeconds": interval, "staleAfterSeconds": interval * 2}}
         self.store_payload(payload)
         telegram_sent = publish_cached_panel_snapshot(SEED_META_CACHE_KEY, payload)
         status = "ok" if payload.get("status") == "ok" else str(payload.get("status") or "degraded")
@@ -231,14 +232,16 @@ def main() -> int:
             print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
             return 0
         while True:
+            started = time.monotonic()
             try:
-                print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
+                result = watcher.run_once()
+                print(json.dumps({"status": result.get("status"), "generatedAt": (result.get("payload") or {}).get("generatedAt"), "durationSeconds": round(time.monotonic() - started, 2)}, ensure_ascii=False), file=sys.stderr)
             except KeyboardInterrupt:
                 return 0
             except Exception as exc:
                 watcher.store_meta(status="error", record_count=0, source_states={"weather": "error"}, error_summary=str(exc), preserve=True)
                 print(f"[global-weather-map] ERROR {exc}", file=sys.stderr)
-            time.sleep(max(60, args.interval))
+            time.sleep(max(1, watcher.interval_seconds - (time.monotonic() - started)))
     finally:
         watcher.close()
 

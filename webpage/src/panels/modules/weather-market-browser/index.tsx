@@ -63,9 +63,9 @@ function MarketRow({
     >
       <span className="wm-weather-market-family">{familyLabel(family, shared)}</span>
       <strong>{city.city || shared('global', 'Global')}</strong>
-      <em>{top?.label || market.eventTitle || shared('weatherMarket', 'Weather market')}</em>
+      <em>{market.marketDate || '--'} · {top?.label || market.eventTitle || shared('weatherMarket', 'Weather market')}</em>
       <b>{priceLabel(top?.midPriceYes)}</b>
-      <i>{bookCoverage(city)}</i>
+      <i>{bookCoverage({ ...city, bins: market.bins || [] })}</i>
     </button>
   );
 }

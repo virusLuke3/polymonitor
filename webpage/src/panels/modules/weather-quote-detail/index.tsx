@@ -1,10 +1,11 @@
+import { WeatherQuoteStatus } from '@/panels/shared/weather/WeatherDataStatus';
 import { panelStatus } from '../../shared/formatters';
 import { useMemo } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import type { RuntimeGlobalWeatherMapPayload, RuntimeWeatherQuoteBin } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { panelFromRenderer } from '@/panels/definePanel';
-import { bookMidPrice, selectedWeatherCity, statusBadge } from '@/panels/shared/weather/model';
+import { bookMidPrice, selectedWeatherCity } from '@/panels/shared/weather/model';
 import { useLiveWeatherQuoteBins } from '@/panels/shared/weather/useLiveWeatherQuoteBins';
 import { numericTime, WeatherLiveChart, type WeatherLiveChartSeries } from '@/panels/shared/weather/WeatherLiveChart';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
@@ -47,14 +48,6 @@ function QuoteCurve({ bins, cityName }: { bins: RuntimeWeatherQuoteBin[]; cityNa
       ) : (
         <div className="wm-weather-detail-empty-line wm-weather-quote-curve-large">{copy('noBookMid', 'No two-sided CLOB book mid for this market.')}</div>
       )}
-      <div className="wm-weather-quote-history-strip">
-        <button type="button">{copy('playHistory', 'Play History')}</button>
-        <span className="muted">{shared('hoursAgo', '{count}h ago', { count: 24 })}</span>
-        <span className="purple">{shared('hoursAgo', '{count}h ago', { count: 12 })}</span>
-        <span className="green">{shared('hoursAgo', '{count}h ago', { count: 6 })}</span>
-        <span className="cyan">{shared('hoursAgo', '{count}h ago', { count: 1 })}</span>
-        <span className="yellow">{shared('minutesAgo', '{count}m ago', { count: 30 })}</span>
-      </div>
       {hasLastOnly ? <p>{copy('lastOnlyNote', 'LAST and one-sided book quotes stay in the table but are not plotted as live bid/ask mid.')}</p> : null}
     </div>
   );
@@ -69,17 +62,18 @@ function WeatherQuoteDetailPanel({
 }) {
   const { copy } = useSpecialistCopy('weather-quote-detail');
   const city = selectedWeatherCity(payload, selectedCityId);
-  const { bins, loading } = useLiveWeatherQuoteBins(city);
+  const feed = useLiveWeatherQuoteBins(city);
+  const { bins, loading } = feed;
   return (
     <Panel
       title={copy('title', 'WEATHER QUOTE CURVE')}
-      badge={loading ? 'BOOK' : statusBadge(payload?.status)}
-      status={panelStatus(payload?.status)}
+      badge={loading ? 'WARMING' : feed.data?.status === 'ok' ? 'BOOK' : 'PARTIAL'}
+      status={panelStatus(feed.data?.status)}
       className="wm-market-panel wm-weather-quote-detail-panel wm-weather-quote-curve-only-panel"
       dataPanelId="weather-quote-detail"
     >
       {city ? (
-        <QuoteCurve bins={bins} cityName={city.city} />
+        <><WeatherQuoteStatus feed={feed} city={city} /><QuoteCurve bins={bins} cityName={city.city} /></>
       ) : (
         <div className="wm-weather-detail-empty">{copy('empty', 'Select a city to inspect quote bins.')}</div>
       )}

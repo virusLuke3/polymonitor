@@ -1,3 +1,4 @@
+import { WeatherDataStatus } from '@/panels/shared/weather/WeatherDataStatus';
 import { panelStatus } from '../../shared/formatters';
 import { Panel } from '@/components/Panel';
 import type { RuntimeGlobalWeatherMapPayload } from '@/types';
@@ -38,11 +39,12 @@ function WeatherCitySnapshotPanel({
             <b>{tempLabel(currentWeatherTemp(city), unit)}</b>
           </section>
           <div className="wm-weather-city-stats">
-            <span><i>{shared('low', 'Low')}</i><strong>{tempLabel(city.todayLow ?? city.daily?.[0]?.low, unit)}</strong></span>
+            <span><i>{shared('low', 'Low')}</i><strong>{tempLabel(city.marketDate ? city.marketForecastLow : city.todayLow, unit)}</strong></span>
             <span><i>{shared('high', 'High')}</i><strong>{tempLabel(highWeatherTemp(city), unit)}</strong></span>
             <span><i>{shared('book', 'Book')}</i><strong>{bookCoverage(city)}</strong></span>
             <span><i>{shared('updated', 'Updated')}</i><strong>{updatedLabel(city, payload?.generatedAt)}</strong></span>
           </div>
+          <WeatherDataStatus city={city} payload={payload} />
           <WeatherMiniLine city={city} className="wm-weather-city-line" />
           <div className="wm-weather-city-daily">
             {daily.length ? daily.map((day) => (

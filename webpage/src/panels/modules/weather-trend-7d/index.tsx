@@ -19,14 +19,14 @@ function WeatherTrend7dPanel({
   const city = selectedWeatherCity(payload, selectedCityId);
   return (
     <Panel
-      title={copy('title', 'WU 7 DAY')}
+      title={copy('title', '7 DAY FORECAST')}
       badge={statusBadge(payload?.status)}
       status={panelStatus(payload?.status)}
       className="wm-market-panel wm-weather-trend-detail-panel wm-weather-trend-single-panel"
       dataPanelId="weather-trend-7d"
     >
       {city ? (
-        <TrendChart title={copy('chartTitle', 'WU 7 Day')} city={city} points={sevenDayPoints(city)} />
+        <TrendChart title={copy('chartTitle', '7 day forecast')} city={city} points={sevenDayPoints(city)} daily />
       ) : (
         <div className="wm-weather-detail-empty">{copy('empty', 'Select a city to inspect 7 day temperature trend.')}</div>
       )}
@@ -48,7 +48,7 @@ const renderers: PanelRenderMap<'selectedWeatherCityId'> = {
 export const panel = panelFromRenderer(renderers, {
   contextKeys: ['selectedWeatherCityId'],
   id: 'weather-trend-7d',
-  title: 'WU 7 Day',
+  title: '7 day forecast',
   eyebrow: 'weather',
   description: 'Selected city 7 day temperature trend chart.',
   defaultEnabled: true,

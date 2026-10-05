@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import quote_plus
+from zoneinfo import ZoneInfo
 
 
 from api.context import resolve_optional_service_callable, resolve_service_callable
@@ -526,6 +527,40 @@ def _weather_market_window_bounds(
     return start, end
 
 
+def _weather_time_utc(value: Any, zone: str) -> Optional[str]:
+    """Open-Meteo times are local; never interpret them in the browser timezone."""
+    try:
+        stamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=ZoneInfo(zone))
+        return stamp.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    except (ValueError, TypeError, KeyError):
+        return None
+
+
+def _quote_coverage(bins: List[Dict[str, Any]]) -> Dict[str, int]:
+    states: Dict[str, int] = {}
+    for row in bins:
+        status = str(row.get("bookStatus") or "not-queried")
+        states[status] = states.get(status, 0) + 1
+    return {"total": len(bins), "queried": sum(v for k, v in states.items() if k != "not-queried"),
+            "quoted": sum(row.get("bestBidYes") is not None or row.get("bestAskYes") is not None for row in bins),
+            "twoSided": sum(row.get("bestBidYes") is not None and row.get("bestAskYes") is not None for row in bins),
+            **{f"status:{k}": v for k, v in states.items()}}
+
+
+def _align_city_forecast(item: Dict[str, Any]) -> Dict[str, Any]:
+    target = item.get("marketDate") or item.get("todayDate")
+    item["forecastDate"] = target
+    day = next((row for row in item.get("daily") or [] if row.get("date") == target), {})
+    item["marketForecastHigh"] = day.get("high")
+    item["marketForecastLow"] = day.get("low")
+    item["hourly"] = [row for row in item.get("hourly") or []
+                      if not target or (row.get("localDate") or str(row.get("time") or "")[:10]) == target][:24]
+    item["bookCoverage"] = _quote_coverage(item.get("bins") or [])
+    return item
+
+
 def _weather_by_city(
     ctx: GlobalWeatherMapContext,
     cities: List[Dict[str, Any]],
@@ -572,6 +607,8 @@ def _weather_by_city(
             if row.get("error"):
                 continue
             unit = str(city.get("unit") or "F").upper()
+            zone = str(row.get("timezone") or city.get("timezone") or "UTC")
+            fetched_at = _utc_now_iso(dependencies)
             current = row.get("current") if isinstance(row.get("current"), dict) else {}
             daily = row.get("daily") if isinstance(row.get("daily"), dict) else {}
             hourly = row.get("hourly") if isinstance(row.get("hourly"), dict) else {}
@@ -634,7 +671,8 @@ def _weather_by_city(
                 "precipitationUnit": "mm",
                 "hourly": [
                     {
-                        "time": time_value,
+                        "time": _weather_time_utc(time_value, zone),
+                        "localDate": str(time_value)[:10],
                         "temp": _c_to_unit(temp, unit),
                         "precipitation": _round_metric(precipitation),
                         "precipitationProbability": _round_metric(precipitation_probability, 0),
@@ -643,18 +681,21 @@ def _weather_by_city(
                         "weatherCode": _float(weather_code),
                     }
                     for time_value, temp, precipitation, precipitation_probability, wind_speed, wind_gust, weather_code in zip(
-                        hourly_times[:24],
-                        hourly_temps[:24],
-                        hourly_precip[:24],
-                        hourly_precip_prob[:24],
-                        hourly_wind[:24],
-                        hourly_gust[:24],
-                        hourly_codes[:24],
+                        hourly_times[:168],
+                        hourly_temps[:168],
+                        hourly_precip[:168],
+                        hourly_precip_prob[:168],
+                        hourly_wind[:168],
+                        hourly_gust[:168],
+                        hourly_codes[:168],
                     )
                 ],
                 "daily": daily_rows,
-                "weatherUpdatedAt": current.get("time") or row.get("generationtime_ms"),
-                "updatedAt": current.get("time") or row.get("generationtime_ms"),
+                "weatherUpdatedAt": _weather_time_utc(current.get("time"), zone),
+                "forecastFetchedAt": fetched_at,
+                "todayDate": str(current.get("time") or (daily_dates[0] if daily_dates else ""))[:10],
+                "weatherProvider": "open-meteo",
+                "updatedAt": _weather_time_utc(current.get("time"), zone),
             }
             if _item_has_weather_signal(weather_row):
                 by_city[str(city["city_id"])] = weather_row
@@ -728,7 +769,8 @@ def _wttr_city_weather(
             temp = hourly.get("tempF") if unit == "F" else hourly.get("tempC")
             hourly_rows.append(
                 {
-                    "time": _wttr_time_label(date_value, hourly.get("time")),
+                    "time": _weather_time_utc(_wttr_time_label(date_value, hourly.get("time")), str(city.get("timezone") or "UTC")),
+                    "localDate": date_value,
                     "temp": _float(temp),
                     "precipitation": _round_metric(hourly.get("precipMM")),
                     "precipitationProbability": _round_metric(hourly.get("chanceofrain"), 0),
@@ -760,7 +802,9 @@ def _wttr_city_weather(
         "precipitationUnit": "mm",
         "hourly": [row for row in hourly_rows[:24] if any(row.get(key) is not None for key in ("temp", "precipitation", "windSpeed", "windGust"))],
         "daily": [row for row in daily_rows if any(row.get(key) is not None for key in ("high", "low", "precipitationSum", "windSpeedMax", "windGustMax"))],
-        "weatherUpdatedAt": _utc_now_iso(dependencies),
+        "weatherUpdatedAt": _weather_time_utc(current.get("localObsDateTime"), str(city.get("timezone") or "UTC")),
+        "forecastFetchedAt": _utc_now_iso(dependencies),
+        "todayDate": daily_rows[0].get("date") if daily_rows else None,
         "updatedAt": _utc_now_iso(dependencies),
         "weatherProvider": "wttr.in",
     }
@@ -825,7 +869,7 @@ def _metar_by_city(
     for city in cities:
         row = by_icao.get(str(city.get("icao") or "").upper())
         if row:
-            result[str(city["city_id"])] = {"metarTemp": _c_to_unit(row.get("temp") or row.get("temp_c"), str(city.get("unit") or "F")), "updatedAt": row.get("reportTime") or row.get("obsTime")}
+            result[str(city["city_id"])] = {"metarTemp": _c_to_unit(row.get("temp") if row.get("temp") is not None else row.get("temp_c"), str(city.get("unit") or "F")), "observationUpdatedAt": _weather_time_utc(row.get("reportTime"), "UTC") or (datetime.fromtimestamp(row["obsTime"], timezone.utc).isoformat().replace("+00:00", "Z") if isinstance(row.get("obsTime"), (int, float)) else None), "updatedAt": row.get("reportTime") or row.get("obsTime")}
     return result
 
 
@@ -880,7 +924,7 @@ def _clob_book_payload(ctx: GlobalWeatherMapContext, token_id: str) -> Dict[str,
     payload = reader(token_id)
     side = payload.get("yes") or {}
     status = side.get("bookStatus") or payload.get("bookStatus") or "unknown"
-    return {"bookStatus": status, "bids": side.get("bids", []) if status == "live" else [], "asks": side.get("asks", []) if status == "live" else []}
+    return {"bookStatus": status, "quoteUpdatedAt": side.get("receivedAt"), "quoteStaleAfter": side.get("staleAfter"), "bids": side.get("bids", []) if status == "live" else [], "asks": side.get("asks", []) if status == "live" else []}
 
 
 def _clob_yes_quote(
@@ -916,6 +960,8 @@ def _clob_yes_quote(
         "bookStatus": status,
         "priceSource": "clob-book",
         "yesTokenId": token_ids[0],
+        "quoteUpdatedAt": book.get("quoteUpdatedAt"),
+        "quoteStaleAfter": book.get("quoteStaleAfter"),
     }
     return payload
 
@@ -934,6 +980,8 @@ def _apply_clob_quote_to_bin(
     row["bestAskYes"] = ask
     row["bookStatus"] = clob.get("bookStatus")
     row["yesTokenId"] = clob.get("yesTokenId")
+    row["quoteUpdatedAt"] = clob.get("quoteUpdatedAt")
+    row["quoteStaleAfter"] = clob.get("quoteStaleAfter")
     if bid is not None and ask is not None:
         row["midPriceYes"] = round((bid + ask) / 2, 4)
         row["priceSource"] = "clob-book"
@@ -1078,6 +1126,7 @@ def _normalize_temperature_db_group(
     city: Dict[str, Any],
     date_iso: str,
     rows: List[Dict[str, Any]],
+    *, query_book: bool = True,
 ) -> Optional[Dict[str, Any]]:
     dependencies = _dependencies(ctx)
     bins: List[Dict[str, Any]] = []
@@ -1124,7 +1173,7 @@ def _normalize_temperature_db_group(
         == "all"
         else ([top] if top is not None else [])
     )
-    for target in targets:
+    for target in targets if query_book else []:
         _apply_clob_quote_to_bin(ctx, target)
     quoted = len([row for row in bins if row.get("midPriceYes") is not None])
     top = max([row for row in bins if row.get("midPriceYes") is not None], key=lambda row: float(row.get("midPriceYes") or 0), default=top)
@@ -1149,6 +1198,7 @@ def _normalize_temperature_db_group(
         "eventSlug": event_slug,
         "eventTitle": f"Highest temperature in {city.get('city')} on {date_iso}?",
         "marketSource": "psql-db",
+        "marketDate": date_iso if re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_iso) else None,
         "marketFamily": "highest_temperature",
         "marketFamilyLabel": _family_label("highest_temperature"),
         "metricType": "highest_temperature",
@@ -1167,10 +1217,11 @@ def _normalize_weather_db_group(
     date_iso: str,
     family: str,
     rows: List[Dict[str, Any]],
+    *, query_book: bool = True,
 ) -> Optional[Dict[str, Any]]:
     dependencies = _dependencies(ctx)
     if family == "highest_temperature" and city is not None:
-        return _normalize_temperature_db_group(ctx, city, date_iso, rows)
+        return _normalize_temperature_db_group(ctx, city, date_iso, rows, query_book=query_book)
     bins: List[Dict[str, Any]] = []
     default_unit = str((city or {}).get("unit") or "F")
     for row in rows:
@@ -1211,7 +1262,7 @@ def _normalize_weather_db_group(
         == "all"
         else ([top] if top is not None else [])
     )
-    for target in targets:
+    for target in targets if query_book else []:
         _apply_clob_quote_to_bin(ctx, target)
     quoted = len([row for row in bins if row.get("midPriceYes") is not None])
     top = max([row for row in bins if row.get("midPriceYes") is not None], key=lambda row: float(row.get("midPriceYes") or 0), default=top)
@@ -1231,6 +1282,7 @@ def _normalize_weather_db_group(
         "eventSlug": event_slug,
         "eventTitle": titles[0] if len(rows) == 1 and titles else f"{_family_label(family)} in {city_name}",
         "marketSource": "psql-db",
+        "marketDate": date_iso if re.fullmatch(r"\d{4}-\d{2}-\d{2}", date_iso) else None,
         "marketFamily": family,
         "marketFamilyLabel": _family_label(family),
         "metricType": family,
@@ -1308,23 +1360,23 @@ def _db_markets_by_city(
         else:
             source_states[city_id] = "empty" if db_status == "ok" else db_status
 
-    for city_id, groups in selected_groups.items():
-        normalized_groups = [
-            normalized
-            for city, date_iso, family, group_rows in groups
-            for normalized in [_normalize_weather_db_group(ctx, city, date_iso, family, group_rows)]
-            if normalized
-        ]
-        if normalized_groups:
-            primary = normalized_groups[0]
-            result[city_id] = {
-                **primary,
-                "markets": normalized_groups,
-                "marketFamilies": sorted({str(group.get("marketFamily") or "") for group in normalized_groups if group.get("marketFamily")}),
-            }
-            source_states[city_id] = "ok"
-        else:
-            source_states[city_id] = "partial"
+    def normalize_city(entry):
+        city_id, groups = entry
+        normalized = [_normalize_weather_db_group(ctx, city, date_iso, family, rows, query_book=index == 0)
+                      for index, (city, date_iso, family, rows) in enumerate(groups)]
+        return city_id, [group for group in normalized if group]
+
+    # Only one representative book per city; secondary dates remain explicitly
+    # not-queried. Four read-only readers bound both latency and upstream load.
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        for city_id, normalized_groups in pool.map(normalize_city, selected_groups.items()):
+            if normalized_groups:
+                primary = normalized_groups[0]
+                result[city_id] = {**primary, "markets": normalized_groups,
+                    "marketFamilies": sorted({str(group.get("marketFamily") or "") for group in normalized_groups if group.get("marketFamily")})}
+                source_states[city_id] = "ok"
+            else:
+                source_states[city_id] = "partial"
     dependencies.runtime_state["_weather_family_counts"] = family_counts
     dependencies.runtime_state["_weather_unmapped_markets"] = unmapped[:80]
     return result, source_states
@@ -1395,20 +1447,12 @@ def build_summary(items: List[Dict[str, Any]]) -> Dict[str, Any]:
         if _item_has_weather_signal(item)
     ]
     markets = [item for item in items if item.get("eventSlug")]
-    stale = [item for item in items if "error" in set((item.get("sourceStates") or {}).values())]
-    hottest = max(
-        mapped,
-        key=lambda row: float(
-            row.get("forecastHigh")
-            if row.get("forecastHigh") is not None
-            else row.get("currentTemp")
-            if row.get("currentTemp") is not None
-            else row.get("metarTemp")
-            if row.get("metarTemp") is not None
-            else -999
-        ),
-        default=None,
-    )
+    stale = [item for item in items if any(value in {"error", "stale", "partial"} for value in (item.get("sourceStates") or {}).values())]
+    def comparable_temperature(row):
+        value = next((row.get(key) for key in ("marketForecastHigh", "todayHigh", "currentTemp", "metarTemp") if row.get(key) is not None), -999)
+        return (float(value) - 32) * 5 / 9 if row.get("unit") == "F" else float(value)
+
+    hottest = max(mapped, key=comparable_temperature, default=None)
     family_counts: Dict[str, int] = {}
     for item in items:
         for market in item.get("markets") or ([] if not item.get("marketFamily") else [item]):
@@ -1448,6 +1492,9 @@ _WEATHER_CARRY_FORWARD_FIELDS = (
     "hourly",
     "daily",
     "weatherUpdatedAt",
+    "forecastFetchedAt",
+    "todayDate",
+    "weatherProvider",
 )
 
 
@@ -1489,13 +1536,17 @@ def merge_weather_series_from_previous(payload: Dict[str, Any], previous: Option
                 carried_fields.append(field)
         if carried_fields:
             source_states = dict(next_item.get("sourceStates") or {})
-            if source_states.get("openMeteo") == "error":
+            if source_states.get("openMeteo") in {"error", "empty", "partial"}:
                 source_states["openMeteo"] = "stale"
             next_item["sourceStates"] = source_states
             next_item["weatherCarryForward"] = True
             next_item["weatherCarryForwardFields"] = carried_fields
+            if any(field in carried_fields for field in ("hourly", "daily")):
+                next_item["forecastFetchedAt"] = previous_item.get("forecastFetchedAt")
+            if "currentTemp" in carried_fields:
+                next_item["weatherUpdatedAt"] = previous_item.get("weatherUpdatedAt")
             changed = True
-        next_items.append(next_item)
+        next_items.append(_align_city_forecast(next_item))
     if not changed:
         return payload
     next_payload = {**payload, "items": next_items}
@@ -1505,7 +1556,7 @@ def merge_weather_series_from_previous(payload: Dict[str, Any], previous: Option
         next_payload["summary"]["marketFamilyCounts"] = (payload.get("summary") or {}).get("marketFamilyCounts") or previous_summary.get("marketFamilyCounts") or {}
         next_payload["summary"]["unmappedMarketCount"] = (payload.get("summary") or {}).get("unmappedMarketCount") or previous_summary.get("unmappedMarketCount") or 0
     sources = dict(next_payload.get("sources") or {})
-    if sources.get("openMeteo") == "error":
+    if sources.get("openMeteo") in {"error", "empty", "partial"}:
         sources["openMeteo"] = "stale"
     next_payload["sources"] = sources
     if next_payload.get("status") == "warming" and next_payload["summary"].get("mappedCount"):
@@ -1521,6 +1572,7 @@ def build_global_weather_map_payload(
     dependencies = _dependencies(ctx)
     cities = load_weather_cities(limit=max(limit or DEFAULT_ITEM_LIMIT, DEFAULT_ITEM_LIMIT))
     sources: Dict[str, str] = {}
+    dependencies.runtime_state["_weather_clob_stats"] = {}
     open_meteo_failed = False
     try:
         weather = _weather_by_city(ctx, cities)
@@ -1615,9 +1667,15 @@ def build_global_weather_map_payload(
                 "metar": "ok" if metar_row else "empty",
                 "polymarket": "ok" if market_row else market_source_states.get(city_id, "empty"),
             },
-            "updatedAt": weather_row.get("updatedAt") or metar_row.get("updatedAt") or market_row.get("updatedAt") or _utc_now_iso(dependencies),
+            "updatedAt": weather_row.get("weatherUpdatedAt") or metar_row.get("observationUpdatedAt"),
+            "marketFetchedAt": _utc_now_iso(dependencies) if market_row else None,
         }
-        items.append(item)
+        items.append(_align_city_forecast(item))
+    # Aggregate only attempted books; omitted bins are reported separately.
+    coverages = [item["bookCoverage"] for item in items]
+    queried = sum(c["queried"] for c in coverages)
+    quoted = sum(c["quoted"] for c in coverages)
+    sources["clob"] = "ok" if queried and queried == quoted else ("partial" if quoted else "unavailable" if queried else "empty")
     summary = build_summary(items)
     summary["marketFamilyCounts"] = (
         dependencies.runtime_state.get("_weather_family_counts")
@@ -1629,7 +1687,7 @@ def build_global_weather_map_payload(
         or []
     )
     status = "ok" if summary["mappedCount"] else "warming"
-    if status == "ok" and any(value == "error" for value in sources.values()):
+    if status == "ok" and any(sources.get(key) in {"error", "partial", "stale", "unavailable"} for key in ("openMeteo", "marketDatabase")):
         status = "degraded"
     return {
         "generatedAt": _utc_now_iso(dependencies),
@@ -1686,7 +1744,7 @@ def normalize_global_weather_map_payload(
     result["summary"] = result.get("summary") if isinstance(result.get("summary"), dict) else build_summary(result["items"])
     result["generatedAt"] = str(
         result.get("generatedAt")
-        or _utc_now_iso(dependencies)
+        or ""
     )
     result["status"] = str(result.get("status") or ("ok" if result["items"] else "warming"))
     result["source"] = str(result.get("source") or "Open-Meteo/wttr + AviationWeather + Polymarket Gamma/CLOB")
@@ -1698,6 +1756,16 @@ def normalize_global_weather_map_payload(
             "https://open-meteo.com/",
         )
     )
+    refresh = result.get("refresh") or {}
+    stale_after = max(240, int(refresh.get("staleAfterSeconds") or 360))
+    try:
+        age = (datetime.fromisoformat(_utc_now_iso(dependencies).replace("Z", "+00:00"))
+               - datetime.fromisoformat(result["generatedAt"].replace("Z", "+00:00"))).total_seconds()
+    except (ValueError, TypeError):
+        age = float("inf")
+    result["snapshotAgeSeconds"] = round(age, 1) if age != float("inf") else None
+    if items and (age > stale_after or result.get("cacheMode") == "stale-seed"):
+        result["status"] = "stale"
     result["unmappedMarkets"] = [item for item in (result.get("unmappedMarkets") or []) if isinstance(item, dict)][:120]
     return result
 
@@ -1808,7 +1876,7 @@ def get_global_weather_map_snapshot(
     ctx: GlobalWeatherMapContext,
     limit: int = DEFAULT_ITEM_LIMIT,
     *,
-    allow_live_build: bool = True,
+    allow_live_build: bool = False,
 ) -> Dict[str, Any]:
     dependencies = _dependencies(ctx)
     ttl_seconds = max(

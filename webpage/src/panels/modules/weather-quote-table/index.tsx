@@ -1,14 +1,16 @@
+import { WeatherQuoteStatus } from '@/panels/shared/weather/WeatherDataStatus';
 import { panelStatus } from '../../shared/formatters';
 import { Panel } from '@/components/Panel';
 import type { RuntimeGlobalWeatherMapPayload, RuntimeWeatherQuoteBin } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { panelFromRenderer } from '@/panels/definePanel';
-import { bestBookQuoteBin, bestQuoteBin, bookMidCoverage, bookMidPrice, bookCoverage, marketSourceLabel, midCoverage, num, priceLabel, selectedWeatherCity, statusBadge, tempLabel } from '@/panels/shared/weather/model';
+import { bestBookQuoteBin, bestQuoteBin, bookMidCoverage, bookMidPrice, bookCoverage, marketSourceLabel, midCoverage, num, priceLabel, selectedWeatherCity, tempLabel } from '@/panels/shared/weather/model';
 import { useLiveWeatherQuoteBins } from '@/panels/shared/weather/useLiveWeatherQuoteBins';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 function sourceLabel(value?: string | null) {
   if (value === 'clob-book') return 'CLOB';
+  if (value === 'previous-book') return 'PREVIOUS';
   if (value === 'db-latest') return 'LAST';
   if (value === 'gamma-outcome') return 'GAMMA';
   return '--';
@@ -54,7 +56,8 @@ function WeatherQuoteTablePanel({
 }) {
   const { copy, shared } = useSpecialistCopy('weather-quote-table');
   const city = selectedWeatherCity(payload, selectedCityId);
-  const { bins, loading } = useLiveWeatherQuoteBins(city);
+  const feed = useLiveWeatherQuoteBins(city);
+  const { bins, loading } = feed;
   const liveCity = city ? { ...city, bins } : null;
   const topBookBin = bestBookQuoteBin(liveCity);
   const topBin = topBookBin || bestQuoteBin(liveCity);
@@ -63,13 +66,14 @@ function WeatherQuoteTablePanel({
   return (
     <Panel
       title={copy('title', 'WEATHER QUOTE TABLE')}
-      badge={loading ? 'BOOK' : statusBadge(payload?.status)}
-      status={panelStatus(payload?.status)}
+      badge={loading ? 'WARMING' : feed.data?.status === 'ok' ? 'BOOK' : 'PARTIAL'}
+      status={panelStatus(feed.data?.status)}
       className="wm-market-panel wm-weather-quote-table-only-panel"
       dataPanelId="weather-quote-table"
     >
       {city ? (
         <section className="wm-weather-quote-table-panel">
+          <WeatherQuoteStatus feed={feed} city={city} />
           <div className="wm-weather-quote-table-head">
             <div>
               <span>{copy('tableTitle', '{city} Quote Table', { city: city.city || '--' })}</span>
@@ -85,6 +89,7 @@ function WeatherQuoteTablePanel({
             <span><i>{shared('bid', 'Bid')}</i><strong>{priceLabel(topBookBin?.bestBidYes)}</strong></span>
             <span><i>{shared('ask', 'Ask')}</i><strong>{priceLabel(topBookBin?.bestAskYes)}</strong></span>
           </div>
+          {!bins.length ? <div className="wm-weather-detail-empty-line">{shared('noMarketBins', 'No published market intervals for this city.')}</div> : null}
           <div className="wm-weather-quote-table-wrap">
             <table className="wm-weather-quote-table">
               <thead>

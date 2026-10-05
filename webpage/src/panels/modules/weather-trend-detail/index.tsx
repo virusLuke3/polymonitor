@@ -19,14 +19,14 @@ function WeatherTrendDetailPanel({
   const city = selectedWeatherCity(payload, selectedCityId);
   return (
     <Panel
-      title={copy('title', 'WU 1 DAY')}
+      title={copy('title', 'HOURLY FORECAST')}
       badge={statusBadge(payload?.status)}
       status={panelStatus(payload?.status)}
       className="wm-market-panel wm-weather-trend-detail-panel wm-weather-trend-single-panel"
       dataPanelId="weather-trend-detail"
     >
       {city ? (
-        <TrendChart title={copy('chartTitle', 'WU 1 Day')} city={city} points={oneDayPoints(city)} />
+        <TrendChart title={copy('chartTitle', 'Hourly forecast')} city={city} points={oneDayPoints(city)} />
       ) : (
         <div className="wm-weather-detail-empty">{copy('empty', 'Select a city to inspect temperature trend.')}</div>
       )}
@@ -48,7 +48,7 @@ const renderers: PanelRenderMap<'selectedWeatherCityId'> = {
 export const panel = panelFromRenderer(renderers, {
   contextKeys: ['selectedWeatherCityId'],
   id: 'weather-trend-detail',
-  title: 'WU 1 Day',
+  title: 'Hourly forecast',
   eyebrow: 'weather',
   description: 'Selected city 1D temperature trend chart.',
   defaultEnabled: true,

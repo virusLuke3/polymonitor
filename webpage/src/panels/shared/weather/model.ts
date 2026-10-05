@@ -14,11 +14,11 @@ export function tempLabel(value?: string | number | null, unit?: string | null) 
 }
 
 export function currentWeatherTemp(city?: RuntimeGlobalWeatherCity | null) {
-  return city?.currentTemp ?? city?.metarTemp ?? city?.todayHigh ?? null;
+  return city?.weatherCarryForward && city?.metarTemp != null ? city.metarTemp : city?.currentTemp ?? city?.metarTemp ?? null;
 }
 
 export function highWeatherTemp(city?: RuntimeGlobalWeatherCity | null) {
-  return city?.forecastHigh ?? city?.todayHigh ?? city?.currentTemp ?? city?.metarTemp ?? null;
+  return city?.marketDate ? city?.marketForecastHigh ?? null : city?.todayHigh ?? null;
 }
 
 export function priceLabel(value?: string | number | null) {
@@ -28,6 +28,8 @@ export function priceLabel(value?: string | number | null) {
 }
 
 export function bookMidPrice(bin?: RuntimeWeatherQuoteBin | null) {
+  if (bin?.bookStatus && !['ok', 'live'].includes(bin.bookStatus)) return null;
+  if (bin?.quoteStaleAfter && Date.parse(bin.quoteStaleAfter) <= Date.now()) return null;
   const bid = num(bin?.bestBidYes);
   const ask = num(bin?.bestAskYes);
   if (bid === null || ask === null) return null;
@@ -77,39 +79,8 @@ export function midCoverage(city?: RuntimeGlobalWeatherCity | null) {
   return `${bins.filter((bin) => num(bin.midPriceYes) !== null).length}/${bins.length}`;
 }
 
-function expectedQuoteBins(city?: RuntimeGlobalWeatherCity | null): RuntimeWeatherQuoteBin[] {
-  if (!city) return [];
-  const unit = city.unit || '';
-  const anchor = num(city.forecastHigh ?? city.todayHigh ?? city.currentTemp ?? city.metarTemp);
-  if (anchor === null) return [];
-  const center = Math.round(anchor);
-  const start = center - 5;
-  return Array.from({ length: 11 }, (_, index) => {
-    const value = start + index;
-    const label = index === 0
-      ? `${value}°${unit} or below`
-      : index === 10
-        ? `${value}°${unit} or higher`
-        : `${value}°${unit}`;
-    return {
-      label,
-      bucketType: index === 0 ? 'lte' : index === 10 ? 'gte' : 'eq',
-      minTemp: value,
-      maxTemp: value,
-      unit,
-      bestBidYes: null,
-      bestAskYes: null,
-      midPriceYes: null,
-      marketStatus: 'Missing Quote',
-    };
-  });
-}
-
 export function displayQuoteBins(city?: RuntimeGlobalWeatherCity | null): RuntimeWeatherQuoteBin[] {
-  const family = String(city?.marketFamily || city?.metricType || '').toLowerCase();
-  if (city?.bins?.length) return city.bins;
-  if (family && !family.includes('temperature')) return [];
-  return expectedQuoteBins(city);
+  return city?.bins || [];
 }
 
 export function statusBadge(status?: string | null) {
@@ -143,10 +114,10 @@ export function weatherSourceLabel(city?: RuntimeGlobalWeatherCity | null, paylo
   const openMeteo = String(states.openMeteo || payload?.sources?.openMeteo || '').toLowerCase();
   const wttr = String(states.wttr || payload?.sources?.wttr || '').toLowerCase();
   const metar = String(states.metar || states.aviationWeather || payload?.sources?.aviationWeather || '').toLowerCase();
-  if (wttr === 'ok') return 'WTTR LIVE';
-  if ((city?.weatherCarryForward || openMeteo === 'stale') && metar === 'ok') return 'METAR LIVE';
+  if (wttr === 'ok') return 'WTTR MODEL';
+  if ((city?.weatherCarryForward || openMeteo === 'stale') && city?.metarTemp != null && metar === 'ok') return 'METAR OBSERVATION';
   if (city?.weatherCarryForward || openMeteo === 'stale') return 'WX STALE';
-  if (openMeteo === 'ok') return 'OPEN-METEO';
+  if (openMeteo === 'ok') return 'OPEN-METEO MODEL';
   if (metar === 'ok') return 'METAR OK';
   if (openMeteo === 'error') return 'WX ERROR';
   return 'WX SEED';
@@ -156,13 +127,13 @@ export function forecastSourceLabel(city?: RuntimeGlobalWeatherCity | null, payl
   const states = city?.sourceStates || {};
   const openMeteo = String(states.openMeteo || payload?.sources?.openMeteo || '').toLowerCase();
   const wttr = String(states.wttr || payload?.sources?.wttr || '').toLowerCase();
-  if (wttr === 'ok') return 'WTTR LIVE';
+  if (wttr === 'ok') return 'WTTR MODEL';
   if (city?.weatherCarryForward || openMeteo === 'stale') return 'WX STALE';
-  if (openMeteo === 'ok') return 'OPEN-METEO';
+  if (openMeteo === 'ok') return 'OPEN-METEO MODEL';
   if (openMeteo === 'error') return 'WX ERROR';
   return 'WX SEED';
 }
 
-export function updatedLabel(city?: RuntimeGlobalWeatherCity | null, fallback?: string | null) {
-  return formatRelative(city?.updatedAt || city?.hourly?.[0]?.time || fallback || null);
+export function updatedLabel(city?: RuntimeGlobalWeatherCity | null, _fallback?: string | null) {
+  return formatRelative(city?.weatherCarryForward && city?.metarTemp != null ? city.observationUpdatedAt || null : city?.weatherUpdatedAt || null);
 }

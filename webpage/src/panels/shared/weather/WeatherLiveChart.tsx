@@ -41,25 +41,30 @@ export function WeatherLiveChart({
   series,
   showTimeScale = true,
   valueFormatter,
+  timeFormatter,
 }: {
   className?: string;
   series: WeatherLiveChartSeries[];
   showTimeScale?: boolean;
   valueFormatter?: (value: number) => string;
+  timeFormatter?: (value: Time) => string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRefs = useRef<Map<string, SeriesApi>>(new Map());
+  const timeFormatterRef = useRef(timeFormatter);
   const formatterRef = useRef(valueFormatter || ((value: number) => String(Math.round(value))));
 
   useEffect(() => {
+    timeFormatterRef.current = timeFormatter;
     formatterRef.current = valueFormatter || ((value: number) => String(Math.round(value)));
     chartRef.current?.applyOptions({
       localization: {
         priceFormatter: (value: number) => formatterRef.current(value),
+        ...(timeFormatterRef.current ? { timeFormatter: (value: Time) => timeFormatterRef.current!(value) } : {}),
       },
     });
-  }, [valueFormatter]);
+  }, [valueFormatter, timeFormatter]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -87,6 +92,7 @@ export function WeatherLiveChart({
       timeScale: {
         borderColor: 'rgba(255,255,255,0.10)',
         visible: showTimeScale,
+        ...(timeFormatterRef.current ? { tickMarkFormatter: (value: Time) => timeFormatterRef.current!(value) } : {}),
         fixLeftEdge: true,
         fixRightEdge: true,
         secondsVisible: false,
@@ -102,6 +108,7 @@ export function WeatherLiveChart({
       handleScale: false,
       localization: {
         priceFormatter: (value: number) => formatterRef.current(value),
+        ...(timeFormatterRef.current ? { timeFormatter: (value: Time) => timeFormatterRef.current!(value) } : {}),
       },
     });
 

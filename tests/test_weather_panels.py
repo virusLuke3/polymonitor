@@ -210,7 +210,7 @@ def test_global_weather_map_builds_weather_metar_and_market_payload(monkeypatch)
     }])
     payload = global_weather_map_service.build_global_weather_map_payload(ctx, limit=1)
 
-    assert payload["status"] == "ok"
+    assert payload["status"] == "degraded"  # fixture supplies only one of 60 city forecasts
     assert int(payload["summary"]["mappedCount"]) >= 1
     assert payload["summary"]["liveMarketCount"] == 1
     city = payload["items"][0]
@@ -724,7 +724,7 @@ def test_global_weather_map_failure_returns_warming_payload():
     assert payload["cacheMode"] == "seed-miss"
 
 
-def test_global_weather_map_cold_start_returns_fast_and_schedules_refresh(monkeypatch):
+def test_global_weather_map_cold_start_is_read_only_and_waits_for_collector(monkeypatch):
     scheduled = {}
 
     def schedule(ctx, *, limit, ttl_seconds, reason):
@@ -737,8 +737,8 @@ def test_global_weather_map_cold_start_returns_fast_and_schedules_refresh(monkey
 
     assert payload["status"] == "warming"
     assert payload["items"] == []
-    assert payload["cacheMode"] == "seed-miss-refreshing"
-    assert scheduled == {"limit": 2, "ttl": 300, "reason": "seed-miss"}
+    assert payload["cacheMode"] == "seed-miss"
+    assert scheduled == {}
     assert ctx["_calls"]["json"] == 0
 
 
@@ -996,3 +996,55 @@ def test_weather_quotes_read_live_engine_without_reusing_stale_quote():
         assert quote["bestAskYes"] is None
         assert quote["bookStatus"] == status
     assert ctx["_calls"]["json"] == 0
+
+
+def test_expired_weather_seed_keeps_original_clock_without_request_collection(monkeypatch):
+    seed = {"generatedAt": "2026-05-12T11:00:00Z", "status": "ok", "items": [{"cityId": "ny"}]}
+    ctx = make_ctx(store=FakeStore(stale=seed))
+    monkeypatch.setattr(global_weather_map_service, "_schedule_live_refresh", lambda *a, **k: (_ for _ in ()).throw(AssertionError("request collected weather")))
+    value = global_weather_map_service.get_global_weather_map_snapshot(ctx)
+    assert value["status"] == "stale"
+    assert value["generatedAt"] == seed["generatedAt"]
+    assert value["cacheMode"] == "stale-seed"
+    assert ctx["_calls"]["json"] == 0
+
+
+def test_weather_native_time_uses_city_timezone_and_preserves_dst():
+    convert = global_weather_map_service._weather_time_utc
+    assert convert("2026-10-04T21:15", "America/New_York") == "2026-10-05T01:15:00Z"
+    assert convert("2026-12-04T21:15", "America/New_York") == "2026-12-05T02:15:00Z"
+    assert convert(230.5, "UTC") is None  # generationtime_ms is not a source timestamp
+
+
+def test_market_forecast_selects_target_day_and_reports_quote_denominator():
+    city = {"marketDate": "2026-10-06", "todayDate": "2026-10-04",
+            "daily": [{"date": "2026-10-04", "high": 95}, {"date": "2026-10-06", "high": 71, "low": 60}],
+            "hourly": [{"time": "2026-10-05T01:00:00Z", "localDate": "2026-10-04", "temp": 90},
+                       {"time": "2026-10-06T05:00:00Z", "localDate": "2026-10-06", "temp": 60}],
+            "bins": [{"bookStatus": "ok", "bestBidYes": .3, "bestAskYes": .4}, {"bookStatus": "warming"}, {"bookStatus": "not-queried"}]}
+    aligned = global_weather_map_service._align_city_forecast(city)
+    assert aligned["marketForecastHigh"] == 71
+    assert aligned["marketForecastLow"] == 60
+    assert len(aligned["hourly"]) == 1
+    assert aligned["bookCoverage"]["queried"] == 2
+    assert aligned["bookCoverage"]["twoSided"] == 1
+    assert aligned["bookCoverage"]["total"] == 3
+    city["marketDate"] = "2026-10-12"
+    assert global_weather_map_service._align_city_forecast(city)["hourly"] == []
+    assert city["marketForecastHigh"] is None
+
+
+def test_partial_source_retention_never_relabels_old_forecast_as_new():
+    previous = {"items": [{"cityId": "ny", "daily": [{"date": "2026-10-06", "high": 71}], "forecastFetchedAt": "2026-10-04T00:00:00Z", "weatherUpdatedAt": "2026-10-04T00:00:00Z"}]}
+    new = {"status": "degraded", "sources": {"openMeteo": "partial"}, "items": [{"cityId": "ny", "currentTemp": 64, "marketDate": "2026-10-06", "forecastFetchedAt": "2026-10-05T00:00:00Z", "sourceStates": {"openMeteo": "empty"}}]}
+    value = global_weather_map_service.merge_weather_series_from_previous(new, previous)["items"][0]
+    assert value["forecastFetchedAt"] == "2026-10-04T00:00:00Z"
+    assert value["sourceStates"]["openMeteo"] == "stale"
+    assert value["marketForecastHigh"] == 71
+
+
+def test_weather_watcher_cache_survives_cadence_without_extending_snapshot_clock():
+    watcher = global_weather_map_watcher.GlobalWeatherMapWatcher.__new__(global_weather_map_watcher.GlobalWeatherMapWatcher)
+    watcher.settings = make_settings(global_weather_map_ttl_seconds=180)
+    watcher.interval_seconds = 180
+    assert watcher.ttl_seconds() == 360

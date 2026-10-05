@@ -1291,6 +1291,8 @@ export type RuntimeWeatherQuoteBin = {
   priceSource?: string | null;
   bookStatus?: string | null;
   yesTokenId?: string | null;
+  quoteUpdatedAt?: string | null;
+  quoteStaleAfter?: string | null;
 };
 
 export type RuntimeGlobalWeatherCity = {
@@ -1327,6 +1329,7 @@ export type RuntimeGlobalWeatherCity = {
   metarTemp?: number | string | null;
   hourly?: Array<{
     time?: string | null;
+    localDate?: string | null;
     temp?: number | string | null;
     precipitation?: number | string | null;
     precipitationProbability?: number | string | null;
@@ -1344,6 +1347,7 @@ export type RuntimeGlobalWeatherCity = {
     windGustMax?: number | string | null;
     weatherCode?: number | string | null;
   }>;
+  marketDate?: string | null;
   eventSlug?: string | null;
   eventTitle?: string | null;
   marketSource?: string | null;
@@ -1356,7 +1360,8 @@ export type RuntimeGlobalWeatherCity = {
   topBin?: RuntimeWeatherQuoteBin | null;
   bins?: RuntimeWeatherQuoteBin[];
   markets?: Array<{
-    eventSlug?: string | null;
+    marketDate?: string | null;
+  eventSlug?: string | null;
     eventTitle?: string | null;
     marketSource?: string | null;
     eventStatus?: string | null;
@@ -1374,11 +1379,21 @@ export type RuntimeGlobalWeatherCity = {
   weatherCarryForward?: boolean;
   weatherCarryForwardFields?: string[];
   weatherUpdatedAt?: string | null;
+  forecastFetchedAt?: string | null;
+  observationUpdatedAt?: string | null;
+  marketFetchedAt?: string | null;
+  forecastDate?: string | null;
+  todayDate?: string | null;
+  marketForecastHigh?: number | string | null;
+  marketForecastLow?: number | string | null;
+  bookCoverage?: Record<string, number>;
   updatedAt?: string | null;
 };
 
 export type RuntimeGlobalWeatherMapPayload = {
   generatedAt?: string;
+  snapshotAgeSeconds?: number | null;
+  refresh?: { intervalSeconds: number; staleAfterSeconds: number };
   source?: string | null;
   sourceUrl?: string | null;
   cacheMode?: string | null;

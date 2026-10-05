@@ -1,5 +1,6 @@
 import { panelStatus } from '../../shared/formatters';
-import { statusBadge, num, tempLabel } from '@/panels/shared/weather/model';
+import { statusBadge, num, tempLabel, currentWeatherTemp, highWeatherTemp, updatedLabel } from '@/panels/shared/weather/model';
+import { WeatherDataStatus } from '@/panels/shared/weather/WeatherDataStatus';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeGlobalTemperatureMonitor } from '@/services/api';
 import type { RuntimeGlobalWeatherCity, RuntimeGlobalWeatherMapPayload, RuntimeWeatherQuoteBin } from '@/types';
@@ -16,15 +17,16 @@ function priceLabel(value?: string | number | null) {
 }
 
 function currentTempValue(city: RuntimeGlobalWeatherCity) {
-  return city.currentTemp ?? city.metarTemp ?? city.todayHigh ?? null;
+  return currentWeatherTemp(city);
 }
 
 function highTempValue(city: RuntimeGlobalWeatherCity) {
-  return city.forecastHigh ?? city.todayHigh ?? city.currentTemp ?? city.metarTemp ?? null;
+  return highWeatherTemp(city);
 }
 
 function citySortValue(city: RuntimeGlobalWeatherCity) {
-  return num(highTempValue(city)) ?? -999;
+  const value = num(highTempValue(city));
+  return value === null ? -999 : city.unit === 'F' ? (value - 32) * 5 / 9 : value;
 }
 
 function cityTone(city: RuntimeGlobalWeatherCity) {
@@ -52,7 +54,7 @@ function bestBin(city: RuntimeGlobalWeatherCity): RuntimeWeatherQuoteBin | null 
 
 function MiniSpark({ city }: { city: RuntimeGlobalWeatherCity }) {
   const hourly = (city.hourly || []).filter((point) => num(point.temp) !== null).slice(0, 12);
-  const points = hourly.length >= 2 ? hourly : (city.bins || []).filter((bin) => num(bin.midPriceYes) !== null).slice(0, 12).map((bin, index) => ({ time: String(index), temp: num(bin.midPriceYes)! * 100 }));
+  const points = hourly;
   if (points.length < 2) return <span className="wm-weather-table-mini-empty">--</span>;
   const values = points.map((point) => num(point.temp) ?? 0);
   return <WeatherCanvasSparkline values={values} className="wm-weather-table-mini" />;
@@ -67,7 +69,7 @@ function TemperatureCard({
   selected: boolean;
   onSelectCity: (cityId: string) => void;
 }) {
-  const { shared, formatRelativeTime } = useSpecialistCopy('weather-shared');
+  const { shared } = useSpecialistCopy('weather-shared');
   const top = bestBin(city);
   const unit = city.unit || top?.unit || '';
   const coverage = liveBookCoverage(city);
@@ -99,8 +101,8 @@ function TemperatureCard({
       <MiniSpark city={city} />
       <div className="wm-temp-city-stats">
         <span><i>{shared('high', 'High')}</i>{tempLabel(highTempValue(city), unit)}</span>
-        <span><i>{shared('low', 'Low')}</i>{tempLabel(city.todayLow ?? city.daily?.[0]?.low, unit)}</span>
-        <span><i>{shared('updated', 'Updated')}</i>{formatRelativeTime(city.updatedAt || city.hourly?.[0]?.time || null)}</span>
+        <span><i>{shared('low', 'Low')}</i>{tempLabel(city.marketDate ? city.marketForecastLow : city.todayLow, unit)}</span>
+        <span><i>{shared('updated', 'Updated')}</i>{updatedLabel(city)}</span>
       </div>
       {hasMarket ? (
         <div className="wm-temp-city-market">
@@ -127,7 +129,7 @@ function TemperatureMonitorPanel({
   const items = [...(payload?.items || [])].sort((a, b) => {
     return citySortValue(b) - citySortValue(a);
   });
-  const selectedId = selectedWeatherCityId || items[0]?.cityId || null;
+  const selectedId = selectedWeatherCityId || payload?.items?.[0]?.cityId || null;
   return (
     <Panel
       title={copy('title', 'GLOBAL TEMP MONITOR')}
@@ -136,6 +138,7 @@ function TemperatureMonitorPanel({
       className="wm-market-panel wm-global-temperature-monitor-panel"
       dataPanelId="global-temperature-monitor"
     >
+      <WeatherDataStatus payload={payload} />
       <div className="wm-temp-city-list">
         {items.length ? items.map((city) => (
           <TemperatureCard
@@ -174,6 +177,8 @@ export const panel = runtimePanelFromRenderer(renderers, {
 }, {
   tier: 'slow',
   intervalMs: 60000,
+  staleAfterMs: 360000,
+  requestTimeoutMs: 10000,
   limit: 60,
   fetchData: (context, limit) => fetchRuntimeGlobalTemperatureMonitor(limit, context?.signal),
 });
