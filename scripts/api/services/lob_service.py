@@ -67,7 +67,7 @@ def _live_side(side, token_id: str) -> dict[str, Any]:
 
 
 def get_runtime_lob_by_token_payload(
-    token_id: str, *, no_token_id: str = "", market_title: str = "", market_id: int | None = None
+    token_id: str, *, no_token_id: str = "", market_title: str = "", market_id: int | None = None, read_timeout_seconds: float = 1.5
 ) -> dict[str, Any]:
     token_id, no_token_id = str(token_id or "").strip(), str(no_token_id or "").strip()
     if (
@@ -89,7 +89,7 @@ def get_runtime_lob_by_token_payload(
         with requests.Session() as session:
             session.trust_env = False
             base = os.environ.get("MARKET_DATA_LOB_URL", "http://127.0.0.1:18610").rstrip("/")
-            response = session.get(f"{base}/book/{token_id}", params={"noTokenId": no_token_id}, timeout=(0.5, 1.5))
+            response = session.get(f"{base}/book/{token_id}", params={"noTokenId": no_token_id}, timeout=(0.5, min(3.0, max(0.5, float(read_timeout_seconds)))))
             response.raise_for_status()
             payload = response.json()
         if payload.get("source") != "market-data" or payload.get("runtimeModel") != "websocket-live":

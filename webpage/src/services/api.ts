@@ -736,7 +736,8 @@ function fetchMarketLob(marketId: number, timeoutMs = 4000, signal?: AbortSignal
 
 export function fetchWeatherBooks(tokens: string[], signal?: AbortSignal) {
   const params = new URLSearchParams({ tokens: tokens.join(','), _ts: String(Date.now()) });
-  return apiGetWithTimeout<{ books: Record<string, LobPayload> }>(`/runtime/lob/books?${params}`, 10_000, signal, 'no-store');
+  // The bounded server batch can require six waves of four 3-second reads.
+  return apiGetWithTimeout<{ books: Record<string, LobPayload> }>(`/runtime/lob/books?${params}`, 22_000, signal, 'no-store');
 }
 
 export function fetchMarketLobByToken(

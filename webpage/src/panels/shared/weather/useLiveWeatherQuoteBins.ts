@@ -13,7 +13,7 @@ export function weatherQuoteResource(bins: RuntimeWeatherQuoteBin[]): PanelResou
   return {
     key: `weather:books:v2:${tokens.join(',') || 'none'}`, title: 'Weather books',
     maxAgeMs: 20_000, staleAgeMs: 120_000, acceptStale: true,
-    refreshPolicy: { tier: 'fast', intervalMs: WEATHER_QUOTE_REFRESH_MS, staleAfterMs: 20_000, requestTimeoutMs: 15_000 },
+    refreshPolicy: { tier: 'fast', intervalMs: WEATHER_QUOTE_REFRESH_MS, staleAfterMs: 20_000, requestTimeoutMs: 25_000 },
     updatedAt: value => value.checkedAt,
     parse: value => {
       const snapshot = value as QuoteSnapshot;

@@ -109,3 +109,35 @@ def test_retired_history_endpoint_does_not_query_legacy_database():
     assert response.status_code == 410
     assert response.get_json()["code"] == "lob_history_retired"
     assert response.headers["Cache-Control"] == "no-store"
+
+
+def test_batch_read_deadline_is_bounded_without_changing_other_readers(monkeypatch):
+    timeouts = []
+    class Session:
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def get(self, *args, **kwargs):
+            timeouts.append(kwargs['timeout'])
+            return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {'source': 'market-data', 'runtimeModel': 'websocket-live', 'yes': side('123'), 'no': side('', 'unavailable')})
+    monkeypatch.setattr(lob_service.requests, 'Session', Session)
+    lob_service.get_runtime_lob_by_token_payload('123')
+    lob_service.get_runtime_lob_by_token_payload('123', read_timeout_seconds=3)
+    lob_service.get_runtime_lob_by_token_payload('123', read_timeout_seconds=100)
+    assert timeouts == [(0.5, 1.5), (0.5, 3.0), (0.5, 3.0)]
+
+
+def test_runtime_health_remains_available_without_book_read_options(monkeypatch):
+    class Session:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def get(self, url, **kwargs):
+            assert url.endswith('/health')
+            assert kwargs['timeout'] == (0.5, 1.5)
+            return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {'status': 'ok', 'connected': True})
+
+    monkeypatch.setattr(lob_service.requests, 'Session', Session)
+    assert lob_service.get_lob_runtime_status() == {'status': 'ok', 'connected': True}

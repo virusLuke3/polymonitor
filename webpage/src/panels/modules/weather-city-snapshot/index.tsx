@@ -1,3 +1,4 @@
+import { useLiveWeatherQuoteBins } from '@/panels/shared/weather/useLiveWeatherQuoteBins';
 import { WeatherDataStatus } from '@/panels/shared/weather/WeatherDataStatus';
 import { panelStatus } from '../../shared/formatters';
 import { Panel } from '@/components/Panel';
@@ -17,7 +18,9 @@ function WeatherCitySnapshotPanel({
 }) {
   const { copy, shared } = useSpecialistCopy('weather-city-snapshot');
   const city = selectedWeatherCity(payload, selectedCityId);
-  const topBin = bestQuoteBin(city);
+  const quotes = useLiveWeatherQuoteBins(city);
+  const liveCity = city ? { ...city, bins: quotes.bins } : null;
+  const topBin = bestQuoteBin(liveCity);
   const unit = city?.unit || topBin?.unit || '';
   const daily = (city?.daily || []).slice(0, 5);
   return (
@@ -41,7 +44,7 @@ function WeatherCitySnapshotPanel({
           <div className="wm-weather-city-stats">
             <span><i>{shared('low', 'Low')}</i><strong>{tempLabel(city.marketDate ? city.marketForecastLow : city.todayLow, unit)}</strong></span>
             <span><i>{shared('high', 'High')}</i><strong>{tempLabel(highWeatherTemp(city), unit)}</strong></span>
-            <span><i>{shared('book', 'Book')}</i><strong>{bookCoverage(city)}</strong></span>
+            <span><i>{shared('book', 'Book')}</i><strong>{bookCoverage(liveCity)}</strong></span>
             <span><i>{shared('updated', 'Updated')}</i><strong>{updatedLabel(city, payload?.generatedAt)}</strong></span>
           </div>
           <WeatherDataStatus city={city} payload={payload} />

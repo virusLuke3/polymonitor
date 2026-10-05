@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
+from api.services import lob_service
 from typing import Callable, Any
 
 from flask import Blueprint, jsonify, request
@@ -11,6 +13,7 @@ from flask import Blueprint, jsonify, request
 class LobRouteDependencies:
     get_runtime_lob_payload: Callable[..., dict[str, Any]]
     get_runtime_lob_by_token_payload: Callable[..., dict[str, Any]]
+    get_runtime_lob_batch_token_payload: Callable[..., dict[str, Any]] = partial(lob_service.get_runtime_lob_by_token_payload, read_timeout_seconds=3.0)
 
 
 def create_lob_blueprint(dependencies: LobRouteDependencies) -> Blueprint:
@@ -36,7 +39,7 @@ def create_lob_blueprint(dependencies: LobRouteDependencies) -> Blueprint:
 
         def read(token):
             try:
-                payload = dependencies.get_runtime_lob_by_token_payload(token)
+                payload = dependencies.get_runtime_lob_batch_token_payload(token)
                 return token, payload
             except Exception:
                 # A failed interval cannot discard successful neighbouring books.

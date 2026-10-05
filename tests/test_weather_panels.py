@@ -1074,7 +1074,7 @@ def test_weather_book_batch_is_bounded_and_isolates_interval_failures():
             raise RuntimeError('one interval failed')
         return {'bookStatus': 'live', 'yes': {'tokenId': token, 'bookStatus': 'live'}}
     app = Flask(__name__)
-    app.register_blueprint(create_lob_blueprint(LobRouteDependencies(lambda *a: {}, read)))
+    app.register_blueprint(create_lob_blueprint(LobRouteDependencies(lambda *a: {}, read, read)))
     client = app.test_client()
     result = client.get('/runtime/lob/books?tokens=1,2,1')
     assert result.status_code == 200
