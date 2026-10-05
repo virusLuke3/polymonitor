@@ -835,15 +835,13 @@ def _wttr_weather_by_city(
 
 
 def _metar_observation_time(row: Dict[str, Any]) -> Optional[str]:
-    stamp = _weather_time_utc(row.get("reportTime"), "UTC")
-    if stamp:
-        return stamp
+    # reportTime is a rounded reporting period, not the station's observation.
     if isinstance(row.get("obsTime"), (int, float)):
         try:
             return datetime.fromtimestamp(row["obsTime"], timezone.utc).isoformat().replace("+00:00", "Z")
         except (ValueError, OverflowError, OSError):
             pass
-    return None
+    return _weather_time_utc(row.get("reportTime"), "UTC")
 
 
 def _metar_by_city(

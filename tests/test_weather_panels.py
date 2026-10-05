@@ -1098,6 +1098,16 @@ def test_metar_selects_newest_observation_and_preserves_zero_temperature():
     assert value["observationState"] == "stale"
 
 
+def test_metar_uses_actual_observation_instead_of_future_rounded_report_period():
+    observed = global_weather_map_service._parse_ts('2026-10-05T02:51:00Z')
+    rows = [{'icaoId': 'KNYC', 'temp': 13, 'obsTime': observed, 'reportTime': '2026-10-05T03:00:00Z'}]
+    ctx = make_ctx(http_json_get=lambda *a, **k: rows)
+    ctx['utc_now_iso'] = lambda: '2026-10-05T02:57:00Z'
+    value = global_weather_map_service._metar_by_city(ctx, [{'city_id': 'ny', 'icao': 'KNYC', 'unit': 'C'}])['ny']
+    assert value['observationUpdatedAt'] == '2026-10-05T02:51:00Z'
+    assert value['observationState'] == 'ok'
+
+
 def test_weather_book_batch_is_bounded_and_isolates_interval_failures():
     from flask import Flask
     from api.routes.lob import LobRouteDependencies, create_lob_blueprint
