@@ -4,8 +4,8 @@ import { bookMidPrice, currentWeatherTemp, displayQuoteBins, highWeatherTemp, we
 import { mergeLiveQuote, quoteFromLob } from './quote';
 import { sevenDayPoints } from './trend';
 import { weatherQuoteResource } from './useLiveWeatherQuoteBins';
-import { fetchMarketLobByToken } from '@/services/api';
-vi.mock('@/services/api', () => ({ fetchMarketLobByToken: vi.fn() }));
+import { fetchWeatherBooks } from '@/services/api';
+vi.mock('@/services/api', () => ({ fetchWeatherBooks: vi.fn() }));
 const now = Date.now();
 const live = (): LobPayload => ({ marketId: 1, bookStatus: 'live', yes: { bookStatus: 'live', continuity: true,
   bestBid: .3, bestAsk: .4, receivedAt: new Date(now - 1000).toISOString(), heartbeatAt: new Date(now).toISOString(), staleAfter: new Date(now + 20_000).toISOString() } });
@@ -42,18 +42,19 @@ describe('weather source and book contracts', () => {
     const resource = weatherQuoteResource([{ yesTokenId: '2' }, { yesTokenId: '1' }, { yesTokenId: '2' }]);
     expect(resource.key).toBe(weatherQuoteResource([{ yesTokenId: '1' }, { yesTokenId: '2' }]).key);
     expect(resource.refreshPolicy.intervalMs).toBe(15_000);
-    const fetch = vi.mocked(fetchMarketLobByToken);
-    fetch.mockResolvedValue({ marketId: 1, bookStatus: 'warming', yes: { bookStatus: 'warming' } });
-    expect(resource.parse(await resource.fetch()).status).toBe('partial'); expect(fetch).toHaveBeenCalledTimes(2);
-    fetch.mockResolvedValue(live());
-    expect(resource.parse(await resource.fetch()).status).toBe('ok'); expect(fetch).toHaveBeenCalledTimes(4);
+    const fetch = vi.mocked(fetchWeatherBooks);
+    fetch.mockResolvedValue({ books: { '1': { marketId: 1, bookStatus: 'warming' }, '2': { marketId: 1, bookStatus: 'warming' } } });
+    expect(resource.parse(await resource.fetch()).status).toBe('partial'); expect(fetch).toHaveBeenCalledTimes(1);
+    fetch.mockResolvedValue({ books: { '1': live(), '2': live() } });
+    expect(resource.parse(await resource.fetch()).status).toBe('ok'); expect(fetch).toHaveBeenCalledTimes(2);
   });
-  it('cancels work and bounds concurrent upstream reads', async () => {
-    let running = 0, max = 0;
-    vi.mocked(fetchMarketLobByToken).mockImplementation(async () => { running++; max = Math.max(max, running); await Promise.resolve(); running--; return live(); });
+  it('uses one bounded HTTP batch and forwards cancellation', async () => {
+    const controller = new AbortController();
+    vi.mocked(fetchWeatherBooks).mockResolvedValue({ books: {} });
     const resource = weatherQuoteResource(Array.from({ length: 11 }, (_, i) => ({ yesTokenId: String(i + 1) })));
-    await resource.fetch(); expect(max).toBeLessThanOrEqual(4);
-    const controller = new AbortController(); controller.abort();
-    await expect(resource.fetch({ signal: controller.signal } as never)).rejects.toThrow();
+    await resource.fetch({ signal: controller.signal } as never);
+    expect(fetchWeatherBooks).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(fetchWeatherBooks).mock.calls[0]?.[0]).toHaveLength(11);
+    expect(vi.mocked(fetchWeatherBooks).mock.calls[0]?.[1]).toBe(controller.signal);
   });
 });

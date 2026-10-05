@@ -1,5 +1,5 @@
 import { useMemo } from 'preact/hooks';
-import { fetchMarketLobByToken } from '@/services/api';
+import { fetchWeatherBooks } from '@/services/api';
 import { usePanelResource, type PanelResource } from '@/panels/usePanelResource';
 import type { RuntimeGlobalWeatherCity, RuntimeWeatherQuoteBin } from '@/types';
 import { displayQuoteBins } from './model';
@@ -13,7 +13,7 @@ export function weatherQuoteResource(bins: RuntimeWeatherQuoteBin[]): PanelResou
   return {
     key: `weather:books:v2:${tokens.join(',') || 'none'}`, title: 'Weather books',
     maxAgeMs: 20_000, staleAgeMs: 120_000, acceptStale: true,
-    refreshPolicy: { tier: 'fast', intervalMs: WEATHER_QUOTE_REFRESH_MS, staleAfterMs: 20_000, requestTimeoutMs: 12_000 },
+    refreshPolicy: { tier: 'fast', intervalMs: WEATHER_QUOTE_REFRESH_MS, staleAfterMs: 20_000, requestTimeoutMs: 15_000 },
     updatedAt: value => value.checkedAt,
     parse: value => {
       const snapshot = value as QuoteSnapshot;
@@ -24,22 +24,8 @@ export function weatherQuoteResource(bins: RuntimeWeatherQuoteBin[]): PanelResou
     },
     fetch: async context => {
       const quotes: Record<string, LiveWeatherQuote> = {};
-      let index = 0;
-      // Share the public runtime's cancellation, visibility and single flight.
-      // Four concurrent reads bound demand on the live book exporter.
-      await Promise.all(Array.from({ length: Math.min(4, tokens.length) }, async () => {
-        while (index < tokens.length) {
-          context?.signal?.throwIfAborted();
-          const token = tokens[index++];
-          if (!token) continue;
-          try {
-            quotes[token] = quoteFromLob(await fetchMarketLobByToken(token, '', '', 2500, context?.signal));
-          } catch (error) {
-            context?.signal?.throwIfAborted();
-            quotes[token] = { bestBidYes: null, bestAskYes: null, bookStatus: 'error' };
-          }
-        }
-      }));
+      const response = await fetchWeatherBooks(tokens, context?.signal);
+      for (const token of tokens) quotes[token] = quoteFromLob(response.books[token] || null);
       const values = Object.values(quotes);
       return { checkedAt: Date.now(), quotes, status: values.every(quote => quote.bookStatus === 'ok') ? 'ok' : 'partial' };
     },

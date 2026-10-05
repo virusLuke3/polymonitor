@@ -1062,3 +1062,25 @@ def test_metar_selects_newest_observation_and_preserves_zero_temperature():
     ctx["utc_now_iso"] = lambda: "2026-05-12T15:00:00Z"
     value = global_weather_map_service._metar_by_city(ctx, [{"city_id": "ny", "icao": "KNYC", "unit": "C"}])["ny"]
     assert value["observationState"] == "stale"
+
+
+def test_weather_book_batch_is_bounded_and_isolates_interval_failures():
+    from flask import Flask
+    from api.routes.lob import LobRouteDependencies, create_lob_blueprint
+    calls = []
+    def read(token):
+        calls.append(token)
+        if token == '2':
+            raise RuntimeError('one interval failed')
+        return {'bookStatus': 'live', 'yes': {'tokenId': token, 'bookStatus': 'live'}}
+    app = Flask(__name__)
+    app.register_blueprint(create_lob_blueprint(LobRouteDependencies(lambda *a: {}, read)))
+    client = app.test_client()
+    result = client.get('/runtime/lob/books?tokens=1,2,1')
+    assert result.status_code == 200
+    assert result.headers['Cache-Control'] == 'no-store'
+    assert sorted(calls) == ['1', '2']
+    assert result.json['books']['1']['bookStatus'] == 'live'
+    assert result.json['books']['2']['bookStatus'] == 'unavailable'
+    for tokens in ('', 'abc', ','.join(str(i) for i in range(25))):
+        assert client.get('/runtime/lob/books?tokens=' + tokens).status_code == 400

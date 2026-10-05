@@ -142,7 +142,7 @@ function apiGetWithTimeout<T>(path: string, timeoutMs = 12000, externalSignal?: 
   if (!path.startsWith('/runtime/') && !bulkDashboard) return run();
   // Visible quote/signal consumers share the first tier with primary hazards
   // and interactive detail. Bulk map layers cannot starve their refreshes.
-  const priority = /^\/runtime\/(?:(signals|trades|markets)\/|crypto\/funding-watch)|natural-hazards\/map.*source=(usgs|nhc|nws)\b|detail|aviation.*viewport|map-query/.test(path) ? 0
+  const priority = /^\/runtime\/(?:(signals|trades|markets)\/|crypto\/funding-watch|lob\/books|weather\/temperature-monitor)|natural-hazards\/map.*source=(usgs|nhc|nws)\b|detail|aviation.*viewport|map-query/.test(path) ? 0
     : /natural-hazards|global-transport|transport\/global-shipping|geo-sanctions/.test(path) ? 1 : 2;
   return withRuntimeRequestBudget(run, externalSignal, priority);
 }
@@ -732,6 +732,11 @@ export function fetchMarketContent(marketId: number, limit = 20, timeoutMs = 500
 
 function fetchMarketLob(marketId: number, timeoutMs = 4000, signal?: AbortSignal) {
   return apiGetWithTimeout<LobPayload>(`/runtime/lob/${marketId}`, timeoutMs, signal);
+}
+
+export function fetchWeatherBooks(tokens: string[], signal?: AbortSignal) {
+  const params = new URLSearchParams({ tokens: tokens.join(','), _ts: String(Date.now()) });
+  return apiGetWithTimeout<{ books: Record<string, LobPayload> }>(`/runtime/lob/books?${params}`, 10_000, signal, 'no-store');
 }
 
 export function fetchMarketLobByToken(
