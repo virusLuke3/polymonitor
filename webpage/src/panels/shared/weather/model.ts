@@ -28,8 +28,7 @@ export function priceLabel(value?: string | number | null) {
 }
 
 export function bookMidPrice(bin?: RuntimeWeatherQuoteBin | null) {
-  if (bin?.bookStatus && !['ok', 'live'].includes(bin.bookStatus)) return null;
-  if (bin?.quoteStaleAfter && Date.parse(bin.quoteStaleAfter) <= Date.now()) return null;
+  if (!hasCurrentBook(bin)) return null;
   const bid = num(bin?.bestBidYes);
   const ask = num(bin?.bestAskYes);
   if (bid === null || ask === null) return null;
@@ -64,7 +63,13 @@ export function bestBookQuoteBin(city?: RuntimeGlobalWeatherCity | null): Runtim
 export function bookCoverage(city?: RuntimeGlobalWeatherCity | null) {
   const bins = city?.bins || [];
   if (!bins.length) return '0/0';
-  return `${bins.filter((bin) => num(bin.bestBidYes) !== null || num(bin.bestAskYes) !== null).length}/${bins.length}`;
+  return `${bins.filter(hasCurrentBook).length}/${bins.length}`;
+}
+
+function hasCurrentBook(bin?: RuntimeWeatherQuoteBin | null) {
+  return Boolean(bin && ['ok', 'live'].includes(bin.bookStatus || '')
+    && Date.parse(bin.quoteStaleAfter || '') > Date.now()
+    && (num(bin.bestBidYes) !== null || num(bin.bestAskYes) !== null));
 }
 
 export function bookMidCoverage(city?: RuntimeGlobalWeatherCity | null) {

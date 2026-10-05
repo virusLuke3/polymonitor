@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LobPayload } from '@/types';
-import { bookMidPrice, currentWeatherTemp, displayQuoteBins, highWeatherTemp, weatherSourceLabel } from './model';
+import { bookCoverage, bookMidPrice, currentWeatherTemp, displayQuoteBins, highWeatherTemp, weatherSourceLabel } from './model';
 import { mergeLiveQuote, quoteFromLob } from './quote';
 import { sevenDayPoints } from './trend';
 import { weatherQuoteResource } from './useLiveWeatherQuoteBins';
@@ -56,5 +56,11 @@ describe('weather source and book contracts', () => {
     expect(fetchWeatherBooks).toHaveBeenCalledTimes(1);
     expect(vi.mocked(fetchWeatherBooks).mock.calls[0]?.[0]).toHaveLength(11);
     expect(vi.mocked(fetchWeatherBooks).mock.calls[0]?.[1]).toBe(controller.signal);
+  });
+  it('counts only current books in overview and detail coverage', () => {
+    const current = { bookStatus: 'ok', bestBidYes: .4, quoteStaleAfter: new Date(Date.now() + 20_000).toISOString() };
+    const expired = { ...current, quoteStaleAfter: new Date(Date.now() - 1).toISOString() };
+    expect(bookCoverage({ bins: [current, expired, { ...current, bookStatus: 'warming' }, { bestBidYes: .5 }] })).toBe('1/4');
+    expect(bookMidPrice({ ...expired, bestAskYes: .5 })).toBeNull();
   });
 });

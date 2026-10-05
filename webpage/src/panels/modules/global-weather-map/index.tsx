@@ -1,6 +1,8 @@
 import { panelStatus } from '../../shared/formatters';
 import { statusBadge, num, tempLabel, currentWeatherTemp, highWeatherTemp, updatedLabel } from '@/panels/shared/weather/model';
 import { WeatherDataStatus } from '@/panels/shared/weather/WeatherDataStatus';
+import { useLiveWeatherQuoteBins } from '@/panels/shared/weather/useLiveWeatherQuoteBins';
+import { selectedWeatherCity, bestBookQuoteBin } from '@/panels/shared/weather/model';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeGlobalTemperatureMonitor } from '@/services/api';
 import type { RuntimeGlobalWeatherCity, RuntimeGlobalWeatherMapPayload, RuntimeWeatherQuoteBin } from '@/types';
@@ -126,6 +128,8 @@ function TemperatureMonitorPanel({
   onSelectCity: (cityId: string | null) => void;
 }) {
   const { copy } = useSpecialistCopy('global-temperature-monitor');
+  const selectedCity = selectedWeatherCity(payload, selectedWeatherCityId);
+  const quotes = useLiveWeatherQuoteBins(selectedCity);
   const items = [...(payload?.items || [])].sort((a, b) => {
     return citySortValue(b) - citySortValue(a);
   });
@@ -143,7 +147,8 @@ function TemperatureMonitorPanel({
         {items.length ? items.map((city) => (
           <TemperatureCard
             key={String(city.cityId || city.city)}
-            city={city}
+            city={city.cityId === selectedCity?.cityId ? { ...city, bins: quotes.bins,
+              topBin: bestBookQuoteBin({ bins: quotes.bins }) || city.topBin } : city}
             selected={String(city.cityId || '') === String(selectedId || '')}
             onSelectCity={onSelectCity}
           />
