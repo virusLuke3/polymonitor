@@ -834,6 +834,18 @@ def _wttr_weather_by_city(
     return result
 
 
+def _metar_observation_time(row: Dict[str, Any]) -> Optional[str]:
+    stamp = _weather_time_utc(row.get("reportTime"), "UTC")
+    if stamp:
+        return stamp
+    if isinstance(row.get("obsTime"), (int, float)):
+        try:
+            return datetime.fromtimestamp(row["obsTime"], timezone.utc).isoformat().replace("+00:00", "Z")
+        except (ValueError, OverflowError, OSError):
+            pass
+    return None
+
+
 def _metar_by_city(
     ctx: GlobalWeatherMapContext,
     cities: List[Dict[str, Any]],
@@ -864,12 +876,18 @@ def _metar_by_city(
         icao = str(row.get("icaoId") or row.get("station_id") or row.get("id") or "").strip().upper()
         if not icao:
             continue
-        by_icao[icao] = row
+        observed = _metar_observation_time(row)
+        previous = by_icao.get(icao) or {}
+        previous_observed = _metar_observation_time(previous)
+        if icao not in by_icao or _parse_ts(observed) > _parse_ts(previous_observed):
+            by_icao[icao] = row
     result: Dict[str, Dict[str, Any]] = {}
     for city in cities:
         row = by_icao.get(str(city.get("icao") or "").upper())
         if row:
-            result[str(city["city_id"])] = {"metarTemp": _c_to_unit(row.get("temp") if row.get("temp") is not None else row.get("temp_c"), str(city.get("unit") or "F")), "observationUpdatedAt": _weather_time_utc(row.get("reportTime"), "UTC") or (datetime.fromtimestamp(row["obsTime"], timezone.utc).isoformat().replace("+00:00", "Z") if isinstance(row.get("obsTime"), (int, float)) else None), "updatedAt": row.get("reportTime") or row.get("obsTime")}
+            observed_at = _metar_observation_time(row)
+            age = _parse_ts(_utc_now_iso(dependencies)) - _parse_ts(observed_at)
+            result[str(city["city_id"])] = {"observationState": "ok" if observed_at and 0 <= age <= 7200 else "stale", "metarTemp": _c_to_unit(row.get("temp") if row.get("temp") is not None else row.get("temp_c"), str(city.get("unit") or "F")), "observationUpdatedAt": observed_at, "updatedAt": observed_at}
     return result
 
 
@@ -1664,7 +1682,7 @@ def build_global_weather_map_payload(
             "sourceStates": {
                 "openMeteo": "ok" if weather_row and weather_provider != "wttr.in" else ("error" if open_meteo_failed else "empty"),
                 "wttr": "ok" if weather_provider == "wttr.in" else "empty",
-                "metar": "ok" if metar_row else "empty",
+                "metar": metar_row.get("observationState", "ok") if metar_row else "empty",
                 "polymarket": "ok" if market_row else market_source_states.get(city_id, "empty"),
             },
             "updatedAt": weather_row.get("weatherUpdatedAt") or metar_row.get("observationUpdatedAt"),

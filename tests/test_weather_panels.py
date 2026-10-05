@@ -1048,3 +1048,17 @@ def test_weather_watcher_cache_survives_cadence_without_extending_snapshot_clock
     watcher.settings = make_settings(global_weather_map_ttl_seconds=180)
     watcher.interval_seconds = 180
     assert watcher.ttl_seconds() == 360
+
+
+def test_metar_selects_newest_observation_and_preserves_zero_temperature():
+    rows = [{"icaoId": "KNYC", "temp": 0, "reportTime": "2026-05-12T11:50:00Z"},
+            {"icaoId": "KNYC", "temp": 12, "reportTime": "2026-05-12T08:50:00Z"}]
+    ctx = make_ctx(http_json_get=lambda *a, **k: rows)
+    value = global_weather_map_service._metar_by_city(ctx, [{"city_id": "ny", "icao": "KNYC", "unit": "C"}])["ny"]
+    assert value["metarTemp"] == 0
+    assert value["observationUpdatedAt"] == "2026-05-12T11:50:00Z"
+    assert value["observationState"] == "ok"
+    assert global_weather_map_service._metar_observation_time({"obsTime": global_weather_map_service._parse_ts("2026-05-12T11:50:00Z")}) == "2026-05-12T11:50:00Z"
+    ctx["utc_now_iso"] = lambda: "2026-05-12T15:00:00Z"
+    value = global_weather_map_service._metar_by_city(ctx, [{"city_id": "ny", "icao": "KNYC", "unit": "C"}])["ny"]
+    assert value["observationState"] == "stale"

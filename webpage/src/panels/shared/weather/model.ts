@@ -14,7 +14,7 @@ export function tempLabel(value?: string | number | null, unit?: string | null) 
 }
 
 export function currentWeatherTemp(city?: RuntimeGlobalWeatherCity | null) {
-  return city?.weatherCarryForward && city?.metarTemp != null ? city.metarTemp : city?.currentTemp ?? city?.metarTemp ?? null;
+  return city?.weatherCarryForward && city?.sourceStates?.metar === 'ok' && city?.metarTemp != null ? city.metarTemp : city?.currentTemp ?? city?.metarTemp ?? null;
 }
 
 export function highWeatherTemp(city?: RuntimeGlobalWeatherCity | null) {
@@ -135,5 +135,5 @@ export function forecastSourceLabel(city?: RuntimeGlobalWeatherCity | null, payl
 }
 
 export function updatedLabel(city?: RuntimeGlobalWeatherCity | null, _fallback?: string | null) {
-  return formatRelative(city?.weatherCarryForward && city?.metarTemp != null ? city.observationUpdatedAt || null : city?.weatherUpdatedAt || null);
+  return formatRelative(city?.weatherCarryForward && city?.sourceStates?.metar === 'ok' && city?.metarTemp != null ? city.observationUpdatedAt || null : city?.weatherUpdatedAt || null);
 }
