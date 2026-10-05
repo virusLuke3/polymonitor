@@ -1377,6 +1377,7 @@ export type RuntimeGlobalWeatherCity = {
   marketFamilies?: string[];
   sourceStates?: Record<string, string>;
   weatherCarryForward?: boolean;
+  marketCarryForward?: boolean;
   weatherCarryForwardFields?: string[];
   weatherUpdatedAt?: string | null;
   forecastFetchedAt?: string | null;

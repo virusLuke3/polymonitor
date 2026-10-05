@@ -10,8 +10,10 @@ export function WeatherDataStatus({ city, payload }: { city?: RuntimeGlobalWeath
     {city ? <>
       <span>{forecastSourceLabel(city)} · {shared('fetched', 'Fetched')} {formatRelativeTime(city.forecastFetchedAt || null)}</span>
       <span>METAR · {shared('observed', 'Observed')} {formatRelativeTime(city.observationUpdatedAt || null)}</span>
+      <span>{shared('marketCatalog', 'Market catalog')} · {shared('fetched', 'Fetched')} {formatRelativeTime(city.marketFetchedAt || null)}</span>
       <span>{shared('forecastDate', 'Forecast date')} {city.forecastDate || '--'} · {shared('marketDate', 'Market date')} {city.marketDate || '--'}</span>
       {city.weatherCarryForward ? <strong>{shared('retainedForecast', 'Previous forecast retained; source retry is automatic.')}</strong> : null}
+      {city.marketCarryForward ? <strong>{shared('retainedMarkets', 'Previous market catalog retained; source retry is automatic.')}</strong> : null}
     </> : null}
   </div>;
 }

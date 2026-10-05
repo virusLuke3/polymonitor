@@ -916,7 +916,7 @@ def test_global_weather_map_carries_forward_weather_series_when_open_meteo_fails
     stored = {}
     map_watcher.store_payload = lambda payload: stored.setdefault("payload", payload)
     map_watcher.store_meta = lambda **kwargs: stored.setdefault("meta", kwargs)
-    monkeypatch.setattr(global_weather_map_watcher.global_weather_map_service, "build_global_weather_map_payload", lambda ctx: fresh_partial)
+    monkeypatch.setattr(global_weather_map_watcher.global_weather_map_service, "build_global_weather_map_payload", lambda ctx, **kwargs: fresh_partial)
 
     result = map_watcher.run_once()
 
@@ -949,7 +949,7 @@ def test_watchers_preserve_previous_on_empty_or_exception(monkeypatch):
     stored = {}
     map_watcher.store_payload = lambda payload: stored.setdefault("map_payload", payload)
     map_watcher.store_meta = lambda **kwargs: stored.setdefault("map_meta", kwargs)
-    monkeypatch.setattr(global_weather_map_watcher.global_weather_map_service, "build_global_weather_map_payload", lambda ctx: {"items": [], "sources": {"openMeteo": "empty"}, "status": "empty"})
+    monkeypatch.setattr(global_weather_map_watcher.global_weather_map_service, "build_global_weather_map_payload", lambda ctx, **kwargs: {"items": [], "sources": {"openMeteo": "empty"}, "status": "empty"})
 
     result = map_watcher.run_once()
 
@@ -958,7 +958,7 @@ def test_watchers_preserve_previous_on_empty_or_exception(monkeypatch):
     assert stored["map_meta"]["preserve"] is True
 
     stored.clear()
-    monkeypatch.setattr(global_weather_map_watcher.global_weather_map_service, "build_global_weather_map_payload", lambda ctx: {"items": [{"cityId": "new-york", "quoteCoverage": "11/11"}], "sources": {"openMeteo": "error"}, "summary": {"mappedCount": 0}, "status": "warming"})
+    monkeypatch.setattr(global_weather_map_watcher.global_weather_map_service, "build_global_weather_map_payload", lambda ctx, **kwargs: {"items": [{"cityId": "new-york", "quoteCoverage": "11/11"}], "sources": {"openMeteo": "error"}, "summary": {"mappedCount": 0}, "status": "warming"})
 
     result = map_watcher.run_once()
 
@@ -1048,6 +1048,40 @@ def test_weather_watcher_cache_survives_cadence_without_extending_snapshot_clock
     watcher.settings = make_settings(global_weather_map_ttl_seconds=180)
     watcher.interval_seconds = 180
     assert watcher.ttl_seconds() == 360
+
+
+def test_catalog_outage_preserves_contract_identity_without_old_books_or_wrong_day():
+    from copy import deepcopy
+    group = {'marketDate': '2026-10-06', 'marketFamily': 'highest_temperature', 'eventSlug': 'new-york-oct-6',
+             'bins': [{'yesTokenId': '123', 'bestBidYes': .4, 'bestAskYes': .5, 'midPriceYes': .45, 'bookStatus': 'ok', 'priceSource': 'clob-book'}]}
+    previous = {'items': [{'cityId': 'ny', **group, 'markets': [group], 'marketFetchedAt': '2026-10-05T00:00:00Z'}]}
+    original = deepcopy(previous)
+    fresh = {'sources': {'openMeteo': 'ok', 'marketDatabase': 'error'}, 'items': [{'cityId': 'ny', 'todayDate': '2026-10-05',
+        'forecastFetchedAt': '2026-10-05T02:00:00Z', 'currentTemp': 63,
+        'daily': [{'date': '2026-10-06', 'high': 72, 'low': 60}],
+        'hourly': [{'localDate': '2026-10-05', 'temp': 63}, {'localDate': '2026-10-06', 'temp': 71}],
+        'sourceStates': {'openMeteo': 'ok', 'polymarket': 'error'}}]}
+    value = global_weather_map_service.merge_weather_markets_from_previous(fresh, previous)
+    city = value['items'][0]
+    assert city['marketDate'] == city['forecastDate'] == '2026-10-06'
+    assert city['marketForecastHigh'] == 72
+    assert city['hourly'] == [{'localDate': '2026-10-06', 'temp': 71}]
+    assert city['marketFetchedAt'] == '2026-10-05T00:00:00Z'
+    assert city['forecastFetchedAt'] == '2026-10-05T02:00:00Z'
+    assert city['marketCarryForward'] is True
+    assert city['sourceStates'] == {'openMeteo': 'ok', 'polymarket': 'stale'}
+    assert city['eventStatus'] == 'unknown'
+    assert city['bins'][0]['bestBidYes'] is None
+    assert city['bins'][0]['priceSource'] == 'previous-book'
+    assert city['bookCoverage']['queried'] == 0
+    assert previous == original
+    assert global_weather_map_service.merge_weather_markets_from_previous(fresh, value)['items'][0]['marketFetchedAt'] == city['marketFetchedAt']
+    healthy_empty = deepcopy(fresh)
+    healthy_empty['items'][0]['sourceStates']['polymarket'] = 'empty'
+    assert global_weather_map_service.merge_weather_markets_from_previous(healthy_empty, value) is healthy_empty
+    expired = deepcopy(fresh)
+    expired['items'][0]['todayDate'] = '2026-10-07'
+    assert global_weather_map_service.merge_weather_markets_from_previous(expired, previous) is expired
 
 
 def test_metar_selects_newest_observation_and_preserves_zero_temperature():

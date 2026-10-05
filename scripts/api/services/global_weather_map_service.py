@@ -1526,6 +1526,40 @@ def _is_missing_weather_value(value: Any) -> bool:
     return False
 
 
+def merge_weather_markets_from_previous(payload: Dict[str, Any], previous: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """A catalog outage must not delete known contracts or refresh their clocks."""
+    previous_items = {item.get("cityId"): item for item in (previous or {}).get("items", []) if isinstance(item, dict)}
+    fields = ("eventSlug", "eventTitle", "marketSource", "marketDate", "marketFamily", "marketFamilyLabel", "metricType", "marketUrl", "bins", "topBin")
+    items = []
+    carried = False
+    for item in payload.get("items") or []:
+        old = previous_items.get(item.get("cityId")) or {}
+        if (item.get("sourceStates") or {}).get("polymarket") != "error" or not old.get("bins"):
+            items.append(item)
+            continue
+        groups = []
+        for group in old.get("markets") or [old]:
+            # Do not keep expired daily contracts as today's available markets.
+            if group.get("marketDate") and item.get("todayDate") and group["marketDate"] < item["todayDate"]:
+                continue
+            bins = [{**row, "bestBidYes": None, "bestAskYes": None, "bookStatus": "not-queried",
+                     "marketStatus": "unknown", "priceSource": "previous-book" if row.get("priceSource") == "clob-book" else row.get("priceSource")}
+                    for row in group.get("bins") or []]
+            if not bins:
+                continue
+            top = next((row for row in bins if row.get("yesTokenId") == (group.get("topBin") or {}).get("yesTokenId")), bins[0])
+            groups.append({**{key: group.get(key) for key in fields}, "bins": bins, "topBin": top, "eventStatus": "unknown"})
+        if not groups:
+            items.append(item)
+            continue
+        carried = True
+        items.append(_align_city_forecast({**item, **groups[0], "markets": groups,
+            "marketFamilies": sorted({group["marketFamily"] for group in groups if group.get("marketFamily")}),
+            "marketFetchedAt": old.get("marketFetchedAt"), "marketCarryForward": True,
+            "sourceStates": {**(item.get("sourceStates") or {}), "polymarket": "stale"}}))
+    return {**payload, "items": items, "summary": {**(payload.get("summary") or {}), **build_summary(items)}, "status": "degraded"} if carried else payload
+
+
 def merge_weather_series_from_previous(payload: Dict[str, Any], previous: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """Keep usable Open-Meteo series when a fresh build only has market/METAR data."""
     if not isinstance(payload, dict) or not isinstance(previous, dict):
@@ -1586,6 +1620,7 @@ def build_global_weather_map_payload(
     ctx: GlobalWeatherMapContext,
     *,
     limit: int = DEFAULT_ITEM_LIMIT,
+    defer_forecast_alignment: bool = False,
 ) -> Dict[str, Any]:
     dependencies = _dependencies(ctx)
     cities = load_weather_cities(limit=max(limit or DEFAULT_ITEM_LIMIT, DEFAULT_ITEM_LIMIT))
@@ -1688,9 +1723,9 @@ def build_global_weather_map_payload(
             "updatedAt": weather_row.get("weatherUpdatedAt") or metar_row.get("observationUpdatedAt"),
             "marketFetchedAt": _utc_now_iso(dependencies) if market_row else None,
         }
-        items.append(_align_city_forecast(item))
+        items.append(item if defer_forecast_alignment else _align_city_forecast(item))
     # Aggregate only attempted books; omitted bins are reported separately.
-    coverages = [item["bookCoverage"] for item in items]
+    coverages = [_quote_coverage(item.get("bins") or []) for item in items]
     queried = sum(c["queried"] for c in coverages)
     quoted = sum(c["quoted"] for c in coverages)
     sources["clob"] = "ok" if queried and queried == quoted else ("partial" if quoted else "unavailable" if queried else "empty")

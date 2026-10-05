@@ -132,7 +132,7 @@ class GlobalWeatherMapWatcher:
         return {
             "_resources": self.resources,
             "SETTINGS": self.settings,
-            "get_runtime_lob_by_token_payload": lambda token: lob_service.get_runtime_lob_by_token_payload(token),
+            "get_runtime_lob_by_token_payload": lambda token: lob_service.get_runtime_lob_by_token_payload(token, read_timeout_seconds=3.0),
             "app": _App(),
             "http_json_get": self._http_json_get,
             "get_clob_session": lambda: self.requests,
@@ -190,7 +190,7 @@ class GlobalWeatherMapWatcher:
     def run_once(self) -> Dict[str, Any]:
         previous = self.previous()
         try:
-            payload = global_weather_map_service.build_global_weather_map_payload(self.context())
+            payload = global_weather_map_service.build_global_weather_map_payload(self.context(), defer_forecast_alignment=True)
         except Exception as exc:
             if previous:
                 self.store_payload(previous)
@@ -206,7 +206,10 @@ class GlobalWeatherMapWatcher:
             self.store_payload(previous)
             self.store_meta(status="preserved", record_count=len(previous.get("items") or []), source_states=payload.get("sources"), error_summary="Preserved previous snapshot because new weather map payload lost live weather values", preserve=True)
             return {"status": "preserved", "payload": previous}
+        payload = global_weather_map_service.merge_weather_markets_from_previous(payload, previous)
         payload = global_weather_map_service.merge_weather_series_from_previous(payload, previous)
+        items = [global_weather_map_service._align_city_forecast(dict(item)) for item in payload.get("items") or []]
+        payload = {**payload, "items": items, "summary": {**(payload.get("summary") or {}), **global_weather_map_service.build_summary(items)}}
         interval = getattr(self, "interval_seconds", DEFAULT_INTERVAL_SECONDS)
         payload = {**payload, "cacheMode": "seeded", "refresh": {"intervalSeconds": interval, "staleAfterSeconds": interval * 2}}
         self.store_payload(payload)

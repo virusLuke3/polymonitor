@@ -9,6 +9,7 @@ The existing panel directories, Preact registry and public panel runtime remain 
 - `generatedAt` measures snapshot assembly, `forecastFetchedAt` measures model acquisition, `weatherUpdatedAt` measures the provider's current-model sample, `observationUpdatedAt` measures the METAR observation, and `marketFetchedAt` measures catalog reading. Request time does not replace a missing source timestamp.
 - Open-Meteo native local timestamps are converted with the city/provider IANA timezone. Dates in daily forecasts and market contracts remain local calendar dates.
 - Missing forecasts may be retained with their original acquisition time and carry-forward fields. A newly assembled snapshot does not turn retained data into a new forecast.
+- A failed market database read retains the last known nonexpired contracts independently of fresh weather, with the original catalog clock and explicit retained status. Saved ladders are cleared, contract eligibility becomes unknown, and the selected-city quote resource reads current books independently. A successful empty catalog is not treated as an outage and does not resurrect removed contracts.
 
 ## Market and quote ownership
 
