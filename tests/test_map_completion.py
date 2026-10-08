@@ -68,7 +68,8 @@ def test_liveness_does_not_touch_unavailable_dependencies():
     assert app.test_client().get('/health/live').json == {'status': 'ok'}
 
 
-def test_weather_lookup_caches_and_uses_real_selected_coordinates():
+def test_weather_lookup_caches_and_uses_real_selected_coordinates(tmp_path):
+    from runtime.snapshot_store import SnapshotStore
     calls = []; resources = RuntimeResources()
     def get(url, **kwargs):
         calls.append((url, kwargs))
@@ -76,7 +77,7 @@ def test_weather_lookup_caches_and_uses_real_selected_coordinates():
             return {'results': [{'id': 1, 'name': 'London', 'latitude': 51.5, 'longitude': -.12, 'country': 'UK'}]}
         return {'current': {'temperature_2m': 12.5, 'time': '2026-10-02T08:00'}, 'daily': {}, 'hourly': {}}
     ctx = {'_resources': resources, 'SETTINGS': SimpleNamespace(open_meteo_api_url='https://api.open-meteo.com/v1/forecast'),
-        'SNAPSHOT_STORE': Store(), 'http_json_get': get}
+        'SNAPSHOT_STORE': SnapshotStore(str(tmp_path / 'weather.sqlite3')), 'http_json_get': get}
     try:
         assert query_map_weather(ctx, query='London')['places'][0]['lat'] == 51.5
         assert query_map_weather(ctx, query='London')['status'] == 'ok'
@@ -273,7 +274,8 @@ def test_worker_startup_still_rejects_missing_auth_schema(monkeypatch):
     with pytest.raises(RuntimeError,match='schema is missing'):auth.validate_runtime_config()
     assert closed==[True]
 
-def test_weather_provider_throttle_uses_independent_forecast_and_shared_cooldown():
+def test_weather_provider_throttle_uses_independent_forecast_and_shared_cooldown(tmp_path):
+    from runtime.snapshot_store import SnapshotStore
     import requests
     calls = []
     now = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
@@ -284,7 +286,7 @@ def test_weather_provider_throttle_uses_independent_forecast_and_shared_cooldown
             raise requests.HTTPError(response=response)
         return {'properties': {'timeseries': [{'time': now.isoformat(), 'data': {'instant': {'details': {
             'air_temperature': 12.4, 'wind_speed': 2, 'relative_humidity': 61}}}}]}}
-    resources = RuntimeResources(); store = Store()
+    resources = RuntimeResources(); store = SnapshotStore(str(tmp_path / 'weather.sqlite3'))
     ctx = {'_resources': resources, 'SETTINGS': SimpleNamespace(), 'SNAPSHOT_STORE': store, 'http_json_get': get}
     try:
         result = query_map_weather(ctx, latitude=51.50853, longitude=-.12574)

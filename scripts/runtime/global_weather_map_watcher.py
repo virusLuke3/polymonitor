@@ -25,7 +25,7 @@ from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
 from runtime.snapshot_store import SnapshotStore
 from runtime.telegram_panel_publish import publish_cached_panel_snapshot
 
-DEFAULT_INTERVAL_SECONDS = 180
+DEFAULT_INTERVAL_SECONDS = 3600
 SEED_META_NAMESPACE = "seed-meta:weather"
 SEED_META_CACHE_KEY = "global-weather-map"
 SEED_META_SERVICE_NAME = "polydata-global-weather-map-seed.service"

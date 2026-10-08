@@ -183,7 +183,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   tier: 'slow',
   batch: false,
   intervalMs: 60000,
-  staleAfterMs: 360000,
+  staleAfterMs: 7200000,
   requestTimeoutMs: 10000,
   limit: 60,
   fetchData: (context, limit) => fetchRuntimeGlobalTemperatureMonitor(limit, context?.signal),

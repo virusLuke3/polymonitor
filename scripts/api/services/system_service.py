@@ -274,7 +274,7 @@ SEED_META_SPECS = [
         "cacheKey": "global-weather-map",
         "serviceName": "polydata-global-weather-map-seed.service",
         "intervalEnv": "POLYDATA_GLOBAL_WEATHER_MAP_WATCH_INTERVAL_SECONDS",
-        "defaultIntervalSeconds": 60,
+        "defaultIntervalSeconds": 3600,
     },
     {
         "panelId": "weather-news",

@@ -684,7 +684,7 @@ def load_api_settings() -> ApiSettings:
         ),
         google_news_rss_url=_get_str("POLYDATA_GOOGLE_NEWS_RSS_URL", "https://news.google.com/rss/search"),
         weather_source_url=_get_str("POLYDATA_WEATHER_SOURCE_URL", "https://open-meteo.com/"),
-        global_weather_map_ttl_seconds=_get_int("POLYDATA_GLOBAL_WEATHER_MAP_TTL_SECONDS", 180),
+        global_weather_map_ttl_seconds=_get_int("POLYDATA_GLOBAL_WEATHER_MAP_TTL_SECONDS", 7200),
         global_weather_market_days=_get_int("POLYDATA_GLOBAL_WEATHER_MARKET_DAYS", 4),
         weather_news_ttl_seconds=_get_int("POLYDATA_WEATHER_NEWS_TTL_SECONDS", 300),
         weather_news_limit=_get_int("POLYDATA_WEATHER_NEWS_LIMIT", 40),

@@ -6,7 +6,7 @@ import type { useLiveWeatherQuoteBins } from './useLiveWeatherQuoteBins';
 export function WeatherDataStatus({ city, payload }: { city?: RuntimeGlobalWeatherCity | null; payload?: RuntimeGlobalWeatherMapPayload | null }) {
   const { shared, formatRelativeTime } = useSpecialistCopy('weather-shared');
   return <div className="wm-weather-source-status">
-    {payload ? <span>{shared('snapshot', 'Snapshot')} {formatRelativeTime(payload.generatedAt || null)} · {shared('autoCheck', 'Auto check')} 60s</span> : null}
+    {payload ? <span>{shared('snapshot', 'Snapshot')} {formatRelativeTime(payload.generatedAt || null)} · {shared('autoCheck', 'Auto check')} 60s · {shared('source', 'Source')} {payload.refresh?.intervalSeconds === 3600 ? '1h' : `${payload.refresh?.intervalSeconds || 3600}s`}</span> : null}
     {city ? <>
       <span>{forecastSourceLabel(city)} · {shared('fetched', 'Fetched')} {formatRelativeTime(city.forecastFetchedAt || null)}</span>
       <span>METAR · {shared('observed', 'Observed')} {formatRelativeTime(city.observationUpdatedAt || null)}</span>

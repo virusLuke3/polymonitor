@@ -1050,6 +1050,19 @@ def test_weather_watcher_cache_survives_cadence_without_extending_snapshot_clock
     assert watcher.ttl_seconds() == 360
 
 
+def test_hourly_snapshot_is_fresh_for_its_declared_cycle_but_not_forever():
+    ctx = make_ctx()
+    payload = {'generatedAt': '2026-05-12T11:00:00Z', 'status': 'ok',
+        'refresh': {'intervalSeconds': 3600, 'staleAfterSeconds': 7200},
+        'items': [{'cityId': 'ny', 'currentTemp': 70}]}
+    value = global_weather_map_service.normalize_global_weather_map_payload(payload, ctx=ctx)
+    assert value['status'] == 'ok'
+    ctx['utc_now_iso'] = lambda: '2026-05-12T13:01:00Z'
+    value = global_weather_map_service.normalize_global_weather_map_payload(payload, ctx=ctx)
+    assert value['status'] == 'stale'
+    assert value['generatedAt'] == payload['generatedAt']
+
+
 def test_catalog_outage_preserves_contract_identity_without_old_books_or_wrong_day():
     from copy import deepcopy
     group = {'marketDate': '2026-10-06', 'marketFamily': 'highest_temperature', 'eventSlug': 'new-york-oct-6',
