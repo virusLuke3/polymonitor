@@ -6,7 +6,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 from urllib.parse import quote_plus
-from weather.open_meteo import get_forecast
+from weather.open_meteo import get_json
 
 
 WORLDCUP_INTEL_NAMESPACE = "snapshot:sports:worldcup-intel"
@@ -240,7 +240,7 @@ def _weather_code_label(code: Any) -> str:
 def _open_meteo_weather(ctx: dict) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     try:
-        payload = get_forecast(
+        payload = get_json(
             ctx["http_json_get"], ctx.get("SNAPSHOT_STORE"),
             OPEN_METEO_URL,
             params={

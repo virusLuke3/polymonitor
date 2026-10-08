@@ -18,7 +18,7 @@ from api.context import resolve_optional_service_callable, resolve_service_calla
 from weather.cities import load_weather_cities
 from weather.temperature_bins import parse_temperature_bin
 from weather.weather_codes import describe_weather_code
-from weather.open_meteo import get_forecast
+from weather.open_meteo import get_json
 
 
 GLOBAL_WEATHER_MAP_SNAPSHOT_NAMESPACE = "snapshot:weather:global-map"
@@ -581,7 +581,7 @@ def _weather_by_city(
     for offset in range(0, len(cities), chunk_size):
         chunk = cities[offset:offset + chunk_size]
         try:
-            payload = get_forecast(
+            payload = get_json(
                 dependencies.http_json_get, dependencies.snapshot_store,
                 base_url,
                 params={
@@ -2060,7 +2060,7 @@ def query_map_weather(ctx: GlobalWeatherMapContext, *, query: str = "", language
         if cached is not None:
             return cached
         if latitude is None or longitude is None:
-            raw = dependencies.http_json_get("https://geocoding-api.open-meteo.com/v1/search",
+            raw = get_json(dependencies.http_json_get, store, "https://geocoding-api.open-meteo.com/v1/search",
                 params={"name": query, "count": 12, "language": language, "format": "json"}, timeout=7)
             if not isinstance(raw, dict) or raw.get("error"):
                 raise RuntimeError("invalid-geocoding-response")
@@ -2076,7 +2076,7 @@ def query_map_weather(ctx: GlobalWeatherMapContext, *, query: str = "", language
             try:
                 if cooldown:
                     raise RuntimeError("open-meteo-cooldown")
-                raw = get_forecast(
+                raw = get_json(
                     dependencies.http_json_get, store,
                     getattr(dependencies.settings, "open_meteo_api_url", "") or "https://api.open-meteo.com/v1/forecast",
                     params={"latitude": latitude, "longitude": longitude, "current": "temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m",

@@ -28,7 +28,7 @@ def test_forecast_budget_is_shared_atomic_and_honors_provider_cooldown(tmp_path,
     def reader(_):
         try:
             # Different store instances model independently started API readers.
-            return open_meteo.get_forecast(request, SnapshotStore(store.db_path), url, params=params)
+            return open_meteo.get_json(request, SnapshotStore(store.db_path), url, params=params)
         except RuntimeError:
             return None
 
@@ -48,13 +48,17 @@ def test_forecast_budget_is_shared_atomic_and_honors_provider_cooldown(tmp_path,
         raise requests.HTTPError(response=response)
 
     with pytest.raises(requests.HTTPError):
-        open_meteo.get_forecast(rate_limited, store, url, params=params)
+        open_meteo.get_json(rate_limited, store, url, params=params)
+    assert open_meteo.get_json(request, store, 'https://geocoding-api.open-meteo.com/v1/search', params={'name': 'London'}) == {'success': True}
+    assert len(calls) == 3  # A forecast cooldown does not stop geocoding.
+    with pytest.raises(RuntimeError):
+        open_meteo.get_json(request, store, 'https://geocoding-api.open-meteo.com/v1/search', params={'name': 'Paris'})
     day += timedelta(days=1)
     assert reader(0) is None  # A Retry-After extending past midnight is retained.
-    assert len(calls) == 2
+    assert len(calls) == 3
     day += timedelta(days=2)
     assert reader(0) == {'success': True}
-    assert len(calls) == 3
+    assert len(calls) == 4
 
     class MissingStore:
         db_path = str(tmp_path / 'missing' / 'budget.sqlite3')
@@ -63,8 +67,8 @@ def test_forecast_budget_is_shared_atomic_and_honors_provider_cooldown(tmp_path,
             return None
 
     with pytest.raises(sqlite3.OperationalError):
-        open_meteo.get_forecast(request, MissingStore(), url, params=params)
-    assert len(calls) == 3  # Storage failures never bypass quota accounting.
+        open_meteo.get_json(request, MissingStore(), url, params=params)
+    assert len(calls) == 4  # Storage failures never bypass quota accounting.
 
     global_params = {'latitude': ','.join(['1'] * 50), 'longitude': ','.join(['1'] * 50),
         'current': ','.join(['variable'] * 5), 'hourly': ','.join(['variable'] * 6),
