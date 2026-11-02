@@ -187,18 +187,43 @@ def test_worker_pool_cannot_reserve_sibling_connection_share(runtime, monkeypatc
         connect.close()
 
 
-def test_catalog_caps_candidates_and_never_reads_retired_serving(runtime):
+def test_catalog_caps_page_and_ranks_current_quotes_without_a_newest_market_window(runtime):
     reader = MarketPanelReader(runtime)
     reader.query = Mock(return_value=[])
     payload = reader.catalog(page_size=10000)
     sql, params = reader.query.call_args.args
-    assert params == (5000, 101)
-    assert 'AS MATERIALIZED' in sql and 'core.market_catalog' in sql
-    assert 'market_list_serving' not in sql
+    assert params == (101,)
+    assert 'core.market_quote_current' in sql and 'q.volume_24h DESC NULLS LAST' in sql
+    assert 'market_list_serving' not in sql and 'market_latest_prices' not in sql
+    assert '5000' not in sql
     assert payload['pagination']['pageSize'] == 100
     with pytest.raises(ValueError):
         reader.catalog(page=2)
     assert reader.query.call_count == 1
+
+
+def test_catalog_sort_cache_is_separate_and_unsupported_sorts_fail_before_query(runtime):
+    reader = MarketPanelReader(runtime)
+    reader.query = Mock(return_value=[])
+    for sort in ('volume', 'new', 'close'):
+        assert reader.catalog(sort=sort)['sort'] == sort
+        assert reader.catalog(sort=sort)['sort'] == sort
+    assert reader.query.call_count == 3
+    with pytest.raises(ValueError):
+        reader.catalog(sort='trades')
+    assert reader.query.call_count == 3
+
+
+def test_catalog_does_not_read_missing_volume_from_metadata_or_invent_trade_prices():
+    item = MarketPanelReader._item({'id': 7, 'catalog_payload': {'volume24hr': 999},
+        'latest_yes_price': '0.9', 'volume_24h': None, 'quote_observed_at': 'observed',
+        'quote_updated_at': 'source-time', 'quote_token_ids': ['1', '2'],
+        'quote_prices': ['0.2', '0.81'], 'quote_labels': ['Yes', 'No']})
+    assert item['volume24h'] is None and item['latestPrice'] is None
+    assert item['tradeCount24h'] is None and item['lastTradeAt'] is None
+    assert item['_catalogQuote']['prices'] == ['0.2', '0.81']
+    assert item['observedAt'] == 'observed' and item['quoteUpdatedAt'] == 'source-time'
+    assert MarketPanelReader._item({'volume_24h': 0})['volume24h'] == 0
 
 
 def test_compatibility_book_resolves_identity_then_uses_native_adapter(runtime, monkeypatch):

@@ -183,3 +183,14 @@ describe('shared Runtime admission', () => {
     expect(peak).toBe(2);
   });
 });
+
+describe('market catalog sorting', () => {
+  it('sends the chosen ordering to the server, defaulting to 24h volume', async () => {
+    vi.stubGlobal('window', globalThis);
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ items: [] }) })));
+    await fetchMarketsPage();
+    expect(String(vi.mocked(fetch).mock.calls[0]?.[0])).toContain('sort=volume');
+    await fetchMarketsPage(1, '', 50, undefined, 'new');
+    expect(String(vi.mocked(fetch).mock.calls[1]?.[0])).toContain('sort=new');
+  });
+});

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bundleMatchesMarket, emptyWorkspaceBundle, mergeWorkspaceBundle } from './marketBundle';
+import { bundleMatchesMarket, emptyWorkspaceBundle, mergeWorkspaceBundle, pickDefaultMarketId } from './marketBundle';
 
 describe('market bundle identity', () => {
   it('rejects a mixed identity even if one sub-payload matches', () => {
@@ -20,4 +20,12 @@ describe('market bundle identity', () => {
     const patch = { ...emptyWorkspaceBundle(), chart: { marketId: 1, range: 'snapshot', interval: 'snapshot', points: [] } };
     expect(mergeWorkspaceBundle(previous, patch).chart).toEqual(previous.chart);
   });
+});
+
+
+it('selects the first eligible result in server order, not the newest market', () => {
+  const markets = [{ id: 1, title: 'Older active market', slug: 'older', status: 'Active', createdAt: '2026-01-01' },
+    { id: 2, title: 'New market', slug: 'new', status: 'Active', createdAt: '2026-11-02' }];
+  expect(pickDefaultMarketId(markets)).toBe(1);
+  expect(pickDefaultMarketId([...markets].reverse())).toBe(2);
 });

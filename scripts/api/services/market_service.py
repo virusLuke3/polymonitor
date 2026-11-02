@@ -51,31 +51,42 @@ def read_query(connection_factory, database_path, sql, params=()):
             connection.close()
 
 
-def market_rows(query, where, params, *, limit=100, candidates=None):
-    # Materialize the indexed candidate window before identity/lifecycle
-    # checks. LIMIT after a broad anti-join can otherwise scan the registry.
-    candidate_where = "m.created_at IS NOT NULL" if candidates else where
-    selected_where = where if candidates else "TRUE"
-    bound = (candidates, *params, limit) if candidates else (*params, limit, limit)
+SORTS = {
+    "volume": "q.volume_24h DESC NULLS LAST, q.gamma_market_id",
+    "new": "q.created_at DESC NULLS LAST, q.gamma_market_id",
+    "close": "q.end_date ASC NULLS LAST, q.gamma_market_id",
+}
+
+
+def market_rows(query, where, params, *, limit=100, sort=None, search=False):
+    # Sorted catalog reads start at the current-quote index, not a window of
+    # recently created registry rows. Detail reads use the registry's exact key.
+    order = SORTS[sort] if sort else "m.created_at DESC NULLS LAST, m.id DESC"
+    identity = "q.gamma_market_id = m.gamma_market_id AND q.condition_id = m.condition_id"
+    identity += " AND q.token_ids @> jsonb_build_array(m.yes_token_id,m.no_token_id)"
+    identity += " AND q.observed_at > now() - interval '2 hours' AND q.observed_at <= now() + interval '1 minute'"
+    filters = f"{where} AND {binary_serving_identity_sql('m', qualified_ops=True)}"
+    if sort and not search:
+        # Keep the ordered quote index as the outer scan. The registry's
+        # correlated predicates otherwise cause a full join/sort estimate.
+        source = f"""core.market_quote_current q JOIN LATERAL (
+            SELECT m.* FROM core.markets m WHERE {identity} AND {filters} LIMIT 1
+        ) m ON TRUE"""
+        filters = "q.active AND NOT q.closed"
+    else:
+        source = f"core.markets m LEFT JOIN core.market_quote_current q ON {identity}"
     return query(f"""
-        WITH candidates AS MATERIALIZED (
-            SELECT m.* FROM core.markets m WHERE {candidate_where}
-            ORDER BY m.created_at DESC NULLS LAST, m.id DESC LIMIT ?
-        ), selected AS MATERIALIZED (
-            SELECT m.* FROM candidates m WHERE {selected_where}
-            AND {binary_serving_identity_sql('m', qualified_ops=True)}
-        )
-        SELECT m.*, c.source_payload AS catalog_payload, c.source_updated_at AS quote_updated_at,
-            c.last_seen_at AS catalog_observed_at, s.completion_status, s.is_resolved, s.is_final,
-            s.settlement_outcome, s.settlement_source, s.updated_at AS oracle_updated_at,
-            mlp.latest_yes_price, mlp.latest_no_price, mlp.latest_trade_at AS price_updated_at
-        FROM selected m
-        LEFT JOIN core.market_catalog c ON c.gamma_market_id = m.gamma_market_id
-            AND c.source_payload->>'conditionId' = m.condition_id
+        SELECT m.*, q.token_ids AS quote_token_ids, q.outcome_labels AS quote_labels,
+            q.outcome_prices AS quote_prices, q.volume_24h,
+            q.condition_id AS quote_condition_id, q.source_updated_at AS quote_updated_at,
+            q.observed_at AS quote_observed_at,
+            s.completion_status, s.is_resolved, s.is_final,
+            s.settlement_outcome, s.settlement_source, s.updated_at AS oracle_updated_at
+        FROM {source}
         LEFT JOIN core.market_status_snapshot s ON s.market_id = m.id
-        LEFT JOIN core.market_latest_prices mlp ON mlp.market_id = m.id
-        ORDER BY mlp.latest_trade_at DESC NULLS LAST, m.created_at DESC NULLS LAST, m.id DESC LIMIT ?
-    """, bound)
+        WHERE {filters}
+        ORDER BY {order} LIMIT ?
+    """, (*params, limit))
 
 
 class MarketPanelReader:
@@ -86,8 +97,8 @@ class MarketPanelReader:
     def query(self, sql, params=()):
         return read_query(self.runtime._api_connection_factory, self.runtime.SETTINGS.database.sqlite_path, sql, params)
 
-    def _rows(self, where, params, *, limit=100, candidates=None):
-        return market_rows(self.query, where, params, limit=limit, candidates=candidates)
+    def _rows(self, where, params, *, limit=100, sort=None, search=False):
+        return market_rows(self.query, where, params, limit=limit, sort=sort, search=search)
 
     def record(self, market_id):
         def build():
@@ -95,7 +106,7 @@ class MarketPanelReader:
             if not rows:
                 return {"_status": 404, "error": "Market identity not available", "marketId": int(market_id)}
             return {"row": rows[0]}
-        value = self.cache.get("record", int(market_id), build, ttl=60, max_age=300, admit=False)
+        value = self.cache.get("record", ["gamma-quotes-v1", int(market_id)], build, ttl=60, max_age=300, admit=False)
         if value.get("_status") == 404:
             raise LookupError("Market identity not available")
         if not value.get("row"):
@@ -135,19 +146,22 @@ class MarketPanelReader:
 
     @staticmethod
     def _item(row):
-        payload = row.get("catalog_payload") or {}
-        if isinstance(payload, str):
-            payload = json.loads(payload)
-        yes, no = number(row.get("latest_yes_price")), number(row.get("latest_no_price"))
         state = "Closed" if row.get("closed") is True else "Active" if row.get("active") is True and row.get("closed") is False else "Unknown"
-        item = normalize_market({**row, "status": state, "latest_price": yes, "latest_yes_price": yes, "latest_no_price": no,
+        item = normalize_market({**row, "status": state, "latest_price": None,
+                                 "latest_yes_price": None, "latest_no_price": None,
                                  "completion_status": row.get("completion_status") or "UNKNOWN"})
-        item.update(volume24h=number(payload.get("volume24hr")), tradeCount24h=None, price24hAgo=None,
-                    lastTradeAt=None, quoteUpdatedAt=row.get("price_updated_at"),
-                    observedAt=row.get("catalog_observed_at"), priceSource="stored-trade", change24h=number(payload.get("oneDayPriceChange")))
+        item.update(volume24h=number(row.get("volume_24h")), tradeCount24h=None, price24hAgo=None,
+                    lastTradeAt=None, quoteUpdatedAt=row.get("quote_updated_at"),
+                    observedAt=row.get("quote_observed_at"), priceSource="gamma-catalog",
+                    volumeSource="gamma-volume24hr", change24h=None,
+                    _catalogQuote={"conditionId": row.get("quote_condition_id"),
+                                   "tokenIds": row.get("quote_token_ids"),
+                                   "labels": row.get("quote_labels"), "prices": row.get("quote_prices")})
         return item
 
-    def catalog(self, *, query="", page=1, page_size=50, status="active"):
+    def catalog(self, *, query="", page=1, page_size=50, status="active", sort="volume"):
+        if sort not in SORTS:
+            raise ValueError("Unsupported market sort")
         query = str(query or "").strip()[:160]
         page_size = min(100, max(1, int(page_size)))
         if int(page) != 1:
@@ -162,14 +176,14 @@ class MarketPanelReader:
                     params.append(query)
             else:
                 filters.extend(["m.slug NOT LIKE '%%updown-5m%%'", "m.slug NOT LIKE '%%updown-15m%%'", "m.title NOT LIKE '%% Up or Down - %%'"])
-            rows = self._rows(" AND ".join(filters), params, limit=page_size + 1, candidates=5000 if not query else None)
+            rows = self._rows(" AND ".join(filters), params, limit=page_size + 1, sort=sort, search=bool(query))
             items = [self._item(row) for row in rows[:page_size]]
             return {"items": items, "pagination": {"page": 1, "pageSize": page_size, "hasMore": len(rows) > page_size},
-                    "coverage": "page-from-latest-5000-registry-candidates", "source": "market-data/postgresql", "generatedAt": utc_now()}
-        return self.cache.get("catalog", [query, page_size], build, ttl=45, max_age=300)
+                    "coverage": "recently-observed-gamma-markets", "sort": sort, "source": "market-data/postgresql", "generatedAt": utc_now()}
+        return self.cache.get("catalog", ["gamma-quotes-v1", query, page_size, sort], build, ttl=45, max_age=300)
 
-    def groups(self, *, query="", page=1, page_size=50, sort="active"):
-        catalog = self.catalog(query=query, page=page, page_size=page_size)
+    def groups(self, *, query="", page=1, page_size=50, sort="volume"):
+        catalog = self.catalog(query=query, page=page, page_size=page_size, sort="volume" if sort == "active" else sort)
         # Each visible card is a canonical binary market. Event expansion is
         # fetched only on selection, never for all catalog rows.
         return {**catalog, "items": [self._group([item]) for item in catalog.get("items", [])]}
@@ -216,9 +230,10 @@ class MarketPanelReader:
         identity = {**MarketIdentity.from_row(row).as_api_dict(), "marketId": int(market_id)}
         price = {"marketId": int(market_id), "latestPrice": item["latestPrice"], "latestYesPrice": item["latestYesPrice"],
                  "latestNoPrice": item["latestNoPrice"], "volume24h": item["volume24h"], "tradeCount24h": None,
-                 "updatedAt": row.get("price_updated_at"), "priceSource": "stored-trade"}
+                 "updatedAt": item["observedAt"], "priceSource": "gamma-catalog",
+                 "_catalogQuote": item["_catalogQuote"]}
         return {"market": item, "identity": identity, "price": price, "localMarketId": int(market_id),
-                "servingSource": "market-data/postgresql", "servingUpdatedAt": row.get("catalog_observed_at"),
+                "servingSource": "market-data/postgresql", "servingUpdatedAt": row.get("quote_observed_at"),
                 "focusStatus": "ready", "generatedAt": utc_now()}
 
 

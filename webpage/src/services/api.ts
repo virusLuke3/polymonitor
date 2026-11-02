@@ -178,19 +178,19 @@ export function fetchBootstrap(signal?: AbortSignal) {
   return apiGet<BootstrapPayload>('/bootstrap', signal);
 }
 
-export function fetchMarketSearch(query: string, limit = 12, signal?: AbortSignal) {
+export function fetchMarketSearch(query: string, limit = 12, signal?: AbortSignal, sort = 'volume') {
   const params = new URLSearchParams({
     q: query.trim(),
-    pageSize: String(limit),
+    pageSize: String(limit), sort,
   });
   return apiGetWithTimeout<{ items: MarketListItem[] }>(`/markets?${params.toString()}`, 5000, signal);
 }
 
-export function fetchMarketsPage(page = 1, query = '', pageSize = 50, signal?: AbortSignal) {
+export function fetchMarketsPage(page = 1, query = '', pageSize = 50, signal?: AbortSignal, sort = 'volume') {
   const params = new URLSearchParams({
     page: String(page),
     pageSize: String(pageSize),
-    status: 'active',
+    status: 'active', sort,
   });
   if (query.trim()) params.set('q', query.trim());
   return apiGetWithTimeout<MarketsPayload>(`/markets?${params.toString()}`, 10000, signal);

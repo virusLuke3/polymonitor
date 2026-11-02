@@ -143,7 +143,7 @@ export function outcomeKeyForGroupMarket(group: MarketGroupItem, marketId?: numb
 export function optimisticBundleFromMarket(market: MarketListItem): WorkspaceBundle {
   const latest = market.latestPrice ?? null;
   const latestNo = market.latestNoPrice == null ? null : String(market.latestNoPrice);
-  const timestamp = market.quoteUpdatedAt || null;
+  const timestamp = market.observedAt || market.quoteUpdatedAt || null;
   return {
     market: {
       id: market.id,
@@ -187,6 +187,7 @@ export function optimisticBundleFromMarket(market: MarketListItem): WorkspaceBun
       volume24h: market.volume24h == null ? null : String(market.volume24h),
       tradeCount24h: market.tradeCount24h ?? null,
       updatedAt: timestamp,
+      priceSource: market.priceSource,
     },
     chart: null,
     content: null,

@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import { fetchMarketsPage, fetchMarketSearch } from '@/services/api';
-import type { BootstrapPayload, MarketListItem, MarketGroupItem } from '@/types';
+import type { BootstrapPayload, MarketListItem, MarketGroupItem, MarketGroupSort } from '@/types';
 
 /** One owner for the active catalog; manual refresh joins the current request. */
-export function useMarketCatalog(bootstrap: BootstrapPayload | null, enabled: boolean) {
+export function useMarketCatalog(bootstrap: BootstrapPayload | null, enabled: boolean, sort: MarketGroupSort = 'volume') {
   const [markets, setMarkets] = useState<MarketListItem[]>([]);
   const [marketGroups, setMarketGroups] = useState<MarketGroupItem[]>([]);
   const [marketCatalogRefreshing, setRefreshing] = useState(false);
@@ -23,7 +23,7 @@ export function useMarketCatalog(bootstrap: BootstrapPayload | null, enabled: bo
     const isCurrent = () => !controller.signal.aborted && mounted.current;
     const errors: string[] = [];
     const promise = Promise.allSettled([
-      fetchMarketsPage(1, '', 50, controller.signal).then((catalog) => {
+      fetchMarketsPage(1, '', 50, controller.signal, sort).then((catalog) => {
         if (!isCurrent()) return;
         hydrated.current.markets = true;
         setMarkets((catalog.items || []).map((item) => ({ ...item, catalogFetchedAt: catalog.generatedAt }))); setMarketGroups([]); setLoaded(true);
@@ -43,7 +43,7 @@ export function useMarketCatalog(bootstrap: BootstrapPayload | null, enabled: bo
     });
     requestRef.current = { controller, promise };
     return promise;
-  }, []);
+  }, [sort]);
   useEffect(() => {
     if (!bootstrap) return;
     if (!hydrated.current.markets) setMarkets(bootstrap.activeMarketsPreview || []);
@@ -51,6 +51,8 @@ export function useMarketCatalog(bootstrap: BootstrapPayload | null, enabled: bo
   }, [bootstrap]);
   useEffect(() => {
     if (!enabled) return;
+    retryAt.current = 0; failures.current = 0;
+    setMarkets([]); setLoaded(false); setError(null);
     void refreshMarketCatalog(false);
     const timer = window.setInterval(() => void refreshMarketCatalog(false), 45_000);
     const resume = () => {
@@ -58,7 +60,10 @@ export function useMarketCatalog(bootstrap: BootstrapPayload | null, enabled: bo
       else { requestRef.current?.controller.abort(); requestRef.current = null; }
     };
     document.addEventListener('visibilitychange', resume);
-    return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', resume); };
+    return () => {
+      window.clearInterval(timer); document.removeEventListener('visibilitychange', resume);
+      requestRef.current?.controller.abort(); requestRef.current = null;
+    };
   }, [enabled, refreshMarketCatalog]);
   useEffect(() => {
     mounted.current = true;
@@ -68,7 +73,7 @@ export function useMarketCatalog(bootstrap: BootstrapPayload | null, enabled: bo
 }
 
 /** Command search has a separate query identity and no periodic refresh. */
-export function useMarketSearch(query: string, enabled: boolean) {
+export function useMarketSearch(query: string, enabled: boolean, sort: MarketGroupSort = 'volume') {
   const [hits, setHits] = useState<MarketListItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [unavailable, setUnavailable] = useState(false);
@@ -78,13 +83,13 @@ export function useMarketSearch(query: string, enabled: boolean) {
     if (!enabled || !query.trim()) return;
     const timer = window.setTimeout(() => {
       setLoading(true);
-      void fetchMarketSearch(query.trim(), 50, controller.signal).then((payload) => {
+      void fetchMarketSearch(query.trim(), 50, controller.signal, sort).then((payload) => {
         if (!controller.signal.aborted) setHits(payload.items || []);
       }).catch(() => {
         if (!controller.signal.aborted) setUnavailable(true);
       }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     }, 180);
     return () => { controller.abort(); window.clearTimeout(timer); };
-  }, [query, enabled]);
+  }, [query, enabled, sort]);
   return { hits, loading, unavailable };
 }

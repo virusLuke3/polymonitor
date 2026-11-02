@@ -69,15 +69,8 @@ function readSearchParam(key: string): string | null {
 }
 
 function readMarketGroupSortStorage(): MarketGroupSort {
-  const saved = readStringStorage<string>(MARKET_GROUP_SORT_STORAGE_KEY, 'active');
-  return saved === 'new'
-    || saved === 'volume'
-    || saved === 'active'
-    || saved === 'close'
-    || saved === 'move'
-    || saved === 'trades'
-    ? saved
-    : 'active';
+  const saved = readStringStorage<string>(MARKET_GROUP_SORT_STORAGE_KEY, 'volume');
+  return saved === 'new' || saved === 'close' ? saved : 'volume';
 }
 
 export function useWorkspacePreferences() {
@@ -306,7 +299,7 @@ export function useWorkspaceSync(workspace: ReturnType<typeof useWorkspacePrefer
         if (!readSearchParam('view') && isMapViewMode(prefs.viewMode)) target.setViewMode(prefs.viewMode);
         if (!readSearchParam('zoom') && !readSearchParam('center') && prefs.mapZoom != null) map.setMapZoom(clampMapZoom(prefs.mapZoom));
         if (typeof prefs.showPanelLibrary === 'boolean') target.setShowPanelLibrary(prefs.showPanelLibrary);
-        if (['active', 'new', 'volume', 'close', 'move', 'trades'].includes(prefs.marketGroupSort || '')) target.setMarketGroupSort(prefs.marketGroupSort as MarketGroupSort);
+        if (['new', 'volume', 'close'].includes(prefs.marketGroupSort || '')) target.setMarketGroupSort(prefs.marketGroupSort as MarketGroupSort);
         revision.current = server.revision;
         setUpdatedAt(server.updatedAt);
         setHydration((version) => version + 1);

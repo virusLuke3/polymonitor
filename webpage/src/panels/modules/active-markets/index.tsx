@@ -15,16 +15,13 @@ const MARKET_CATALOG_AUTO_REFRESH_MS = 45_000;
 
 const MARKET_CATALOG_SYNC_DELAYED_MS = 60_000;
 
-const MARKET_ACTIVITY_DELAYED_MS = 12 * 60 * 60 * 1000;
+const MARKET_ACTIVITY_DELAYED_MS = 60 * 60 * 1000;
 
-const MARKET_ACTIVITY_STALE_MS = 24 * 60 * 60 * 1000;
+const MARKET_ACTIVITY_STALE_MS = 2 * 60 * 60 * 1000;
 
 const MARKET_SORT_OPTIONS: ReadonlyArray<{ value: MarketGroupSort; label: MessageKey }> = [
-  { value: 'active', label: 'atlasMarket.sort.active' },
   { value: 'volume', label: 'atlasMarket.sort.volume' },
   { value: 'close', label: 'atlasMarket.sort.close' },
-  { value: 'move', label: 'atlasMarket.sort.move' },
-  { value: 'trades', label: 'atlasMarket.sort.transactions' },
   { value: 'new', label: 'atlasMarket.sort.newest' },
 ];
 
@@ -125,6 +122,7 @@ function groupTopic(group: MarketGroupItem) {
 }
 
 function marketTiming(market: MarketListItem, i18n: MarketI18n) {
+  if (market.observedAt) return i18n.t('atlasMarket.catalog.quote', { time: i18n.formatRelativeTime(market.observedAt) });
   if (market.createdAt) return i18n.formatRelativeTime(market.createdAt);
   if (market.lastTradeAt) return i18n.t('atlasMarket.tradeTiming', { time: i18n.formatRelativeTime(market.lastTradeAt) });
   if (market.endDate) return i18n.t('atlasMarket.closeTiming', { time: i18n.formatRelativeTime(market.endDate) });
@@ -489,7 +487,10 @@ function activeMarketsList(
               </div>
               <strong className="wm-poly-market-title">{market.title}</strong>
               <div className="wm-poly-market-bottom">
-                <span className="wm-poly-market-prob">{localizedPercent(market.latestPrice, i18n)}</span>
+                <span className="wm-poly-market-prob">
+                  {market.latestPrice == null ? `${market.outcomePrices?.[0]?.sourceLabel || ''} ` : ''}
+                  {localizedPercent(market.latestPrice ?? market.primaryOutcomePrice, i18n)}
+                </span>
                 <span className="wm-poly-market-activity">
                   <span className="wm-poly-market-volume">{i18n.t('atlasMarket.volume', { value: localizedCurrency(market.volume24h, i18n) })}</span>
                   {activityLabel ? <span className="wm-poly-market-trades">{activityLabel}</span> : null}
@@ -538,7 +539,7 @@ function ActiveMarketsPanel({
   const i18n = useI18n();
   const { t } = i18n;
   const [search, setSearch] = useState('');
-  const searchResult = useMarketSearch(search, true);
+  const searchResult = useMarketSearch(search, true, marketGroupSort);
   const [clockNow, setClockNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = window.setInterval(() => setClockNow(Date.now()), 1_000);
@@ -580,21 +581,13 @@ function ActiveMarketsPanel({
     const filtered = query
       ? [...searchResult.hits]
       : markets.filter((market) => !isDefaultSuppressedMarket(market));
-    const ranked = filtered.sort((a, b) => {
-      if (marketGroupSort === 'new') return parseTimestamp(b.createdAt) - parseTimestamp(a.createdAt);
-      if (marketGroupSort === 'volume') return Number(b.volume24h || 0) - Number(a.volume24h || 0);
-      if (marketGroupSort === 'close') return timestampOrInfinity(a.endDate) - timestampOrInfinity(b.endDate);
-      if (marketGroupSort === 'move') return Math.abs(Number(b.change24h || 0)) - Math.abs(Number(a.change24h || 0));
-      if (marketGroupSort === 'trades') return Number(b.tradeCount24h || 0) - Number(a.tradeCount24h || 0);
-      return 0;
-    });
-    return query ? ranked : ranked;
+    return filtered; // Preserve the database ranking across the full eligible catalog.
   }, [marketGroupSort, markets, search, searchResult.hits]);
 
   const hasGroups = marketGroups.length > 0 && visibleGroups.some(groupHasMarketCoverage);
   const panelCount = hasGroups ? visibleGroups.length : visibleMarkets.length;
   const catalogGeneratedAt = useMemo(() => marketGroups.length ? marketCatalogGeneratedAt(marketGroups) : newestTimestamp(markets.map((m) => m.catalogFetchedAt)), [marketGroups, markets]);
-  const catalogActivityAt = useMemo(() => marketGroups.length ? marketCatalogActivityAt(marketGroups) : newestTimestamp(markets.map((m) => m.observedAt)), [marketGroups, markets]);
+  const catalogActivityAt = useMemo(() => marketGroups.length ? marketCatalogActivityAt(marketGroups) : (markets.length ? Math.min(...markets.map((m) => parseTimestamp(m.observedAt))) : 0), [marketGroups, markets]);
   const catalogSyncAge = catalogGeneratedAt ? Math.max(0, clockNow - catalogGeneratedAt) : Number.POSITIVE_INFINITY;
   const catalogActivityAge = catalogActivityAt ? Math.max(0, clockNow - catalogActivityAt) : Number.POSITIVE_INFINITY;
   const catalogTone = marketCatalogError

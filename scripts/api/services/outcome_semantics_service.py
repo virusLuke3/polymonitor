@@ -1712,6 +1712,48 @@ def _project_public_oracle_fields(
     return None
 
 
+def _project_catalog_quote(quote: Any, semantics: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+    """Bind both stored source prices to this request's proven token slots."""
+    if not isinstance(quote, Mapping) or not semantics.get("valid"):
+        return None
+    if not semantics.get("conditionId") or quote.get("conditionId") != semantics["conditionId"]:
+        return None
+    tokens, labels, prices = (quote.get(key) for key in ("tokenIds", "labels", "prices"))
+    if any(not isinstance(values, list) or len(values) != 2 for values in (tokens, labels, prices)):
+        return None
+    if any(not isinstance(token, str) for token in tokens) or len(set(tokens)) != 2:
+        return None
+    proven = semantics.get("tokens") or {}
+    if set(tokens) != set(proven):
+        return None
+    pair = []
+    for index, (token, label, raw_price) in enumerate(zip(tokens, labels, prices)):
+        slot = proven[token]
+        if label != slot.get("sourceLabel") or index != slot.get("sourceIndex") or isinstance(raw_price, bool):
+            return None
+        try:
+            price = float(raw_price)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(price) or not 0 <= price <= 1:
+            return None
+        pair.append({"tokenId": token, "sourceLabel": label, "sourceIndex": index,
+                     "logicalOutcome": slot["logicalOutcome"], "price": f"{price:.10f}"})
+    result = {"outcomePrices": pair, "primaryOutcomePrice": pair[0]["price"],
+              "outcomeSemanticsValid": True, "outcomeSemanticsStatus": "projected",
+              "priceProjectionValid": True, "priceProjectionProof": "canonical_catalog_tokens"}
+    slots = {item["logicalOutcome"]: item["price"] for item in pair}
+    if semantics.get("supportsYesNoWording"):
+        result.update(latestPrice=slots["YES"], latestYesPrice=slots["YES"], latestNoPrice=slots["NO"],
+                      yesPrice=slots["YES"], noPrice=slots["NO"])
+    elif semantics.get("supportsDirectionalSemantics"):
+        result.update(upPrice=slots["YES"], downPrice=slots["NO"],
+                      latestUpPrice=slots["YES"], latestDownPrice=slots["NO"])
+    else:
+        result["sourcePrices"] = pair
+    return result
+
+
 def sanitize_public_market_payload(
     ctx: Mapping[str, Any],
     payload: Any,
@@ -1802,7 +1844,10 @@ def sanitize_public_market_payload(
             proof_row = dict(row)
             if current_market_id is not None and _market_id(proof_row) is None:
                 proof_row["marketId"] = current_market_id
-            if has_exact_fact:
+            if "_catalogQuote" in row and identity_error is None:
+                if row.get("conditionId") in (None, semantics.get("conditionId")):
+                    projection = _project_catalog_quote(row["_catalogQuote"], semantics)
+            elif has_exact_fact:
                 untrusted_cached_fact = proof_row
                 for field in (
                     "outcome",
@@ -1894,6 +1939,7 @@ def sanitize_public_market_payload(
                     "priceProjectionReason": capabilities["priceProjectionReason"],
                 }
             )
+        row.pop("_catalogQuote", None)
         for key, item in list(row.items()):
             if key in _SEMANTIC_ATTESTATION_FIELDS or key in {"outcomePrices", "sourcePrices"}:
                 continue

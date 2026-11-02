@@ -32,6 +32,7 @@ def _semantics(mode: str, labels: tuple[str, str]) -> dict:
         "status": "projected",
         "valid": True,
         "marketId": 7,
+        "conditionId": "0x" + "1" * 64,
         "semanticMode": mode,
         "supportsYesNoWording": mode == "yes_no_labels",
         "supportsDirectionalSemantics": mode == "up_down_labels",
@@ -997,3 +998,46 @@ def test_clickhouse_directional_aggregate_without_receipt_is_dropped(
     rows = clickhouse_orderfilled_service.get_alpha_volume_signal_rows({}, limit=4)
 
     assert rows == []
+
+
+def test_catalog_quote_binds_both_actual_prices_and_uses_one_semantics_batch(monkeypatch):
+    semantics = _semantics('yes_no_labels', ('Yes', 'No'))
+    calls = []
+    def load(_ctx, ids):
+        calls.append(set(ids))
+        return {7: semantics}
+    monkeypatch.setattr(outcome_semantics_service, 'load_market_outcome_semantics', load)
+    payload = {'items': [{'marketId': 7, 'latestPrice': None, '_catalogQuote': {
+        'conditionId': semantics['conditionId'], 'tokenIds': list(TOKENS),
+        'labels': ['Yes', 'No'], 'prices': ['0.4', '0.61']}}]}
+    result = outcome_semantics_service.sanitize_public_market_payload({}, payload)['items'][0]
+    assert result['latestYesPrice'] == '0.4000000000'
+    assert result['latestNoPrice'] == '0.6100000000'  # No invented complement.
+    assert result['priceProjectionValid'] is True and '_catalogQuote' not in result
+    assert calls == [{7}]
+
+
+@pytest.mark.parametrize('override', [
+    {'conditionId': 'wrong'}, {'tokenIds': ['token-a', 'unknown']},
+    {'tokenIds': ['token-a', 'token-a']}, {'labels': ['No', 'Yes']},
+    {'prices': ['NaN', '0.6']}, {'prices': [True, '0.6']}, {'prices': None},
+])
+def test_catalog_quote_rejects_identity_or_price_mismatch(install_semantics, override):
+    semantics = install_semantics('yes_no_labels', ('Yes', 'No'))
+    quote = {'conditionId': semantics['conditionId'], 'tokenIds': list(TOKENS),
+             'labels': ['Yes', 'No'], 'prices': ['0.4', '0.6'], **override}
+    result = outcome_semantics_service.sanitize_public_market_payload({},
+        {'marketId': 7, 'latestPrice': '0.4', '_catalogQuote': quote})
+    assert not result['priceProjectionValid'] and result['latestPrice'] is None
+    assert '_catalogQuote' not in result
+
+
+def test_catalog_quote_keeps_source_first_labels_without_claiming_yes_no(install_semantics):
+    semantics = install_semantics('source_first_second', ('Away', 'Home'))
+    result = outcome_semantics_service.sanitize_public_market_payload({}, {
+        'marketId': 7, 'latestPrice': None, '_catalogQuote': {
+            'conditionId': semantics['conditionId'], 'tokenIds': list(TOKENS),
+            'labels': ['Away', 'Home'], 'prices': ['0.3', '0.71']}})
+    assert result['primaryOutcomePrice'] == '0.3000000000'
+    assert result['sourcePrices'][0]['sourceLabel'] == 'Away'
+    assert result['latestPrice'] is None and not result['supportsYesNoWording']

@@ -69,7 +69,8 @@ def create_markets_blueprint(dependencies: MarketRouteDependencies) -> Blueprint
         query = (request.args.get("q") or "").strip()
         page = max(1, int(request.args.get("page", 1)))
         page_size = min(100, max(1, int(request.args.get("pageSize", 20))))
-        return respond(dependencies.get_markets_payload(status=status, query=query, page=page, page_size=page_size))
+        return respond(dependencies.get_markets_payload(status=status, query=query, page=page, page_size=page_size,
+            sort=request.args.get("sort", "volume")))
 
     @bp.route("/markets/<int:market_id>", methods=["GET"])
     def api_market_by_id(market_id: int):

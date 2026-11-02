@@ -4,6 +4,8 @@ import type { BootstrapPayload, MarketListItem, MarketGroupItem, MarketGroupDeta
 import { pickDefaultMarketId, pickDefaultGroupOutcome, optimisticBundleFromMarket, optimisticBundleFromGroup, emptyWorkspaceBundle, bundleMatchesMarket, mergeWorkspaceBundle } from './marketBundle';
 import { pollPanel } from './pollPanel';
 
+const SELECTED_MARKET_KEY = 'wm:selectedMarket:v1';
+
 export function useMarketFocus({ bootstrap, markets, marketGroups, catalogLoaded }: {
   catalogLoaded: boolean; bootstrap: BootstrapPayload | null; markets: MarketListItem[]; marketGroups: MarketGroupItem[];
 }) {
@@ -45,8 +47,15 @@ export function useMarketFocus({ bootstrap, markets, marketGroups, catalogLoaded
   useEffect(() => {
     if (!catalogLoaded || initialized.current || touched.current || !markets.length) return;
     initialized.current = true;
-    selectMarket(pickDefaultMarketId(markets), true);
+    let saved = 0;
+    try { saved = Number(window.localStorage.getItem(SELECTED_MARKET_KEY)); } catch { /* Storage may be blocked. */ }
+    selectMarket(Number.isSafeInteger(saved) && saved > 0 ? saved : pickDefaultMarketId(markets), true);
   }, [catalogLoaded, markets]);
+  useEffect(() => {
+    if (selectedMarketId) {
+      try { window.localStorage.setItem(SELECTED_MARKET_KEY, String(selectedMarketId)); } catch { /* Optional preference. */ }
+    }
+  }, [selectedMarketId]);
 
   useEffect(() => {
     if (!selectedMarketId) { setBundleLoading(false); return; }
@@ -62,7 +71,13 @@ export function useMarketFocus({ bootstrap, markets, marketGroups, catalogLoaded
     const market = latestMarkets.current.find((row) => row.id === id);
     setBundleLoading(!market);
     const stopDetail = pollPanel(
-      (signal) => fetchMarketFocusTile(id, 6000, signal),
+      (signal) => fetchMarketFocusTile(id, 6000, signal).catch((error) => {
+        if (current() && !signal.aborted && error?.status === 404) {
+          const fallback = pickDefaultMarketId(latestMarkets.current);
+          if (fallback !== id) selectMarket(fallback, true);
+        }
+        throw error;
+      }),
       (value) => {
         if (!current() || !bundleMatchesMarket(value, id)) return;
         update((base) => mergeWorkspaceBundle(base, value)); setBundleLoading(false); setError(null);

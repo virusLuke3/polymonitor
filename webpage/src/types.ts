@@ -149,6 +149,9 @@ export type MarketGroupChartPayload = {
 };
 
 export type MarketListItem = {
+  primaryOutcomePrice?: string | number | null;
+  outcomePrices?: Array<{ tokenId: string; sourceLabel: string; sourceIndex: number; price: string }>;
+  priceSource?: string | null;
   latestYesPrice?: string | number | null;
   latestNoPrice?: string | number | null;
   quoteUpdatedAt?: string | null;
