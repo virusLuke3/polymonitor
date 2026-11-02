@@ -15,7 +15,7 @@ for (const width of [1440,390]) test(`crypto strategy source states and controls
     assets:Object.fromEntries(['BTC','ETH','SOL','XRP'].map(asset=>[asset,{asset,spot:{price:100},linear:{mark:101,index:100,oi:500,oiValue:50000},spotHistory:[{t:now-900000,v:100},{t:now,v:101}],oiHistory:[{t:now-900000,v:500},{t:now,v:550}],basisBps:100,premiumBps:100,fundingHistory:[{t:now-28800000,v:.01},{t:now,v:.02}],
       flow:{net:99,buy:200,sell:101,count:2,limit:60,from:now-1000,to:now,cvd:[{t:now-1000,v:200},{t:now,v:99}],trades:[]},depth:{bids:[[99,1]],asks:[[101,1]],imbalance:-.01,levels:1,method:'snapshot'}}])),
     references:{BTC:{status:'stale',latest:{value:'101',event_at_ms:now-600000,window_seconds:60},history:[],spotHistory:[],quotes:{}}},
-    options:{BTC:{expiries:[],source:'Deribit'}},
+    options:{BTC:{source:'Deribit',observedAt:new Date(now).toISOString(),expiries:[{expiry:new Date(now+86400000).toISOString(),underlying:77500,bands:[{strike:77000,lowerStrike:76000,upperStrike:78000,probability:.5,low:.4,high:.6,iv:50,instruments:['BTC-CALL']}]}]}},
     stablecoins:[{asset:'USDC',source:'Coinbase',price:1.001,deviationBps:10,status:'ok',receivedAt:new Date(now).toISOString(),history:[{t:now-30000,v:5},{t:now,v:10}]}],
     inflows:{mode:'historical',rows:[{date:'2026-06-25',exchange:'Binance',inflow:5,outflow:4,net:1,transactions:2},{date:'2026-06-26',exchange:'Binance',inflow:6,outflow:4,net:2,transactions:3}]},
   };
@@ -37,6 +37,18 @@ for (const width of [1440,390]) test(`crypto strategy source states and controls
   await page.evaluate(()=>window.panelHarness.mount('crypto-oracle-reference'));
   await expect(page.locator('.wm-cstrategy-empty')).toBeVisible();
   await expect(page.locator('.wm-cstrategy-stats')).toHaveCount(0);
+  await page.evaluate(()=>window.panelHarness.mount('options-implied-probability'));
+  const optionsPanel = page.locator('.wm-panel');
+  // At 1440px the actual five-column workspace gives this panel only 284px.
+  await page.locator('.wm-panel-slot').evaluate((el, width) => {
+    (el as HTMLElement).style.width = `${width === 1440 ? 284 : 382}px`;
+    (el as HTMLElement).style.height = '300px';
+  }, width);
+  await expect(optionsPanel).toContainText('PM expiry unmatched');
+  const optionsChart = await optionsPanel.locator('.wm-cstrategy-chart svg').boundingBox();
+  const optionsBody = await optionsPanel.locator('.wm-panel-body').boundingBox();
+  expect(optionsChart!.y + optionsChart!.height).toBeLessThanOrEqual(optionsBody!.y + optionsBody!.height);
+  await page.locator('.wm-panel-slot').evaluate(el => el.removeAttribute('style'));
   await page.evaluate(()=>window.panelHarness.mount('crypto-order-flow'));
   await expect(page.locator('.wm-cstrategy-stats')).toContainText('99');
   const flowPanel = page.locator('.wm-panel');
