@@ -12,8 +12,6 @@ import { panelFromRenderer } from '@/panels/definePanel';
 
 const MARKET_CATALOG_AUTO_REFRESH_MS = 45_000;
 
-const MARKET_CATALOG_SYNC_DELAYED_MS = 60_000;
-
 const MARKET_ACTIVITY_DELAYED_MS = 60 * 60 * 1000;
 
 const MARKET_ACTIVITY_STALE_MS = 2 * 60 * 60 * 1000;
@@ -575,15 +573,12 @@ function ActiveMarketsPanel({
   const panelCount = hasGroups ? visibleGroups.length : visibleMarkets.length;
   const catalogGeneratedAt = useMemo(() => marketGroups.length ? marketCatalogGeneratedAt(marketGroups) : newestTimestamp(markets.map((m) => m.catalogFetchedAt)), [marketGroups, markets]);
   const catalogActivityAt = useMemo(() => marketGroups.length ? marketCatalogActivityAt(marketGroups) : (markets.length ? Math.min(...markets.map((m) => parseTimestamp(m.observedAt))) : 0), [marketGroups, markets]);
-  const catalogSyncAge = catalogGeneratedAt ? Math.max(0, clockNow - catalogGeneratedAt) : Number.POSITIVE_INFINITY;
   const catalogActivityAge = catalogActivityAt ? Math.max(0, clockNow - catalogActivityAt) : Number.POSITIVE_INFINITY;
   const catalogTone = marketCatalogError
     ? 'error'
     : !catalogGeneratedAt
       ? 'waiting'
-      : catalogSyncAge > MARKET_CATALOG_SYNC_DELAYED_MS
-        ? 'delayed'
-        : catalogActivityAge > MARKET_ACTIVITY_STALE_MS
+      : catalogActivityAge > MARKET_ACTIVITY_STALE_MS
           ? 'stale'
           : catalogActivityAge > MARKET_ACTIVITY_DELAYED_MS
             ? 'delayed'
