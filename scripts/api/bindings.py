@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from api.services import map_infrastructure_service
+from api.services.crypto_strategy.store import database_path as _crypto_strategy_path, get_snapshot as _crypto_strategy_snapshot
 
 from typing import TYPE_CHECKING
 
@@ -864,6 +865,7 @@ def build_blueprints(runtime: ServiceRuntime):
         runtime_panels_routes.create_runtime_panels_blueprint(
             runtime_panels_routes.RuntimePanelRouteDependencies(
                 panel_context=runtime_panel_types.RuntimePanelContext(
+                    get_crypto_strategy_snapshot=lambda: _crypto_strategy_snapshot(_crypto_strategy_path(runtime.SETTINGS.snapshot_sqlite_path)),
                     get_alpha_signal_snapshot=lambda limit=8: signal_service.get_alpha_signal_snapshot(
                         runtime.signal_context, limit=limit
                     ),

@@ -6,6 +6,8 @@ import { useI18n } from '@/services/i18n';
 import { assetStats, fundingStats, percent, quoteState, type FundingAsset, type FundingQuote } from './model';
 import { useFundingFeed } from './useFundingFeed';
 import './styles.css';
+import { FundingHistory } from './History';
+import { PanelResourceView } from '@/panels/usePanelResource';
 
 function Quote({ quote, cn, clock }: { quote: FundingQuote; cn: boolean; clock: (value: string) => string }) {
   const state = quoteState(quote);
@@ -55,6 +57,7 @@ function FundingRatePanel() {
     {feed.loading && <PanelLoading />}
     {(feed.error || stale) && <p className="wm-funding-notice" role="status">{cn ? '刷新失败或快照过期；保留有效报价，自动重试。' : 'Refresh failed or snapshot overdue; keeping usable quotes and retrying automatically.'}</p>}
     {feed.fromCache && <p className="wm-funding-clock">{cn ? '显示缓存，正在检查更新。' : 'Saved snapshot; checking for updates.'}</p>}
+    <PanelResourceView.Provider value={null}><FundingHistory/></PanelResourceView.Provider>
     {data && <>
       <p className="wm-funding-clock">{cn ? '新鲜报价' : 'Fresh quotes'} {data.coverage.succeeded}/{data.coverage.expectedQuotes} · {cn ? '保留' : 'Saved'} {data.coverage.retained} · {cn ? '缺失' : 'Missing'} {data.coverage.missing}</p>
       <div className="wm-funding-sources">{Object.entries(data.sources).map(([source, state]) => <span key={source} data-funding-source={source} className={state === 'ok' ? 'ok' : 'partial'}>{source.toUpperCase()} {state.toUpperCase()}</span>)}</div>

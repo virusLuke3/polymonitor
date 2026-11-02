@@ -1,0 +1,21 @@
+[Unit]
+Description=polyData shared crypto strategy inputs
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/__POLYDATA_REPO_ROOT__
+EnvironmentFile=%h/.config/polydata/polydata.env
+Environment=POLYDATA_CRYPTO_REFERENCE_URL=http://127.0.0.1:28076
+Environment=POLYDATA_CRYPTO_LOB_READER_URL=http://127.0.0.1:18500
+Environment=POLYDATA_CRYPTO_EXCHANGE_FLOW_FILE=/opt/polyData/data/crypto_exchange_flow_history.json
+ExecStart=/bin/bash -lc 'exec "${POLYDATA_PYTHON_BIN:-python3}" scripts/runtime/crypto_strategy_watcher.py --watch'
+Restart=always
+RestartSec=15
+TimeoutStopSec=20
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=polydata-gcp.target

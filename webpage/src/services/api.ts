@@ -224,6 +224,10 @@ export function fetchRuntimeCrypto(signal?: AbortSignal) {
   return apiGet<RuntimeMarketGroup>('/runtime/markets/crypto', signal);
 }
 
+export function fetchCryptoStrategyInputs(signal?: AbortSignal): Promise<unknown> {
+  return apiGetWithTimeout('/runtime/crypto/order-flow', 10000, signal);
+}
+
 export function fetchRuntimeCryptoFundingWatch(limit = 80, signal?: AbortSignal) {
   return apiGetWithTimeout<unknown>(`/runtime/crypto/funding-watch?limit=${limit}`, 8000, signal, 'no-store');
 }

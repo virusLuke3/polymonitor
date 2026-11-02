@@ -1,0 +1,18 @@
+[Unit]
+Description=Polymonitor existing crypto reference reader tunnel (SUN to GCP)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+# Install on the source-reader host only. Remote listener is loopback-only.
+EnvironmentFile=%h/.config/polydata/crypto-reference-tunnel.env
+ExecStart=/usr/bin/ssh -N -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=2 -o HostKeyAlias=polymonitor-web-singapore-01-internal -J ${POLYDATA_CRYPTO_REFERENCE_JUMP} -R 127.0.0.1:28076:127.0.0.1:28075 ${POLYDATA_CRYPTO_REFERENCE_TARGET}
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

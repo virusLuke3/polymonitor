@@ -18,6 +18,10 @@ import { panel as whaleTracker } from './whale-tracker';
 import { panel as suspiciousFlow } from './suspicious-flow';
 import { panel as commoditiesWatch } from './commodities-watch';
 import { panel as cryptoWatch } from './crypto-watch';
+import { panel as cryptoOrderFlow } from './crypto-order-flow';
+import { panel as cryptoOracleReference } from './crypto-oracle-reference';
+import { panel as optionsImpliedProbability } from './options-implied-probability';
+import { panel as cryptoExchangeInflow } from './crypto-exchange-inflow';
 import { panel as aiModelRace } from './ai-model-race';
 import { panel as bigTechMarketCap } from './big-tech-market-cap';
 import { panel as consumerAppPulse } from './consumer-app-pulse';
@@ -91,6 +95,10 @@ export const PANEL_MODULES: PanelModule[] = [
   suspiciousFlow,
   commoditiesWatch,
   cryptoWatch,
+  cryptoOrderFlow,
+  cryptoOracleReference,
+  optionsImpliedProbability,
+  cryptoExchangeInflow,
   aiModelRace,
   bigTechMarketCap,
   consumerAppPulse,

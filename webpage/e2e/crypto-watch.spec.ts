@@ -18,6 +18,7 @@ test('crypto checks every 5s, publishes changed prices, preserves outages and re
   await page.goto('/e2e/panels.html');
   await page.waitForFunction(() => window.panelHarness);
   await page.evaluate(() => window.panelHarness.mount('crypto-watch'));
+  await page.getByRole('button', { name: 'All coins', exact: true }).click();
   const btc = page.locator('[data-crypto-symbol="BTC-USD"]');
   await expect(btc).toContainText('$110.00');
   price = 120;
@@ -38,6 +39,7 @@ test('crypto checks every 5s, publishes changed prices, preserves outages and re
   await expect.poll(() => requests).toBeGreaterThan(before);
   fail = true;
   await page.evaluate(() => window.panelHarness.mount('crypto-watch'));
+  await page.getByRole('button', { name: 'All coins', exact: true }).click();
   await expect(btc).toContainText('$130.00');
   await page.clock.fastForward(16 * 60_000);
   await expect(btc).toHaveCount(0); // no unlimited stale prices
@@ -52,6 +54,7 @@ for (const width of [1440, 390]) test(`crypto loads autonomously with visible pr
   await page.goto('/');
   const slot = page.locator('.wm-panel-slot[data-workspace-panel-id="crypto-watch"]');
   await slot.scrollIntoViewIfNeeded();
+  await slot.getByRole('button', { name: 'All coins', exact: true }).click();
   await expect(slot.locator('[data-crypto-symbol="BTC-USD"]')).toContainText('$84,000');
   await slot.locator('[data-crypto-symbol="BTC-USD"]').scrollIntoViewIfNeeded();
   await expect(slot.locator('.wm-crypto-market-value').first()).toBeInViewport();

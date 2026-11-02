@@ -4,6 +4,10 @@ from types import ModuleType
 from typing import Dict, Iterable, List, Optional
 
 from .modules import (
+    crypto_order_flow,
+    crypto_oracle_reference,
+    options_implied_probability,
+    crypto_exchange_inflow,
     ai_model_race,
     alpha_signal,
     breaking_event_radar,
@@ -70,6 +74,10 @@ from .types import RuntimePanelModule
 
 
 _MODULES: List[ModuleType] = [
+    crypto_order_flow,
+    crypto_oracle_reference,
+    options_implied_probability,
+    crypto_exchange_inflow,
     commodities_watch,
     crypto_watch,
     ai_model_race,

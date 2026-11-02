@@ -11,6 +11,7 @@ import { useCryptoFeed } from './useCryptoFeed';
 import { cryptoQuoteState, type CryptoQuote } from './model';
 import { useI18n } from '@/services/i18n';
 import './styles.css';
+import { Synchronized } from './Synchronized';
 
 type CryptoTickDirection = 'tick-up' | 'tick-down';
 
@@ -71,7 +72,7 @@ function cryptoBoard(
   );
 }
 
-function CryptoWatchPanel() {
+function CryptoOverviewPanel({ onSync }: { onSync: () => void }) {
   const feed = useCryptoFeed(), crypto = feed.data, i18n = useI18n(), cn = i18n.locale.startsWith('zh');
   const { copy, shared } = useSpecialistCopy('crypto-watch');
   const items = useMemo(() => crypto?.items || [], [crypto]);
@@ -119,6 +120,7 @@ function CryptoWatchPanel() {
 
   return (
     <Panel title={copy('title', 'CRYPTO')} badge="SPOT" status="muted" count={crypto ? items.length : '—'} className="wm-market-panel wm-crypto-market-panel" dataPanelId="crypto-watch">
+      <div className="wm-crypto-toolbar"><button onClick={onSync}>{cn ? '同步行情 / PM' : 'Synchronized / PM'}</button></div>
       <div className="wm-crypto-toolbar"><span>{feed.suspended ? cn ? '不可见时暂停检查' : 'Auto paused while hidden' : cn ? '自动检查5秒' : 'Auto check 5s'}{crypto && ` · ${cn ? '后台更新' : 'Source'} ${crypto.refreshIntervalSeconds}s`}</span><button type="button" disabled={feed.status.fetching} onClick={() => void feed.refresh()}>{feed.status.fetching ? cn ? '刷新中…' : 'Refreshing…' : cn ? '刷新' : 'Refresh'}</button></div>
       <p className="wm-crypto-clock">{checked && <span>{cn ? '检查' : 'Checked'} <time data-crypto-checked-at dateTime={checked}>{clock(checked)}</time></span>}{crypto && <span>{cn ? '快照' : 'Snapshot'} <time data-crypto-snapshot-at dateTime={crypto.generatedAt}>{clock(crypto.generatedAt)}</time></span>}</p>
       {feed.loading && <PanelLoading />}
@@ -135,6 +137,11 @@ function CryptoWatchPanel() {
       })}
     </Panel>
   );
+}
+
+function CryptoWatchPanel() {
+  const [sync, setSync] = useState(true);
+  return sync ? <Synchronized onOverview={() => setSync(false)}/> : <CryptoOverviewPanel onSync={() => setSync(true)}/>;
 }
 
 const renderers: PanelRenderMap = {

@@ -196,6 +196,7 @@ class RuntimePanelContext:
     sports: SportsRuntimePanelDependencies
     technology: TechnologyRuntimePanelDependencies
     world: WorldRuntimePanelDependencies
+    get_crypto_strategy_snapshot: Callable[..., PanelPayload] | None = None
 
     @classmethod
     def from_context(cls, context: Mapping[str, Any]) -> RuntimePanelContext:
@@ -225,6 +226,7 @@ class RuntimePanelContext:
             sports=SportsRuntimePanelDependencies.from_context(context),
             technology=TechnologyRuntimePanelDependencies.from_context(context),
             world=WorldRuntimePanelDependencies.from_context(context),
+            get_crypto_strategy_snapshot=context.get("get_crypto_strategy_snapshot"),
         )
 
 
