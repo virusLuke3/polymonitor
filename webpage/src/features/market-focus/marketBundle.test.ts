@@ -24,7 +24,7 @@ describe('market bundle identity', () => {
 
 
 it('selects the first eligible result in server order, not the newest market', () => {
-  const markets = [{ id: 1, title: 'Older active market', slug: 'older', status: 'Active', createdAt: '2026-01-01' },
+  const markets = [{ id: 1, title: 'Older active market', slug: 'older', status: 'Active', createdAt: '2026-01-01', latestPrice: '0.945', tags: ['hide-from-new'] },
     { id: 2, title: 'New market', slug: 'new', status: 'Active', createdAt: '2026-11-02' }];
   expect(pickDefaultMarketId(markets)).toBe(1);
   expect(pickDefaultMarketId([...markets].reverse())).toBe(2);

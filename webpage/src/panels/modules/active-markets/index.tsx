@@ -1,5 +1,4 @@
 import { useMarketSearch } from '@/features/market-focus/useMarketCatalog';
-import { numericValue } from '@/panels/shared/formatters';
 import { createContext } from 'preact';
 import { useContext, useEffect, useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
@@ -76,18 +75,6 @@ function marketCatalogActivityAt(groups: MarketGroupItem[]) {
   ]));
 }
 
-function isDefaultSuppressedMarket(market: MarketListItem) {
-  const tags = (market.tags || []).map((item) => String(item || '').trim().toLowerCase());
-  const slug = String(market.slug || '').toLowerCase();
-  const title = String(market.title || '').toLowerCase();
-  const endAt = parseTimestamp(market.endDate);
-  const price = numericValue(market.latestPrice);
-  if (endAt && endAt < Date.now()) return true;
-  if (price > 0 && (price < 0.1 || price > 0.9)) return true;
-  if (tags.some((tag) => tag === 'hide-from-new' || tag === 'recurring' || tag === 'onchain-registry')) return true;
-  if (slug.includes('updown-5m') || slug.includes('updown-15m')) return true;
-  return title.includes(' up or down - ');
-}
 
 function marketTopic(market: MarketListItem) {
   const tags = (market.tags || []).map((item) => String(item || '').trim().toLowerCase()).filter(Boolean);
@@ -580,7 +567,7 @@ function ActiveMarketsPanel({
     const query = search.trim().toLowerCase();
     const filtered = query
       ? [...searchResult.hits]
-      : markets.filter((market) => !isDefaultSuppressedMarket(market));
+      : markets;
     return filtered; // Preserve the database ranking across the full eligible catalog.
   }, [marketGroupSort, markets, search, searchResult.hits]);
 

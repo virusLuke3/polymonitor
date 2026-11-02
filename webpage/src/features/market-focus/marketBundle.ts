@@ -1,9 +1,5 @@
 import type { MarketListItem, MarketGroupItem, MarketGroupDetail, MarketGroupOutcome, MarketSummary, WorkspaceBundle } from '@/types';
 
-function isLiveStatus(status?: string | null) {
-  const normalized = String(status || '').trim().toLowerCase();
-  return normalized === 'active' || normalized === 'proposed';
-}
 
 type DefaultMarketCandidate = Pick<MarketSummary, 'id' | 'slug' | 'title' | 'category' | 'tags' | 'status'>;
 
@@ -26,11 +22,6 @@ export function isSuppressedDefaultMarket(market?: Partial<DefaultMarketCandidat
 }
 
 export function pickDefaultMarketId(markets: MarketListItem[], featured?: MarketSummary | null) {
-  const firstLive = markets.find((market) => isLiveStatus(market.status) && !isSuppressedDefaultMarket(market));
-  if (firstLive) return firstLive.id;
-  const firstEligible = markets.find((market) => !isSuppressedDefaultMarket(market));
-  if (firstEligible) return firstEligible.id;
-  if (featured && !isSuppressedDefaultMarket(featured)) return featured.id;
   return markets[0]?.id ?? featured?.id ?? null;
 }
 
