@@ -78,6 +78,8 @@ function readMarketGroupSortStorage(): MarketGroupSort {
 export function useWorkspacePreferences() {
   const accountLayoutApplied = useRef(false);
   const panelPreferencesOwned = useRef(false);
+  const panelEditVersion = useRef(0);
+  const getPanelEditVersion = useCallback(() => panelEditVersion.current, []);
   const [layoutWidth, setLayoutWidth] = useState(() => typeof window === 'undefined' ? 1440 : window.innerWidth);
   useEffect(() => {
     const resize = () => setLayoutWidth(window.innerWidth);
@@ -90,6 +92,7 @@ export function useWorkspacePreferences() {
   const [knownDefaultPanelIds, setKnownDefaultPanelIds] = useState<string[]>([]);
   const updatePanelIds = useCallback((value: string[] | ((current: string[]) => string[])) => {
     panelPreferencesOwned.current = true;
+    panelEditVersion.current++;
     setActivePanelIds(value);
   }, []);
   const applyBootstrapPanels = useCallback((payload: BootstrapPayload) => {
@@ -185,6 +188,7 @@ export function useWorkspacePreferences() {
   };
 
   const resizeWorkspacePanel = (panelId: string, patch: { rowSpan?: number; colSpan?: number }) => {
+    panelEditVersion.current++;
     setPanelLayoutPrefs((current) => {
       const entry = current[panelId] || {};
       return {
@@ -198,6 +202,7 @@ export function useWorkspacePreferences() {
   };
 
   const resetWorkspacePanelLayout = (panelId: string) => {
+    panelEditVersion.current++;
     setPanelLayoutPrefs((current) => {
       if (!current[panelId]) return current;
       const next = { ...current };
@@ -206,7 +211,7 @@ export function useWorkspacePreferences() {
     });
   };
 
-  return { layoutWidth, applyBootstrapPanels, applyAccountPanels, enableAllPanels, restorePanels, activePanelIds, knownDefaultPanelIds, setActivePanelIds: updatePanelIds, panelLayoutPrefs, setPanelLayoutPrefs, panelPrefsLoaded, viewMode, setViewMode, showPanelLibrary, setShowPanelLibrary, marketGroupSort, setMarketGroupSort, togglePanel, moveWorkspacePanel, resizeWorkspacePanel, resetWorkspacePanelLayout };
+  return { layoutWidth, applyBootstrapPanels, applyAccountPanels, getPanelEditVersion, enableAllPanels, restorePanels, activePanelIds, knownDefaultPanelIds, setActivePanelIds: updatePanelIds, panelLayoutPrefs, setPanelLayoutPrefs, panelPrefsLoaded, viewMode, setViewMode, showPanelLibrary, setShowPanelLibrary, marketGroupSort, setMarketGroupSort, togglePanel, moveWorkspacePanel, resizeWorkspacePanel, resetWorkspacePanelLayout };
 }
 export function useWorkspaceSync(workspace: ReturnType<typeof useWorkspacePreferences>, camera: {
   region: WorldEventRegion; mapZoom: number;
@@ -276,7 +281,8 @@ export function useWorkspaceSync(workspace: ReturnType<typeof useWorkspacePrefer
     owner.current = controller;
     ready.current = false; writing.current = false;
     setStatus('checking');
-    const started = latest.current.snapshot;
+    const startedPanelEdits = latest.current.workspace.getPanelEditVersion();
+    const savedLocalMeta = meta();
     const synchronize = async () => {
       const session = await fetchAuthSession(controller.signal);
       if (controller.signal.aborted) return;
@@ -284,11 +290,14 @@ export function useWorkspaceSync(workspace: ReturnType<typeof useWorkspacePrefer
       userId.current = session.user?.id ?? null;
       const server = await fetchWorkspaceLayout(controller.signal);
       if (controller.signal.aborted) return;
-      const local = meta();
+      // Automatic viewport/library hydration is not a user panel edit. Compare
+      // the saved layout timestamp and actual panel actions while loading.
+      const editedDuringLoad = latest.current.workspace.getPanelEditVersion() !== startedPanelEdits;
+      const local = editedDuringLoad ? meta() : savedLocalMeta;
       const sameUser = local.userId == null || String(local.userId) === String(userId.current);
       const localTime = Date.parse(local.updatedAt || '');
       const serverTime = Date.parse(server.clientUpdatedAt || '');
-      const newer = sameUser && (latest.current.snapshot !== started
+      const newer = sameUser && (editedDuringLoad
         || (Number.isFinite(localTime) && (!Number.isFinite(serverTime) || localTime > serverTime)));
       if (!server.exists || newer) {
         const submitted = latest.current;

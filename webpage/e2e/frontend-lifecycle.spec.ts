@@ -931,3 +931,33 @@ test('an unknown source timestamp cannot become a successful ready snapshot', as
   expect(await page.evaluate(() => window.frontendHarness.runtime!.getStatus('shared').checkedAt ?? null)).toBeNull();
   expect(await page.evaluate(() => window.frontendHarness.runtime!.getData('shared'))).toBeUndefined();
 });
+
+for (const editPanels of [false, true]) {
+  test(`late account layout distinguishes initialization from user panel edits (${editPanels})`, async ({ page }) => {
+    const known = await knownPanelIds();
+    await page.route('**/wm-api/auth/session', route => route.fulfill({ json: {
+      authenticated: true, user: { id: 7 }, csrfToken: 'fixture-only',
+    } }));
+    let release: (() => Promise<void>) | undefined;
+    const writes: any[] = [];
+    await page.route('**/wm-api/product/workspace-layout', route => {
+      const server = { exists: true, revision: 4, activePanelIds: ['price-chart'], panelLayout: {},
+        preferences: { knownDefaultPanelIds: known }, clientUpdatedAt: '2099-01-01', updatedAt: GENERATED_AT };
+      if (route.request().method() === 'GET') { release = () => route.fulfill({ json: server }); return; }
+      const body = route.request().postDataJSON(); writes.push(body);
+      return route.fulfill({ json: { ...server, ...body, revision: body.revision + 1 } });
+    });
+    await harness(page, 'workspace');
+    await expect.poll(() => Boolean(release)).toBe(true);
+    await page.evaluate(edit => {
+      const w = window.frontendHarness.workspace!;
+      w.setShowPanelLibrary(true);
+      if (edit) w.setActivePanelIds(['crypto-watch']);
+    }, editPanels);
+    await page.clock.runFor(100);
+    await release!();
+    await expect.poll(() => page.evaluate(() => window.frontendHarness.sync!.workspaceSyncStatus)).toBe('synced');
+    expect(await page.evaluate(() => window.frontendHarness.workspace!.activePanelIds)).toEqual(editPanels ? ['crypto-watch'] : ['price-chart']);
+    expect(writes.length).toBe(editPanels ? 1 : 0);
+  });
+}
