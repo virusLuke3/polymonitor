@@ -41,7 +41,7 @@ not prove an empty market history.
 - The new namespace holds at most 512 payloads, each at most 1 MiB, plus 512 small
   cooldown markers. Stale reuse expires after 60 s for flow, 120 s for Oracle,
   and 300 s for catalog/chart/metadata. Unrelated snapshot namespaces are untouched.
-- LOB reads share the same token-pair cache across browsers, with two concurrent
+- API-mediated LOB reads share the same token-pair cache across browsers, with two concurrent
   upstream reads and eight reads/s (burst four). Book timestamps and continuity
   come from the existing reader; unavailable books are not reused as live.
 - Source outcome evidence is cached for 30 s with no stale reuse. Public value
@@ -51,6 +51,15 @@ not prove an empty market history.
 - Browser requests are independent, single-flight, canceled on selection changes,
   paused while hidden, and use backoff plus Retry-After. Hovering unselected rows
   and bootstrap do not launch historical/global scans.
+
+The production Nginx token-book route uses the existing dedicated market-data
+reader on port 18861 directly, avoiding the main API worker queue. That reader
+shares a 2 s cache, deduplicates same-pair requests, admits at most four snapshot
+reads, retains at most 128 keys, and cools failed reads for 15 s. It reads the
+committed gateway snapshot using a read-only SQLite identity lookup; this route
+does not open PostgreSQL or ClickHouse connections. Nginx additionally limits
+per-client book requests and concurrent connections. The API-mediated limits
+above apply to the compatibility market-ID and batch endpoints.
 
 ## Health and release
 
