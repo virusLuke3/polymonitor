@@ -31,6 +31,10 @@ class MarketRouteDependencies:
 def create_markets_blueprint(dependencies: MarketRouteDependencies) -> Blueprint:
     bp = Blueprint("market_routes", __name__)
 
+    @bp.errorhandler(LookupError)
+    def missing(_error):
+        return jsonify({"status": "not_found", "error": "Market identity not available"}), 404
+
     @bp.errorhandler(TimeoutError)
     def unavailable(_error):
         return respond({"status": "unavailable", "error": "Market data temporarily unavailable"})

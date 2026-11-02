@@ -436,14 +436,6 @@ SEED_META_SPECS = [
         "intervalEnv": "POLYDATA_SIGNAL_WATCH_INTERVAL_SECONDS",
         "defaultIntervalSeconds": 120,
     },
-    {
-        "panelId": "bootstrap",
-        "namespace": "seed-meta:bootstrap",
-        "cacheKey": "bootstrap",
-        "serviceName": "polydata-bootstrap-seed.service",
-        "intervalEnv": "POLYDATA_BOOTSTRAP_SEED_INTERVAL_SECONDS",
-        "defaultIntervalSeconds": 60,
-    },
 ]
 
 

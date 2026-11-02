@@ -22,16 +22,13 @@ class RuntimeResources:
     # execution/memory limits or the serving API's short read deadline.
     clickhouse_read_timeout_seconds: float | None = None
     snapshot_workers: int = 2
-    workspace_workers: int = 2
     shutdown_timeout_seconds: float = 20
     clickhouse_slots: Any = field(init=False)
     snapshot_slots: Any = field(init=False)
-    workspace_slots: Any = field(init=False)
 
     def __post_init__(self):
         self.clickhouse_slots = threading.BoundedSemaphore(self.clickhouse.concurrency)
         self.snapshot_slots = threading.BoundedSemaphore(self.snapshot_workers)
-        self.workspace_slots = threading.BoundedSemaphore(self.workspace_workers)
 
     health_cache: dict[str, Any] = field(default_factory=dict)
     health_lock: Any = field(default_factory=threading.Lock)
@@ -44,8 +41,6 @@ class RuntimeResources:
     snapshot_lock: Any = field(default_factory=threading.Lock)
     snapshot_refreshing: set[str] = field(default_factory=set)
 
-    workspace_lock: Any = field(default_factory=threading.Lock)
-    workspace_refreshing: set[str] = field(default_factory=set)
     live_refresh_lock: Any = field(default_factory=threading.Lock)
     live_refreshing: set[str] = field(default_factory=set)
     weather_state: dict[str, Any] = field(default_factory=dict)

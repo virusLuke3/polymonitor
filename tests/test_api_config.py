@@ -71,7 +71,7 @@ def test_application_factory_owns_configuration_caches_and_connections(tmp_path)
         second = create_app(replace(settings, port=18502), connection_factory=no_database)
     assert first is not second
     a, b = (app.extensions["polydata_runtime"] for app in (first, second))
-    assert a.bootstrap_cache is not b.bootstrap_cache
+    assert a.panel_reader.cache is not b.panel_reader.cache
     a._dashboard_cache["value"] = {"only": "first"}
     a.global_weather_map.runtime_state["_weather_test"] = True
     assert b._dashboard_cache["value"] is None
@@ -411,8 +411,8 @@ def test_clickhouse_configuration_and_capacity_are_owned_by_runtime(tmp_path, mo
         ServiceRuntime(replace(base, clickhouse=api_config.ClickHouseSettings(database="second"))) as second,
     ):
         monkeypatch.setenv("POLYDATA_ORDERFILLED_CLICKHOUSE_DATABASE", "changed_later")
-        assert _settings(first.market_context).database == "first"
-        assert _settings(second.market_context).database == "second"
+        assert _settings(first.query_context).database == "first"
+        assert _settings(second.query_context).database == "second"
         assert first.resources.clickhouse_slots.acquire(blocking=False)
         assert not first.resources.clickhouse_slots.acquire(blocking=False)
         assert second.resources.clickhouse_slots.acquire(blocking=False)

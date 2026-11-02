@@ -35,7 +35,7 @@ export function useMarketDossier(marketId: number | null, t: Translator, content
       && request.current?.controller === controller && currentMarket.current === marketId;
     setLoading(true);
     const promise = (async () => {
-      const next = await fetchWorkspaceBundle(marketId, { includeContent: true, contentDays, includeLob: true, signal: controller.signal });
+      const next = await fetchWorkspaceBundle(marketId, { includeContent: true, contentDays, signal: controller.signal });
       if (!isCurrent()) return;
       if (!next.market || !bundleMatchesMarket(next, marketId)) throw new Error(t('market.noIdentity', { id: marketId }));
       const outcome = selectedWorkspaceOutcome(next);

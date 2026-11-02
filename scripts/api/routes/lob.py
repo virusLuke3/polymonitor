@@ -19,6 +19,14 @@ class LobRouteDependencies:
 def create_lob_blueprint(dependencies: LobRouteDependencies) -> Blueprint:
     bp = Blueprint("lob_routes", __name__)
 
+    @bp.errorhandler(LookupError)
+    def missing(_error):
+        return jsonify({"error": "Market identity not available"}), 404
+
+    @bp.errorhandler(TimeoutError)
+    def unavailable(_error):
+        return jsonify({"bookStatus": "unavailable"}), 503, {"Retry-After": "15"}
+
     @bp.after_request
     def prevent_stale_http_cache(response):
         response.headers["Cache-Control"] = "no-store"

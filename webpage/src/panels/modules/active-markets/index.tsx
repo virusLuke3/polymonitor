@@ -1,7 +1,7 @@
 import { useMarketSearch } from '@/features/market-focus/useMarketCatalog';
 import { numericValue } from '@/panels/shared/formatters';
 import { createContext } from 'preact';
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useContext, useEffect, useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import type { MarketGroupItem, MarketGroupOutcome, MarketGroupSort, MarketListItem } from '@/types';
 import type { PanelRenderMap } from '@/panels/types';
@@ -396,15 +396,12 @@ function activeMarketGroupsList(
   selectedMarketId: number | null,
   selectedMarketGroupId: string | null,
   focusMarketGroup: (group: MarketGroupItem, outcomeKey?: string | null, marketId?: number | null) => void,
-  prefetchMarketFocus: (marketIds: number[]) => void,
-  queueMarketPrefetch: (marketIds: number[]) => void,
-  cancelMarketPrefetch: () => void,
   i18n: MarketI18n,
 ) {
   if (!groups.length) return emptyState(i18n.t('atlasMarket.noGroups'), localizedEmptyCopy(i18n));
   return (
     <div className="wm-poly-market-list">
-      {groups.map((group, index) => {
+      {groups.map((group) => {
         const defaultOutcome = groupDefaultOutcome(group);
         const outcomeTitle = defaultOutcome?.title || defaultOutcome?.label || null;
         const displaysOutcome = Boolean(defaultOutcome && outcomeTitle);
@@ -419,9 +416,6 @@ function activeMarketGroupsList(
         const defaultMarketId = defaultOutcome?.marketId ? Number(defaultOutcome.marketId) : defaultGroupMarketId(group);
         const groupEventId = group.eventId != null ? String(group.eventId) : null;
         const selected = (groupEventId != null && selectedMarketGroupId === groupEventId) || (defaultMarketId != null && selectedMarketId === defaultMarketId);
-        const adjacentMarketIds = [groups[index - 1], group, groups[index + 1]]
-          .map((candidate) => candidate ? defaultGroupMarketId(candidate) : null)
-          .filter((marketId): marketId is number => marketId != null && Number.isFinite(marketId));
         return (
           <button
             key={group.groupId}
@@ -429,14 +423,6 @@ function activeMarketGroupsList(
             className={`wm-poly-market-card ${topicClassName(groupTopic(group))} ${selected ? 'active' : ''}`}
             onClick={() => {
               focusMarketGroup(group, defaultOutcome?.outcomeKey || group.defaultOutcomeKey || null, defaultMarketId);
-            }}
-            onMouseEnter={() => queueMarketPrefetch(adjacentMarketIds)}
-            onMouseLeave={cancelMarketPrefetch}
-            onFocus={() => queueMarketPrefetch(adjacentMarketIds)}
-            onBlur={cancelMarketPrefetch}
-            onPointerDown={() => {
-              cancelMarketPrefetch();
-              if (defaultMarketId != null) prefetchMarketFocus([defaultMarketId]);
             }}
             aria-pressed={selected}
             title={displayTitle === group.title ? group.title : `${displayTitle}\n${group.title}`}
@@ -475,32 +461,19 @@ function activeMarketsList(
   markets: MarketListItem[],
   selectedMarketId: number | null,
   setSelectedMarketId: (marketId: number | null) => void,
-  prefetchMarketFocus: (marketIds: number[]) => void,
-  queueMarketPrefetch: (marketIds: number[]) => void,
-  cancelMarketPrefetch: () => void,
   i18n: MarketI18n,
 ) {
   if (!markets.length) return emptyState(i18n.t('atlasMarket.noMarkets'), localizedEmptyCopy(i18n));
   return (
     <div className="wm-poly-market-list">
-      {markets.map((market, index) => {
+      {markets.map((market) => {
         const activityLabel = marketActivityLabel(market.tradeCount24h, market.volume24h, i18n);
-        const adjacentMarketIds = [markets[index - 1]?.id, market.id, markets[index + 1]?.id]
-          .filter((marketId): marketId is number => marketId != null && Number.isFinite(marketId));
         return (
           <button
             key={market.id}
             type="button"
             className={`wm-poly-market-card ${topicClassName(marketTopic(market))} ${selectedMarketId === market.id ? 'active' : ''}`}
             onClick={() => setSelectedMarketId(market.id)}
-            onMouseEnter={() => queueMarketPrefetch(adjacentMarketIds)}
-            onMouseLeave={cancelMarketPrefetch}
-            onFocus={() => queueMarketPrefetch(adjacentMarketIds)}
-            onBlur={cancelMarketPrefetch}
-            onPointerDown={() => {
-              cancelMarketPrefetch();
-              prefetchMarketFocus([market.id]);
-            }}
             aria-pressed={selectedMarketId === market.id}
             title={`${market.title}${market.slug ? ` · ${market.slug}` : ''}`}
             style={{ '--wm-market-accent': marketAccent(market) } as Record<string, string>}
@@ -545,7 +518,6 @@ function ActiveMarketsPanel({
   selectedMarketId,
   selectedMarketGroupId,
   setSelectedMarketId,
-  prefetchMarketFocus,
   focusMarketGroup,
   marketCatalogRefreshing,
   marketCatalogError,
@@ -558,7 +530,6 @@ function ActiveMarketsPanel({
   selectedMarketId: number | null;
   selectedMarketGroupId: string | null;
   setSelectedMarketId: (marketId: number | null) => void;
-  prefetchMarketFocus: (marketIds: number[]) => void;
   focusMarketGroup: (group: MarketGroupItem, outcomeKey?: string | null, marketId?: number | null) => void;
   marketCatalogRefreshing: boolean;
   marketCatalogError: string | null;
@@ -569,30 +540,10 @@ function ActiveMarketsPanel({
   const [search, setSearch] = useState('');
   const searchResult = useMarketSearch(search, true);
   const [clockNow, setClockNow] = useState(() => Date.now());
-  const prefetchTimerRef = useRef<number | undefined>(undefined);
-
-  const cancelMarketPrefetch = useCallback(() => {
-    if (prefetchTimerRef.current !== undefined) {
-      window.clearTimeout(prefetchTimerRef.current);
-      prefetchTimerRef.current = undefined;
-    }
-  }, []);
-
-  const queueMarketPrefetch = useCallback((marketIds: number[]) => {
-    cancelMarketPrefetch();
-    const uniqueMarketIds = [...new Set(marketIds.filter((marketId) => Number.isFinite(marketId)))].slice(0, 3);
-    if (!uniqueMarketIds.length) return;
-    prefetchTimerRef.current = window.setTimeout(() => {
-      prefetchTimerRef.current = undefined;
-      prefetchMarketFocus(uniqueMarketIds);
-    }, 150);
-  }, [prefetchMarketFocus, cancelMarketPrefetch]);
-
   useEffect(() => {
     const timer = window.setInterval(() => setClockNow(Date.now()), 1_000);
     return () => {
       window.clearInterval(timer);
-      cancelMarketPrefetch();
     };
   }, []);
 
@@ -676,10 +627,10 @@ function ActiveMarketsPanel({
     : '--';
   const sortHelp = t(MARKET_SORT_HELP_KEYS[marketGroupSort]);
   const rows = useMemo(() => hasGroups
-    ? activeMarketGroupsList(visibleGroups, selectedMarketId, selectedMarketGroupId, focusMarketGroup, prefetchMarketFocus, queueMarketPrefetch, cancelMarketPrefetch, i18n)
-    : activeMarketsList(visibleMarkets, selectedMarketId, setSelectedMarketId, prefetchMarketFocus, queueMarketPrefetch, cancelMarketPrefetch, i18n),
+    ? activeMarketGroupsList(visibleGroups, selectedMarketId, selectedMarketGroupId, focusMarketGroup, i18n)
+    : activeMarketsList(visibleMarkets, selectedMarketId, setSelectedMarketId, i18n),
     [hasGroups, visibleGroups, visibleMarkets, selectedMarketId, selectedMarketGroupId, focusMarketGroup,
-      setSelectedMarketId, prefetchMarketFocus, queueMarketPrefetch, cancelMarketPrefetch, i18n]);
+      setSelectedMarketId, i18n]);
 
 
   return (
@@ -743,7 +694,7 @@ function ActiveMarketsPanel({
   );
 }
 
-const renderers: PanelRenderMap<'bootstrap' | 'focusMarketGroup' | 'marketCatalogError' | 'marketCatalogRefreshing' | 'marketGroupSort' | 'marketGroups' | 'markets' | 'prefetchMarketFocus' | 'refreshMarketCatalog' | 'selectedMarketGroupId' | 'selectedMarketId' | 'setMarketGroupSort' | 'setSelectedMarketId'> = {
+const renderers: PanelRenderMap<'bootstrap' | 'focusMarketGroup' | 'marketCatalogError' | 'marketCatalogRefreshing' | 'marketGroupSort' | 'marketGroups' | 'markets' | 'refreshMarketCatalog' | 'selectedMarketGroupId' | 'selectedMarketId' | 'setMarketGroupSort' | 'setSelectedMarketId'> = {
   'active-markets': {
     render: (ctx) => (
       <ActiveMarketsPanel
@@ -754,7 +705,6 @@ const renderers: PanelRenderMap<'bootstrap' | 'focusMarketGroup' | 'marketCatalo
         selectedMarketId={ctx.selectedMarketId}
         selectedMarketGroupId={ctx.selectedMarketGroupId}
         setSelectedMarketId={ctx.setSelectedMarketId}
-        prefetchMarketFocus={ctx.prefetchMarketFocus}
         focusMarketGroup={ctx.focusMarketGroup}
         marketCatalogRefreshing={ctx.marketCatalogRefreshing}
         marketCatalogError={ctx.marketCatalogError}
@@ -765,7 +715,7 @@ const renderers: PanelRenderMap<'bootstrap' | 'focusMarketGroup' | 'marketCatalo
 };
 
 export const panel = panelFromRenderer(renderers, {
-  contextKeys: ['bootstrap', 'focusMarketGroup', 'marketCatalogError', 'marketCatalogRefreshing', 'marketGroupSort', 'marketGroups', 'markets', 'prefetchMarketFocus', 'refreshMarketCatalog', 'selectedMarketGroupId', 'selectedMarketId', 'setMarketGroupSort', 'setSelectedMarketId'],
+  contextKeys: ['bootstrap', 'focusMarketGroup', 'marketCatalogError', 'marketCatalogRefreshing', 'marketGroupSort', 'marketGroups', 'markets', 'refreshMarketCatalog', 'selectedMarketGroupId', 'selectedMarketId', 'setMarketGroupSort', 'setSelectedMarketId'],
   id: 'active-markets',
   title: 'Active Markets',
   eyebrow: 'market',

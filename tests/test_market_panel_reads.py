@@ -14,7 +14,7 @@ from api.config import ClickHouseSettings
 from api.context import RuntimeResources
 from api.read_budget import take_read_token, try_permit
 from api.services.panel_read_cache import NAMESPACE, PanelReadCache
-from api.services.market_panel_read_service import MarketPanelReader
+from api.services.market_service import MarketPanelReader
 from api.services import panel_trade_reader
 from runtime.snapshot_store import SnapshotStore
 
@@ -164,15 +164,6 @@ def test_receipt_cache_deduplicates_without_changing_source_evidence(runtime):
     reader.query.assert_called_once()
 
 
-def test_lob_cache_is_shared_by_token_pair_not_browser_metadata(runtime, monkeypatch):
-    reader = MarketPanelReader(runtime)
-    source = Mock(return_value={"bookStatus": "live", "yes": {"tokenId": "1"}, "no": {"tokenId": "2"}})
-    monkeypatch.setattr("api.services.lob_service.get_runtime_lob_by_token_payload", source)
-    assert reader.book_by_token("1", no_token_id="2", market_title="A")["marketTitle"] == "A"
-    assert reader.book_by_token("1", no_token_id="2", market_title="B")["marketTitle"] == "B"
-    source.assert_called_once()
-    source.side_effect = TimeoutError()
-    assert reader.book_by_token("3")["bookStatus"] == "unavailable"
 
 
 def test_worker_pool_cannot_reserve_sibling_connection_share(runtime, monkeypatch):
@@ -194,3 +185,76 @@ def test_worker_pool_cannot_reserve_sibling_connection_share(runtime, monkeypatc
         first.close()
         second.close()
         connect.close()
+
+
+def test_catalog_caps_candidates_and_never_reads_retired_serving(runtime):
+    reader = MarketPanelReader(runtime)
+    reader.query = Mock(return_value=[])
+    payload = reader.catalog(page_size=10000)
+    sql, params = reader.query.call_args.args
+    assert params == (5000, 101)
+    assert 'AS MATERIALIZED' in sql and 'core.market_catalog' in sql
+    assert 'market_list_serving' not in sql
+    assert payload['pagination']['pageSize'] == 100
+    with pytest.raises(ValueError):
+        reader.catalog(page=2)
+    assert reader.query.call_count == 1
+
+
+def test_compatibility_book_resolves_identity_then_uses_native_adapter(runtime, monkeypatch):
+    reader = MarketPanelReader(runtime)
+    reader.record = Mock(return_value={'yes_token_id': '1', 'no_token_id': '2', 'title': 'Market'})
+    source = Mock(return_value={'bookStatus': 'stale'})
+    monkeypatch.setattr('api.services.lob_service.get_runtime_lob_by_token_payload', source)
+    assert reader.book(7) == {'bookStatus': 'stale'}
+    source.assert_called_once_with('1', no_token_id='2', market_title='Market', market_id=7)
+
+
+def test_bootstrap_and_panel_health_do_not_read_sources(tmp_path):
+    from dataclasses import replace
+    from api.app import create_app
+    from api.config import load_api_settings
+    connect = Mock(side_effect=AssertionError('No source IO'))
+    app = create_app(replace(load_api_settings(), snapshot_sqlite_path=str(tmp_path / 'snapshots.sqlite')), connection_factory=connect)
+    runtime = app.extensions['polydata_runtime']
+    try:
+        client = app.test_client()
+        bootstrap = client.get('/bootstrap')
+        assert bootstrap.status_code == 200
+        assert bootstrap.json['activeMarketsPreview'] == []
+        assert client.get('/health/panels').json['scope'] == 'recent-reads-only'
+        connect.assert_not_called()
+    finally:
+        runtime.close()
+
+
+def test_http_mcp_and_linking_share_the_reader(tmp_path, monkeypatch):
+    from dataclasses import replace
+    from api import bindings
+    from api.app import create_app
+    from api.config import load_api_settings
+    captured = {}
+    original = bindings.mcp_routes.create_mcp_blueprint
+    def capture(deps):
+        captured['mcp'] = deps
+        return original(deps)
+    monkeypatch.setattr(bindings.mcp_routes, 'create_mcp_blueprint', capture)
+    monkeypatch.setattr('api.services.outcome_semantics_service.sanitize_public_market_payload', lambda ctx, payload, **kw: payload)
+    monkeypatch.setattr(MarketPanelReader, 'detail', lambda self, market_id: {'market': {'id': market_id}, 'owner': 'single-reader'})
+    app = create_app(replace(load_api_settings(), snapshot_sqlite_path=str(tmp_path / 'snapshots.sqlite')), connection_factory=Mock(side_effect=AssertionError('No IO')))
+    runtime = app.extensions['polydata_runtime']
+    try:
+        reader = runtime.panel_reader
+        assert captured['mcp'].search_markets == reader.search
+        assert captured['mcp'].get_market_workspace == reader.workspace
+        assert captured['mcp'].get_market_oracle == reader.oracle
+        reader.search = Mock(return_value={'items': []})
+        assert runtime.breaking_event_radar.search_markets('weather') == {'items': []}
+        reader.search.assert_called_once_with('weather', limit=10)
+        for path in ('detail', 'focus-tile'):
+            assert app.test_client().get(f'/markets/7/{path}').json['owner'] == 'single-reader'
+        reader.record = Mock(side_effect=LookupError('Missing market'))
+        for path in ('/markets/8', '/runtime/lob/8'):
+            assert app.test_client().get(path).status_code == 404
+    finally:
+        runtime.close()

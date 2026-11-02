@@ -47,22 +47,16 @@ class ServiceRuntime:
         self.resources = RuntimeResources(
             clickhouse=self.SETTINGS.clickhouse,
             snapshot_workers=self.SETTINGS.snapshot_refresh_workers,
-            workspace_workers=self.SETTINGS.workspace_refresh_workers,
             shutdown_timeout_seconds=self.SETTINGS.shutdown_timeout_seconds,
         )
         self.app = application or SimpleNamespace(logger=logging.getLogger("polydata.services"))
         self.ALLOWED_ORIGINS = set(self.SETTINGS.allowed_origins)
         self._dashboard_cache_lock = threading.Lock()
         self._dashboard_cache: Dict[str, Any] = {"value": None, "expires_at": 0.0}
-        self._bootstrap_cache_lock = threading.Lock()
-        self._bootstrap_cache: Dict[str, Any] = {"value": None, "expires_at": 0.0}
-        self._clob_session = None
-        self._clob_session_lock = threading.Lock()
         self._api_connection_factory = connection_factory or build_api_connection_factory(
             self.SETTINGS.database.connect, lambda: self.SETTINGS.database.backend
         )
         # All display readers share the same host-wide connection allowance.
-        self._alpha_connection_pool = None
         self.TRADE_READ_SOURCE = sql_identifier(get_trade_read_source())
         self.CONTENT_RUNTIME_PROVIDER = RuntimeContentProvider()
         self.SNAPSHOT_STORE = SnapshotStore(self.SETTINGS.snapshot_sqlite_path)
@@ -74,8 +68,6 @@ class ServiceRuntime:
 
         bind_services(self)
         alpha_db_context = {**self.api_db_context}
-        if self._alpha_connection_pool is not None:
-            alpha_db_context["get_connection"] = self._alpha_connection_pool.acquire
         self.alpha_signal_context = {
             **self.signal_context,
             "query_all": lambda sql, params=None: api_db.query_all(alpha_db_context, sql, params),
@@ -141,30 +133,10 @@ class ServiceRuntime:
         self.app.logger.info("snapshot-prewarm thread-owner pid=%s", os.getpid())
         return True
 
-    def get_clob_session(self):
-        if requests is None:
-            return None
-        if self._clob_session is not None:
-            return self._clob_session
-        with self._clob_session_lock:
-            if self._clob_session is not None:
-                return self._clob_session
-            session = requests.Session()
-            session.trust_env = str(os.environ.get("POLYDATA_CLOB_TRUST_ENV_PROXY") or "").strip().lower() in {
-                "1",
-                "true",
-                "yes",
-                "on",
-            }
-            session.headers.update({"Accept": "application/json", "User-Agent": "polyData-api/1.0"})
-            self._clob_session = session
-            return self._clob_session
 
     def set_cached_runtime_payload(
-        self, namespace: str, cache_key: str, payload: Any, ttl_seconds: int | None = None
+        self, namespace: str, cache_key: str, payload: Any, ttl_seconds: int
     ) -> Any:
-        if ttl_seconds is None:
-            ttl_seconds = self.SETTINGS.clob_price_cache_ttl_seconds
         return api_cache.set_cached_runtime_payload(self.cache, namespace, cache_key, payload, ttl_seconds)
 
     def set_cached_json(self, namespace: str, cache_key: str, payload: Dict[str, Any], ttl_seconds: int) -> None:
@@ -248,10 +220,6 @@ class ServiceRuntime:
             self.cache, cache_key, builder, namespace=namespace, ttl_seconds=ttl_seconds
         )
 
-    def get_bootstrap_component_cached(self, component_key: str, builder, *, ttl_seconds: int | None = None) -> Any:
-        if ttl_seconds is None:
-            ttl_seconds = self.SETTINGS.bootstrap_component_ttl_seconds
-        return api_cache.get_bootstrap_component_cached(self.cache, component_key, builder, ttl_seconds=ttl_seconds)
 
     def prewarm_critical_payloads(self) -> None:
         bootstrap_service.prewarm_critical_payloads(self.bootstrap_prewarm)
@@ -287,7 +255,7 @@ class ServiceRuntime:
                 return
             self._closed = True
         self.resources.close()
-        for resource in (self._clob_session, self.cache.redis_client, self.CONTENT_RUNTIME_PROVIDER, self._alpha_connection_pool):
+        for resource in (self.cache.redis_client, self.CONTENT_RUNTIME_PROVIDER):
             close = getattr(resource, "close", None)
             if close is not None:
                 close()

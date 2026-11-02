@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiTimeoutError, withRuntimeRequestBudget, fetchAllActiveMarkets, fetchMarketGroups, fetchAviationViewport, fetchMarketWideAiSnapshot, fetchNaturalHazardMapSource, fetchRuntimeAlpha, fetchRuntimeGeoSanctionsShock, fetchRuntimeGlobalTemperatureMonitor, fetchSystemHealth, fetchWorkspaceBundle } from './api';
+import { ApiTimeoutError, withRuntimeRequestBudget, fetchMarketsPage, fetchAviationViewport, fetchMarketWideAiSnapshot, fetchNaturalHazardMapSource, fetchRuntimeAlpha, fetchRuntimeGeoSanctionsShock, fetchRuntimeGlobalTemperatureMonitor, fetchSystemHealth, fetchWorkspaceBundle } from './api';
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
@@ -28,17 +28,6 @@ describe('HTTP lifecycle', () => {
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(String(vi.mocked(fetch).mock.calls[0]?.[0])).toMatch(/\/health$/);
     expect(String(vi.mocked(fetch).mock.calls[0]?.[0])).not.toContain('/system/');
-  });
-  it('publishes the first market page before continuing and starts no next page after cancellation', async () => {
-    vi.stubGlobal('window', globalThis);
-    const controller = new AbortController();
-    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({
-      items: [{ id: 1 }], pagination: { total: 160, totalPages: 2, hasMore: true },
-    }) })));
-    const firstPage = vi.fn(() => controller.abort());
-    await expect(fetchAllActiveMarkets('', 80, 8, controller.signal, firstPage)).rejects.toMatchObject({ name: 'AbortError' });
-    expect(firstPage).toHaveBeenCalledTimes(1);
-    expect(fetch).toHaveBeenCalledTimes(1);
   });
   it.each([
     ['temperature', (signal: AbortSignal) => fetchRuntimeGlobalTemperatureMonitor(60, signal)],
@@ -90,7 +79,7 @@ describe('HTTP lifecycle', () => {
     await vi.advanceTimersByTimeAsync(14_000); await result;
     expect(vi.getTimerCount()).toBe(0);
   });
-  it('does not start a detail fallback after cancellation and cancels optional content and book requests', async () => {
+  it('cancels the dossier and optional content without a second request', async () => {
     vi.stubGlobal('window', globalThis);
     const signals: AbortSignal[] = [];
     vi.stubGlobal('fetch', vi.fn((_url, options) => new Promise((_resolve, reject) => {
@@ -98,9 +87,8 @@ describe('HTTP lifecycle', () => {
       options.signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
     })));
     const controller = new AbortController();
-    const request = fetchWorkspaceBundle(1, { includeContent: true, includeLob: true, signal: controller.signal });
+    const request = fetchWorkspaceBundle(1, { includeContent: true, signal: controller.signal });
     controller.abort(); await expect(request).rejects.toMatchObject({ name: 'AbortError' });
-    // The queued Runtime book request is cancelled before admission.
     expect(signals).toHaveLength(2);
     expect(signals.every((signal) => signal.aborted)).toBe(true);
   });
@@ -121,7 +109,7 @@ describe('shared Runtime admission', () => {
     await new Promise(resolve => setTimeout(resolve, 10));
     vi.stubGlobal('fetch', vi.fn());
     const abort = new AbortController();
-    const request = fetchMarketGroups('', 80, 'active', abort.signal);
+    const request = fetchMarketsPage(1, '', 50, abort.signal);
     const rejection = expect(request).rejects.toMatchObject({ name: 'AbortError' });
     expect(fetch).not.toHaveBeenCalled();
     abort.abort(); await rejection;

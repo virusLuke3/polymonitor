@@ -272,15 +272,3 @@ def get_markets_payload_cached(
         for key in expired_keys:
             ctx.markets_cache.pop(key, None)
         return payload
-
-
-def get_bootstrap_component_cached(ctx: CacheState, component_key: str, builder, *, ttl_seconds: int) -> Any:
-    cache_key = json.dumps({"component": component_key, "v": 1}, sort_keys=True, ensure_ascii=True)
-    payload = get_markets_payload_cached(
-        ctx,
-        cache_key,
-        lambda: {"value": builder()},
-        namespace="bootstrap:component",
-        ttl_seconds=ttl_seconds,
-    )
-    return payload.get("value")

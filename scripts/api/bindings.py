@@ -95,10 +95,7 @@ from api.services import (
     grid_esports_service,
     live_video_source_service,
     lob_service,
-    market_group_service,
     market_quality_service,
-    market_workspace_cache_service,
-    market_panel_read_service,
     orderfilled_outcome_proof_service,
     product_service,
     sports_odds_service,
@@ -126,12 +123,6 @@ def bind_services(runtime: ServiceRuntime) -> None:
         )
     )
     _identifier_name = lambda identifier: api_db.identifier_name(identifier)
-    build_system_health_payload = lambda: system_service.build_system_health_payload(runtime.system_health)
-    enrich_market_rows_with_runtime_prices = lambda rows, max_updates=18, force_refresh=False: (
-        market_service.enrich_market_rows_with_runtime_prices(
-            runtime.market_context, rows, max_updates=max_updates, force_refresh=force_refresh
-        )
-    )
     fetch_dashboard_market_status = lambda now_iso: query_service.fetch_dashboard_market_status(
         runtime.dashboard_status, now_iso
     )
@@ -145,18 +136,10 @@ def bind_services(runtime: ServiceRuntime) -> None:
         runtime.recent_trade_window, window_size
     )
     fetch_trade_count_estimate = lambda: query_service.fetch_trade_count_estimate(runtime.trade_count_estimate)
-    get_active_markets_snapshot = lambda page_size=40, include_runtime_prices=False, include_change_24h=False: (
-        market_service.get_active_markets_snapshot(
-            runtime.market_context,
-            page_size=page_size,
-            include_runtime_prices=include_runtime_prices,
-            include_change_24h=include_change_24h,
-        )
-    )
+    get_active_markets_snapshot = lambda page_size=40, **_: runtime.panel_reader.catalog(page_size=page_size)
     get_alpha_signal_snapshot = lambda limit=8: signal_service.get_alpha_signal_snapshot(
         runtime.signal_context, limit=limit
     )
-    get_bootstrap_payload_cached = lambda: bootstrap_service.get_bootstrap_payload_cached(runtime.bootstrap_cache)
     get_cached_json = lambda namespace, cache_key: api_cache.get_cached_json(runtime.cache, namespace, cache_key)
     get_cached_runtime_payload = lambda namespace, cache_key: api_cache.get_cached_runtime_payload(
         runtime.cache, namespace, cache_key
@@ -177,74 +160,35 @@ def bind_services(runtime: ServiceRuntime) -> None:
         finance_panels_service.get_finance_liquidity_regime_snapshot(runtime.finance_panels_context, limit=limit)
     )
     get_existing_trade_read_source = lambda: api_db.get_existing_trade_read_source(runtime.api_db_context)
-    get_gamma_active_market_filter = lambda: market_data_client.get_gamma_active_market_filter(
-        runtime.market_data_client_context
-    )
-    get_latest_content_snapshot = lambda limit=8, days=7: query_service.get_latest_content_snapshot(
-        runtime.query_context, limit=limit, days=days
-    )
-    get_market_by_id = lambda market_id: market_service.get_market_by_id(runtime.market_context, market_id)
-    get_market_chart_payload = lambda market_id, range_name="1d", interval="5m": (
-        market_service.get_market_chart_payload(
-            runtime.market_context, market_id, range_name=range_name, interval=interval
-        )
-    )
-    get_market_clob_price_series = lambda market, range_name="1d", interval="5m": (
-        market_data_client.get_market_clob_price_series(
-            runtime.market_data_client_context, market, range_name=range_name, interval=interval
-        )
-    )
-    get_market_clob_price_snapshot = lambda market: market_data_client.get_market_clob_price_snapshot(
-        runtime.market_data_client_context, market
-    )
+    get_latest_content_snapshot = lambda limit=8, days=7: query_service.get_latest_content_snapshot(runtime.query_context, limit=limit, days=days)
+    get_market_by_id = lambda market_id: runtime.panel_reader.by_id(market_id)
     get_market_group_snapshot = lambda items, kind: runtime_service.get_market_group_snapshot(
         runtime.runtime_context, items, kind=kind
     )
-    get_market_groups_payload = lambda query="", page=1, page_size=80, sort="active": (
-        market_group_service.get_market_groups_payload(
-            runtime.market_group_context, query=query, page=page, page_size=page_size, sort=sort
-        )
-    )
+    get_market_groups_payload = lambda **kw: runtime.panel_reader.groups(**kw)
     get_polymarket_macro_map_snapshot = lambda limit=12: polymarket_macro_map_service.get_polymarket_macro_map_snapshot(
         runtime.polymarket_macro_map, limit=limit
-    )
-    get_market_group_chart_payload = lambda event_id, range_name="1d": (
-        market_group_service.get_market_group_chart_payload(
-            runtime.market_group_context, event_id, range_name=range_name
-        )
     )
     get_jin10_panel_snapshot = lambda limit=24: jin10_runtime_service.get_jin10_panel_snapshot(
         runtime.jin10_runtime, limit=limit
     )
-    get_oracle_events_by_market_id = lambda market_id: market_service.get_oracle_events_by_market_id(
-        runtime.market_context, market_id
-    )
     get_recent_oracle_events = lambda limit=24: query_service.get_recent_oracle_events(
         runtime.query_recent_oracle, limit=limit
     )
-    get_recent_oracle_snapshot = lambda limit=24: market_service.get_recent_oracle_snapshot(
-        runtime.recent_oracle, limit=limit
-    )
+    get_recent_oracle_snapshot = lambda limit=24: get_snapshot_payload("snapshot:oracle_recent", str(min(50, max(1, int(limit)))), lambda: get_recent_oracle_events(limit=min(50, max(1, int(limit)))), ttl_seconds=30)
     get_recent_trades = lambda limit=24: query_service.get_recent_trades(runtime.query_context, limit=limit)
-    get_recent_trades_snapshot = lambda limit=24: market_service.get_recent_trades_snapshot(
-        runtime.market_context, limit=limit
-    )
+    get_recent_trades_snapshot = lambda limit=24: get_snapshot_payload("snapshot:trades_recent", str(min(50, max(1, int(limit)))), lambda: get_recent_trades(limit=min(50, max(1, int(limit)))), ttl_seconds=15)
     get_redis_client = lambda: api_cache.get_redis_client(runtime.cache)
     get_related_content_by_market_id = lambda market_id, limit=8, days=7, market=None: query_service.get_related_content_by_market_id(
         runtime.query_context, market_id, limit=limit, days=days, market=market
     )
-    get_runtime_lob_payload = lambda market_id: lob_service.get_runtime_lob_payload(runtime.lob, market_id)
     get_snapshot_payload = lambda namespace, cache_key, builder, *, ttl_seconds: api_cache.get_snapshot_payload(
         runtime.cache, namespace, cache_key, builder, ttl_seconds=ttl_seconds
     )
     get_suspicious_trades_snapshot = lambda limit=12: signal_service.get_suspicious_trades_snapshot(
         runtime.signal_context, limit=limit
     )
-    get_trades_by_market_id = lambda market_id, limit=100, offset=0, before=None: (
-        market_service.get_trades_by_market_id(
-            runtime.market_context, market_id, limit=limit, offset=offset, before=before
-        )
-    )
+    get_trades_by_market_id = lambda market_id, **kw: runtime.panel_reader.trades(market_id, **kw)
     get_whale_trades_snapshot = lambda limit=14: signal_service.get_whale_trades_snapshot(
         runtime.signal_context, limit=limit
     )
@@ -265,7 +209,7 @@ def bind_services(runtime: ServiceRuntime) -> None:
     )
     query_all = lambda sql, params=None: api_db.query_all(runtime.api_db_context, sql, params)
     query_one = lambda sql, params=None: api_db.query_one(runtime.api_db_context, sql, params)
-    search_markets = lambda query, limit=10: market_service.search_markets(runtime.market_context, query, limit=limit)
+    search_markets = lambda query, limit=10: runtime.panel_reader.search(query, limit=limit)
     table_exists = lambda table_name: api_db.table_exists(runtime.api_db_context, table_name)
     get_backend = lambda: runtime.SETTINGS.database.backend
     get_orderfilled_outcome_mutation_proof = lambda **kwargs: (
@@ -374,66 +318,14 @@ def bind_services(runtime: ServiceRuntime) -> None:
     }
     runtime.market_data_client_context = {
         "_resources": runtime.resources,
-        "CLOB_API_BASE": runtime.SETTINGS.clob_api_base,
-        "CLOB_TIMEOUT_SECONDS": runtime.SETTINGS.clob_timeout_seconds,
         "FINANCE_RUNTIME_TTL_SECONDS": runtime.SETTINGS.finance_runtime_ttl_seconds,
         "SETTINGS": runtime.SETTINGS,
         "_safe_float": _safe_float,
         "app": runtime.app,
         "format_trade_decimal": format_trade_decimal,
         "get_cached_runtime_payload": get_cached_runtime_payload,
-        "get_clob_session": runtime.get_clob_session,
         "requests": requests,
         "set_cached_runtime_payload": runtime.set_cached_runtime_payload,
-    }
-    runtime.market_group_context = {
-        "_resources": runtime.resources,
-        "SETTINGS": runtime.SETTINGS,
-        "app": runtime.app,
-        "get_backend": get_backend,
-        "get_cached_runtime_payload": get_cached_runtime_payload,
-        "get_market_clob_price_series": get_market_clob_price_series,
-        "get_orderfilled_outcome_mutation_proof": get_orderfilled_outcome_mutation_proof,
-        "get_snapshot_payload": get_snapshot_payload,
-        "http_json_get": http_json_get,
-        "normalize_trade": normalize_trade,
-        "query_all": query_all,
-        "set_cached_runtime_payload": runtime.set_cached_runtime_payload,
-        "table_exists": table_exists,
-        "utc_now_iso": utc_now_iso,
-    }
-    runtime.market_context = {
-        "_resources": runtime.resources,
-        "SETTINGS": runtime.SETTINGS,
-        "SNAPSHOT_STORE": runtime.SNAPSHOT_STORE,
-        "app": runtime.app,
-        "build_market_status_case": build_market_status_case,
-        "format_trade_decimal": format_trade_decimal,
-        "get_backend": get_backend,
-        "get_cached_json": get_cached_json,
-        "get_cached_runtime_payload": get_cached_runtime_payload,
-        "get_gamma_active_market_filter": get_gamma_active_market_filter,
-        "get_market_clob_price_series": get_market_clob_price_series,
-        "get_market_clob_price_snapshot": get_market_clob_price_snapshot,
-        "get_markets_payload_cached": runtime.get_markets_payload_cached,
-        "get_orderfilled_outcome_mutation_proof": get_orderfilled_outcome_mutation_proof,
-        "get_recent_oracle_events": get_recent_oracle_events,
-        "get_recent_trades": get_recent_trades,
-        "get_runtime_lob_by_token_payload": get_runtime_lob_by_token_payload,
-        "get_snapshot_payload": get_snapshot_payload,
-        "get_yahoo_market_snapshot": get_yahoo_market_snapshot,
-        "http_json_get": http_json_get,
-        "normalize_market": normalize_market,
-        "normalize_oracle_event": normalize_oracle_event,
-        "normalize_trade": normalize_trade,
-        "parse_iso_datetime": parse_iso_datetime,
-        "parse_json_list": parse_json_list,
-        "query_all": query_all,
-        "query_one": query_one,
-        "set_cached_json": runtime.set_cached_json,
-        "set_cached_runtime_payload": runtime.set_cached_runtime_payload,
-        "table_exists": table_exists,
-        "utc_now_iso": utc_now_iso,
     }
     runtime.natural_hazards_context = {
         "_resources": runtime.resources,
@@ -577,42 +469,6 @@ def bind_services(runtime: ServiceRuntime) -> None:
         "requests": requests,
         "set_cached_json": runtime.set_cached_json,
     }
-    runtime.bootstrap_cache = bootstrap_service.BootstrapCacheDependencies(
-        resources=runtime.resources,
-        builder=bootstrap_service.BootstrapCoreDependencies(
-            application=runtime.app,
-            commodity_symbols=COMMODITY_SYMBOLS,
-            finance_runtime_ttl_seconds=int(runtime.SETTINGS.finance_runtime_ttl_seconds),
-            query_all=query_all,
-            query_one=query_one,
-            utc_now_iso=utc_now_iso,
-            utc_date_days_ago=utc_date_days_ago,
-            parse_json_list=parse_json_list,
-            get_gamma_active_market_filter=get_gamma_active_market_filter,
-            enrich_market_rows_with_runtime_prices=enrich_market_rows_with_runtime_prices,
-            get_bootstrap_component_cached=runtime.get_bootstrap_component_cached,
-            get_market_groups_payload=get_market_groups_payload,
-            get_market_by_id=get_market_by_id,
-            normalize_market=normalize_market,
-            get_trades_by_market_id=get_trades_by_market_id,
-            get_oracle_events_by_market_id=get_oracle_events_by_market_id,
-            table_exists=table_exists,
-            get_related_content_by_market_id=get_related_content_by_market_id,
-            get_recent_trades_snapshot=get_recent_trades_snapshot,
-            get_recent_oracle_snapshot=get_recent_oracle_snapshot,
-            get_latest_content_snapshot=get_latest_content_snapshot,
-            get_market_group_snapshot=get_market_group_snapshot,
-            build_system_health_payload=build_system_health_payload,
-        ),
-        application=runtime.app,
-        snapshot_store=runtime.SNAPSHOT_STORE,
-        cache=runtime._bootstrap_cache,
-        cache_lock=runtime._bootstrap_cache_lock,
-        get_cached_json=get_cached_json,
-        set_cached_json=runtime.set_cached_json,
-        cache_ttl_seconds=int(runtime.SETTINGS.bootstrap_cache_ttl_seconds),
-        component_ttl_seconds=int(runtime.SETTINGS.bootstrap_component_ttl_seconds),
-    )
     runtime.dashboard_cache = bootstrap_service.DashboardCacheDependencies(
         resources=runtime.resources,
         builder=bootstrap_service.DashboardBuildDependencies(
@@ -639,43 +495,12 @@ def bind_services(runtime: ServiceRuntime) -> None:
     )
     runtime.bootstrap_prewarm = bootstrap_service.BootstrapPrewarmDependencies(
         resources=runtime.resources,
-        bootstrap=bootstrap_service.BootstrapCoreDependencies(
-            application=runtime.app,
-            commodity_symbols=COMMODITY_SYMBOLS,
-            finance_runtime_ttl_seconds=int(runtime.SETTINGS.finance_runtime_ttl_seconds),
-            query_all=query_all,
-            query_one=query_one,
-            utc_now_iso=utc_now_iso,
-            utc_date_days_ago=utc_date_days_ago,
-            parse_json_list=parse_json_list,
-            get_gamma_active_market_filter=get_gamma_active_market_filter,
-            enrich_market_rows_with_runtime_prices=enrich_market_rows_with_runtime_prices,
-            get_bootstrap_component_cached=runtime.get_bootstrap_component_cached,
-            get_market_groups_payload=get_market_groups_payload,
-            get_market_by_id=get_market_by_id,
-            normalize_market=normalize_market,
-            get_trades_by_market_id=get_trades_by_market_id,
-            get_oracle_events_by_market_id=get_oracle_events_by_market_id,
-            table_exists=table_exists,
-            get_related_content_by_market_id=get_related_content_by_market_id,
-            get_recent_trades_snapshot=get_recent_trades_snapshot,
-            get_recent_oracle_snapshot=get_recent_oracle_snapshot,
-            get_latest_content_snapshot=get_latest_content_snapshot,
-            get_market_group_snapshot=get_market_group_snapshot,
-            build_system_health_payload=build_system_health_payload,
-        ),
         application=runtime.app,
         commodity_symbols=COMMODITY_SYMBOLS,
         finance_runtime_ttl_seconds=int(runtime.SETTINGS.finance_runtime_ttl_seconds),
         signal_runtime_ttl_seconds=int(runtime.SETTINGS.signal_runtime_ttl_seconds),
         snapshot_prewarm_enabled=bool(runtime.SETTINGS.snapshot_prewarm_enabled),
-        get_market_groups_payload=get_market_groups_payload,
-        get_market_group_chart_payload=get_market_group_chart_payload,
         get_market_group_snapshot=get_market_group_snapshot,
-        get_bootstrap_component_cached=runtime.get_bootstrap_component_cached,
-        get_active_markets_snapshot=get_active_markets_snapshot,
-        get_recent_oracle_snapshot=get_recent_oracle_snapshot,
-        get_recent_trades_snapshot=get_recent_trades_snapshot,
         get_finance_market_atlas_snapshot=get_finance_market_atlas_snapshot,
         get_equity_event_command_snapshot=get_equity_event_command_snapshot,
         get_onchain_tradfi_perp_radar_snapshot=get_onchain_tradfi_perp_radar_snapshot,
@@ -684,7 +509,6 @@ def bind_services(runtime: ServiceRuntime) -> None:
         get_suspicious_trades_snapshot=get_suspicious_trades_snapshot,
         get_alpha_signal_snapshot=get_alpha_signal_snapshot,
         get_jin10_panel_snapshot=get_jin10_panel_snapshot,
-        get_bootstrap_payload_cached=get_bootstrap_payload_cached,
     )
     runtime.breaking_event_radar = breaking_event_radar_service.BreakingEventRadarDependencies(
         resources=runtime.resources,
@@ -842,34 +666,19 @@ def bind_services(runtime: ServiceRuntime) -> None:
     runtime.live_video_source = live_video_source_service.LiveVideoSourceDependencies.from_context(
         runtime.live_video_source_context
     )
-    runtime.lob = lob_service.LobDependencies(get_market_by_id)
     runtime.market_quality = market_quality_service.MarketQualityDependencies(
+        get_recent_oracle_snapshot=get_recent_oracle_snapshot,
         resources=runtime.resources,
         application=runtime.app,
         query_one=query_one,
         query_all=query_all,
         table_exists=table_exists,
         get_snapshot_payload=get_snapshot_payload,
-        get_recent_oracle_snapshot=get_recent_oracle_snapshot,
         utc_now_iso=utc_now_iso,
     )
-    runtime.panel_reader = market_panel_read_service.MarketPanelReader(runtime)
-    runtime.recent_oracle = market_service.RecentOracleDependencies.from_context(runtime.market_context)
-    runtime.market_workspace_cache = market_workspace_cache_service.MarketWorkspaceCacheDependencies(
-        resources=runtime.resources,
-        cache=runtime.cache,
-        application=runtime.app,
-        snapshot_store=runtime.SNAPSHOT_STORE,
-        utc_now_iso=utc_now_iso,
-        build_detail=lambda market_id: market_service.get_market_detail_payload(runtime.market_context, market_id),
-        build_chart=get_market_chart_payload,
-        build_flow=get_trades_by_market_id,
-        build_lob=get_runtime_lob_payload,
-        get_market_by_id=get_market_by_id,
-        detail_ttl=runtime.SETTINGS.workspace_detail_ttl_seconds,
-        chart_ttl=runtime.SETTINGS.workspace_chart_ttl_seconds,
-        flow_ttl=runtime.SETTINGS.workspace_flow_ttl_seconds,
-    )
+    runtime.panel_reader = market_service.MarketPanelReader(runtime)
+    runtime.get_recent_trades_snapshot = get_recent_trades_snapshot
+    runtime.get_recent_oracle_snapshot = get_recent_oracle_snapshot
     runtime.natural_hazard = NaturalHazardDependencies.from_context(runtime.natural_hazards_context)
     runtime.polymarket_macro_map = polymarket_macro_map_service.PolymarketMacroMapDependencies(
         settings=runtime.SETTINGS,
@@ -935,11 +744,6 @@ def bind_services(runtime: ServiceRuntime) -> None:
         "get_trades_by_market_id": get_trades_by_market_id,
         "set_cached_json": runtime.set_cached_json,
     }
-    runtime.agent_snapshot_context["get_trades_by_market_id"] = lambda market_id, limit=100, offset=0: (
-        market_workspace_cache_service.get_market_flow_rows(
-            runtime.market_workspace_cache, market_id, limit=limit, offset=offset
-        )
-    )
 
 
 from api.routes import analytics as analytics_routes
@@ -998,8 +802,8 @@ def build_blueprints(runtime: ServiceRuntime):
         ),
         bootstrap_routes.create_bootstrap_blueprint(
             bootstrap_routes.BootstrapRouteDependencies(
+                get_bootstrap_payload_cached=bootstrap_service.build_bootstrap_payload,
                 get_dashboard_payload_cached=runtime.get_dashboard_payload_cached,
-                get_bootstrap_payload_cached=runtime.panel_reader.bootstrap,
                 search_markets=lambda query, limit=10: runtime.panel_reader.catalog(query=query, page_size=limit),
             )
         ),
@@ -1053,8 +857,8 @@ def build_blueprints(runtime: ServiceRuntime):
         market_groups_routes.create_market_groups_blueprint(
             market_groups_routes.MarketGroupRouteDependencies(
                 get_market_groups_payload=runtime.panel_reader.groups,
-                get_market_group_detail_payload=runtime.panel_reader.group_detail,
                 get_market_group_chart_payload=runtime.panel_reader.group_chart,
+                get_market_group_detail_payload=runtime.panel_reader.group_detail,
             )
         ),
         runtime_panels_routes.create_runtime_panels_blueprint(
@@ -1143,9 +947,7 @@ def build_blueprints(runtime: ServiceRuntime):
                                         )
                                     ),
                                     commodity_symbols=COMMODITY_SYMBOLS,
-                                    search_markets=lambda query, limit=10: market_service.search_markets(
-                                        runtime.market_context, query, limit=limit
-                                    ),
+                                    search_markets=runtime.panel_reader.search,
                                     application=runtime.app,
                                     utc_now_iso=utc_now_iso,
                                 ),
@@ -1327,15 +1129,9 @@ def build_blueprints(runtime: ServiceRuntime):
         mcp_routes.create_mcp_blueprint(
             mcp_routes.McpRouteDependencies(
                 authenticate=auth_service.authenticate_request,
-                search_markets=lambda query, limit=10: market_service.search_markets(
-                    runtime.market_context, query, limit=limit
-                ),
-                get_market_workspace=lambda market_id: market_workspace_cache_service.get_market_workspace_payload(
-                    runtime.market_workspace_cache, market_id
-                ),
-                get_market_oracle=lambda market_id: market_service.get_market_oracle_payload(
-                    runtime.market_context, market_id
-                ),
+                search_markets=runtime.panel_reader.search,
+                get_market_workspace=runtime.panel_reader.workspace,
+                get_market_oracle=runtime.panel_reader.oracle,
                 get_market_data_quality=lambda: market_quality_service.get_market_data_quality_payload(
                     runtime.market_quality
                 ),
@@ -1387,6 +1183,8 @@ def build_blueprints(runtime: ServiceRuntime):
         ),
         markets_routes.create_markets_blueprint(
             markets_routes.MarketRouteDependencies(
+                get_recent_trades_snapshot=runtime.get_recent_trades_snapshot,
+                get_recent_oracle_snapshot=runtime.get_recent_oracle_snapshot,
                 sanitize_payload=lambda payload, **kw: (
                     markets_routes.outcome_semantics_service.sanitize_public_market_payload(
                         {
@@ -1398,19 +1196,13 @@ def build_blueprints(runtime: ServiceRuntime):
                     )
                 ),
                 get_markets_payload=runtime.panel_reader.catalog,
-                get_market_by_id=lambda market_id: market_service.get_market_by_id(runtime.market_context, market_id),
-                get_market_by_slug=lambda slug: market_service.get_market_by_slug(runtime.market_context, slug),
+                get_market_by_id=runtime.panel_reader.by_id,
+                get_market_by_slug=runtime.panel_reader.by_slug,
                 normalize_market=normalize_market,
                 get_trades_by_market_id=runtime.panel_reader.trades,
                 get_market_flow_payload=runtime.panel_reader.flow,
                 get_panel_health=runtime.panel_reader.health,
-                get_recent_trades_snapshot=lambda limit=24: market_service.get_recent_trades_snapshot(
-                    runtime.market_context, limit=limit
-                ),
                 get_market_oracle_payload=runtime.panel_reader.oracle,
-                get_recent_oracle_snapshot=lambda limit=24: market_service.get_recent_oracle_snapshot(
-                    runtime.recent_oracle, limit=limit
-                ),
                 get_market_detail_payload=runtime.panel_reader.detail,
                 get_market_chart_payload=runtime.panel_reader.chart,
                 get_market_workspace_payload=runtime.panel_reader.workspace,
@@ -1420,8 +1212,8 @@ def build_blueprints(runtime: ServiceRuntime):
         lob_routes.create_lob_blueprint(
             lob_routes.LobRouteDependencies(
                 runtime.panel_reader.book,
-                runtime.panel_reader.book_by_token,
-                runtime.panel_reader.book_by_token,
+                lob_service.get_runtime_lob_by_token_payload,
+                lob_service.get_runtime_lob_by_token_payload,
             )
         ),
         schema_routes.create_schema_blueprint(),

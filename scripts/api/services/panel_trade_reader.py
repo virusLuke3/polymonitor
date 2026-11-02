@@ -33,7 +33,7 @@ def read_flow(reader, market_id, *, limit=50, before=None, chart_range=None):
                 raise TimeoutError("Panel ClickHouse rate budget full")
             settings = replace(reader.runtime.SETTINGS.clickhouse, max_threads=1, max_memory_bytes=256 * 1024**2,
                                max_bytes_to_read=16 * 1024**2, max_execution_seconds=2)
-            context = {**reader.runtime.market_context, "query_all": reader.semantic_query,
+            context = {"app": reader.runtime.app, "get_backend": lambda: "postgres", "query_all": reader.semantic_query,
                        "_resources": SimpleNamespace(clickhouse=settings, clickhouse_read_timeout_seconds=None,
                                                      clickhouse_slots=threading.BoundedSemaphore(1))}
             deadline = time.monotonic() + 4.0
@@ -61,7 +61,7 @@ def read_flow(reader, market_id, *, limit=50, before=None, chart_range=None):
             upper = int(watermarks[0]["block_number"])
             if before:
                 upper = min(upper, int(before[0]))
-            from api.services.market_panel_read_service import RANGES
+            from api.services.market_service import RANGES
             # The block bound is a scan guard, not proof of time completeness.
             # Timestamp filtering below enforces the requested chart interval.
             seconds = RANGES[chart_range] if chart_range else 86400

@@ -41,9 +41,6 @@ not prove an empty market history.
 - The new namespace holds at most 512 payloads, each at most 1 MiB, plus 512 small
   cooldown markers. Stale reuse expires after 60 s for flow, 120 s for Oracle,
   and 300 s for catalog/chart/metadata. Unrelated snapshot namespaces are untouched.
-- API-mediated LOB reads share the same token-pair cache across browsers, with two concurrent
-  upstream reads and eight reads/s (burst four). Book timestamps and continuity
-  come from the existing reader; unavailable books are not reused as live.
 - Source outcome evidence is cached for 30 s with no stale reuse. Public value
   projection still revalidates each response; cached capability assertions are
   not accepted as evidence. Repeated receipt JSON is deduplicated without
@@ -58,8 +55,8 @@ shares a 2 s cache, deduplicates same-pair requests, admits at most four snapsho
 reads, retains at most 128 keys, and cools failed reads for 15 s. It reads the
 committed gateway snapshot using a read-only SQLite identity lookup; this route
 does not open PostgreSQL or ClickHouse connections. Nginx additionally limits
-per-client book requests and concurrent connections. The API-mediated limits
-above apply to the compatibility market-ID and batch endpoints.
+per-client book requests and concurrent connections. The market-ID and batch endpoints forward to this same reader; there is no
+second book cache in the API.
 
 ## Health and release
 
@@ -75,3 +72,9 @@ read-only SQL cleanup, and browser polling cancellation/backoff. Production
 acceptance additionally checks release SHA, actual source responses, and desktop
 and mobile screenshots without substituting APIs or tiles. This change does not
 start collectors, restart a host, or restore maintenance-stopped trading tasks.
+
+All market HTTP routes, MCP tools, and market-linking consumers use
+`market_service.py`. The retired market/group serving implementation, workspace
+cache, exchange history fallback, bootstrap seed job and hover prefetch are
+removed. Group and workspace URLs remain thin compositions of the same bounded
+reads. Finance and other non-market seed jobs retain their existing ownership.

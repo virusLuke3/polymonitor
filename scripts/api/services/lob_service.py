@@ -4,11 +4,8 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
-from typing import Any, Dict
+from typing import Any
 
 import requests
 
@@ -27,9 +24,6 @@ def get_lob_runtime_status() -> dict[str, Any]:
         return {"source": "market-data", "status": "unavailable"}
 
 
-@dataclass(frozen=True)
-class LobDependencies:
-    get_market_by_id: Callable[[int], dict[str, Any] | None]
 
 
 def _timestamp(value: Any) -> datetime | None:
@@ -119,15 +113,3 @@ def get_runtime_lob_by_token_payload(
             "bookStatus": "unavailable",
             "fallbackReason": "live-source-unavailable",
         }
-
-
-def get_runtime_lob_payload(deps: LobDependencies, market_id: int) -> dict[str, Any]:
-    market = deps.get_market_by_id(market_id)
-    if not market:
-        return {"error": "Market not found", "_status": 404}
-    return get_runtime_lob_by_token_payload(
-        market.get("yes_token_id") or "",
-        no_token_id=market.get("no_token_id") or "",
-        market_title=market.get("title") or "",
-        market_id=market_id,
-    )

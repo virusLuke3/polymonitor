@@ -10,7 +10,6 @@ from flask import Flask
 
 from api.routes.runtime_panels import create_runtime_panels_blueprint
 from api.runtime_panels import RUNTIME_PANEL_MODULES, get_default_panel_ids
-from api.services.bootstrap_service import BootstrapPrewarmDependencies
 
 
 def test_hazard_http_cache_never_outlives_source_freshness(monkeypatch):
@@ -197,8 +196,10 @@ def test_default_workspace_panel_ids_include_runtime_and_static_panels():
     assert len(panel_ids) == len(set(panel_ids))
 
 
-def test_api_server_context_satisfies_bootstrap_prewarm_contract():
+def test_api_runtime_has_one_market_reader():
     from api.runtime import ServiceRuntime
 
     with ServiceRuntime() as runtime:
-        assert callable(runtime.bootstrap_prewarm.get_active_markets_snapshot)
+        assert callable(runtime.panel_reader.catalog)
+        assert not hasattr(runtime, "market_workspace_cache")
+        assert not hasattr(runtime, "market_context")

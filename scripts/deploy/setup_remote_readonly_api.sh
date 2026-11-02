@@ -425,7 +425,6 @@ GCP_UNITS=(
   polydata-gcp.target
   polydata.target
   polydata-alpha-signal-seed.service
-  polydata-bootstrap-seed.service
   polydata-content-topic-refresh.service
   polydata-cpi-release-calendar-seed.service
   polydata-crypto-funding-seed.service

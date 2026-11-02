@@ -119,14 +119,12 @@ export function useMarketFocus({ bootstrap, markets, marketGroups, catalogLoaded
     );
   }, [selectedMarketId, selectedMarketGroupChartRange]);
 
-  // Hovering catalog rows must not start database work for unselected markets.
-  const prefetchMarketFocus = (_marketIds: number[]) => undefined;
   const selectedMarketGroupChart: MarketGroupChartPayload | null = null;
   void marketGroups;
   return {
     selectedMarketId, setSelectedMarketId: selectMarket, resetMarketSelection,
     selectedMarketGroupId, selectedMarketGroupOutcomeKey, setSelectedMarketGroupOutcomeKey,
     selectedMarketGroupDetail, selectedMarketGroupChart, selectedMarketGroupChartRange,
-    setSelectedMarketGroupChartRange, bundle, bundleLoading, error, focusMarketGroup, prefetchMarketFocus,
+    setSelectedMarketGroupChartRange, bundle, bundleLoading, error, focusMarketGroup,
   };
 }

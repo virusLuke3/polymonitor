@@ -156,9 +156,6 @@ class MarketSelectionSettings:
 @dataclass(frozen=True)
 class ApiSettings:
     market_selection: MarketSelectionSettings
-    workspace_detail_ttl_seconds: int
-    workspace_chart_ttl_seconds: int
-    workspace_flow_ttl_seconds: int
     database: DatabaseSettings
     deploy_role: str
     host: str
@@ -167,8 +164,6 @@ class ApiSettings:
     db_path: str
     dashboard_cache_ttl_seconds: int
     markets_cache_ttl_seconds: int
-    bootstrap_cache_ttl_seconds: int
-    bootstrap_component_ttl_seconds: int
     recent_trade_window: int
     address_cache_ttl_seconds: int
     redis_url: str
@@ -176,12 +171,9 @@ class ApiSettings:
     snapshot_sqlite_path: str
     snapshot_prewarm_enabled: bool
     gamma_api_base: str
-    clob_api_base: str
     polymarket_macro_map_source_url: str
     polymarket_macro_map_ttl_seconds: int
     polymarket_macro_map_search_terms: tuple[str, ...]
-    clob_timeout_seconds: int
-    clob_price_cache_ttl_seconds: int
     finance_runtime_ttl_seconds: int
     finance_defillama_yields_url: str
     finance_alternative_fng_url: str
@@ -310,9 +302,6 @@ class ApiSettings:
     snapshot_refresh_workers: int = field(
         default_factory=lambda: max(1, min(_get_int("POLYDATA_SNAPSHOT_REFRESH_WORKERS", 2), 8))
     )
-    workspace_refresh_workers: int = field(
-        default_factory=lambda: max(1, min(_get_int("POLYDATA_MARKET_FOCUS_REFRESH_WORKERS", 2), 12))
-    )
 
 
 def load_api_settings() -> ApiSettings:
@@ -329,9 +318,6 @@ def load_api_settings() -> ApiSettings:
             min_price=Decimal(_get_str("POLYDATA_ACTIVE_MARKET_MIN_PRICE", "0.05")),
             max_price=Decimal(_get_str("POLYDATA_ACTIVE_MARKET_MAX_PRICE", "0.95")),
         ),
-        workspace_detail_ttl_seconds=_get_int("POLYDATA_MARKET_WORKSPACE_DETAIL_TTL_SECONDS", 120),
-        workspace_chart_ttl_seconds=_get_int("POLYDATA_MARKET_WORKSPACE_CHART_TTL_SECONDS", 90),
-        workspace_flow_ttl_seconds=_get_int("POLYDATA_MARKET_WORKSPACE_FLOW_TTL_SECONDS", 8),
         database=DatabaseSettings.from_environment(),
         deploy_role=deploy_role,
         host=_get_str("POLYDATA_API_HOST", "127.0.0.1"),
@@ -340,8 +326,6 @@ def load_api_settings() -> ApiSettings:
         db_path=_get_str("POLYMARKET_DB", DEFAULT_DB_PATH),
         dashboard_cache_ttl_seconds=_get_int("POLYDATA_DASHBOARD_CACHE_TTL_SECONDS", 300),
         markets_cache_ttl_seconds=_get_int("POLYDATA_MARKETS_CACHE_TTL_SECONDS", 60),
-        bootstrap_cache_ttl_seconds=_get_int("POLYDATA_BOOTSTRAP_CACHE_TTL_SECONDS", 30),
-        bootstrap_component_ttl_seconds=_get_int("POLYDATA_BOOTSTRAP_COMPONENT_TTL_SECONDS", 60),
         recent_trade_window=_get_int("POLYDATA_DASHBOARD_TRADE_WINDOW", 250000),
         address_cache_ttl_seconds=_get_int("POLYDATA_ADDRESS_CACHE_TTL_SECONDS", 120),
         redis_url=_get_str("POLYDATA_REDIS_URL", ""),
@@ -349,15 +333,12 @@ def load_api_settings() -> ApiSettings:
         snapshot_sqlite_path=_get_str("POLYDATA_SNAPSHOT_SQLITE_PATH", snapshot_default),
         snapshot_prewarm_enabled=_get_bool("POLYDATA_SNAPSHOT_PREWARM", snapshot_prewarm_default),
         gamma_api_base=_get_str("POLYDATA_GAMMA_API_BASE", ("")),
-        clob_api_base=_get_str("POLYDATA_CLOB_API_BASE", ("")),
         polymarket_macro_map_source_url=_get_str(
             "POLYDATA_MACRO_MARKET_MAP_SOURCE_URL",
             env_str("POLYDATA_GAMMA_API_BASE"),
         ),
         polymarket_macro_map_ttl_seconds=_get_int("POLYDATA_MACRO_MARKET_MAP_TTL_SECONDS", 180),
         polymarket_macro_map_search_terms=_get_csv("POLYDATA_MACRO_MARKET_MAP_SEARCH_TERMS", ()),
-        clob_timeout_seconds=_get_int("POLYDATA_CLOB_TIMEOUT_SECONDS", 12),
-        clob_price_cache_ttl_seconds=_get_int("POLYDATA_CLOB_PRICE_CACHE_TTL_SECONDS", 45),
         finance_runtime_ttl_seconds=_get_int("POLYDATA_FINANCE_RUNTIME_TTL_SECONDS", 300),
         finance_defillama_yields_url=_get_str("POLYDATA_FINANCE_DEFILLAMA_YIELDS_URL", "https://yields.llama.fi/pools"),
         finance_alternative_fng_url=_get_str("POLYDATA_FINANCE_ALTERNATIVE_FNG_URL", "https://api.alternative.me/fng/"),

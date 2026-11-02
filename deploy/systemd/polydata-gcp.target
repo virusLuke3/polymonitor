@@ -8,7 +8,6 @@ Wants=polydata-serving-healthcheck.timer
 Wants=polydata-content-topic-refresh.service
 Wants=polydata-alpha-signal-seed.service
 Wants=polydata-breaking-event-radar-seed.service
-Wants=polydata-bootstrap-seed.service
 Wants=polydata-cpi-release-calendar-seed.service
 Wants=polydata-crypto-funding-seed.service
 Wants=polydata-defi-token-watch-seed.service

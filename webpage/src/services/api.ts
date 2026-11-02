@@ -6,11 +6,8 @@ import type {
   MarketWideAiInsightLens,
   MarketWideAiInsightResponse,
   MarketSummary,
-  MarketGroupChartPayload,
   MarketGroupDetail,
   MarketGroupOutcome,
-  MarketGroupsPayload,
-  MarketGroupSort,
   MarketListItem,
   MarketDataQualityPayload,
   MarketsPayload,
@@ -189,7 +186,7 @@ export function fetchMarketSearch(query: string, limit = 12, signal?: AbortSigna
   return apiGetWithTimeout<{ items: MarketListItem[] }>(`/markets?${params.toString()}`, 5000, signal);
 }
 
-export function fetchMarketsPage(page = 1, query = '', pageSize = 160, signal?: AbortSignal) {
+export function fetchMarketsPage(page = 1, query = '', pageSize = 50, signal?: AbortSignal) {
   const params = new URLSearchParams({
     page: String(page),
     pageSize: String(pageSize),
@@ -199,64 +196,9 @@ export function fetchMarketsPage(page = 1, query = '', pageSize = 160, signal?: 
   return apiGetWithTimeout<MarketsPayload>(`/markets?${params.toString()}`, 10000, signal);
 }
 
-export async function fetchAllActiveMarkets(query = '', pageSize = 160, maxPages = 8, signal?: AbortSignal,
-  onFirstPage?: (payload: MarketsPayload) => void) {
-  const items: MarketsPayload['items'] = [];
-  let page = 1;
-  let total = 0;
-  let totalPages = 1;
-  let hasMore = false;
 
-  do {
-    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-    const payload = await fetchMarketsPage(page, query, pageSize, signal);
-    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-    if (page === 1) onFirstPage?.(payload);
-    items.push(...(payload.items || []));
-    total = payload.pagination?.total || items.length;
-    totalPages = payload.pagination?.totalPages || page;
-    hasMore = Boolean(payload.pagination?.hasMore);
-    page += 1;
-  } while (hasMore && page <= maxPages);
 
-  return {
-    items,
-    pagination: {
-      page: 1,
-      pageSize: items.length,
-      total,
-      totalPages,
-      hasMore,
-    },
-  } satisfies MarketsPayload;
-}
 
-export function fetchMarketGroups(query = '', pageSize = 80, sort: MarketGroupSort = 'active', signal?: AbortSignal) {
-  const params = new URLSearchParams({
-    page: '1',
-    pageSize: String(pageSize),
-    sort,
-  });
-  if (query.trim()) params.set('q', query.trim());
-  return apiGetWithTimeout<MarketGroupsPayload>(`/market-groups?${params.toString()}`, 9000, signal);
-}
-
-export function fetchMarketGroupDetail(eventId: string, timeoutMs = 3500, signal?: AbortSignal) {
-  return apiGetWithTimeout<MarketGroupDetail>(`/market-groups/${encodeURIComponent(eventId)}/detail`, timeoutMs, signal);
-}
-
-export function fetchMarketGroupChart(
-  eventId: string,
-  range: '1h' | '6h' | '1d' | '1w' | '1m' | 'all' = '1d',
-  timeoutMs = 4000,
-  signal?: AbortSignal,
-) {
-  return apiGetWithTimeout<MarketGroupChartPayload>(
-    `/market-groups/${encodeURIComponent(eventId)}/chart?range=${encodeURIComponent(range)}`,
-    timeoutMs,
-    signal,
-  );
-}
 
 export async function fetchSystemHealth(signal?: AbortSignal): Promise<SystemHealth> {
   // The public dashboard never requests the operations-only admin endpoint.
@@ -268,13 +210,7 @@ export function fetchMarketDataQuality(signal?: AbortSignal) {
   return apiGetWithTimeout<MarketDataQualityPayload>('/data-quality/markets', 45_000, signal);
 }
 
-export function fetchRecentTrades(limit = 24, signal?: AbortSignal) {
-  return apiGet<TradeRow[]>(`/trades/recent?limit=${limit}`, signal);
-}
 
-export function fetchRecentOracle(limit = 24, signal?: AbortSignal) {
-  return apiGet<OraclePayload['timeline']>(`/oracle/recent?limit=${limit}`, signal);
-}
 
 export function fetchLatestContent(limit = 8, signal?: AbortSignal, days = 7) {
   return apiGet<ContentPayload>(`/content/latest?limit=${limit}&days=${days}`, signal);
@@ -674,10 +610,6 @@ function normalizeMarketBundlePayload(payload: MarketDetailBundlePayload, market
   };
 }
 
-async function fetchMarketDetailBundle(marketId: number, timeoutMs = 6500, signal?: AbortSignal): Promise<WorkspaceBundle> {
-  const payload = await apiGetWithTimeout<MarketDetailBundlePayload>(`/markets/${marketId}/detail`, timeoutMs, signal);
-  return normalizeMarketBundlePayload(payload, marketId);
-}
 
 async function fetchMarketWorkspaceBundle(marketId: number, timeoutMs = 6500, signal?: AbortSignal): Promise<WorkspaceBundle> {
   const payload = await apiGetWithTimeout<MarketDetailBundlePayload>(`/markets/${marketId}/workspace`, timeoutMs, signal);
@@ -739,9 +671,6 @@ export function fetchMarketContent(marketId: number, limit = 20, timeoutMs = 500
     });
 }
 
-function fetchMarketLob(marketId: number, timeoutMs = 4000, signal?: AbortSignal) {
-  return apiGetWithTimeout<LobPayload>(`/runtime/lob/${marketId}`, timeoutMs, signal);
-}
 
 export function fetchWeatherBooks(tokens: string[], signal?: AbortSignal) {
   const params = new URLSearchParams({ tokens: tokens.join(','), _ts: String(Date.now()) });
@@ -803,12 +732,11 @@ export function fetchMarketWideAiSnapshot(lens: MarketWideAiInsightLens, timeout
 
 export async function fetchWorkspaceBundle(
   marketId: number,
-  options: { includeContent?: boolean; contentDays?: number; includeLob?: boolean; signal?: AbortSignal } = {},
+  options: { includeContent?: boolean; contentDays?: number; signal?: AbortSignal } = {},
 ): Promise<WorkspaceBundle> {
   const includeContent = Boolean(options.includeContent);
-  const includeLob = Boolean(options.includeLob);
   const contentDays = options.contentDays === 30 ? 30 : 7;
-  const inflightKey = `${marketId}:${includeContent ? `content:${contentDays}` : 'base'}:${includeLob ? 'lob' : 'no-lob'}`;
+  const inflightKey = `${marketId}:${includeContent ? `content:${contentDays}` : 'base'}`;
   const inflight = options.signal ? null : workspaceBundleInflight.get(inflightKey);
   if (inflight) return inflight;
 
@@ -816,13 +744,8 @@ export async function fetchWorkspaceBundle(
     const contentPromise = includeContent
       ? fetchMarketContent(marketId, 20, 8000, options.signal, contentDays)
       : Promise.resolve(null);
-    const lobPromise = includeLob ? fetchMarketLob(marketId, 1800, options.signal) : Promise.resolve(null);
-    const detailPromise = fetchMarketWorkspaceBundle(marketId, 22000, options.signal)
-      .catch((error) => {
-        if (options.signal?.aborted || error instanceof ApiHttpError && [429, 502, 503, 504].includes(error.status)) throw error;
-        return fetchMarketDetailBundle(marketId, 12000, options.signal);
-      });
-    const [detailResult, contentResult, lobResult] = await Promise.allSettled([detailPromise, contentPromise, lobPromise]);
+    const detailPromise = fetchMarketWorkspaceBundle(marketId, 22000, options.signal);
+    const [detailResult, contentResult] = await Promise.allSettled([detailPromise, contentPromise]);
     if (detailResult.status === 'rejected') throw detailResult.reason;
     const detailBundle = detailResult.value;
     const secondary: WorkspaceBundle = {
@@ -841,7 +764,7 @@ export async function fetchWorkspaceBundle(
         scope: 'market', marketId, items: [], count: 0, status: 'unavailable',
         empty_reason: 'content_request_failed', sourceMode: 'database:free-public',
       },
-      lob: includeLob && lobResult.status === 'fulfilled' ? lobResult.value : null,
+      lob: null,
       servingSource: null,
       servingUpdatedAt: null,
       generatedAt: null,
