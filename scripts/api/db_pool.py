@@ -189,7 +189,11 @@ def build_api_connection_factory(
     """Return a pooled API connector while retaining non-PostgreSQL behavior."""
 
     # A consumer must never disable admission or expand without a host budget.
-    pool_size = min(4, max(1, _env_int("POLYDATA_API_POSTGRES_POOL_SIZE", 1)))
+    # Reserve a share for every serving worker. A worker retaining all four
+    # idle connections would otherwise starve its sibling indefinitely.
+    workers = max(1, _env_int("POLYDATA_GUNICORN_WORKERS", 2))
+    worker_share = max(1, 4 // workers)
+    pool_size = min(worker_share, max(1, _env_int("POLYDATA_API_POSTGRES_POOL_SIZE", 1)))
     pool = ApiPostgresConnectionPool(
         connection_factory,
         max_size=pool_size,

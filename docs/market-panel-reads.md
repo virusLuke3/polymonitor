@@ -22,6 +22,8 @@ not prove an empty market history.
 ## Resource boundaries
 
 - At most four PostgreSQL connections across API worker generations on one host.
+  Each worker is capped to its share (two each for two workers), so idle
+  connections in one worker cannot consume its sibling's entire allowance.
   Alpha display reads share this pool. Queue admission is 200 ms; a cold TCP
   connection has a separate eight-second deadline. Connections have a recognizable
   application name, and every returned lease is rolled back.

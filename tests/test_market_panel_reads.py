@@ -173,3 +173,24 @@ def test_lob_cache_is_shared_by_token_pair_not_browser_metadata(runtime, monkeyp
     source.assert_called_once()
     source.side_effect = TimeoutError()
     assert reader.book_by_token("3")["bookStatus"] == "unavailable"
+
+
+def test_worker_pool_cannot_reserve_sibling_connection_share(runtime, monkeypatch):
+    from api.db_pool import build_api_connection_factory
+    monkeypatch.setenv("POLYDATA_GUNICORN_WORKERS", "2")
+    monkeypatch.setenv("POLYDATA_API_POSTGRES_POOL_SIZE", "16")
+    factory = Mock(side_effect=lambda **kwargs: Mock())
+    connect = build_api_connection_factory(factory, lambda: "postgres")
+    first, second = connect(), connect()
+    try:
+        with pytest.raises(TimeoutError):
+            connect()
+        assert factory.call_count == 2
+        first.close()
+        third = connect()
+        third.close()
+        assert factory.call_count == 2
+    finally:
+        first.close()
+        second.close()
+        connect.close()
