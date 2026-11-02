@@ -664,7 +664,11 @@ function ActiveMarketsPanel({
         <em>{t('atlasMarket.catalog.sync', { time: generatedAtLabel })} · {t('atlasMarket.catalog.auto', { seconds: MARKET_CATALOG_AUTO_REFRESH_MS / 1000 })}</em>
       </div>
       {searchResult.loading ? <p>{t('atlasMarket.catalog.refreshing')}</p> : searchResult.unavailable ? <p>{t('atlasMarket.catalog.error')}</p> : null}
-      <CatalogClock.Provider value={clockNow}>{rows}</CatalogClock.Provider>
+      <CatalogClock.Provider value={clockNow}>
+        {!panelCount && (marketCatalogError || searchResult.unavailable || marketCatalogRefreshing)
+          ? emptyState(t(marketCatalogError || searchResult.unavailable ? 'atlasMarket.catalog.error' : 'atlasMarket.catalog.refreshing'), localizedEmptyCopy(i18n))
+          : rows}
+      </CatalogClock.Provider>
     </Panel>
   );
 }

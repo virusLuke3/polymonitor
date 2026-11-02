@@ -214,6 +214,23 @@ def test_catalog_sort_cache_is_separate_and_unsupported_sorts_fail_before_query(
     assert reader.query.call_count == 3
 
 
+def test_catalog_does_not_wait_for_slow_trade_and_chart_snapshot_builds(runtime):
+    reader = MarketPanelReader(runtime)
+    reader.query = Mock(return_value=[])
+    with try_permit('panel-builds', 2), try_permit('panel-builds', 2):
+        assert reader.catalog(sort='new')['status'] == 'ok'
+        assert reader.query.call_count == 1
+
+
+def test_catalog_still_respects_the_postgres_connection_budget(runtime):
+    reader = MarketPanelReader(runtime)
+    runtime.SETTINGS.database = SimpleNamespace(sqlite_path='')
+    runtime._api_connection_factory = Mock()
+    with try_permit('panel-postgres', 2), try_permit('panel-postgres', 2):
+        assert reader.catalog()['status'] == 'unavailable'
+    runtime._api_connection_factory.assert_not_called()
+
+
 def test_catalog_does_not_read_missing_volume_from_metadata_or_invent_trade_prices():
     item = MarketPanelReader._item({'id': 7, 'catalog_payload': {'volume24hr': 999},
         'latest_yes_price': '0.9', 'volume_24h': None, 'quote_observed_at': 'observed',

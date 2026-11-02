@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiTimeoutError, withRuntimeRequestBudget, fetchMarketsPage, fetchAviationViewport, fetchMarketWideAiSnapshot, fetchNaturalHazardMapSource, fetchRuntimeAlpha, fetchRuntimeGeoSanctionsShock, fetchRuntimeGlobalTemperatureMonitor, fetchSystemHealth, fetchWorkspaceBundle } from './api';
+import { ApiHttpError, ApiTimeoutError, withRuntimeRequestBudget, fetchMarketsPage, fetchAviationViewport, fetchMarketWideAiSnapshot, fetchNaturalHazardMapSource, fetchRuntimeAlpha, fetchRuntimeGeoSanctionsShock, fetchRuntimeGlobalTemperatureMonitor, fetchSystemHealth, fetchWorkspaceBundle } from './api';
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
@@ -193,4 +193,11 @@ describe('market catalog sorting', () => {
     await fetchMarketsPage(1, '', 50, undefined, 'new');
     expect(String(vi.mocked(fetch).mock.calls[1]?.[0])).toContain('sort=new');
   });
+});
+
+
+it('honors duplicate Retry-After headers without treating invalid values as a retry time', () => {
+  expect(new ApiHttpError(503, '/markets', '15, 15').retryAfterMs).toBe(15_000);
+  expect(new ApiHttpError(503, '/markets', '15, 120').retryAfterMs).toBe(120_000);
+  expect(new ApiHttpError(503, '/markets', 'invalid').retryAfterMs).toBeNull();
 });

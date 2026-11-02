@@ -64,8 +64,11 @@ export class ApiHttpError extends Error {
   readonly retryAfterMs: number | null;
   constructor(readonly status: number, path: string, retryAfter: string | null, readonly verificationPending = false) {
     super(`API ${status} for ${path}`); this.name = 'ApiHttpError';
-    const seconds = Number(retryAfter);
-    this.retryAfterMs = retryAfter == null ? null : Number.isFinite(seconds) ? Math.max(0, seconds * 1000) : Math.max(0, Date.parse(retryAfter) - Date.now());
+    // A proxy may append the same numeric Retry-After as the upstream.
+    const seconds = retryAfter && /^\s*\d+(?:\s*,\s*\d+)*\s*$/.test(retryAfter)
+      ? Math.max(...retryAfter.split(',').map(Number)) : Number(retryAfter);
+    const delay = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(retryAfter || '') - Date.now();
+    this.retryAfterMs = retryAfter == null || !Number.isFinite(delay) ? null : Math.max(0, delay);
   }
 }
 

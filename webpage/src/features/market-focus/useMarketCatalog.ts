@@ -19,9 +19,11 @@ export function useMarketCatalog(bootstrap: BootstrapPayload | null, enabled: bo
     if (document.hidden && !manual) return Promise.resolve();
     if (Date.now() < retryAt.current) return Promise.resolve();
     const controller = new AbortController();
-    if (manual) { setRefreshing(true); setError(null); }
+    setRefreshing(true);
+    if (manual) setError(null);
     const isCurrent = () => !controller.signal.aborted && mounted.current;
     const errors: string[] = [];
+    let retryAfterMs = 0;
     const promise = Promise.allSettled([
       fetchMarketsPage(1, '', 50, controller.signal, sort).then((catalog) => {
         if (!isCurrent()) return;
@@ -29,13 +31,16 @@ export function useMarketCatalog(bootstrap: BootstrapPayload | null, enabled: bo
         setMarkets((catalog.items || []).map((item) => ({ ...item, catalogFetchedAt: catalog.generatedAt }))); setMarketGroups([]); setLoaded(true);
         if (catalog.status === 'stale' && catalog.refreshStatus !== 'refreshing') errors.push('Catalog refresh failed; showing the last stored page.');
       }).catch((error) => {
-        if (isCurrent()) errors.push(error instanceof Error ? error.message : 'Market catalog refresh failed.');
+        if (isCurrent()) {
+          errors.push(error instanceof Error ? error.message : 'Market catalog refresh failed.');
+          retryAfterMs = Number(error?.retryAfterMs) || 0;
+        }
       }),
     ]).then(() => {
       if (isCurrent()) {
         setLoaded(true); setError(errors[0] || null);
         failures.current = errors.length ? Math.min(3, failures.current + 1) : 0;
-        retryAt.current = Date.now() + (errors.length ? 30_000 * 2 ** failures.current : 0);
+        retryAt.current = Date.now() + (errors.length ? Math.max(retryAfterMs, 15_000 * 2 ** (failures.current - 1)) : 0);
       }
     }).finally(() => {
       if (requestRef.current?.controller === controller) requestRef.current = null;

@@ -180,7 +180,9 @@ class MarketPanelReader:
             items = [self._item(row) for row in rows[:page_size]]
             return {"items": items, "pagination": {"page": 1, "pageSize": page_size, "hasMore": len(rows) > page_size},
                     "coverage": "recently-observed-gamma-markets", "sort": sort, "source": "market-data/postgresql", "generatedAt": utc_now()}
-        return self.cache.get("catalog", ["gamma-quotes-v1", query, page_size, sort], build, ttl=45, max_age=300)
+        # PostgreSQL admission/rate limits and the per-key cache lock still
+        # apply. Slow ClickHouse chart/flow builds must not occupy this lane.
+        return self.cache.get("catalog", ["gamma-quotes-v1", query, page_size, sort], build, ttl=45, max_age=300, admit=False)
 
     def groups(self, *, query="", page=1, page_size=50, sort="volume"):
         catalog = self.catalog(query=query, page=page, page_size=page_size, sort="volume" if sort == "active" else sort)
