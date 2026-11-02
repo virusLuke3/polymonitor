@@ -44,6 +44,7 @@ function emptyState(message: string, copy: EmptyStateCopy = {}) {
 }
 
 function tradeNotional(trade: TradeRow) {
+  if (trade.size == null || trade.size === '' || trade.price == null || trade.price === '') return null;
   const size = Number(trade.size);
   const price = Number(trade.price);
   if (!Number.isFinite(size) || !Number.isFinite(price)) return null;
@@ -73,6 +74,7 @@ function formatDateExact(value?: string | null) {
 }
 
 function tradePriceCents(value?: string | number | null) {
+  if (value == null || value === '') return '--';
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return '--';
   return `${Math.round(numeric * 100)}c`;
@@ -126,7 +128,7 @@ function orderfilledList(
                 <span className={`wm-chip ${tone}`}>{side || 'FLOW'}</span>
                 <span className={`wm-orderfilled-outcome ${outcome === 'YES' ? 'yes' : outcome === 'NO' ? 'no' : ''}`}>{outcome}</span>
                 <strong>{tradePriceCents(trade.price)}</strong>
-                <em>{notional ? `$${formatCompact(notional)}` : '$--'}</em>
+                <em>{notional != null ? `$${formatCompact(notional)}` : '$--'}</em>
               </div>
             </div>
             {!options.compact ? <div className="wm-orderfilled-title">{marketTitle || 'Untitled market'}</div> : null}
@@ -206,6 +208,7 @@ function oracleOutcomeLabel(event: OracleEvent, copy: OracleListCopy = {}) {
   const outcome = String(event.effectiveSettlementOutcome || event.settlementOutcome || '').toUpperCase();
   if (outcome && outcome !== 'UNKNOWN') return outcome;
   const price = event.settledPrice ?? event.proposedPrice;
+  if (price == null || price === '') return copy.pending || 'Pending';
   const numeric = Number(price);
   if (Number.isFinite(numeric)) {
     if (numeric >= 0.999 || numeric >= 999999999999999999) return 'YES';
