@@ -42,6 +42,7 @@ export type BootstrapPayload = {
 
 export type MarketsPayload = {
   status?: string;
+  refreshStatus?: string;
   generatedAt?: string;
   items: MarketListItem[];
   pagination: {

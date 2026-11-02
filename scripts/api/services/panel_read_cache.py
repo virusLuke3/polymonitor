@@ -72,11 +72,14 @@ class PanelReadCache:
         if stale is not None:
             if not self.runtime.resources.start_thread(build, name="panel-read-refresh"):
                 permit.close()
-            return self._fallback(stale, "stale")
+            return self._fallback(stale, "refreshing")
         return copy.deepcopy(build())
 
     @staticmethod
     def _fallback(stale, status):
         if stale is not None:
-            return {**copy.deepcopy(stale), "status": "stale", "stale": True, "refreshStatus": status}
+            payload = {**copy.deepcopy(stale), "status": "stale", "stale": True, "refreshStatus": status}
+            if "historyStatus" in payload:
+                payload["historyStatus"] = "stale"
+            return payload
         return {"status": status, "retryAfter": 15, "items": [], "points": [], "historyStatus": status}

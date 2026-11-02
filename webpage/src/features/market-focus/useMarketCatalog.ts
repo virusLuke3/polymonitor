@@ -27,7 +27,7 @@ export function useMarketCatalog(bootstrap: BootstrapPayload | null, enabled: bo
         if (!isCurrent()) return;
         hydrated.current.markets = true;
         setMarkets((catalog.items || []).map((item) => ({ ...item, catalogFetchedAt: catalog.generatedAt }))); setMarketGroups([]); setLoaded(true);
-        if (catalog.status === 'stale') errors.push('Catalog refresh failed; showing the last stored page.');
+        if (catalog.status === 'stale' && catalog.refreshStatus !== 'refreshing') errors.push('Catalog refresh failed; showing the last stored page.');
       }).catch((error) => {
         if (isCurrent()) errors.push(error instanceof Error ? error.message : 'Market catalog refresh failed.');
       }),
