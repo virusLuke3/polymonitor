@@ -121,3 +121,14 @@ def test_native_book_reuse_requires_identity_continuity_and_unexpired_heartbeat(
     book["continuity"] = True
     book["staleAfter"] = iso(NOW-1)
     assert read() == {}
+
+
+def test_quote_receipt_time_is_response_completion_not_cycle_start(monkeypatch):
+    from api.services.crypto_strategy.providers import stablecoins
+    from api.services.crypto_strategy.contracts import iso
+    monkeypatch.setattr('time.time', lambda: (NOW+9000)/1000)
+    def get(url, **kwargs):
+        return {'data':{'amount':'1'}} if 'coinbase' in url else {'result':{'pair':{'c':['1']}}}
+    rows = stablecoins(get, NOW)
+    assert len(rows) == 4
+    assert all(row['receivedAt'] == iso(NOW+9000) for row in rows)

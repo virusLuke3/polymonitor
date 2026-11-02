@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -36,16 +37,17 @@ def enrich(data, store, now, flow_file=None):
         row["basisHistory"] = store.history("basis:" + asset, now - 86400000)
     for row in data["stablecoins"]:
         key = "peg:" + row["asset"] + ":" + row["source"]
-        store.sample(key, now, row.get("deviationBps"))
+        observed = int(datetime.fromisoformat(row["receivedAt"]).timestamp()*1000) if row.get("receivedAt") else now
+        store.sample(key, observed, row.get("deviationBps"))
         row["history"] = store.history(key, now - 86400000)
         # Duration is bounded by continuous observed samples, not extrapolated.
-        streak, previous = [], now
+        streak, previous = [], observed
         for point in reversed(row["history"]):
             if abs(point["v"]) < 20 or previous - point["t"] > 90000:
                 break
             streak.append(point)
             previous = point["t"]
-        row["observedStressSeconds"] = (now - streak[-1]["t"]) / 1000 if streak and row.get("price") else None
+        row["observedStressSeconds"] = (observed - streak[-1]["t"]) / 1000 if streak and row.get("price") else None
         row["stressThresholdBps"] = 20
     for asset, ref in data["references"].items():
         if not isinstance(ref, dict):

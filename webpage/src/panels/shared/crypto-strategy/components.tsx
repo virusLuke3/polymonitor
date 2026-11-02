@@ -14,7 +14,7 @@ export function Frame({ id, title, badge, children, assets = true }: {id: string
   const feed = useCryptoInputs(), [asset, select] = useCryptoAsset(), t = useCopy();
   return <Panel title={title} badge={badge} status="muted" dataPanelId={id} className="wm-market-panel wm-cstrategy-panel">
     <div className="wm-cstrategy-toolbar"><span>{t('检查 15秒 · 采集 30秒','Check 15s · Source 30s')}</span><button disabled={feed.status.fetching} onClick={() => void feed.refresh()}>{t('刷新','Refresh')}</button></div>
-    <p className="wm-cstrategy-meta">{feed.status.phase==='ready' ? feed.data?.status.toUpperCase() : feed.status.phase.toUpperCase()} · {t('快照','Snapshot')} {feed.data?.generatedAt ? new Date(feed.data.generatedAt).toLocaleString() : '—'} · {t('检查','Checked')} {time(feed.status.checkedAt)}</p>
+    <p className="wm-cstrategy-meta">{t('快照','Snapshot')} {feed.data?.generatedAt ? new Date(feed.data.generatedAt).toLocaleString() : '—'} · {t('检查','Checked')} {time(feed.status.checkedAt)}</p>
     {assets && <div className="wm-cstrategy-tabs" aria-label={t('共享币种选择','Shared asset selection')}>{ASSETS.map(a => <button key={a} aria-pressed={asset===a} onClick={() => select(a)}>{a}</button>)}</div>}
     {feed.loading && <PanelLoading/>}
     {(feed.error || feed.status.phase === 'stale') && <p className="wm-cstrategy-notice">{t('数据延迟或读取失败，保留原始时间。','Delayed or unavailable data; original timestamps retained.')}</p>}

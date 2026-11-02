@@ -59,7 +59,7 @@ def venue_asset(get, base, asset, now):
     value = read("flow", "recent-trade", category="spot", limit=60)
     if value:
         result["flow"] = trade_sample(value["result"].get("list", []), limit=60)
-        result["flow"]["receivedAt"] = iso(now)
+        result["flow"]["receivedAt"] = iso(time.time() * 1000)
     value = read("depth", "orderbook", category="spot", limit=50)
     if value:
         result["depth"] = depth(value["result"])
@@ -158,7 +158,7 @@ def stablecoins(get, now):
                 if not value or value <= 0:
                     raise ValueError("INVALID_STABLECOIN_PRICE")
                 result.append({"asset": symbol, "source": source, "price": value, "deviationBps": basis(value, 1),
-                    "receivedAt": iso(now), "clockBasis": "received; quote-native time unavailable", "status": "ok"})
+                    "receivedAt": iso(time.time() * 1000), "clockBasis": "received; quote-native time unavailable", "status": "ok"})
             except (OSError, ValueError, TypeError, KeyError, StopIteration):
                 result.append({"asset": symbol, "source": source, "price": None, "deviationBps": None, "status": "unavailable"})
     return result
