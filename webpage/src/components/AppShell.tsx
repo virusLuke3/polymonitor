@@ -7,6 +7,7 @@ import { useI18n, type MessageKey } from '@/services/i18n';
 const APP_VERSION = 'v0.2.1';
 const PRIMARY_NAV_LINKS: Array<{ key: MessageKey; href: string }> = [
   { key: 'nav.markets', href: '/' },
+  { key: 'nav.cryptoStrategy', href: '/?panels=crypto#workspace-panels' },
   { key: 'nav.quality', href: '/data-quality' },
   { key: 'nav.watchlist', href: '/watchlist' },
   { key: 'nav.briefings', href: '/briefings' },

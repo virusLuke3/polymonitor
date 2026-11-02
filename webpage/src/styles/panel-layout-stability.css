@@ -11,8 +11,14 @@
 
 @media (max-width: 1500px) {
   .wm-dashboard .wm-panels-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
     grid-auto-rows: 268px;
+  }
+}
+
+/* Keep the dense five-panel desktop layout, including 1280–1500px laptops. */
+@media (max-width: 1279px) {
+  .wm-dashboard .wm-panels-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 
