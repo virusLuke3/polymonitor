@@ -42,7 +42,7 @@ for (const width of [1440,390]) test(`crypto strategy source states and controls
   // At 1440px the actual five-column workspace gives this panel only 284px.
   await page.locator('.wm-panel-slot').evaluate((el, width) => {
     (el as HTMLElement).style.width = `${width === 1440 ? 284 : 382}px`;
-    (el as HTMLElement).style.height = '300px';
+    (el as HTMLElement).style.height = '284px';
   }, width);
   await expect(optionsPanel).toContainText('PM expiry unmatched');
   const optionsChart = await optionsPanel.locator('.wm-cstrategy-chart svg').boundingBox();
