@@ -65,7 +65,7 @@ export function Panel({
         <div className="wm-panel-title-wrap">
           <h3 className="wm-panel-title">{title}</h3>
           {titleControls ? <div className="wm-panel-title-controls">{titleControls}</div> : null}
-          {badge ? <span className={`wm-panel-badge ${status}`}>{badge}</span> : null}
+          {badge && badge.trim().toUpperCase() !== 'PARTIAL' ? <span className={`wm-panel-badge ${status}`}>{badge}</span> : null}
         </div>
         <div className="wm-panel-header-right">
           {controls}

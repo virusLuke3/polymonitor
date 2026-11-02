@@ -1,6 +1,6 @@
 .wm-funding-panel .wm-panel-body { overflow-x: hidden; }
 .wm-funding-toolbar, .wm-funding-filters, .wm-funding-pagination { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
-.wm-funding-toolbar { justify-content: space-between; }
+.wm-funding-toolbar { justify-content: flex-end; }
 .wm-funding-panel button, .wm-funding-panel input { font: inherit; color: inherit; background: #182027; border: 1px solid #3a515b; padding: 5px 8px; min-height: 30px; }
 .wm-funding-panel button { cursor: pointer; }
 .wm-funding-panel button:disabled { opacity: .55; cursor: default; }

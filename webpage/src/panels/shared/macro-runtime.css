@@ -1,5 +1,5 @@
 .wm-macro-refresh { color: var(--text-secondary, #9ca6a3); font-size: 12px; margin-bottom: 12px; overflow-wrap: anywhere; }
-.wm-macro-refresh > div { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.wm-macro-refresh > div { display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
 .wm-macro-refresh button, .wm-macro-filters button { background: transparent; border: 1px solid #405662; color: inherit; padding: 6px 10px; cursor: pointer; }
 .wm-macro-refresh button:disabled { opacity: .6; cursor: wait; }
 .wm-macro-refresh small { display: block; margin-top: 6px; }

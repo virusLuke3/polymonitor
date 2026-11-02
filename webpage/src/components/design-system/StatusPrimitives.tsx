@@ -70,6 +70,8 @@ export function RuntimeStatusBadge({ status, compact = false }: RuntimeStatusBad
   const phase = status.phase || 'idle';
   const freshness = String(status.freshness || '').trim().toLowerCase();
   const label = status.label || (freshness && phase === 'ready' ? freshness : phase);
+  // Keep source completeness in the runtime; omit the generic panel badge.
+  if (label.trim().toLowerCase() === 'partial') return null;
   const age = status.ageSeconds ?? (
     status.updatedAt ? Math.max(0, Math.round((Date.now() - status.updatedAt) / 1_000)) : null
   );

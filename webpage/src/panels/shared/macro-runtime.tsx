@@ -43,14 +43,13 @@ function time(value?: string | number | null) {
   return Number.isFinite(date.getTime()) ? date.toLocaleString() : '--';
 }
 
-export function MacroRefresh({ payload, sourceMinutes = 30 }: {
+export function MacroRefresh({ payload }: {
   payload?: { generatedAt?: string; status?: string | null; sources?: Record<string, string>; optionalSources?: Record<string, string>; expectedIntervalSeconds?: number } | null;
-  sourceMinutes?: number;
 }) {
   const runtime = usePanelRuntimeView();
   const problems = Object.entries({...payload?.sources, ...Object.fromEntries(Object.entries(payload?.optionalSources || {}).map(([key, value]) => [`Optional ${key}`, value]))}).filter(([, state]) => !['ok', 'empty', 'redis-seed', 'sqlite-seed'].includes(state));
   return <div className="wm-macro-refresh" aria-live="polite">
-    <div><span>Auto check 30s · Seed {Math.round((payload?.expectedIntervalSeconds ?? sourceMinutes * 60) / 60)}m</span>
+    <div>
       <button type="button" disabled={Boolean(runtime?.status?.fetching)} onClick={() => runtime?.refresh?.()}>
         {runtime?.status?.fetching ? 'Refreshing…' : 'Refresh'}
       </button></div>

@@ -1,6 +1,7 @@
 .wm-cstrategy-panel { min-width: 0; }
 .wm-cstrategy-toolbar,.wm-cstrategy-tabs,.wm-cstrategy-chart figcaption,.wm-cstrategy-chart>.wm-cstrategy-meta { display:flex; align-items:center; justify-content:space-between; gap:6px; }
 .wm-cstrategy-toolbar,.wm-cstrategy-tabs { margin-bottom:8px; flex-wrap:wrap; }
+.wm-cstrategy-toolbar { justify-content:flex-end; }
 .wm-cstrategy-toolbar button,.wm-cstrategy-tabs button,.wm-cstrategy-panel select,.wm-cstrategy-panel input { background:var(--bg-secondary,#151c20); border:1px solid var(--border-color,#304047); color:inherit; padding:5px 8px; font:inherit; min-width:0; }
 .wm-cstrategy-tabs { justify-content:flex-start; }
 .wm-cstrategy-tabs button[aria-pressed=true] { border-color:var(--accent-cyan,#6ed3ef); color:var(--accent-cyan,#6ed3ef); }

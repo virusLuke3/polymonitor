@@ -40,7 +40,7 @@ function CommoditiesWatchPanel() {
       <div className="wm-commodity-tabbar" role="tablist" aria-label={copy('Quote groups', '行情分组')}>
         {(['commodities', 'fx'] as const).map(group => <button type="button" role="tab" aria-selected={tab === group} key={group} className={`panel-tab${tab === group ? ' active' : ''}`} onClick={() => setTab(group)}>{group === 'fx' ? 'FX' : copy('Commodities', '商品')} <b>{data ? groups[group].length : '—'}</b></button>)}
       </div>
-      <div className="wm-commodity-toolbar"><span>{feed.suspended ? copy('Auto paused while hidden', '不可见时暂停检查') : copy('Auto check 20s', '自动检查20秒')}{data && ` · ${copy('Source', '后台更新')} ${data.refreshIntervalSeconds}s`}</span><button type="button" disabled={feed.status.fetching} onClick={() => void feed.refresh()}>{feed.status.fetching ? copy('Refreshing…', '刷新中…') : copy('Refresh', '刷新')}</button></div>
+      <div className="wm-commodity-toolbar"><button type="button" disabled={feed.status.fetching} onClick={() => void feed.refresh()}>{feed.status.fetching ? copy('Refreshing…', '刷新中…') : copy('Refresh', '刷新')}</button></div>
       <p className="wm-commodity-clock">{checked && <span>{copy('Checked', '检查')} <time data-commodity-checked-at dateTime={checked} title={i18n.formatDateTime(checked)}>{clock(checked)}</time></span>}{data && <span>{copy('Snapshot', '快照')} <time data-commodity-updated-at dateTime={data.generatedAt} title={i18n.formatDateTime(data.generatedAt)}>{clock(data.generatedAt)}</time></span>}</p>
       {feed.loading && <PanelLoading />}
       {feed.fromCache && <p className="wm-commodity-notice" role="status">{copy('Showing saved quotes while checking updates.', '显示已保存报价，正在检查更新。')}</p>}

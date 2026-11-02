@@ -13,7 +13,7 @@ export function TradeFeedFrame({ title, feed, children }: { title: string; feed:
   const checked = feed.status.checkedAt ? new Date(feed.status.checkedAt).toISOString() : null;
   return <Panel title={title} badge="CHAIN" count={data ? data.items.length : feed.loading ? '…' : '—'} className="wm-trade-watch-panel">
     <div className="wm-trade-watch-toolbar"><span>{copy('Global on-chain fills', '全市场链上成交')}</span><button type="button" disabled={feed.status.fetching} onClick={() => void feed.refresh()}>{feed.status.fetching ? copy('Refreshing…', '刷新中…') : copy('Refresh', '刷新')}</button></div>
-    <p className="wm-trade-watch-clock">{feed.suspended ? copy('Auto refresh paused while hidden.', '不可见时暂停自动刷新。') : copy(`Auto 30s · seed ${data?.refreshIntervalSeconds ?? 120}s`, `自动检查30秒 · 后台更新${data?.refreshIntervalSeconds ?? 120}秒`)}
+    <p className="wm-trade-watch-clock">
       <span className="wm-trade-watch-stamps">{checked && <span>{copy('Checked', '检查')} <time data-trade-checked-at dateTime={checked} title={i18n.formatDateTime(checked)}>{clock(checked)}</time></span>}
       {data && <span>{copy('Snapshot', '快照')} <time data-trade-updated-at dateTime={data.generatedAt} title={i18n.formatDateTime(data.generatedAt)}>{clock(data.generatedAt)}</time></span>}</span></p>
     {feed.loading && <PanelLoading />}

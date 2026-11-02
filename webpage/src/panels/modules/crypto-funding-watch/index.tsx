@@ -51,7 +51,7 @@ function FundingRatePanel() {
   return <Panel title={cn ? '资金费率' : 'FUNDING RATE'} badge="PERPETUAL" status="muted" count={data ? assets.length : '—'} dataPanelId="crypto-funding-watch" className="wm-market-panel wm-funding-panel"
     titleControls={<button className="wm-panel-help-button" type="button" aria-label={cn ? '资金费率说明' : 'Explain funding rates'} aria-expanded={showHelp} onClick={() => setShowHelp(value => !value)}>?</button>}
     headerOverlay={showHelp ? <div className="wm-panel-help-popover"><strong>{cn ? '永续合约的资金成本' : 'Perpetual funding cost'}</strong><p>{cn ? '正费率为多头向空头付费，负费率反向。各交易所显示真实周期费率；汇总统一换算至8小时，仅比较新鲜报价。均值为等权平均，不能视为未来收益或预测市场概率。' : 'Positive funding: longs pay shorts; negative: shorts pay longs. Venue rates use their actual interval. Summaries normalize fresh quotes to 8h and use a simple mean. They do not predict returns or Polymarket probabilities.'}</p></div> : null}>
-    <div className="wm-funding-toolbar"><span>{feed.suspended ? cn ? '不可见时暂停' : 'Paused while hidden' : cn ? '自动检查15秒' : 'Auto check 15s'} · {cn ? '采集' : 'Source'} {data?.refreshIntervalSeconds ?? 30}s</span>
+    <div className="wm-funding-toolbar">
       <button type="button" disabled={feed.status.fetching} onClick={() => void feed.refresh()}>{feed.status.fetching ? cn ? '刷新中…' : 'Refreshing…' : cn ? '刷新' : 'Refresh'}</button></div>
     <p className="wm-funding-clock">{checked && <span>{cn ? '检查' : 'Checked'} <time data-funding-checked-at dateTime={checked}>{clock(checked)}</time></span>}{data && <span>{cn ? '快照' : 'Snapshot'} <time data-funding-snapshot-at dateTime={data.generatedAt}>{clock(data.generatedAt)}</time></span>}</p>
     {feed.loading && <PanelLoading />}

@@ -111,7 +111,7 @@ function GeoShockPanel({ payload }: {
       className="wm-market-panel wm-geo-shock-panel"
       dataPanelId="geo-sanctions-shock"
     >
-      <MacroRefresh payload={payload} sourceMinutes={5} />
+      <MacroRefresh payload={payload} />
       <div className="wm-macro-filters" aria-label="Geopolitical data view">
         <button type="button" aria-pressed={view === 'sanctions'} onClick={() => setView('sanctions')}>Sanctions / policy {sanctions.length}</button>
         <button type="button" aria-pressed={view === 'conflicts'} onClick={() => setView('conflicts')}>Conflict history {events.length}</button>

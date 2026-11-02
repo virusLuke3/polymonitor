@@ -1,4 +1,4 @@
-.wm-commodities-panel .wm-commodity-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; font-size: 11px; color: #a7b2b5; }
+.wm-commodities-panel .wm-commodity-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; font-size: 11px; color: #a7b2b5; }
 .wm-commodities-panel .wm-commodity-toolbar button { font: inherit; color: #70d9f5; background: #152028; border: 1px solid #425a69; padding: 6px 10px; cursor: pointer; }
 .wm-commodities-panel .wm-commodity-toolbar button:disabled { opacity: .55; cursor: wait; }
 .wm-commodities-panel button:focus-visible { outline: 2px solid #70d9f5; outline-offset: 2px; }
