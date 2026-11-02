@@ -1,4 +1,8 @@
 {
+  "atlasOracle.stale": "数据已过期",
+  "atlasOracle.sourceUnavailableHint": "尚未取得此市场可核实的当前Oracle状态。",
+  "atlasOracle.sourceUnavailable": "来源不可用",
+  "atlasMarket.catalog.pageScope": "当前页最多50个市场；其他市场请使用搜索",
   "language.name": "中文",
   "language.english": "English",
   "language.chinese": "中文",
@@ -479,7 +483,7 @@
   "atlasMarket.catalog.waiting": "等待数据源",
   "atlasMarket.catalog.refreshing": "正在刷新",
   "atlasMarket.catalog.refreshingShort": "请稍候…",
-  "atlasMarket.catalog.activity": "最近市场活动 {time}",
+  "atlasMarket.catalog.activity": "来源观测于 {time}",
   "atlasMarket.catalog.sync": "目录同步于 {time}",
   "atlasMarket.catalog.auto": "自动 {seconds} 秒",
   "atlasMarket.catalog.refresh": "刷新",

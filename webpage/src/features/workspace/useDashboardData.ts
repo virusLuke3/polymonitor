@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { fetchBootstrap, fetchRecentOracle, fetchRecentTrades, fetchSystemHealth } from '@/services/api';
+import { fetchBootstrap, fetchSystemHealth } from '@/services/api';
 import { useIntelResource } from '@/panels/modules/related-news/useIntelFeed';
 import { mergeRuntimeData } from '@/panels/runtime-store';
 import type { usePanelRuntime } from '@/panels/usePanelRuntime';
@@ -34,12 +34,10 @@ export function useDashboardData(workspace: Pick<ReturnType<typeof useWorkspaceP
         refreshed[key] = true;
         commit(value);
       };
-      // Each summary is independently useful; a slow source must not hold the
-      // successful siblings in Promise.allSettled until their longest timeout.
+      // Market and Oracle panels read only the selected market. Bootstrap must
+      // not also launch global trade/oracle scans.
       await Promise.allSettled([
         fetchSystemHealth(current.signal).then(publish('health', setHealth)),
-        fetchRecentTrades(24, current.signal).then(publish('trades', setGlobalTrades)),
-        fetchRecentOracle(16, current.signal).then(publish('oracle', setGlobalOracle)),
       ]);
       if (refreshController === current) refreshController = null;
     };
@@ -68,7 +66,7 @@ export function useDashboardData(workspace: Pick<ReturnType<typeof useWorkspaceP
       window.clearTimeout(startupTimer);
       releaseStartup();
     });
-    const timer = window.setInterval(() => void refresh(), 20_000);
+    const timer = window.setInterval(() => void refresh(), 30_000);
     const onVisibility = () => {
       if (document.hidden) { refreshController?.abort(); refreshController = null; }
       else void refresh();

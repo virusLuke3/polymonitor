@@ -172,7 +172,7 @@ class SnapshotStore:
         finally:
             conn.close()
 
-    def get_stale(self, namespace: str, cache_key: str) -> Optional[Any]:
+    def get_stale(self, namespace: str, cache_key: str, *, max_age_seconds: int | None = None) -> Optional[Any]:
         try:
             self._ensure_schema()
         except sqlite3.OperationalError as exc:
@@ -184,7 +184,7 @@ class SnapshotStore:
             try:
                 row = conn.execute(
                     """
-                    SELECT payload_json
+                    SELECT payload_json, updated_at
                     FROM panel_snapshots
                     WHERE namespace = ? AND cache_key = ?
                     LIMIT 1
@@ -195,7 +195,7 @@ class SnapshotStore:
                 if self._is_busy_error(exc):
                     return None
                 raise
-            if row is None:
+            if row is None or (max_age_seconds is not None and time.time() - row["updated_at"] > max_age_seconds):
                 return None
             return json.loads(str(row["payload_json"]))
         finally:
@@ -237,7 +237,7 @@ class SnapshotStore:
         finally:
             conn.close()
 
-    def set(self, namespace: str, cache_key: str, payload: Any, ttl_seconds: int) -> bool:
+    def set(self, namespace: str, cache_key: str, payload: Any, ttl_seconds: int, *, max_entries: int | None = None) -> bool:
         """Store a disposable panel snapshot without blocking an API response.
 
         Snapshot persistence is a cache side effect, not the source of truth. If
@@ -269,6 +269,11 @@ class SnapshotStore:
                         """,
                         (namespace, cache_key, payload_json, now, expires_at),
                     )
+                    if max_entries is not None:
+                        conn.execute("""DELETE FROM panel_snapshots WHERE namespace = ? AND cache_key IN (
+                            SELECT cache_key FROM panel_snapshots WHERE namespace = ?
+                            ORDER BY updated_at DESC, cache_key LIMIT -1 OFFSET ?)
+                        """, (namespace, namespace, max(1, max_entries)))
                     conn.commit()
                     return True
                 except sqlite3.OperationalError as exc:

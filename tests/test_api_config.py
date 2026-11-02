@@ -336,14 +336,14 @@ def test_pool_rejects_late_connection_without_retry_or_capacity_leak(monkeypatch
 
     clock, connection = [0.0], Mock()
     def connect(**kwargs):
-        clock[0] = 2
+        clock[0] = 9
         return connection
     factory = Mock(side_effect=connect)
     pool = db_pool.ApiPostgresConnectionPool(factory, max_size=1, acquire_timeout_seconds=1)
     monkeypatch.setattr(db_pool.time, "monotonic", lambda: clock[0])
     with pytest.raises(TimeoutError, match="deadline"):
         pool.acquire()
-    factory.assert_called_once_with(connect_timeout=1)
+    factory.assert_called_once_with(connect_timeout=8)
     connection.close.assert_called_once()
     assert pool._connection_count == 0
     pool.close()

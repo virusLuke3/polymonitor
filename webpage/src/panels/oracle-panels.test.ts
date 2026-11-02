@@ -3,7 +3,7 @@ import type { OracleEvent, OraclePayload } from '@/types';
 import { oracleFeedView } from './modules/oracle-feed';
 
 describe('Oracle feed presentation', () => {
-  it('surfaces global events when the selected market has no Oracle timeline', () => {
+  it('keeps a verified empty selected-market timeline separate from global events', () => {
     const focused: OraclePayload = {
       marketId: 4559386,
       localMarketId: 4559386,
@@ -20,8 +20,8 @@ describe('Oracle feed presentation', () => {
     }];
 
     expect(oracleFeedView(focused, globalEvents)).toEqual({
-      events: globalEvents,
-      source: 'global-fallback',
+      events: [],
+      source: 'focused',
     });
   });
 

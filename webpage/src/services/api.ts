@@ -184,12 +184,12 @@ export function fetchBootstrap(signal?: AbortSignal) {
 export function fetchMarketSearch(query: string, limit = 12, signal?: AbortSignal) {
   const params = new URLSearchParams({
     q: query.trim(),
-    limit: String(limit),
+    pageSize: String(limit),
   });
-  return apiGetWithTimeout<{ items: MarketListItem[] }>(`/search?${params.toString()}`, 5000, signal);
+  return apiGetWithTimeout<{ items: MarketListItem[] }>(`/markets?${params.toString()}`, 5000, signal);
 }
 
-function fetchMarketsPage(page = 1, query = '', pageSize = 160, signal?: AbortSignal) {
+export function fetchMarketsPage(page = 1, query = '', pageSize = 160, signal?: AbortSignal) {
   const params = new URLSearchParams({
     page: String(page),
     pageSize: String(pageSize),
@@ -632,7 +632,7 @@ function normalizeMarketBundlePayload(payload: MarketDetailBundlePayload, market
   const oracleSource = payload.oracle || null;
   const oracleSummary = oracleSource?.summary || null;
   const identity = payload.identity || null;
-  const oracle = oracleSource || payload.oracleEvents || identity
+  const oracle = oracleSource || payload.oracleEvents
     ? {
         ...(oracleSource || {}),
         marketId: Number(oracleSource?.marketId ?? identity?.marketId ?? marketId),
@@ -682,6 +682,15 @@ async function fetchMarketDetailBundle(marketId: number, timeoutMs = 6500, signa
 async function fetchMarketWorkspaceBundle(marketId: number, timeoutMs = 6500, signal?: AbortSignal): Promise<WorkspaceBundle> {
   const payload = await apiGetWithTimeout<MarketDetailBundlePayload>(`/markets/${marketId}/workspace`, timeoutMs, signal);
   return normalizeMarketBundlePayload(payload, marketId);
+}
+
+export function fetchMarketFlow(marketId: number, signal?: AbortSignal) {
+  return apiGetWithTimeout<{ marketId: number; items: TradeRow[]; status: string; sourceUpdatedAt?: string;
+    coverage?: { fromBlock: number; toBlock: number; globalCompleteness: string } }>(`/markets/${marketId}/flow?limit=50`, 6000, signal);
+}
+
+export function fetchMarketOracle(marketId: number, signal?: AbortSignal) {
+  return apiGetWithTimeout<OraclePayload>(`/markets/${marketId}/oracle`, 5000, signal);
 }
 
 export async function fetchMarketFocusTile(marketId: number, timeoutMs = 2200, signal?: AbortSignal): Promise<WorkspaceBundle> {

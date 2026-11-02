@@ -24,6 +24,8 @@ class MarketRouteDependencies:
     get_market_workspace_payload: Callable[[int], dict[str, Any]]
     sanitize_payload: Callable[..., Any]
     get_market_focus_tile_payload: Callable[[int], dict[str, Any]]
+    get_market_flow_payload: Callable[..., dict[str, Any]] | None = None
+    get_panel_health: Callable[[], dict[str, Any]] | None = None
 
 
 def create_markets_blueprint(dependencies: MarketRouteDependencies) -> Blueprint:
@@ -31,7 +33,20 @@ def create_markets_blueprint(dependencies: MarketRouteDependencies) -> Blueprint
 
     @bp.errorhandler(TimeoutError)
     def unavailable(_error):
-        return jsonify({"status": "unavailable", "error": "Market data temporarily unavailable"}), 503
+        return respond({"status": "unavailable", "error": "Market data temporarily unavailable"})
+
+    @bp.errorhandler(ValueError)
+    def invalid(_error):
+        return jsonify({"status": "invalid", "error": "Invalid panel request parameters"}), 400
+
+    def respond(payload, *, market_id=None):
+        status = int(payload.get("_status", 503 if payload.get("status") in {"unavailable", "warming"} else 200))
+        response = jsonify(sanitize(payload, market_id=market_id))
+        response.status_code = status
+        response.headers["Cache-Control"] = "no-store"
+        if status == 503:
+            response.headers["Retry-After"] = str(payload.get("retryAfter", 15))
+        return response
 
     def sanitize(payload: Any, *, market_id: int | None = None) -> Any:
         from api.services.free_content.public import filter_workspace
@@ -40,22 +55,17 @@ def create_markets_blueprint(dependencies: MarketRouteDependencies) -> Blueprint
             market_id=market_id,
         ))
 
+    @bp.route("/health/panels", methods=["GET"])
+    def panel_health():
+        return jsonify(dependencies.get_panel_health() if dependencies.get_panel_health else {"status": "unknown"})
+
     @bp.route("/markets", methods=["GET"])
     def api_markets():
         status = (request.args.get("status") or "active").strip().lower()
         query = (request.args.get("q") or "").strip()
         page = max(1, int(request.args.get("page", 1)))
-        page_size = min(500, max(1, int(request.args.get("pageSize", 20))))
-        return jsonify(
-            sanitize(
-                dependencies.get_markets_payload(
-                    status=status,
-                    query=query,
-                    page=page,
-                    page_size=page_size,
-                )
-            )
-        )
+        page_size = min(100, max(1, int(request.args.get("pageSize", 20))))
+        return respond(dependencies.get_markets_payload(status=status, query=query, page=page, page_size=page_size))
 
     @bp.route("/markets/<int:market_id>", methods=["GET"])
     def api_market_by_id(market_id: int):
@@ -68,7 +78,7 @@ def create_markets_blueprint(dependencies: MarketRouteDependencies) -> Blueprint
     @bp.route("/markets/<int:market_id>/trades", methods=["GET"])
     def api_market_trades_by_id(market_id: int):
         try:
-            limit = min(max(int(request.args.get("limit", 100)), 1), 500)
+            limit = min(max(int(request.args.get("limit", 50)), 1), 100)
             offset = max(0, int(request.args.get("offset", 0)))
             if offset > 5000:
                 raise ValueError("Use before=block:log:tx_hash for deeper pagination")
@@ -95,11 +105,20 @@ def create_markets_blueprint(dependencies: MarketRouteDependencies) -> Blueprint
         limit = min(int(request.args.get("limit", 24)), 200)
         return jsonify(sanitize(dependencies.get_recent_trades_snapshot(limit=limit)))
 
+    @bp.route("/markets/<int:market_id>/flow", methods=["GET"])
+    def api_market_flow(market_id: int):
+        limit = min(100, max(1, int(request.args.get("limit", 50))))
+        before = None
+        if request.args.get("before"):
+            block, log, tx = request.args["before"].split(":")
+            before = (int(block), int(log), tx.lower().removeprefix("0x"))
+        if dependencies.get_market_flow_payload is None:
+            raise TimeoutError("Flow reader unavailable")
+        return respond(dependencies.get_market_flow_payload(market_id, limit=limit, before=before), market_id=market_id)
+
     @bp.route("/markets/<int:market_id>/oracle", methods=["GET"])
     def api_market_oracle_by_id(market_id: int):
-        payload = dependencies.get_market_oracle_payload(market_id)
-        status_code = int(payload.pop("_status", 200))
-        return jsonify(sanitize(payload, market_id=market_id)), status_code
+        return respond(dependencies.get_market_oracle_payload(market_id), market_id=market_id)
 
     @bp.route("/oracle/recent", methods=["GET"])
     def api_recent_oracle():
@@ -124,16 +143,9 @@ def create_markets_blueprint(dependencies: MarketRouteDependencies) -> Blueprint
     def api_market_chart_by_id(market_id: int):
         range_name = (request.args.get("range") or "1d").strip().lower()
         interval = (request.args.get("interval") or "5m").strip().lower()
-        return jsonify(
-            sanitize(
-                dependencies.get_market_chart_payload(
-                    market_id,
-                    range_name=range_name,
-                    interval=interval,
-                ),
-                market_id=market_id,
-            )
-        )
+        if range_name not in {"1h", "6h", "1d", "1w", "1m", "all"} or interval not in {"1m", "3m", "5m", "15m", "1h", "4h", "6h", "1d"}:
+            raise ValueError("Unsupported chart range")
+        return respond(dependencies.get_market_chart_payload(market_id, range_name=range_name, interval=interval), market_id=market_id)
 
     @bp.route("/markets/<int:market_id>/detail", methods=["GET"])
     def api_market_detail_by_id(market_id: int):

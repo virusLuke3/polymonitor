@@ -10,7 +10,6 @@ import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from dataclasses import replace
 
 try:
     import requests
@@ -29,7 +28,7 @@ from api import cache as api_cache
 from api import db as api_db
 from api.config import ApiSettings, load_api_settings
 from api.context import ApplicationLog, RuntimeResources
-from api.db_pool import ApiPostgresConnectionPool, build_api_connection_factory
+from api.db_pool import build_api_connection_factory
 from api.services import (
     bootstrap_service,
     global_weather_map_service,
@@ -62,14 +61,8 @@ class ServiceRuntime:
         self._api_connection_factory = connection_factory or build_api_connection_factory(
             self.SETTINGS.database.connect, lambda: self.SETTINGS.database.backend
         )
-        # Label checks must not queue behind unrelated background builders.
-        self._alpha_database = replace(self.SETTINGS.database, connection={
-            **self.SETTINGS.database.connection, "statement_timeout_ms": 3000, "connect_timeout": 8,
-        })
-        self._alpha_connection_pool = ApiPostgresConnectionPool(
-            connection_factory or self._alpha_database.connect,
-            max_size=2, acquire_timeout_seconds=8,
-        ) if self.SETTINGS.database.backend in {"postgres", "postgresql"} else None
+        # All display readers share the same host-wide connection allowance.
+        self._alpha_connection_pool = None
         self.TRADE_READ_SOURCE = sql_identifier(get_trade_read_source())
         self.CONTENT_RUNTIME_PROVIDER = RuntimeContentProvider()
         self.SNAPSHOT_STORE = SnapshotStore(self.SETTINGS.snapshot_sqlite_path)

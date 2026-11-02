@@ -41,6 +41,8 @@ export type BootstrapPayload = {
 };
 
 export type MarketsPayload = {
+  status?: string;
+  generatedAt?: string;
   items: MarketListItem[];
   pagination: {
     page: number;
@@ -146,6 +148,11 @@ export type MarketGroupChartPayload = {
 };
 
 export type MarketListItem = {
+  latestYesPrice?: string | number | null;
+  latestNoPrice?: string | number | null;
+  quoteUpdatedAt?: string | null;
+  observedAt?: string | null;
+  catalogFetchedAt?: string | null;
   id: number;
   slug: string;
   title: string;
@@ -232,6 +239,10 @@ export type OracleEvent = {
 };
 
 export type OraclePayload = {
+  status?: string;
+  stale?: boolean;
+  updatedAt?: string | null;
+  hasMore?: boolean;
   marketId: number;
   localMarketId?: number | null;
   gammaMarketId?: string | number | null;
@@ -268,7 +279,7 @@ export type PriceSummary = {
   change1h?: string | null;
   change24h?: string | null;
   volume24h?: string | null;
-  tradeCount24h?: number;
+  tradeCount24h?: number | null;
   updatedAt?: string | null;
   priceSource?: string | null;
 };
@@ -573,6 +584,9 @@ export type WorkspaceBundle = {
   group?: MarketGroupDetail | null;
   selectedOutcome?: MarketGroupOutcome | null;
   trades: TradeRow[];
+  flowStatus?: string | null;
+  flowSourceUpdatedAt?: string | null;
+  flowCoverage?: { fromBlock: number; toBlock: number; globalCompleteness: string } | null;
   oracle: OraclePayload | null;
   price: PriceSummary | null;
   chart: ChartPayload | null;
@@ -640,6 +654,9 @@ export type MarketWideAiInsightPayload = {
   markets: MarketListItem[];
   marketGroups: MarketGroupItem[];
   trades: TradeRow[];
+  flowStatus?: string | null;
+  flowSourceUpdatedAt?: string | null;
+  flowCoverage?: { fromBlock: number; toBlock: number; globalCompleteness: string } | null;
   oracle: OracleEvent[];
   content: ContentItem[];
   alphaSignals?: RuntimeTradeSignal[];

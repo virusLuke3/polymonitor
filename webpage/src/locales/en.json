@@ -1,4 +1,8 @@
 {
+  "atlasOracle.stale": "Stale",
+  "atlasOracle.sourceUnavailableHint": "No verified current Oracle state is available for this market.",
+  "atlasOracle.sourceUnavailable": "Source unavailable",
+  "atlasMarket.catalog.pageScope": "Current 50-market page; search for other markets",
   "language.name": "English",
   "language.english": "English",
   "language.chinese": "中文",
@@ -479,7 +483,7 @@
   "atlasMarket.catalog.waiting": "Waiting for source",
   "atlasMarket.catalog.refreshing": "Refreshing",
   "atlasMarket.catalog.refreshingShort": "Wait…",
-  "atlasMarket.catalog.activity": "Latest activity {time}",
+  "atlasMarket.catalog.activity": "Source observed {time}",
   "atlasMarket.catalog.sync": "Catalog synced {time}",
   "atlasMarket.catalog.auto": "Auto {seconds}s",
   "atlasMarket.catalog.refresh": "Refresh",

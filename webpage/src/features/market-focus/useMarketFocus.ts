@@ -1,449 +1,132 @@
-import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
-import { fetchMarketFocusTile, fetchMarketGroupDetail, fetchMarketGroupChart, fetchMarketChart, fetchWorkspaceBundle } from '@/services/api';
-import type {
-  BootstrapPayload,
-  MarketListItem,
-  MarketGroupItem,
-  MarketGroupDetail,
-  MarketGroupChartPayload,
-  MarketGroupChartRange,
-  WorkspaceBundle,
-} from '@/types';
-import {
-  pickDefaultMarketId,
-  pickDefaultMarketGroup,
-  pickDefaultGroupOutcome,
-  findGroupForMarketId,
-  outcomeKeyForGroupMarket,
-  optimisticBundleFromMarket,
-  optimisticBundleFromGroup,
-  emptyWorkspaceBundle,
-  bundleMatchesMarket,
-  mergeWorkspaceBundle,
-} from './marketBundle';
-const MARKET_FOCUS_BROWSER_CACHE_MS = 15_000;
-export function useMarketFocus({ bootstrap, markets, marketGroups, catalogLoaded }: { catalogLoaded: boolean; bootstrap: BootstrapPayload | null; markets: MarketListItem[]; marketGroups: MarketGroupItem[] }) {
-  const [selectedMarketGroupId, setSelectedMarketGroupId] = useState<string | null>(null);
+import { useEffect, useRef, useState } from 'preact/hooks';
+import { fetchMarketFocusTile, fetchMarketChart, fetchMarketFlow, fetchMarketOracle } from '@/services/api';
+import type { BootstrapPayload, MarketListItem, MarketGroupItem, MarketGroupDetail, MarketGroupChartPayload, MarketGroupChartRange, WorkspaceBundle } from '@/types';
+import { pickDefaultMarketId, pickDefaultGroupOutcome, optimisticBundleFromMarket, optimisticBundleFromGroup, emptyWorkspaceBundle, bundleMatchesMarket, mergeWorkspaceBundle } from './marketBundle';
+import { pollPanel } from './pollPanel';
+
+export function useMarketFocus({ bootstrap, markets, marketGroups, catalogLoaded }: {
+  catalogLoaded: boolean; bootstrap: BootstrapPayload | null; markets: MarketListItem[]; marketGroups: MarketGroupItem[];
+}) {
+  const [selectedMarketId, setMarketId] = useState<number | null>(null);
+  const [selectedMarketGroupId, setGroupId] = useState<string | null>(null);
   const [selectedMarketGroupOutcomeKey, setSelectedMarketGroupOutcomeKey] = useState<string | null>(null);
-  const [selectedMarketGroupDetail, setSelectedMarketGroupDetail] = useState<MarketGroupDetail | null>(null);
-  const [selectedMarketGroupChart, setSelectedMarketGroupChart] = useState<MarketGroupChartPayload | null>(null);
+  const [selectedMarketGroupDetail, setGroupDetail] = useState<MarketGroupDetail | null>(null);
   const [selectedMarketGroupChartRange, setSelectedMarketGroupChartRange] = useState<MarketGroupChartRange>('1d');
   const [bundle, setBundle] = useState<WorkspaceBundle | null>(null);
-  const [selectedMarketId, setSelectedMarketId] = useState<number | null>(null);
   const [bundleLoading, setBundleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const bootstrapRef = useRef<BootstrapPayload | null>(null);
-  const selectedMarketIdRef = useRef<number | null>(null);
-  const selectedMarketGroupIdRef = useRef<string | null>(null);
-  const bundleRequestSeqRef = useRef(0);
-  const bundleCacheRef = useRef<Map<number, WorkspaceBundle>>(new Map());
-  const bundleFocusUpdatedAtRef = useRef<Map<number, number>>(new Map());
-  const focusTileInflightRef = useRef<Map<number, Promise<WorkspaceBundle>>>(new Map());
-  const focusRetryAtRef = useRef(new Map<number, number>());
-  bootstrapRef.current = bootstrap;
-  selectedMarketIdRef.current = selectedMarketId;
-  selectedMarketGroupIdRef.current = selectedMarketGroupId;
-  const initializedRef = useRef(false);
-  const catalogSelectionRef = useRef(false);
-  const selectionTouchedRef = useRef(false);
-  const chartRangeRef = useRef(selectedMarketGroupChartRange);
-  chartRangeRef.current = selectedMarketGroupChartRange;
-  const selectChartRange = (range: MarketGroupChartRange) => {
-    chartRangeRef.current = range;
-    setSelectedMarketGroupChartRange(range);
-  };
-  const focusControllersRef = useRef(new Map<number, AbortController>());
-  useEffect(() => () => { focusControllersRef.current.forEach((controller) => controller.abort()); }, []);
-
-  const loadMarketFocusTile = useCallback((marketId: number, force = false): Promise<WorkspaceBundle> => {
-    const normalizedMarketId = Number(marketId);
-    const cachedBundle = bundleCacheRef.current.get(normalizedMarketId);
-    const cachedAt = bundleFocusUpdatedAtRef.current.get(normalizedMarketId) || 0;
-    if (!force && cachedBundle && Date.now() - cachedAt <= MARKET_FOCUS_BROWSER_CACHE_MS) {
-      return Promise.resolve(cachedBundle);
-    }
-    const inFlight = focusTileInflightRef.current.get(normalizedMarketId);
-    if (inFlight) return inFlight;
-    if (Date.now() < (focusRetryAtRef.current.get(normalizedMarketId) || 0)) {
-      return Promise.reject(new Error('Market data source is cooling down.'));
-    }
-
-    const controller = new AbortController();
-    focusControllersRef.current.set(normalizedMarketId, controller);
-    const request = fetchMarketFocusTile(normalizedMarketId, 2500, controller.signal)
-      .then((loadedBundle) => {
-        if (controller.signal.aborted) throw new DOMException('Aborted', 'AbortError');
-        if (!bundleMatchesMarket(loadedBundle, normalizedMarketId)) throw new Error('Market focus identity mismatch');
-        const current = bundleCacheRef.current.get(normalizedMarketId) || emptyWorkspaceBundle();
-        const merged = mergeWorkspaceBundle(current, loadedBundle);
-        bundleCacheRef.current.set(normalizedMarketId, merged);
-        bundleFocusUpdatedAtRef.current.set(normalizedMarketId, Date.now());
-        focusRetryAtRef.current.delete(normalizedMarketId);
-        while (bundleCacheRef.current.size > 64) {
-          const oldest = bundleCacheRef.current.keys().next().value!;
-          bundleCacheRef.current.delete(oldest); bundleFocusUpdatedAtRef.current.delete(oldest);
-        }
-        return merged;
-      })
-      .catch((error) => {
-        if (!controller.signal.aborted) focusRetryAtRef.current.set(normalizedMarketId, Date.now() + 60_000);
-        while (focusRetryAtRef.current.size > 64) focusRetryAtRef.current.delete(focusRetryAtRef.current.keys().next().value!);
-        throw error;
-      })
-      .finally(() => {
-        if (focusTileInflightRef.current.get(normalizedMarketId) === request) {
-          focusTileInflightRef.current.delete(normalizedMarketId);
-          focusControllersRef.current.delete(normalizedMarketId);
-        }
-      });
-    focusTileInflightRef.current.set(normalizedMarketId, request);
-    return request;
-  }, []);
-
-  const prefetchMarketFocus = useCallback((marketIds: number[]) => {
-    const uniqueMarketIds = [...new Set(
-      marketIds
-        .map((marketId) => Number(marketId))
-        .filter((marketId) => Number.isFinite(marketId) && marketId > 0),
-    )].slice(0, 3);
-    uniqueMarketIds.forEach((marketId) => {
-      void loadMarketFocusTile(marketId).catch(() => undefined);
-    });
-  }, [loadMarketFocusTile]);
-
-  const focusMarketGroup = (group: MarketGroupItem, outcomeKey?: string | null, marketId?: number | null, automatic = false) => {
-    if (!automatic) selectionTouchedRef.current = true;
-    const eventId = group.eventId != null ? String(group.eventId) : null;
-    const selectedOutcome = pickDefaultGroupOutcome(group, outcomeKey, marketId);
-    const nextMarketId = selectedOutcome?.marketId != null ? Number(selectedOutcome.marketId) : (marketId != null ? Number(marketId) : null);
-    const nextOutcomeKey = selectedOutcome?.outcomeKey || outcomeKeyForGroupMarket(group, nextMarketId, outcomeKey);
-    selectedMarketGroupIdRef.current = eventId;
-    selectedMarketIdRef.current = nextMarketId;
-    if (nextMarketId != null) {
-      const optimisticBundle = optimisticBundleFromGroup(group, nextMarketId, nextOutcomeKey);
-      const cachedFocusBundle = bundleCacheRef.current.get(nextMarketId);
-      const hydratedBundle = cachedFocusBundle
-        ? mergeWorkspaceBundle(cachedFocusBundle, optimisticBundle)
-        : optimisticBundle;
-      bundleCacheRef.current.set(nextMarketId, hydratedBundle);
-      setBundle(hydratedBundle);
-      setBundleLoading(false);
-      setSelectedMarketGroupDetail(hydratedBundle.group || null);
-    }
-    setSelectedMarketGroupId(eventId);
-    setSelectedMarketGroupOutcomeKey(nextOutcomeKey);
-    setSelectedMarketId(nextMarketId);
-  };
+  const selected = useRef<number | null>(null);
+  const touched = useRef(false);
+  const initialized = useRef(false);
+  const latestMarkets = useRef(markets);
+  latestMarkets.current = markets;
 
   const selectMarket = (marketId: number | null, automatic = false) => {
-    if (!automatic) selectionTouchedRef.current = true;
-    selectedMarketGroupIdRef.current = null;
-    selectedMarketIdRef.current = marketId;
-    setSelectedMarketGroupId(null);
-    setSelectedMarketGroupOutcomeKey(null);
-    setSelectedMarketId(marketId);
+    if (!automatic) touched.current = true;
+    if (selected.current === marketId) return;
+    selected.current = marketId;
+    setMarketId(marketId); setGroupId(null); setGroupDetail(null); setSelectedMarketGroupOutcomeKey(null);
+    const market = markets.find((row) => row.id === marketId);
+    setBundle(market ? optimisticBundleFromMarket(market) : emptyWorkspaceBundle());
     setError(null);
   };
-  const resetMarketSelection = () => {
-    const group = pickDefaultMarketGroup(marketGroups);
-    if (group) focusMarketGroup(group, group.defaultOutcomeKey, group.defaultMarketId);
-    else selectMarket(pickDefaultMarketId(markets, bootstrap?.featuredMarket));
+  const focusMarketGroup = (group: MarketGroupItem, outcomeKey?: string | null, marketId?: number | null) => {
+    touched.current = true;
+    const outcome = pickDefaultGroupOutcome(group, outcomeKey, marketId);
+    const id = outcome?.marketId ?? marketId ?? null;
+    selected.current = id;
+    setMarketId(id); setGroupId(group.eventId == null ? null : String(group.eventId));
+    setGroupDetail({ ...group, generatedAt: group.generatedAt || undefined }); setSelectedMarketGroupOutcomeKey(outcome?.outcomeKey || null);
+    // A group without a local identity must clear the previous market too.
+    setBundle(optimisticBundleFromGroup(group, id, outcome?.outcomeKey || null));
+    setError(null);
   };
+  const resetMarketSelection = () => selectMarket(pickDefaultMarketId(markets, bootstrap?.featuredMarket));
   useEffect(() => {
-    if (!bootstrap || initializedRef.current) return;
-    initializedRef.current = true;
-    if (selectionTouchedRef.current) return;
-    const group = pickDefaultMarketGroup(bootstrap.activeMarketGroupsPreview || []);
-    if (group) focusMarketGroup(group, group.defaultOutcomeKey, group.defaultMarketId, true);
-    else selectMarket(pickDefaultMarketId(bootstrap.activeMarketsPreview || [], bootstrap.featuredMarket), true);
-  }, [bootstrap]);
-  useEffect(() => {
-    const group = pickDefaultMarketGroup(marketGroups);
-    if (!catalogLoaded || (catalogSelectionRef.current && !group)) return;
-    initializedRef.current = true;
-    catalogSelectionRef.current = true;
-    if (selectionTouchedRef.current || selectedMarketGroupIdRef.current) return;
-    if (group) focusMarketGroup(group, group.defaultOutcomeKey, group.defaultMarketId, true);
-    else selectMarket(pickDefaultMarketId(markets, bootstrap?.featuredMarket), true);
-  }, [catalogLoaded, bootstrap, markets, marketGroups]);
+    if (!catalogLoaded || initialized.current || touched.current || !markets.length) return;
+    initialized.current = true;
+    selectMarket(pickDefaultMarketId(markets), true);
+  }, [catalogLoaded, markets]);
 
   useEffect(() => {
-    if (selectedMarketId == null) {
-      if (!selectedMarketGroupId) {
-        setSelectedMarketGroupId(null);
-        setSelectedMarketGroupOutcomeKey(null);
-        setSelectedMarketGroupDetail(null);
-        setSelectedMarketGroupChart(null);
-      }
-      return;
-    }
-    const matchedGroup = findGroupForMarketId(marketGroups, selectedMarketId);
-    if (!matchedGroup) {
-      if (selectedMarketGroupId || selectedMarketGroupDetail || selectedMarketGroupChart || selectedMarketGroupOutcomeKey) {
-        setSelectedMarketGroupId(null);
-        setSelectedMarketGroupOutcomeKey(null);
-        setSelectedMarketGroupDetail(null);
-        setSelectedMarketGroupChart(null);
-      }
-      return;
-    }
-    const nextEventId = matchedGroup.eventId != null ? String(matchedGroup.eventId) : null;
-    const matchedOutcome = (matchedGroup.outcomes || []).find((outcome) => Number(outcome.marketId) === selectedMarketId) || null;
-    if (nextEventId && nextEventId !== selectedMarketGroupId) {
-      selectedMarketGroupIdRef.current = nextEventId;
-      setSelectedMarketGroupId(nextEventId);
-      setSelectedMarketGroupDetail(null);
-      setSelectedMarketGroupChart(null);
-    }
-    const nextOutcomeKey = matchedOutcome?.outcomeKey || matchedGroup.defaultOutcomeKey || null;
-    if (nextOutcomeKey && nextOutcomeKey !== selectedMarketGroupOutcomeKey) {
-      setSelectedMarketGroupOutcomeKey(nextOutcomeKey);
-    }
-  }, [
-    marketGroups,
-    selectedMarketGroupChart,
-    selectedMarketGroupDetail,
-    selectedMarketGroupId,
-    selectedMarketGroupOutcomeKey,
-    selectedMarketId,
-  ]);
-
-  const selectedFocusDetailReady = Boolean(
-    selectedMarketId
-      && bundleMatchesMarket(bundle, selectedMarketId)
-      && bundle?.focusStatus === 'ready'
-      && bundle.group
-      && (bundle.group.outcomes || []).length,
-  );
-  const selectedFocusChartReady = Boolean(
-    selectedMarketId
-      && bundleMatchesMarket(bundle, selectedMarketId)
-      && (bundle?.chart?.points || []).length > 2
-      && !['missing', 'snapshot', 'warming'].includes(String(bundle?.chart?.historyStatus || '').toLowerCase()),
-  );
-
-  useEffect(() => {
-    if (!selectedMarketGroupId) {
-      setSelectedMarketGroupDetail(null);
-      return;
-    }
-    if (selectedFocusDetailReady) return;
-    let cancelled = false;
-    const controller = new AbortController();
-    const eventId = selectedMarketGroupId;
-
-    const timer = window.setTimeout(() => {
-      fetchMarketGroupDetail(eventId, 3000, controller.signal)
-        .then((detailPayload) => {
-          if (cancelled || selectedMarketGroupIdRef.current !== eventId
-            || (detailPayload.eventId != null && String(detailPayload.eventId) !== eventId)) return;
-          setSelectedMarketGroupDetail(detailPayload);
-          const liveDetailOutcome = pickDefaultGroupOutcome(detailPayload, selectedMarketGroupOutcomeKey, selectedMarketIdRef.current);
-          if (liveDetailOutcome?.marketId != null && Number(liveDetailOutcome.marketId) !== selectedMarketIdRef.current) {
-            selectedMarketIdRef.current = Number(liveDetailOutcome.marketId);
-            setSelectedMarketId(Number(liveDetailOutcome.marketId));
-          }
-          setSelectedMarketGroupOutcomeKey(liveDetailOutcome?.outcomeKey || detailPayload.defaultOutcomeKey || null);
-        })
-        .catch(() => {
-          // Keep the optimistic/focus-tile detail visible on a transient detail miss.
-        });
-    }, 2500);
-
-    return () => {
-      cancelled = true;
-      controller.abort();
-      window.clearTimeout(timer);
+    if (!selectedMarketId) { setBundleLoading(false); return; }
+    const id = selectedMarketId;
+    let alive = true;
+    let lastFlowSuccess = 0;
+    let lastOracleSuccess = 0;
+    const current = () => alive && selected.current === id;
+    const update = (change: (base: WorkspaceBundle) => WorkspaceBundle) => {
+      if (!current()) return;
+      setBundle((previous) => change(bundleMatchesMarket(previous, id) ? previous! : emptyWorkspaceBundle()));
     };
-  }, [selectedFocusDetailReady, selectedMarketGroupId, selectedMarketGroupOutcomeKey]);
-
-  useEffect(() => {
-    if (!selectedMarketGroupId) {
-      setSelectedMarketGroupChart(null);
-      return;
-    }
-    let cancelled = false;
-    const controller = new AbortController();
-    let timer: number | undefined;
-    const eventId = selectedMarketGroupId;
-    const chartRange = selectedMarketGroupChartRange;
-    setSelectedMarketGroupChart(null);
-    if (chartRange === '1d' && selectedFocusChartReady) return;
-
-    timer = window.setTimeout(() => {
-      fetchMarketGroupChart(eventId, chartRange, 3500, controller.signal)
-        .then((chartPayload) => {
-          if (!cancelled && selectedMarketGroupIdRef.current === eventId && chartRangeRef.current === chartRange
-            && (chartPayload.eventId == null || String(chartPayload.eventId) === eventId) && chartPayload.range === chartRange) {
-            setSelectedMarketGroupChart(chartPayload);
-          }
-        })
-        .catch(() => {
-          if (!cancelled && selectedMarketGroupIdRef.current === eventId && chartRangeRef.current === chartRange) {
-            setSelectedMarketGroupChart(null);
-          }
-        });
-    }, chartRange === '1d' ? 2500 : 150);
-
-    return () => {
-      cancelled = true;
-      controller.abort();
-      if (timer !== undefined) window.clearTimeout(timer);
-    };
-  }, [selectedFocusChartReady, selectedMarketGroupChartRange, selectedMarketGroupId]);
+    const market = latestMarkets.current.find((row) => row.id === id);
+    setBundleLoading(!market);
+    const stopDetail = pollPanel(
+      (signal) => fetchMarketFocusTile(id, 6000, signal),
+      (value) => {
+        if (!current() || !bundleMatchesMarket(value, id)) return;
+        update((base) => mergeWorkspaceBundle(base, value)); setBundleLoading(false); setError(null);
+      },
+      () => { if (current()) { setBundleLoading(false); setError('Market metadata is unavailable; retrying with backoff.'); update((base) => ({ ...base, focusStatus: 'unavailable' })); } },
+      60_000,
+    );
+    const stopOracle = pollPanel(
+      (signal) => fetchMarketOracle(id, signal),
+      (value) => { if (value.marketId === id) { lastOracleSuccess = Date.now(); update((base) => ({ ...base, oracle: value })); } },
+      () => update((base) => ({ ...base, oracle: {
+        ...(Date.now() - lastOracleSuccess <= 120_000 ? base.oracle : null), marketId: id,
+        timeline: Date.now() - lastOracleSuccess <= 120_000 ? base.oracle?.timeline || [] : [],
+        status: lastOracleSuccess && Date.now() - lastOracleSuccess <= 120_000 ? 'stale' : 'unavailable',
+      } })),
+      20_000, 500,
+    );
+    const stopFlow = pollPanel(
+      (signal) => fetchMarketFlow(id, signal),
+      (value) => {
+        if (value.marketId !== id) return;
+        lastFlowSuccess = Date.now();
+        update((base) => ({ ...base, trades: value.items, flowStatus: value.status,
+          flowCoverage: value.coverage, flowSourceUpdatedAt: value.sourceUpdatedAt }));
+      },
+      () => update((base) => ({ ...base, trades: Date.now() - lastFlowSuccess <= 60_000 ? base.trades : [],
+        flowStatus: lastFlowSuccess && Date.now() - lastFlowSuccess <= 60_000 ? 'stale' : 'unavailable' })),
+      10_000, 1000,
+    );
+    return () => { alive = false; stopDetail(); stopOracle(); stopFlow(); };
+  }, [selectedMarketId]);
 
   useEffect(() => {
     if (!selectedMarketId) return;
-    if (selectedMarketGroupChartRange === '1d') return;
-    let cancelled = false;
-    const controller = new AbortController();
-    const currentMarketId = selectedMarketId;
-    const chartRange = selectedMarketGroupChartRange;
+    const id = selectedMarketId;
+    const range = selectedMarketGroupChartRange;
+    let lastSuccess = 0;
+    setBundle((base) => base ? { ...base, chart: null } : base);
+    return pollPanel(
+      (signal) => fetchMarketChart(id, range, undefined, 6000, signal),
+      (chart) => {
+        if (selected.current !== id || chart.marketId !== id || chart.range !== range) return;
+        lastSuccess = Date.now();
+        setBundle((base) => ({ ...(base || emptyWorkspaceBundle()), chart }));
+      },
+      () => {
+        if (selected.current !== id) return;
+        setBundle((base) => ({ ...(base || emptyWorkspaceBundle()), chart: {
+          marketId: id, range, interval: 'observations', historyStatus: lastSuccess && Date.now() - lastSuccess <= 300_000 ? 'stale' : 'unavailable',
+          points: Date.now() - lastSuccess <= 300_000 ? base?.chart?.points || [] : [],
+        } }));
+      },
+      90_000, 1500,
+    );
+  }, [selectedMarketId, selectedMarketGroupChartRange]);
 
-    fetchMarketChart(currentMarketId, chartRange, undefined, 12000, controller.signal)
-      .then((chartPayload) => {
-        if (cancelled || selectedMarketIdRef.current !== currentMarketId || chartRangeRef.current !== chartRange || chartPayload.marketId !== currentMarketId) return;
-        setBundle((previous) => {
-          const base = previous || bundleCacheRef.current.get(currentMarketId) || emptyWorkspaceBundle();
-          const next = mergeWorkspaceBundle(base, { ...emptyWorkspaceBundle(), chart: chartPayload });
-          bundleCacheRef.current.set(currentMarketId, next);
-          return next;
-        });
-      })
-      .catch(() => undefined);
-
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [selectedMarketGroupChartRange, selectedMarketId]);
-
-  useEffect(() => {
-    if (!selectedMarketId) return;
-    const currentMarketId = selectedMarketId;
-    const requestSeq = ++bundleRequestSeqRef.current;
-    let cancelled = false;
-    const controller = new AbortController();
-    const cachedBundle = bundleCacheRef.current.get(currentMarketId);
-    const listMarket = markets.find((market) => market.id === currentMarketId)
-      || bootstrapRef.current?.activeMarketsPreview?.find((market) => market.id === currentMarketId)
-      || null;
-    const listGroup = marketGroups.find((group) => {
-      if (selectedMarketGroupId && String(group.eventId ?? '') === selectedMarketGroupId) return true;
-      return [...(group.outcomes || []), ...(group.topOutcomes || [])].some((outcome) => Number(outcome.marketId) === currentMarketId);
-    }) || null;
-    const initialBundle = cachedBundle
-      || (listMarket ? optimisticBundleFromMarket(listMarket) : null)
-      || (listGroup ? optimisticBundleFromGroup(listGroup, currentMarketId, selectedMarketGroupOutcomeKey) : null)
-      || emptyWorkspaceBundle();
-    setBundle(initialBundle);
-    setBundleLoading(!cachedBundle && !listMarket && !listGroup);
-    if (!cachedBundle) {
-      bundleCacheRef.current.set(currentMarketId, initialBundle);
-    }
-
-    function applyLoadedBundle(loadedBundle: WorkspaceBundle) {
-      if (cancelled || bundleRequestSeqRef.current !== requestSeq || selectedMarketIdRef.current !== currentMarketId) return;
-      if (!bundleMatchesMarket(loadedBundle, currentMarketId)) return;
-      setError(null);
-      const loadedGroup = loadedBundle.group || null;
-      const loadedEventId = loadedGroup?.eventId ?? loadedBundle.identity?.eventId ?? null;
-      if (loadedGroup && loadedEventId != null) {
-        const eventId = String(loadedEventId);
-        selectedMarketGroupIdRef.current = eventId;
-        setSelectedMarketGroupId(eventId);
-        setSelectedMarketGroupDetail(loadedGroup);
-        const liveLoadedOutcome = pickDefaultGroupOutcome(
-          loadedGroup,
-          loadedBundle.selectedOutcome?.outcomeKey || loadedBundle.identity?.selectedOutcomeKey || loadedGroup.defaultOutcomeKey || null,
-          currentMarketId,
-        );
-        const nextOutcomeKey = liveLoadedOutcome?.outcomeKey
-          || loadedBundle.selectedOutcome?.outcomeKey
-          || loadedBundle.identity?.selectedOutcomeKey
-          || outcomeKeyForGroupMarket(loadedGroup, currentMarketId, loadedGroup.defaultOutcomeKey || null);
-        if (nextOutcomeKey) {
-          setSelectedMarketGroupOutcomeKey(nextOutcomeKey);
-        }
-      }
-      setBundle((previous) => {
-        const base = previous || bundleCacheRef.current.get(currentMarketId) || initialBundle;
-        const patch = chartRangeRef.current === '1d' || loadedBundle.chart?.range === chartRangeRef.current
-          ? loadedBundle : { ...loadedBundle, chart: null };
-        const next = mergeWorkspaceBundle(base, patch);
-        bundleCacheRef.current.set(currentMarketId, next);
-        return next;
-      });
-    }
-
-    const loadFocusTile = (force = false) => loadMarketFocusTile(currentMarketId, force)
-      .then((loadedBundle) => applyLoadedBundle(loadedBundle))
-      .catch((loadError) => {
-        if (!cancelled && bundleRequestSeqRef.current === requestSeq) {
-          setError(loadError instanceof Error ? loadError.message : 'Failed to load market.');
-          setBundle((current) => current ? { ...current, focusStatus: 'unavailable' } : current);
-        }
-      })
-      .finally(() => {
-        if (!cancelled && bundleRequestSeqRef.current === requestSeq) {
-          setBundleLoading(false);
-        }
-      });
-
-    void loadFocusTile();
-    const workspaceTimer = window.setTimeout(() => {
-      if (cancelled || bundleRequestSeqRef.current !== requestSeq) return;
-      fetchWorkspaceBundle(currentMarketId, { signal: controller.signal })
-        .then((loadedBundle) => applyLoadedBundle(loadedBundle))
-        .catch(() => undefined);
-    }, 6500);
-    const timer = window.setInterval(() => {
-      if (cancelled || bundleRequestSeqRef.current !== requestSeq || document.visibilityState === 'hidden') return;
-      void loadFocusTile(true);
-    }, 20000);
-
-    const loadingTimer = window.setTimeout(() => {
-      if (!cancelled && bundleRequestSeqRef.current === requestSeq) {
-        setBundleLoading(false);
-      }
-    }, 4500);
-
-    return () => {
-      cancelled = true;
-      controller.abort();
-      window.clearInterval(timer);
-      const focusController = focusControllersRef.current.get(currentMarketId);
-      focusController?.abort();
-      focusControllersRef.current.delete(currentMarketId);
-      focusTileInflightRef.current.delete(currentMarketId);
-      window.clearTimeout(workspaceTimer);
-      window.clearTimeout(loadingTimer);
-    };
-  }, [loadMarketFocusTile, selectedMarketId]);
-
-  useEffect(() => {
-    if (!selectedMarketId || Number(bundle?.market?.id) === Number(selectedMarketId)) return;
-    const selectedGroup = findGroupForMarketId(marketGroups, selectedMarketId);
-    const selectedListMarket = markets.find((market) => Number(market.id) === Number(selectedMarketId)) || null;
-    const optimistic = selectedGroup
-      ? optimisticBundleFromGroup(selectedGroup, selectedMarketId, selectedMarketGroupOutcomeKey)
-      : selectedListMarket
-        ? optimisticBundleFromMarket(selectedListMarket)
-        : null;
-    if (!optimistic) return;
-    setBundle((previous) => {
-      const next = mergeWorkspaceBundle(previous, optimistic);
-      bundleCacheRef.current.set(selectedMarketId, next);
-      return next;
-    });
-  }, [bundle?.market?.id, marketGroups, markets, selectedMarketGroupOutcomeKey, selectedMarketId]);
-
-
+  // Hovering catalog rows must not start database work for unselected markets.
+  const prefetchMarketFocus = (_marketIds: number[]) => undefined;
+  const selectedMarketGroupChart: MarketGroupChartPayload | null = null;
+  void marketGroups;
   return {
     selectedMarketId, setSelectedMarketId: selectMarket, resetMarketSelection,
     selectedMarketGroupId, selectedMarketGroupOutcomeKey, setSelectedMarketGroupOutcomeKey,
     selectedMarketGroupDetail, selectedMarketGroupChart, selectedMarketGroupChartRange,
-    setSelectedMarketGroupChartRange: selectChartRange,
-    bundle, bundleLoading, error, focusMarketGroup, prefetchMarketFocus,
+    setSelectedMarketGroupChartRange, bundle, bundleLoading, error, focusMarketGroup, prefetchMarketFocus,
   };
 }

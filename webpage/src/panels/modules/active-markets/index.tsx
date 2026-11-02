@@ -1,3 +1,4 @@
+import { useMarketSearch } from '@/features/market-focus/useMarketCatalog';
 import { numericValue } from '@/panels/shared/formatters';
 import { createContext } from 'preact';
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'preact/hooks';
@@ -10,7 +11,7 @@ import { useI18n, type MessageKey } from '@/services/i18n';
 import { localizedCurrency, MarketI18n, localizedPercent, localizedCompact, firstFiniteValue, uniqueGroupOutcomes, groupDisplayTradeCount, groupDisplayVolume } from '../../shared/market-values';
 import { panelFromRenderer } from '@/panels/definePanel';
 
-const MARKET_CATALOG_AUTO_REFRESH_MS = 20_000;
+const MARKET_CATALOG_AUTO_REFRESH_MS = 45_000;
 
 const MARKET_CATALOG_SYNC_DELAYED_MS = 60_000;
 
@@ -566,6 +567,7 @@ function ActiveMarketsPanel({
   const i18n = useI18n();
   const { t } = i18n;
   const [search, setSearch] = useState('');
+  const searchResult = useMarketSearch(search, true);
   const [clockNow, setClockNow] = useState(() => Date.now());
   const prefetchTimerRef = useRef<number | undefined>(undefined);
 
@@ -625,19 +627,7 @@ function ActiveMarketsPanel({
   const visibleMarkets = useMemo(() => {
     const query = search.trim().toLowerCase();
     const filtered = query
-      ? markets.filter((market) => {
-          const haystack = [
-            market.title,
-            market.slug,
-            market.category,
-            market.status,
-            ...(market.tags || []),
-          ]
-            .filter(Boolean)
-            .join(' ')
-            .toLowerCase();
-          return haystack.includes(query);
-        })
+      ? [...searchResult.hits]
       : markets.filter((market) => !isDefaultSuppressedMarket(market));
     const ranked = filtered.sort((a, b) => {
       if (marketGroupSort === 'new') return parseTimestamp(b.createdAt) - parseTimestamp(a.createdAt);
@@ -648,12 +638,12 @@ function ActiveMarketsPanel({
       return 0;
     });
     return query ? ranked : ranked;
-  }, [marketGroupSort, markets, search]);
+  }, [marketGroupSort, markets, search, searchResult.hits]);
 
   const hasGroups = marketGroups.length > 0 && visibleGroups.some(groupHasMarketCoverage);
   const panelCount = hasGroups ? visibleGroups.length : visibleMarkets.length;
-  const catalogGeneratedAt = useMemo(() => marketCatalogGeneratedAt(marketGroups), [marketGroups]);
-  const catalogActivityAt = useMemo(() => marketCatalogActivityAt(marketGroups), [marketGroups]);
+  const catalogGeneratedAt = useMemo(() => marketGroups.length ? marketCatalogGeneratedAt(marketGroups) : newestTimestamp(markets.map((m) => m.catalogFetchedAt)), [marketGroups, markets]);
+  const catalogActivityAt = useMemo(() => marketGroups.length ? marketCatalogActivityAt(marketGroups) : newestTimestamp(markets.map((m) => m.observedAt)), [marketGroups, markets]);
   const catalogSyncAge = catalogGeneratedAt ? Math.max(0, clockNow - catalogGeneratedAt) : Number.POSITIVE_INFINITY;
   const catalogActivityAge = catalogActivityAt ? Math.max(0, clockNow - catalogActivityAt) : Number.POSITIVE_INFINITY;
   const catalogTone = marketCatalogError
@@ -744,9 +734,10 @@ function ActiveMarketsPanel({
         </button>
       </div>
       <div className="wm-market-sort-explainer">
-        <span>{sortHelp}</span>
+        <span>{sortHelp} · {t('atlasMarket.catalog.pageScope')}</span>
         <em>{t('atlasMarket.catalog.sync', { time: generatedAtLabel })} · {t('atlasMarket.catalog.auto', { seconds: MARKET_CATALOG_AUTO_REFRESH_MS / 1000 })}</em>
       </div>
+      {searchResult.loading ? <p>{t('atlasMarket.catalog.refreshing')}</p> : searchResult.unavailable ? <p>{t('atlasMarket.catalog.error')}</p> : null}
       <CatalogClock.Provider value={clockNow}>{rows}</CatalogClock.Provider>
     </Panel>
   );

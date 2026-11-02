@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
-import { fetchAllActiveMarkets, fetchMarketGroups, fetchMarketSearch } from '@/services/api';
+import { fetchMarketsPage, fetchMarketSearch } from '@/services/api';
 import type { BootstrapPayload, MarketListItem, MarketGroupItem } from '@/types';
 
 /** One owner for the active catalog; manual refresh joins the current request. */
@@ -23,25 +23,11 @@ export function useMarketCatalog(bootstrap: BootstrapPayload | null, enabled: bo
     const isCurrent = () => !controller.signal.aborted && mounted.current;
     const errors: string[] = [];
     const promise = Promise.allSettled([
-      fetchMarketGroups('', 80, 'active', controller.signal).then((groups) => {
-        if (!isCurrent()) return;
-        hydrated.current.groups = true;
-        setMarketGroups((groups.items || []).map((group) => ({ ...group, generatedAt: group.generatedAt || groups.generatedAt })));
-        if (groups.status === 'degraded' || groups.stale) errors.push('Catalog fallback is available; local market data is unavailable or stale.');
-        if (groups.items?.length) setLoaded(true);
-      }).catch((error) => {
-        if (isCurrent()) errors.push(error instanceof Error ? error.message : 'Market catalog refresh failed.');
-      }),
-      fetchAllActiveMarkets('', 80, 8, controller.signal, (firstPage) => {
-        if (!isCurrent() || hydrated.current.markets) return;
-        // Make the initial page usable while the bounded remainder loads. A
-        // refresh keeps the complete previous catalog until its replacement.
-        hydrated.current.markets = true;
-        setMarkets(firstPage.items || []); setLoaded(true);
-      }).then((catalog) => {
+      fetchMarketsPage(1, '', 50, controller.signal).then((catalog) => {
         if (!isCurrent()) return;
         hydrated.current.markets = true;
-        setMarkets(catalog.items || []); setLoaded(true);
+        setMarkets((catalog.items || []).map((item) => ({ ...item, catalogFetchedAt: catalog.generatedAt }))); setMarketGroups([]); setLoaded(true);
+        if (catalog.status === 'stale') errors.push('Catalog refresh failed; showing the last stored page.');
       }).catch((error) => {
         if (isCurrent()) errors.push(error instanceof Error ? error.message : 'Market catalog refresh failed.');
       }),
@@ -49,7 +35,7 @@ export function useMarketCatalog(bootstrap: BootstrapPayload | null, enabled: bo
       if (isCurrent()) {
         setLoaded(true); setError(errors[0] || null);
         failures.current = errors.length ? Math.min(3, failures.current + 1) : 0;
-        retryAt.current = Date.now() + (errors.length ? 20_000 * 2 ** failures.current : 0);
+        retryAt.current = Date.now() + (errors.length ? 30_000 * 2 ** failures.current : 0);
       }
     }).finally(() => {
       if (requestRef.current?.controller === controller) requestRef.current = null;
@@ -61,12 +47,12 @@ export function useMarketCatalog(bootstrap: BootstrapPayload | null, enabled: bo
   useEffect(() => {
     if (!bootstrap) return;
     if (!hydrated.current.markets) setMarkets(bootstrap.activeMarketsPreview || []);
-    if (!hydrated.current.groups) setMarketGroups(bootstrap.activeMarketGroupsPreview || []);
+
   }, [bootstrap]);
   useEffect(() => {
     if (!enabled) return;
     void refreshMarketCatalog(false);
-    const timer = window.setInterval(() => void refreshMarketCatalog(false), 20_000);
+    const timer = window.setInterval(() => void refreshMarketCatalog(false), 45_000);
     const resume = () => {
       if (!document.hidden) void refreshMarketCatalog(false);
       else { requestRef.current?.controller.abort(); requestRef.current = null; }

@@ -962,7 +962,8 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const lob = executionAvailable && !marketIsClosed && lobMatchesTokens(candidateLob, selectedTokenId, selectedNoTokenId) ? candidateLob : null;
   const trades = executionAvailable && bundleMatchesSelected ? (ctx.bundle?.trades || []) : [];
   const tradeEvidence = bundleMatchesSelected ? ctx.bundle?.evidence?.claims.find((claim) => claim.id === 'trades') : null;
-  const tradesVerified = trades.length > 0 || Boolean(tradeEvidence && ['ok', 'ready', 'empty'].includes(tradeEvidence.status));
+  const flowStatus = bundleMatchesSelected ? ctx.bundle?.flowStatus : null;
+  const tradesVerified = flowStatus === 'ok' || trades.length > 0 || Boolean(tradeEvidence && ['ok', 'ready', 'empty'].includes(tradeEvidence.status));
   const chart = bundleMatchesSelected ? (ctx.bundle?.chart || null) : null;
   const activeBook = bookSide === 'no' ? lob?.no : lob?.yes;
   const activePrice = bookSide === 'no'
@@ -1225,6 +1226,8 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                   )}</span>
                 </div>
               </div>
+              {chartStatus === 'partial' ? <p>Latest stored fills within this range · up to 600 points; full interval coverage is not established.</p> : null}
+              {chartStatus === 'stale' ? <p>History refresh failed; showing the previous read.</p> : null}
               <div className={`wm-focus-detail-grid${showFocusedOutcomeRail ? '' : ' compact'}`}>
                 <div className="wm-focus-chart-wrap">
                   {detail
@@ -1384,17 +1387,19 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
       {wrapPanel('global-orderfilled', 'wm-focus-panel-slot wm-focus-trades-slot', (
         <Panel
           title="OrderFilled Flow"
-          badge={tradesVerified ? 'History' : 'Unavailable'}
+          badge={flowStatus === 'stale' ? 'Stale' : tradesVerified ? 'Stored events' : 'Unavailable'}
           status="muted"
           count={tradesVerified ? trades.length : undefined}
           className="wm-focus-panel wm-focus-trades-panel wm-orderfilled-panel"
         >
           <div className="wm-focus-trades">
+            {ctx.bundle?.flowCoverage && bundleMatchesSelected ? <p>Blocks {ctx.bundle.flowCoverage.fromBlock}–{ctx.bundle.flowCoverage.toBlock} · Last 50 events in this window</p> : null}
+            {ctx.bundle?.flowSourceUpdatedAt && bundleMatchesSelected ? <p>Source updated {formatRelative(ctx.bundle.flowSourceUpdatedAt)}</p> : null}
             {!executionAvailable && detail
               ? emptyState('Select an outcome with local sync to inspect orderfilled flow.')
               : trades.length
               ? orderfilledList(trades, 12, (trade) => resolveMarketTitle(ctx, trade), { compact: true })
-              : emptyState(tradesVerified ? 'No OrderFilled rows were returned for this query.' : 'Trade reads are unavailable. Catalog volume does not establish whether fills exist.')}
+              : emptyState(tradesVerified ? 'No OrderFilled rows in this block window. Earlier history has not been searched.' : 'Trade reads are unavailable. Catalog volume does not establish whether fills exist.')}
           </div>
         </Panel>
       ))}

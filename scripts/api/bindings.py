@@ -98,6 +98,7 @@ from api.services import (
     market_group_service,
     market_quality_service,
     market_workspace_cache_service,
+    market_panel_read_service,
     orderfilled_outcome_proof_service,
     product_service,
     sports_odds_service,
@@ -852,6 +853,7 @@ def bind_services(runtime: ServiceRuntime) -> None:
         get_recent_oracle_snapshot=get_recent_oracle_snapshot,
         utc_now_iso=utc_now_iso,
     )
+    runtime.panel_reader = market_panel_read_service.MarketPanelReader(runtime)
     runtime.recent_oracle = market_service.RecentOracleDependencies.from_context(runtime.market_context)
     runtime.market_workspace_cache = market_workspace_cache_service.MarketWorkspaceCacheDependencies(
         resources=runtime.resources,
@@ -997,12 +999,8 @@ def build_blueprints(runtime: ServiceRuntime):
         bootstrap_routes.create_bootstrap_blueprint(
             bootstrap_routes.BootstrapRouteDependencies(
                 get_dashboard_payload_cached=runtime.get_dashboard_payload_cached,
-                get_bootstrap_payload_cached=lambda: bootstrap_service.get_bootstrap_payload_cached(
-                    runtime.bootstrap_cache
-                ),
-                search_markets=lambda query, limit=10: market_service.search_markets(
-                    runtime.market_context, query, limit=limit
-                ),
+                get_bootstrap_payload_cached=runtime.panel_reader.bootstrap,
+                search_markets=lambda query, limit=10: runtime.panel_reader.catalog(query=query, page_size=limit),
             )
         ),
         runtime_sports_routes.create_runtime_sports_blueprint(
@@ -1054,19 +1052,9 @@ def build_blueprints(runtime: ServiceRuntime):
         ),
         market_groups_routes.create_market_groups_blueprint(
             market_groups_routes.MarketGroupRouteDependencies(
-                get_market_groups_payload=lambda query="", page=1, page_size=80, sort="active": (
-                    market_group_service.get_market_groups_payload(
-                        runtime.market_group_context, query=query, page=page, page_size=page_size, sort=sort
-                    )
-                ),
-                get_market_group_detail_payload=lambda event_id: market_group_service.get_market_group_detail_payload(
-                    runtime.market_group_context, event_id
-                ),
-                get_market_group_chart_payload=lambda event_id, range_name="1d": (
-                    market_group_service.get_market_group_chart_payload(
-                        runtime.market_group_context, event_id, range_name=range_name
-                    )
-                ),
+                get_market_groups_payload=runtime.panel_reader.groups,
+                get_market_group_detail_payload=runtime.panel_reader.group_detail,
+                get_market_group_chart_payload=runtime.panel_reader.group_chart,
             )
         ),
         runtime_panels_routes.create_runtime_panels_blueprint(
@@ -1402,65 +1390,38 @@ def build_blueprints(runtime: ServiceRuntime):
                 sanitize_payload=lambda payload, **kw: (
                     markets_routes.outcome_semantics_service.sanitize_public_market_payload(
                         {
-                            "query_all": lambda sql, params=None: api_db.query_all(runtime.api_db_context, sql, params),
+                            "query_all": runtime.panel_reader.semantic_query,
                             "get_backend": lambda: runtime.SETTINGS.database.backend,
                         },
                         payload,
                         **kw,
                     )
                 ),
-                get_markets_payload=lambda status="active", query="", page=1, page_size=20: (
-                    market_service.get_markets_payload(
-                        runtime.market_context, status=status, query=query, page=page, page_size=page_size
-                    )
-                ),
+                get_markets_payload=runtime.panel_reader.catalog,
                 get_market_by_id=lambda market_id: market_service.get_market_by_id(runtime.market_context, market_id),
                 get_market_by_slug=lambda slug: market_service.get_market_by_slug(runtime.market_context, slug),
                 normalize_market=normalize_market,
-                get_trades_by_market_id=lambda market_id, limit=100, offset=0, before=None: (
-                    market_workspace_cache_service.get_market_flow_rows(
-                        runtime.market_workspace_cache, market_id, limit=limit, offset=offset, before=before
-                    )
-                ),
+                get_trades_by_market_id=runtime.panel_reader.trades,
+                get_market_flow_payload=runtime.panel_reader.flow,
+                get_panel_health=runtime.panel_reader.health,
                 get_recent_trades_snapshot=lambda limit=24: market_service.get_recent_trades_snapshot(
                     runtime.market_context, limit=limit
                 ),
-                get_market_oracle_payload=lambda market_id: market_service.get_market_oracle_payload(
-                    runtime.market_context, market_id
-                ),
+                get_market_oracle_payload=runtime.panel_reader.oracle,
                 get_recent_oracle_snapshot=lambda limit=24: market_service.get_recent_oracle_snapshot(
                     runtime.recent_oracle, limit=limit
                 ),
-                get_market_detail_payload=lambda market_id: market_workspace_cache_service.get_market_detail_payload(
-                    runtime.market_workspace_cache, market_id
-                ),
-                get_market_chart_payload=lambda market_id, range_name="1d", interval="5m": (
-                    market_workspace_cache_service.get_market_chart_payload(
-                        runtime.market_workspace_cache, market_id, range_name=range_name, interval=interval
-                    )
-                ),
-                get_market_workspace_payload=lambda market_id: (
-                    market_workspace_cache_service.get_market_workspace_payload(
-                        runtime.market_workspace_cache, market_id
-                    )
-                ),
-                get_market_focus_tile_payload=lambda market_id: (
-                    market_workspace_cache_service.get_market_focus_tile_payload(
-                        runtime.market_workspace_cache, market_id
-                    )
-                ),
+                get_market_detail_payload=runtime.panel_reader.detail,
+                get_market_chart_payload=runtime.panel_reader.chart,
+                get_market_workspace_payload=runtime.panel_reader.workspace,
+                get_market_focus_tile_payload=runtime.panel_reader.detail,
             )
         ),
         lob_routes.create_lob_blueprint(
             lob_routes.LobRouteDependencies(
-                lambda market_id: market_workspace_cache_service.get_market_orderbook_payload(
-                    runtime.market_workspace_cache, market_id
-                ),
-                lambda token_id, no_token_id="", market_title="", market_id=None: (
-                    lob_service.get_runtime_lob_by_token_payload(
-                        token_id, no_token_id=no_token_id, market_title=market_title, market_id=market_id
-                    )
-                ),
+                runtime.panel_reader.book,
+                runtime.panel_reader.book_by_token,
+                runtime.panel_reader.book_by_token,
             )
         ),
         schema_routes.create_schema_blueprint(),

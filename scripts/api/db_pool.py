@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import os
 import logging
-import math
 import threading
 import time
 from collections import deque
 from typing import Any, Callable
+
+from api.read_budget import try_permit
 
 
 def _env_int(name: str, default: int, *, minimum: int = 0) -> int:
@@ -62,6 +63,7 @@ class ApiPostgresConnectionPool:
         self._leases: dict[int, tuple[float, str]] = {}
         self._closed = False
         self._connecting = False
+        self._connection_permits = {}
         self._retry_at = 0.0
         self._connect_failures = 0
 
@@ -96,15 +98,23 @@ class ApiPostgresConnectionPool:
                 self._condition.wait(timeout=remaining)
 
         if create_connection:
+            permit = None
             try:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise TimeoutError("API PostgreSQL connection deadline exceeded")
-                connection = self._connection_factory(*args, **kwargs, connect_timeout=max(1, math.ceil(remaining)))
+                permit = try_permit("postgres-connections", 4)
+                if permit is None:
+                    raise TimeoutError("API PostgreSQL connection budget full")
+                # Queue admission and a cold TCP connection have separate budgets.
+                connect_deadline = time.monotonic() + 8
+                connection = self._connection_factory(*args, **kwargs, connect_timeout=8)
+                cursor = connection.cursor()
+                cursor.execute("SELECT set_config('application_name', 'polymonitor-api-reader', false)")
                 connection.commit()  # Preserve the session search_path across lease rollbacks.
-                if time.monotonic() >= deadline:
+                if time.monotonic() >= connect_deadline:
                     raise TimeoutError("API PostgreSQL connection deadline exceeded")
+                self._connection_permits[id(connection)] = permit
             except BaseException:
+                if permit is not None:
+                    permit.close()
                 try:
                     if connection is not None:
                         connection.close()
@@ -125,6 +135,7 @@ class ApiPostgresConnectionPool:
             if self._closed:
                 self._connection_count -= 1
                 connection.close()
+                self._connection_permits.pop(id(connection)).close()
                 raise RuntimeError("database connection pool is closed")
             self._leases[id(connection)] = (time.monotonic(), threading.current_thread().name)
         return _ConnectionLease(self, connection)
@@ -148,6 +159,9 @@ class ApiPostgresConnectionPool:
                 if reusable:
                     connection.close()
                 self._connection_count -= 1
+                permit = self._connection_permits.pop(id(connection), None)
+                if permit is not None:
+                    permit.close()
             self._condition.notify()
         if lease is not None and time.monotonic() - lease[0] >= 5:
             logging.getLogger(__name__).warning(
@@ -163,6 +177,9 @@ class ApiPostgresConnectionPool:
             self._condition.notify_all()
         for connection in idle:
             connection.close()
+            permit = self._connection_permits.pop(id(connection), None)
+            if permit is not None:
+                permit.close()
 
 
 def build_api_connection_factory(
@@ -176,13 +193,10 @@ def build_api_connection_factory(
     pool = ApiPostgresConnectionPool(
         connection_factory,
         max_size=pool_size,
-        acquire_timeout_seconds=_env_float(
+        acquire_timeout_seconds=min(0.2, _env_float(
             "POLYDATA_API_POSTGRES_POOL_ACQUIRE_TIMEOUT_SECONDS",
-            # The production reverse tunnel can take six seconds to establish
-            # a cold session. Keep admission bounded without rejecting a
-            # healthy connection immediately after its search_path commit.
-            8.0,
-        ),
+            0.2,
+        )),
     )
 
     def _connect(*args: Any, **kwargs: Any) -> Any:

@@ -142,9 +142,8 @@ export function outcomeKeyForGroupMarket(group: MarketGroupItem, marketId?: numb
 
 export function optimisticBundleFromMarket(market: MarketListItem): WorkspaceBundle {
   const latest = market.latestPrice ?? null;
-  const numericLatest = Number(latest);
-  const latestNo = Number.isFinite(numericLatest) ? String(1 - numericLatest) : null;
-  const timestamp = market.lastTradeAt || market.createdAt || new Date().toISOString();
+  const latestNo = market.latestNoPrice == null ? null : String(market.latestNoPrice);
+  const timestamp = market.quoteUpdatedAt || null;
   return {
     market: {
       id: market.id,
@@ -186,21 +185,10 @@ export function optimisticBundleFromMarket(market: MarketListItem): WorkspaceBun
       latestNoPrice: latestNo,
       change24h: market.change24h == null ? null : String(market.change24h),
       volume24h: market.volume24h == null ? null : String(market.volume24h),
-      tradeCount24h: Number(market.tradeCount24h || 0),
+      tradeCount24h: market.tradeCount24h ?? null,
       updatedAt: timestamp,
     },
-    chart: latest == null
-      ? null
-      : {
-          marketId: market.id,
-          range: 'snapshot',
-          interval: 'snapshot',
-          kind: 'probability',
-          points: [
-            { timestamp, yesPrice: latest, noPrice: latestNo },
-            { timestamp: new Date().toISOString(), yesPrice: latest, noPrice: latestNo },
-          ],
-        },
+    chart: null,
     content: null,
     lob: null,
   };
@@ -210,9 +198,8 @@ export function optimisticBundleFromGroup(group: MarketGroupItem, marketId: numb
   const selectedOutcome = pickDefaultGroupOutcome(group, outcomeKey, marketId);
   const selectedMarketId = Number(selectedOutcome?.marketId ?? marketId ?? group.defaultMarketId ?? 0);
   const price = selectedOutcome?.blockCloseYesPrice ?? selectedOutcome?.yesPrice ?? group.latestBlockClosePrice ?? null;
-  const numericPrice = Number(price);
-  const noPrice = selectedOutcome?.noPrice ?? (Number.isFinite(numericPrice) ? String(1 - numericPrice) : null);
-  const timestamp = selectedOutcome?.lastTradeAt || group.lastActivityAt || group.createdAt || new Date().toISOString();
+  const noPrice = selectedOutcome?.noPrice ?? null;
+  const timestamp = selectedOutcome?.lastTradeAt || null;
   const marketSlug = selectedOutcome?.slug || group.slug || `market-${selectedMarketId || group.groupId}`;
   const optimisticGroup: MarketGroupDetail = {
     ...group,
@@ -224,7 +211,7 @@ export function optimisticBundleFromGroup(group: MarketGroupItem, marketId: numb
       id: selectedMarketId,
       slug: marketSlug,
       title: selectedOutcome?.title || selectedOutcome?.label || group.title,
-      status: 'OPEN',
+      status: 'UNKNOWN',
       latestPrice: price == null ? null : String(price),
       latestYesPrice: price == null ? null : String(price),
       latestNoPrice: noPrice == null ? null : String(noPrice),
@@ -261,21 +248,10 @@ export function optimisticBundleFromGroup(group: MarketGroupItem, marketId: numb
       volume24h: selectedOutcome?.volume24h == null
         ? (group.volume24h == null ? null : String(group.volume24h))
         : String(selectedOutcome.volume24h),
-      tradeCount24h: Number(selectedOutcome?.tradeCount24h ?? group.tradeCount24h ?? 0),
+      tradeCount24h: selectedOutcome?.tradeCount24h == null ? null : Number(selectedOutcome.tradeCount24h),
       updatedAt: timestamp,
     },
-    chart: Number.isFinite(numericPrice) && selectedMarketId
-      ? {
-          marketId: selectedMarketId,
-          range: 'snapshot',
-          interval: 'snapshot',
-          kind: 'probability',
-          points: [
-            { timestamp, yesPrice: String(price), noPrice },
-            { timestamp: new Date().toISOString(), yesPrice: String(price), noPrice },
-          ],
-        }
-      : null,
+    chart: null,
     content: null,
     lob: null,
   };
@@ -365,7 +341,10 @@ export function mergeWorkspaceBundle(base: WorkspaceBundle | null, patch: Worksp
     selectedOutcome: patch.selectedOutcome || current.selectedOutcome,
     price: patch.price || current.price,
     chart: chooseWorkspaceChart(current.chart, patch.chart),
-    trades: patch.trades?.length ? patch.trades : current.trades,
+    trades: patch.flowStatus ? patch.trades : patch.trades?.length ? patch.trades : current.trades,
+    flowStatus: patch.flowStatus || current.flowStatus,
+    flowCoverage: patch.flowCoverage || current.flowCoverage,
+    flowSourceUpdatedAt: patch.flowSourceUpdatedAt || current.flowSourceUpdatedAt,
     oracle: patch.oracle || current.oracle,
     content: patch.content ?? current.content,
     lob: chooseWorkspaceLob(current.lob, patch.lob),

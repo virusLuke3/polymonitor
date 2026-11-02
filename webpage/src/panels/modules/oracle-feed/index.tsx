@@ -14,17 +14,11 @@ type OracleI18n = ReturnType<typeof useI18n>;
 
 type OracleFeedView = {
   events: OracleEvent[];
-  source: 'focused' | 'global-fallback' | 'global';
+  source: 'focused' | 'global';
 };
 
 export function oracleFeedView(focused: OraclePayload | null, globalEvents: OracleEvent[]): OracleFeedView {
-  if (focused?.timeline?.length) {
-    return { events: focused.timeline, source: 'focused' };
-  }
-  return {
-    events: globalEvents,
-    source: focused ? 'global-fallback' : 'global',
-  };
+  return focused ? { events: focused.timeline || [], source: 'focused' } : { events: globalEvents, source: 'global' };
 }
 
 function focusedOraclePayload(ctx: Inputs): OraclePayload | null {
@@ -54,11 +48,12 @@ function focusedOraclePayload(ctx: Inputs): OraclePayload | null {
     conditionId: selectedOutcome?.conditionId ?? ctx.selectedMarket?.conditionId ?? ctx.bundle?.market?.conditionId ?? null,
     questionId: ctx.selectedMarket?.questionId ?? ctx.bundle?.market?.questionId ?? null,
     oracle: ctx.selectedMarket?.oracle ?? ctx.bundle?.market?.oracle ?? null,
-    currentStatus: ctx.selectedMarket?.status ?? 'OPEN',
-    completionStatus: 'OPEN',
-    isTradingClosed: false,
-    isResolved: false,
-    isFinal: false,
+    status: 'unavailable',
+    currentStatus: 'UNKNOWN',
+    completionStatus: 'UNKNOWN',
+    isTradingClosed: null,
+    isResolved: null,
+    isFinal: null,
     settlementOutcome: 'UNKNOWN',
     settlementSource: selectedOutcome?.marketId ? 'market' : 'gamma-event',
     timeline: [],
@@ -94,11 +89,14 @@ function focusedOracleStatus(ctx: Inputs, payload: OraclePayload, i18n: OracleI1
   const closedAt = ctx.bundle?.market?.endDate || ctx.selectedMarket?.endDate || ctx.bundle?.group?.endDate || ctx.selectedMarketGroupDetail?.endDate || ctx.selectedMarketGroup?.endDate || null;
   const timeline = payload.timeline || [];
   const latestEvent = timeline.length ? timeline[timeline.length - 1] : null;
-  const updatedAt = latestEvent?.eventTime || ctx.bundle?.generatedAt || ctx.bundle?.servingUpdatedAt || null;
+  const updatedAt = payload.updatedAt || latestEvent?.eventTime || null;
+  const unavailable = payload.status === 'unavailable' || payload.status === 'warming' || !currentStatus || currentStatus === 'unknown';
   const proposedEvent = (payload.timeline || []).find((event) => String(event.eventStatus || '').toLowerCase().includes('propose'));
   const disputedEvent = (payload.timeline || []).find((event) => String(event.eventStatus || '').toLowerCase().includes('dispute'));
   const finalizedEvent = (payload.timeline || []).find((event) => String(event.eventStatus || '').toLowerCase().includes('settle') || event.isFinal);
-  const stage = resolved
+  const stage = unavailable
+    ? { label: t('atlasOracle.sourceUnavailable'), detail: t('atlasOracle.sourceUnavailableHint'), tone: 'warning' }
+    : resolved
     ? { label: t('atlasOracle.stageFinalized'), detail: t('atlasOracle.finalizedHint', { outcome }), tone: 'positive' }
     : disputedEvent
       ? { label: t('atlasOracle.stageDisputed'), detail: t('atlasOracle.disputedHint'), tone: 'warning' }
@@ -115,7 +113,7 @@ function focusedOracleStatus(ctx: Inputs, payload: OraclePayload, i18n: OracleI1
             };
   const lifecycle = [
     { label: t('atlasOracle.created'), time: createdAt, active: false, done: Boolean(createdAt) },
-    { label: t('atlasOracle.tradingOpen'), time: createdAt, active: !tradingClosed, done: Boolean(createdAt) },
+    { label: t('atlasOracle.tradingOpen'), time: createdAt, active: !unavailable && !tradingClosed, done: !unavailable && Boolean(createdAt) },
     { label: tradingClosed ? t('atlasOracle.closed') : t('atlasOracle.closes'), time: closedAt, active: tradingClosed && !proposedEvent && !resolved, done: tradingClosed },
     { label: proposedEvent ? t('atlasOracle.submitted') : t('atlasOracle.proposed'), time: proposedEvent?.eventTime || null, active: Boolean(proposedEvent && !disputedEvent && !resolved), done: Boolean(proposedEvent) },
     { label: t('atlasOracle.finalized'), time: finalizedEvent?.eventTime || null, active: resolved, done: resolved },
@@ -127,12 +125,12 @@ function focusedOracleStatus(ctx: Inputs, payload: OraclePayload, i18n: OracleI1
           <span>{t('atlasOracle.currentStage')}</span>
           <em>{linked ? t('atlasOracle.linked') : t('atlasOracle.unlinked')}</em>
         </div>
-        <strong>{stage.label}</strong>
+        <strong>{stage.label}{payload.status === 'stale' ? ` · ${t('atlasOracle.stale')}` : ''}</strong>
         <p>{stage.detail}</p>
       </section>
       <div className="wm-oracle-focused-status-list" aria-label={t('atlasOracle.statusTitle')}>
         <div><span>{t('atlasOracle.resolution')}</span><strong>{resolved ? outcome : t('atlasOracle.pendingOutcome')}</strong></div>
-        <div><span>{t('atlasOracle.events')}</span><strong>{i18n.formatNumber(payload.timeline?.length || 0)} <small>{payload.timeline?.length ? t('atlasOracle.onchain') : t('atlasOracle.noneYet')}</small></strong></div>
+        <div><span>{t('atlasOracle.events')}</span><strong>{unavailable ? '--' : i18n.formatNumber(payload.timeline?.length || 0)} <small>{payload.timeline?.length ? t('atlasOracle.onchain') : t('atlasOracle.noneYet')}</small></strong></div>
         <div className="wide"><span>{t('atlasOracle.dataUpdated')}</span><strong>{updatedAt ? i18n.formatRelativeTime(updatedAt) : t('atlasOracle.notAvailable')}</strong></div>
       </div>
       <div className="wm-oracle-section-heading"><span>{t('atlasOracle.lifecycle')}</span></div>
@@ -194,9 +192,9 @@ function OracleFeedPanel({ ctx }: { ctx: Inputs }) {
   return (
     <Panel
       title={focused ? t('atlasOracle.statusTitle') : t('atlasOracle.feedTitle')}
-      badge={focused ? (oracleIsLinked(ctx, focused) ? t('atlasOracle.linked') : t('atlasOracle.unlinked')) : t('atlasOracle.live')}
-      status="live"
-      count={view.events.length}
+      badge={focused?.status === 'unavailable' ? t('atlasOracle.sourceUnavailable') : focused?.status === 'stale' ? t('atlasOracle.stale') : focused ? (oracleIsLinked(ctx, focused) ? t('atlasOracle.linked') : t('atlasOracle.unlinked')) : t('atlasOracle.live')}
+      status={focused?.status === 'unavailable' || focused?.status === 'stale' ? 'muted' : 'live'}
+      count={focused?.status === 'unavailable' ? undefined : view.events.length}
       className="wm-oracle-feed-panel"
     >
       {focused
