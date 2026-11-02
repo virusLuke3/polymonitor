@@ -124,7 +124,8 @@ function pumpRuntimeRequests() {
     runtimePumpScheduled = false;
     const limit = typeof matchMedia === 'function' && matchMedia('(max-width: 720px)').matches ? 2 : 3;
     const now = performance.now();
-    const effectivePriority = (task: RuntimeRequest) => Math.max(0, task.priority - Math.floor((now - task.queuedAt) / 4000));
+    const effectivePriority = (task: RuntimeRequest) => task.priority < 0
+      ? task.priority : Math.max(0, task.priority - Math.floor((now - task.queuedAt) / 4000));
     runtimeRequests.sort((a, b) => effectivePriority(a) - effectivePriority(b) || a.queuedAt - b.queuedAt);
     while (runtimeRunning < limit && runtimeRequests.length) {
       const task = runtimeRequests.shift()!;
@@ -142,7 +143,9 @@ function apiGetWithTimeout<T>(path: string, timeoutMs = 12000, externalSignal?: 
   if (!path.startsWith('/runtime/') && !bulkDashboard) return run();
   // Visible quote/signal consumers share the first tier with primary hazards
   // and interactive detail. Bulk map layers cannot starve their refreshes.
-  const priority = /^\/runtime\/(?:(signals|trades|markets)\/|crypto\/funding-watch|lob\/books|weather\/temperature-monitor)|natural-hazards\/map.*source=(usgs|nhc|nws)\b|detail|aviation.*viewport|map-query/.test(path) ? 0
+  // The bounded catalog/search owner gets the next shared slot on interaction.
+  const priority = /^\/markets(?:\?|$)/.test(path) ? -1
+    : /^\/runtime\/(?:(signals|trades|markets)\/|crypto\/funding-watch|lob\/books|weather\/temperature-monitor)|natural-hazards\/map.*source=(usgs|nhc|nws)\b|detail|aviation.*viewport|map-query/.test(path) ? 0
     : /natural-hazards|global-transport|transport\/global-shipping|geo-sanctions/.test(path) ? 1 : 2;
   return withRuntimeRequestBudget(run, externalSignal, priority);
 }

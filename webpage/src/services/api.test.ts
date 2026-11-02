@@ -201,3 +201,24 @@ it('honors duplicate Retry-After headers without treating invalid values as a re
   expect(new ApiHttpError(503, '/markets', '15, 120').retryAfterMs).toBe(120_000);
   expect(new ApiHttpError(503, '/markets', 'invalid').retryAfterMs).toBeNull();
 });
+
+it('admits catalog interaction before aged bulk requests without taking another slot', async () => {
+  vi.stubGlobal('window', globalThis);
+  let clock = 0;
+  const now = vi.spyOn(performance, 'now').mockImplementation(() => clock);
+  const releases: (() => void)[] = [], started: string[] = [];
+  const active = [0, 1, 2].map(() => withRuntimeRequestBudget(() => new Promise<void>(resolve => releases.push(resolve))));
+  await new Promise(resolve => setTimeout(resolve, 10));
+  const background = withRuntimeRequestBudget(async () => { started.push('background'); });
+  clock = 10_000;
+  vi.stubGlobal('fetch', vi.fn(async () => { started.push('catalog'); return { ok: true, json: async () => ({ items: [] }) }; }));
+  const catalog = fetchMarketsPage();
+  expect(started).toEqual([]);
+  releases.shift()!();
+  try {
+    await Promise.all([catalog, background]);
+    expect(started).toEqual(['catalog', 'background']);
+  } finally {
+    releases.forEach(release => release()); await Promise.all(active); now.mockRestore();
+  }
+});
