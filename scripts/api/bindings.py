@@ -1382,6 +1382,7 @@ def build_blueprints(runtime: ServiceRuntime):
                 build_system_health_payload=lambda: system_service.build_system_health_payload(runtime.system_health),
                 build_seed_health_payload=lambda: system_service.build_seed_health_payload(runtime.seed_health),
                 describe_db_target=runtime.SETTINGS.database.describe,
+                probe_database=lambda: api_db.query_one(runtime.api_db_context, "SELECT 1 AS ready"),
                 get_redis_client=lambda: api_cache.get_redis_client(runtime.cache),
             )
         ),

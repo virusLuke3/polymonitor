@@ -12,20 +12,25 @@ export function useMarketCatalog(bootstrap: BootstrapPayload | null, enabled: bo
   const requestRef = useRef<{ controller: AbortController; promise: Promise<void> } | null>(null);
   const mounted = useRef(true);
   const hydrated = useRef({ markets: false, groups: false });
+  const retryAt = useRef(0);
+  const failures = useRef(0);
   const refreshMarketCatalog = useCallback((manual = true): Promise<void> => {
     if (requestRef.current) return requestRef.current.promise;
     if (document.hidden && !manual) return Promise.resolve();
+    if (Date.now() < retryAt.current) return Promise.resolve();
     const controller = new AbortController();
     if (manual) { setRefreshing(true); setError(null); }
     const isCurrent = () => !controller.signal.aborted && mounted.current;
+    const errors: string[] = [];
     const promise = Promise.allSettled([
       fetchMarketGroups('', 80, 'active', controller.signal).then((groups) => {
         if (!isCurrent()) return;
         hydrated.current.groups = true;
-        setMarketGroups(groups.items || []); setError(null);
+        setMarketGroups((groups.items || []).map((group) => ({ ...group, generatedAt: group.generatedAt || groups.generatedAt })));
+        if (groups.status === 'degraded' || groups.stale) errors.push('Catalog fallback is available; local market data is unavailable or stale.');
         if (groups.items?.length) setLoaded(true);
       }).catch((error) => {
-        if (isCurrent()) setError(error instanceof Error ? error.message : 'Market catalog refresh failed.');
+        if (isCurrent()) errors.push(error instanceof Error ? error.message : 'Market catalog refresh failed.');
       }),
       fetchAllActiveMarkets('', 80, 8, controller.signal, (firstPage) => {
         if (!isCurrent() || hydrated.current.markets) return;
@@ -38,10 +43,14 @@ export function useMarketCatalog(bootstrap: BootstrapPayload | null, enabled: bo
         hydrated.current.markets = true;
         setMarkets(catalog.items || []); setLoaded(true);
       }).catch((error) => {
-        if (isCurrent()) setError(error instanceof Error ? error.message : 'Market catalog refresh failed.');
+        if (isCurrent()) errors.push(error instanceof Error ? error.message : 'Market catalog refresh failed.');
       }),
     ]).then(() => {
-      if (isCurrent()) setLoaded(true);
+      if (isCurrent()) {
+        setLoaded(true); setError(errors[0] || null);
+        failures.current = errors.length ? Math.min(3, failures.current + 1) : 0;
+        retryAt.current = Date.now() + (errors.length ? 20_000 * 2 ** failures.current : 0);
+      }
     }).finally(() => {
       if (requestRef.current?.controller === controller) requestRef.current = null;
       if (mounted.current && !controller.signal.aborted) setRefreshing(false);

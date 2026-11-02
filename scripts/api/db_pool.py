@@ -61,6 +61,9 @@ class ApiPostgresConnectionPool:
         self._connection_count = 0
         self._leases: dict[int, tuple[float, str]] = {}
         self._closed = False
+        self._connecting = False
+        self._retry_at = 0.0
+        self._connect_failures = 0
 
     def acquire(self, *args: Any, **kwargs: Any) -> _ConnectionLease:
         deadline = time.monotonic() + self._acquire_timeout_seconds
@@ -72,8 +75,11 @@ class ApiPostgresConnectionPool:
                 if self._idle:
                     connection = self._idle.popleft()
                     break
-                if self._connection_count < self._max_size:
+                if time.monotonic() < self._retry_at:
+                    raise TimeoutError("API PostgreSQL connection circuit is open")
+                if self._connection_count < self._max_size and not self._connecting:
                     self._connection_count += 1
+                    self._connecting = True
                     create_connection = True
                     connection = None
                     break
@@ -105,9 +111,17 @@ class ApiPostgresConnectionPool:
                 finally:
                     with self._condition:
                         self._connection_count -= 1
-                        self._condition.notify()
+                        self._connecting = False
+                        self._connect_failures = min(5, self._connect_failures + 1)
+                        self._retry_at = time.monotonic() + min(60, 5 * 2 ** (self._connect_failures - 1))
+                        self._condition.notify_all()
                 raise
         with self._condition:
+            if create_connection:
+                self._connecting = False
+                self._connect_failures = 0
+                self._retry_at = 0.0
+                self._condition.notify_all()
             if self._closed:
                 self._connection_count -= 1
                 connection.close()
@@ -157,9 +171,8 @@ def build_api_connection_factory(
 ) -> Callable[..., Any]:
     """Return a pooled API connector while retaining non-PostgreSQL behavior."""
 
-    pool_size = _env_int("POLYDATA_API_POSTGRES_POOL_SIZE", 1)
-    if pool_size <= 0:
-        return connection_factory
+    # A consumer must never disable admission or expand without a host budget.
+    pool_size = min(4, max(1, _env_int("POLYDATA_API_POSTGRES_POOL_SIZE", 1)))
     pool = ApiPostgresConnectionPool(
         connection_factory,
         max_size=pool_size,

@@ -955,11 +955,14 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   });
   const tokenLob = !marketIsClosed && tokenLobState.key === selectedTokenKey ? tokenLobState.lob : null;
   const tokenLobLoading = !marketIsClosed && tokenLobState.key === selectedTokenKey && tokenLobState.loading;
+  const tokenLobError = tokenLobState.key === selectedTokenKey ? tokenLobState.error : null;
   const executionAvailable = bundleMatchesSelected || selectedOutcomeMatches || Boolean(selectedTokenId) || Boolean(ctx.selectedMarketId && !detail);
   const price = executionAvailable && bundleMatchesSelected ? (ctx.bundle?.price ?? null) : null;
   const candidateLob = tokenLob || (bundleMatchesSelected ? ctx.bundle?.lob : null);
   const lob = executionAvailable && !marketIsClosed && lobMatchesTokens(candidateLob, selectedTokenId, selectedNoTokenId) ? candidateLob : null;
   const trades = executionAvailable && bundleMatchesSelected ? (ctx.bundle?.trades || []) : [];
+  const tradeEvidence = bundleMatchesSelected ? ctx.bundle?.evidence?.claims.find((claim) => claim.id === 'trades') : null;
+  const tradesVerified = trades.length > 0 || Boolean(tradeEvidence && ['ok', 'ready', 'empty'].includes(tradeEvidence.status));
   const chart = bundleMatchesSelected ? (ctx.bundle?.chart || null) : null;
   const activeBook = bookSide === 'no' ? lob?.no : lob?.yes;
   const activePrice = bookSide === 'no'
@@ -978,7 +981,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
     ? (detail.outcomes || []).length > 1
     : ((selectedGroup?.outcomes || []).length > 1 || Number(marketStats?.outcomeCount || 2) > 2);
   const lobObservedAt = timestampMillis(activeBook?.receivedAt);
-  const lobStatus = !lob && tokenLobLoading ? 'warming' : liveBookStatus(lob, bookSide);
+  const lobStatus = !lob && tokenLobLoading && !tokenLobError ? 'warming' : liveBookStatus(lob, bookSide);
   const lobIsFresh = lobStatus === 'live';
   const lobYesPrice = liveBookStatus(lob, 'yes') === 'live' ? bookMidValue(lob, 'yes') : null;
   const lobNoPrice = liveBookStatus(lob, 'no') === 'live' ? bookMidValue(lob, 'no') : null;
@@ -1075,7 +1078,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
     : chartStatus === 'snapshot'
       ? 'Only a latest-price snapshot is available for this market.'
       : hasServingTradeActivity
-        ? 'Price history is still loading for this market.'
+        ? 'Price history is currently unavailable for this market.'
         : 'No local price history is available for this market.';
   const focusedHistoryFallback = isBlockCloseView
     ? blockClosePlaceholder(focusedHistoryEmptyText)
@@ -1107,7 +1110,6 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
           ? 'Catalog quote'
           : 'No live quote';
   const activePriceForBook = hasActiveBookLevels ? activePrice : null;
-  const noTradesYet = executionAvailable && trades.length === 0 && !hasServingTradeActivity;
   const eventCategory = detail?.category || selectedGroup?.category || focusedMarket?.category || marketStats?.category || 'market';
   const outcomeCount = detail?.outcomeCount ?? selectedGroup?.outcomeCount ?? detail?.outcomes?.length ?? marketStats?.outcomeCount ?? null;
   const marketTitle = selectedOutcome?.title
@@ -1301,6 +1303,8 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
             emptyState('Trading is closed. Live CLOB levels are cleared; historical price and OrderFilled evidence remain available.')
           ) : !executionAvailable && detail ? (
             emptyState('Select an outcome with CLOB token data to inspect the order book.')
+          ) : tokenLobError && !lob ? (
+            emptyState(tokenLobError)
           ) : tokenLobLoading && !lob ? (
             emptyState('Warming: waiting for a continuous live order book.')
           ) : !lob || !activeBook ? (
@@ -1380,9 +1384,9 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
       {wrapPanel('global-orderfilled', 'wm-focus-panel-slot wm-focus-trades-slot', (
         <Panel
           title="OrderFilled Flow"
-          badge={marketIsClosed ? 'Historical' : trades.length ? 'Live' : 'Focused'}
-          status={marketIsClosed ? 'muted' : 'live'}
-          count={trades.length}
+          badge={tradesVerified ? 'History' : 'Unavailable'}
+          status="muted"
+          count={tradesVerified ? trades.length : undefined}
           className="wm-focus-panel wm-focus-trades-panel wm-orderfilled-panel"
         >
           <div className="wm-focus-trades">
@@ -1390,7 +1394,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
               ? emptyState('Select an outcome with local sync to inspect orderfilled flow.')
               : trades.length
               ? orderfilledList(trades, 12, (trade) => resolveMarketTitle(ctx, trade), { compact: true })
-              : emptyState(hasServingTradeActivity ? 'Volume is available, but raw OrderFilled rows are not indexed locally yet.' : noTradesYet ? 'No orderfilled rows exist for this outcome yet.' : 'No local orderfilled rows are available for this market.')}
+              : emptyState(tradesVerified ? 'No OrderFilled rows were returned for this query.' : 'Trade reads are unavailable. Catalog volume does not establish whether fills exist.')}
           </div>
         </Panel>
       ))}

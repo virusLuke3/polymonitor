@@ -9,9 +9,9 @@ have been removed.
 This directory now contains polymonitor consumers and shared infrastructure:
 
 - GCP/API and seed-cache services
-- serving-table and panel refresh jobs
+- panel refresh jobs
 - Polygon RPC tunnel and health check
-- LOB API consumer of market-data (`MARKET_DATA_LOB_URL`, default port 18610)
+- LOB API consumer of market-data (`MARKET_DATA_LOB_URL`, default port 18861)
 
 Do not add Market, OrderFilled or Oracle writers here. In particular, never
 run a second OrderFilled writer beside `polydata-trade-sync.service`.
@@ -34,7 +34,7 @@ ClickHouse `poly_orderfilled` database.
 The API reads existing market-data tables and the live book HTTP service;
 it does not require installing the `market-data` Python package. Set
 `MARKET_DATA_LOB_URL` to the engine accessible from this host (default
-`http://127.0.0.1:18610`). The loopback default requires a co-located service or
+`http://127.0.0.1:18861`). The loopback default requires a co-located service or
 an explicitly provisioned tunnel. Consumer installation does not provision
 that upstream service.
 
@@ -76,8 +76,8 @@ units on the serving host.
 The API side is read-only with respect to raw Market, OrderFilled and Oracle
 tables. Runtime panel caches are separate consumer outputs. Quant job templates and
 standalone entrypoints and the old LOB writer/maintenance units have been retired.
-Install `market-data-lob-live.service` from the market-data repository beside
-its raw collector. Polymonitor reads this service; it does not write LOB data.
+Install `market-data-lob-http.service` from the market-data repository beside
+the existing LOB V2 gateways. Its catalog resolves each token to its owner; reads have a 2-second deadline, four concurrent slots, 128 cache entries, and a 15-second failure cooldown. Install `market-data-lob-http-tunnel.service` for a dedicated direct GCP route on port 18861. Polymonitor reads this service; it does not write LOB data.
 
 ## Local acquisition install
 
@@ -142,3 +142,5 @@ been deployed to production.
 
 Development uses terminal output. Optional local captures and their cleanup
 are documented in [development](../../docs/development.md#logs-and-generated-files).
+
+API startup does not run database migrations. Run `python -m api.manage_auth migrate` explicitly during database maintenance when schema changes require it. `/health/live` checks process liveness; `/health` performs bounded cached database and Redis probes and returns 503 on dependency failure.

@@ -99,7 +99,7 @@ describe('HTTP lifecycle', () => {
     })));
     const controller = new AbortController();
     const request = fetchWorkspaceBundle(1, { includeContent: true, includeLob: true, signal: controller.signal });
-    controller.abort(); await request;
+    controller.abort(); await expect(request).rejects.toMatchObject({ name: 'AbortError' });
     // The queued Runtime book request is cancelled before admission.
     expect(signals).toHaveLength(2);
     expect(signals.every((signal) => signal.aborted)).toBe(true);
@@ -108,6 +108,12 @@ describe('HTTP lifecycle', () => {
 
 
 describe('shared Runtime admission', () => {
+  it('propagates workspace overload without issuing a second detail request', async () => {
+    vi.stubGlobal('window', globalThis);
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 503, headers: new Headers({ 'Retry-After': '15' }) })));
+    await expect(fetchWorkspaceBundle(987654)).rejects.toMatchObject({ status: 503, retryAfterMs: 15000 });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
   it('queues bulk market catalogues in the shared budget and cancels before downloading', async () => {
     vi.stubGlobal('window', globalThis);
     const releases: (() => void)[] = [];

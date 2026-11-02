@@ -100,6 +100,8 @@ export type MarketGroupSort = 'active' | 'new' | 'volume' | 'close' | 'move' | '
 export type MarketGroupChartRange = '1h' | '6h' | '1d' | '1w' | '1m' | 'all';
 
 export type MarketGroupsPayload = {
+  status?: string;
+  stale?: boolean;
   items: MarketGroupItem[];
   pagination: {
     page: number;

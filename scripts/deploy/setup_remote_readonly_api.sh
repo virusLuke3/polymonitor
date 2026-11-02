@@ -2,6 +2,8 @@
 
 set -euo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
 # One-shot helper to configure a remote GCP VM as a readonly polyData API host.
 # Run this from the current machine after SSH key access to the remote host works.
 
@@ -110,6 +112,7 @@ POLYDATA_POSTGRES_IDLE_IN_TRANSACTION_SESSION_TIMEOUT_MS=30000
 POLYDATA_POSTGRES_TCP_USER_TIMEOUT_MS=20000
 POLYDATA_SHUTDOWN_TIMEOUT_SECONDS=20
 POLYDATA_REDIS_URL=${REDIS_URL}
+MARKET_DATA_LOB_URL=http://127.0.0.1:18861
 POLYDATA_REDIS_PREFIX=polydata:
 POLYDATA_SNAPSHOT_SQLITE_PATH=${SNAPSHOT_SQLITE_PATH}
 POLYDATA_RUNTIME_TRUST_ENV=0
@@ -344,6 +347,41 @@ server {
         add_header X-Hazard-Cache \$upstream_cache_status always;
     }
 
+    # The LOB V2 snapshot reader has its own bounded event loop; slow catalog queries
+    # must not queue the selected token's book behind the main API workers.
+    location ~ ^/wm-api/runtime/lob/token/([0-9]+)\$ {
+        limit_conn polydata_lob_conn 4;
+        limit_conn polydata_market_conn 12;
+        limit_req zone=polydata_book_client burst=4 nodelay;
+        limit_req_status 429;
+        add_header Retry-After \$polydata_retry_after always;
+        limit_conn_status 429;
+        proxy_pass http://127.0.0.1:18861/book/\$1\$is_args\$args;
+        proxy_http_version 1.1;
+        proxy_connect_timeout 1s;
+        proxy_read_timeout 3s;
+        proxy_send_timeout 3s;
+        proxy_cache off;
+    }
+
+    # Shared across workers and clients; retries cannot multiply DB admission.
+    location ~ ^/wm-api/(markets|market-groups|trades|oracle|system/health)(/|\$) {
+        limit_conn polydata_market_conn 12;
+        limit_conn_status 429;
+        limit_req zone=polydata_market_rate burst=16 nodelay;
+        limit_req_status 429;
+        add_header Retry-After \$polydata_retry_after always;
+        rewrite ^/wm-api/(.*)\$ /\$1 break;
+        proxy_pass http://127.0.0.1:${API_PORT};
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_connect_timeout 2s;
+        proxy_read_timeout 25s;
+    }
+
     location /wm-api/ {
         proxy_pass http://127.0.0.1:${API_PORT}/;
         proxy_http_version 1.1;
@@ -361,6 +399,7 @@ EOF
 scp "${SSH_OPTS[@]}" "${LOCAL_ENV_FILE}" "${REMOTE_USER}@${REMOTE_HOST}:/tmp/polydata.env"
 scp "${SSH_OPTS[@]}" "${LOCAL_TUNNEL_SERVICE}" "${REMOTE_USER}@${REMOTE_HOST}:/tmp/polydata-db-tunnel.service"
 scp "${SSH_OPTS[@]}" "${LOCAL_API_SERVICE}" "${REMOTE_USER}@${REMOTE_HOST}:/tmp/polydata-api.service"
+scp "${SSH_OPTS[@]}" "${ROOT_DIR}/deploy/nginx/polydata-lob-limits.conf.example" "${REMOTE_USER}@${REMOTE_HOST}:/tmp/polydata-lob-limits.conf"
 scp "${SSH_OPTS[@]}" "${LOCAL_NGINX_CONF}" "${REMOTE_USER}@${REMOTE_HOST}:/tmp/polydata-nginx.conf"
 
 echo "[3/7] Installing packages, services, and env on the remote VM ..."
@@ -445,6 +484,7 @@ npm install
 VITE_PMTILES_URL=/map-tiles/planet.pmtiles npm run build
 sudo rsync -av --delete "${REMOTE_REPO_ROOT}/webpage/dist/" "${REMOTE_WEB_ROOT}/"
 
+sudo install -m 644 /tmp/polydata-lob-limits.conf /etc/nginx/conf.d/polydata-lob-limits.conf
 sudo install -m 644 /tmp/polydata-nginx.conf /etc/nginx/sites-available/polydata
 sudo ln -sf /etc/nginx/sites-available/polydata /etc/nginx/sites-enabled/polydata
 sudo nginx -t

@@ -79,18 +79,21 @@ def test_application_factory_owns_configuration_caches_and_connections(tmp_path)
     assert first.config["POLYDATA_API_PORT"] == 18501
     assert second.config["POLYDATA_API_PORT"] == 18502
     assert a.api_db_context["get_connection"] is no_database
-    assert first.test_client().get("/health").status_code == 200
-    assert second.test_client().get("/health").status_code == 200
+    assert first.test_client().get("/health").status_code == 503
+    assert second.test_client().get("/health").status_code == 503
     assert not list(tmp_path.iterdir())
     a.close()
     b.close()
 
 
-def test_public_health_redacts_connection_details_and_reports_redis_failure():
+def test_public_health_redacts_connection_details_and_reports_redis_failure(monkeypatch):
     from flask import Flask
     from unittest.mock import Mock
     from api.routes.system import SystemRouteDependencies, create_system_blueprint
 
+    import api.readiness as readiness
+    clock = [100.0]
+    monkeypatch.setattr(readiness.time, "monotonic", lambda: clock[0])
     redis = Mock()
     redis.ping.return_value = True
     app = Flask(__name__)
@@ -102,11 +105,13 @@ def test_public_health_redacts_connection_details_and_reports_redis_failure():
                 build_seed_health_payload=Mock(),
                 describe_db_target=lambda: "postgres:private-user@private-host/private-db",
                 get_redis_client=lambda: redis,
+                probe_database=lambda: True,
             )
         )
     )
     client = app.test_client()
     assert client.get("/health").get_json() == {"status": "ok", "database": True, "redis": True}
+    clock[0] += 16
     redis.ping.side_effect = ConnectionError("private connection details")
     assert client.get("/health").get_json() == {"status": "degraded", "database": True, "redis": False}
 
@@ -177,7 +182,7 @@ def test_apps_keep_database_configuration_and_health_cache_isolated(monkeypatch)
 
     monkeypatch.setenv("POLYDATA_API_POSTGRES_POOL_SIZE", "0")
     monkeypatch.setenv("POLYDATA_REDIS_URL", "")
-    monkeypatch.setattr(db, "get_postgres_connection", lambda settings, **kwargs: settings["database"])
+    monkeypatch.setattr(db, "get_postgres_connection", lambda settings, **kwargs: Mock(database=settings["database"]))
     monkeypatch.setenv("POLYDATA_POSTGRES_DATABASE", "first")
     first = create_app().extensions["polydata_runtime"]
     monkeypatch.setenv("POLYDATA_POSTGRES_DATABASE", "second")
@@ -185,8 +190,8 @@ def test_apps_keep_database_configuration_and_health_cache_isolated(monkeypatch)
     try:
         for runtime in (first, second):
             runtime.resources.start_thread = Mock(return_value=True)
-        assert first._api_connection_factory() == "first"
-        assert second._api_connection_factory() == "second"
+        assert first._api_connection_factory().database == "first"
+        assert second._api_connection_factory().database == "second"
         from api.services.system_service import build_system_health_payload
 
         a = build_system_health_payload(first.system_health)

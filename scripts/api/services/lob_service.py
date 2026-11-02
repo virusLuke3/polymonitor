@@ -19,7 +19,7 @@ def get_lob_runtime_status() -> dict[str, Any]:
     try:
         with requests.Session() as session:
             session.trust_env = False
-            base = os.environ.get("MARKET_DATA_LOB_URL", "http://127.0.0.1:18610").rstrip("/")
+            base = os.environ.get("MARKET_DATA_LOB_URL", "http://127.0.0.1:18861").rstrip("/")
             response = session.get(f"{base}/health", timeout=(0.5, 1.5))
             response.raise_for_status()
             return response.json()
@@ -82,17 +82,17 @@ def get_runtime_lob_by_token_payload(
         "marketTitle": market_title,
         "tokenMode": True,
         "source": "market-data",
-        "runtimeModel": "websocket-live",
+        "runtimeModel": "lob-v2",
     }
     try:
         # One local request for both outcomes; never warm, collect, or write here.
         with requests.Session() as session:
             session.trust_env = False
-            base = os.environ.get("MARKET_DATA_LOB_URL", "http://127.0.0.1:18610").rstrip("/")
+            base = os.environ.get("MARKET_DATA_LOB_URL", "http://127.0.0.1:18861").rstrip("/")
             response = session.get(f"{base}/book/{token_id}", params={"noTokenId": no_token_id}, timeout=(0.5, min(3.0, max(0.5, float(read_timeout_seconds)))))
             response.raise_for_status()
             payload = response.json()
-        if payload.get("source") != "market-data" or payload.get("runtimeModel") != "websocket-live":
+        if payload.get("source") != "market-data" or payload.get("runtimeModel") != "lob-v2":
             raise ValueError("Unexpected LOB source")
         yes, no = _live_side(payload.get("yes"), token_id), _live_side(payload.get("no"), no_token_id)
         states = {s["bookStatus"] for s in ([yes, no] if no_token_id else [yes])}

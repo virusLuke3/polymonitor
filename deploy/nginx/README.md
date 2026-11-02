@@ -79,3 +79,8 @@ the OpenFreeMap fallback and the Range cache is not exercised.
 - The LOB connection zone must be installed in the Nginx `http` context before
   enabling the site. It limits only concurrent public LOB reads per client; it
   does not change LOB data, matching, storage, or runtime code.
+
+Numeric `/wm-api/runtime/lob/token/{token}` reads go directly to the local
+market-data LOB V2 snapshot reader on port 18861 with a 3-second timeout and no HTTP cache.
+The remaining LOB routes (market lookup and historical snapshots) stay on the
+main API. Install the market-data LOB V2 HTTP reader unit before reloading this template.

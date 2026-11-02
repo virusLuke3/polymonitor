@@ -39,6 +39,7 @@ export function useMarketFocus({ bootstrap, markets, marketGroups, catalogLoaded
   const bundleCacheRef = useRef<Map<number, WorkspaceBundle>>(new Map());
   const bundleFocusUpdatedAtRef = useRef<Map<number, number>>(new Map());
   const focusTileInflightRef = useRef<Map<number, Promise<WorkspaceBundle>>>(new Map());
+  const focusRetryAtRef = useRef(new Map<number, number>());
   bootstrapRef.current = bootstrap;
   selectedMarketIdRef.current = selectedMarketId;
   selectedMarketGroupIdRef.current = selectedMarketGroupId;
@@ -63,6 +64,9 @@ export function useMarketFocus({ bootstrap, markets, marketGroups, catalogLoaded
     }
     const inFlight = focusTileInflightRef.current.get(normalizedMarketId);
     if (inFlight) return inFlight;
+    if (Date.now() < (focusRetryAtRef.current.get(normalizedMarketId) || 0)) {
+      return Promise.reject(new Error('Market data source is cooling down.'));
+    }
 
     const controller = new AbortController();
     focusControllersRef.current.set(normalizedMarketId, controller);
@@ -74,7 +78,17 @@ export function useMarketFocus({ bootstrap, markets, marketGroups, catalogLoaded
         const merged = mergeWorkspaceBundle(current, loadedBundle);
         bundleCacheRef.current.set(normalizedMarketId, merged);
         bundleFocusUpdatedAtRef.current.set(normalizedMarketId, Date.now());
+        focusRetryAtRef.current.delete(normalizedMarketId);
+        while (bundleCacheRef.current.size > 64) {
+          const oldest = bundleCacheRef.current.keys().next().value!;
+          bundleCacheRef.current.delete(oldest); bundleFocusUpdatedAtRef.current.delete(oldest);
+        }
         return merged;
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) focusRetryAtRef.current.set(normalizedMarketId, Date.now() + 60_000);
+        while (focusRetryAtRef.current.size > 64) focusRetryAtRef.current.delete(focusRetryAtRef.current.keys().next().value!);
+        throw error;
       })
       .finally(() => {
         if (focusTileInflightRef.current.get(normalizedMarketId) === request) {
@@ -331,6 +345,7 @@ export function useMarketFocus({ bootstrap, markets, marketGroups, catalogLoaded
     function applyLoadedBundle(loadedBundle: WorkspaceBundle) {
       if (cancelled || bundleRequestSeqRef.current !== requestSeq || selectedMarketIdRef.current !== currentMarketId) return;
       if (!bundleMatchesMarket(loadedBundle, currentMarketId)) return;
+      setError(null);
       const loadedGroup = loadedBundle.group || null;
       const loadedEventId = loadedGroup?.eventId ?? loadedBundle.identity?.eventId ?? null;
       if (loadedGroup && loadedEventId != null) {
@@ -364,8 +379,9 @@ export function useMarketFocus({ bootstrap, markets, marketGroups, catalogLoaded
     const loadFocusTile = (force = false) => loadMarketFocusTile(currentMarketId, force)
       .then((loadedBundle) => applyLoadedBundle(loadedBundle))
       .catch((loadError) => {
-        if (!cancelled && bundleRequestSeqRef.current === requestSeq && !listMarket && !listGroup && !cachedBundle) {
+        if (!cancelled && bundleRequestSeqRef.current === requestSeq) {
           setError(loadError instanceof Error ? loadError.message : 'Failed to load market.');
+          setBundle((current) => current ? { ...current, focusStatus: 'unavailable' } : current);
         }
       })
       .finally(() => {

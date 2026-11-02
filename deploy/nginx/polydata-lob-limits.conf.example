@@ -2,3 +2,11 @@
 # The site template uses the zone to stop one client from occupying every API
 # request slot with slow LOB reads.
 limit_conn_zone $binary_remote_addr zone=polydata_lob_conn:10m;
+limit_conn_zone $server_name zone=polydata_market_conn:1m;
+limit_req_zone $server_name zone=polydata_market_rate:1m rate=8r/s;
+limit_req_zone $binary_remote_addr zone=polydata_book_client:10m rate=2r/s;
+map $status $polydata_retry_after {
+    default "";
+    429 15;
+    503 15;
+}

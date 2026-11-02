@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { fetchMarketLobByToken } from '@/services/api';
+import { ApiHttpError, fetchMarketLobByToken } from '@/services/api';
 import type { LobPayload } from '@/types';
 import {
   bookMidValue,
@@ -16,6 +16,7 @@ type TokenLobState = {
   key: string;
   lob: LobPayload | null;
   loading: boolean;
+  error: string | null;
   updatedAt: number | null;
   pulseId: number;
   direction: RefreshDirection;
@@ -32,6 +33,7 @@ export function useFocusedOrderBook({ marketId, selectedTokenId, selectedNoToken
     key: '',
     lob: null,
     loading: false,
+    error: null,
     updatedAt: null,
     pulseId: 0,
     direction: 'flat',
@@ -42,7 +44,7 @@ export function useFocusedOrderBook({ marketId, selectedTokenId, selectedNoToken
     if (marketIsClosed || !selectedTokenId) {
       setTokenLobState((current) => (
         current.loading || current.lob
-          ? { key: '', lob: null, loading: false, updatedAt: null, pulseId: 0, direction: 'flat' }
+          ? { key: '', lob: null, loading: false, error: null, updatedAt: null, pulseId: 0, direction: 'flat' }
           : current
       ));
       return;
@@ -50,6 +52,8 @@ export function useFocusedOrderBook({ marketId, selectedTokenId, selectedNoToken
     let cancelled = false;
     let timer: number | undefined;
     let controller: AbortController | null = null;
+    let failures = 0;
+    let retryAfterMs = 0;
     const key = selectedTokenKey;
     const title = outcomeLabel || groupTitle || '';
     const matchingSeed = lobMatchesTokens(bundledLob, selectedTokenId, selectedNoTokenId) ? bundledLob : null;
@@ -59,6 +63,7 @@ export function useFocusedOrderBook({ marketId, selectedTokenId, selectedNoToken
         key,
         lob: matchingSeed,
         loading: false,
+        error: null,
         updatedAt: timestampMillis(matchingSeed.yes?.receivedAt),
         pulseId: current.key === key ? current.pulseId : current.pulseId + 1,
         direction: current.key === key ? current.direction : 'flat',
@@ -74,6 +79,7 @@ export function useFocusedOrderBook({ marketId, selectedTokenId, selectedNoToken
         key,
         lob: current.key === key ? current.lob : null,
         loading: true,
+        error: current.key === key ? current.error : null,
         updatedAt: current.key === key ? current.updatedAt : null,
         pulseId: current.key === key ? current.pulseId : 0,
         direction: current.key === key ? current.direction : 'flat',
@@ -82,6 +88,9 @@ export function useFocusedOrderBook({ marketId, selectedTokenId, selectedNoToken
         .then((lobPayload) => {
           if (cancelled || currentController.signal.aborted || requestSeq !== tokenLobRequestRef.current) return;
           if (!lobMatchesTokens(lobPayload, selectedTokenId, selectedNoTokenId)) throw new Error('LOB token mismatch');
+          if (lobPayload.bookStatus === 'unavailable') throw new Error('Order book source unavailable. Retrying with backoff.');
+          failures = 0;
+          retryAfterMs = 0;
           setTokenLobState((current) => {
             const previousMid = current.key === key ? bookMidValue(current.lob, bookSide) : null;
             const nextMid = bookMidValue(lobPayload, bookSide);
@@ -89,18 +98,22 @@ export function useFocusedOrderBook({ marketId, selectedTokenId, selectedNoToken
               key,
               lob: lobPayload,
               loading: false,
+              error: null,
               updatedAt: timestampMillis(lobPayload.yes?.receivedAt),
               pulseId: (current.key === key ? current.pulseId : 0) + 1,
               direction: directionFromValues(nextMid, previousMid),
             };
           });
         })
-        .catch(() => {
+        .catch((error: unknown) => {
           if (!cancelled && !currentController.signal.aborted && requestSeq === tokenLobRequestRef.current) {
+            failures = Math.min(failures + 1, 5);
+            retryAfterMs = error instanceof ApiHttpError ? error.retryAfterMs || 0 : 0;
             setTokenLobState((current) => ({
               key,
               lob: current.key === key ? staleLob(current.lob) : null,
               loading: false,
+              error: 'Order book source unavailable. Retrying with backoff.',
               updatedAt: current.key === key ? current.updatedAt : null,
               pulseId: current.key === key ? current.pulseId : 0,
               direction: current.key === key ? current.direction : 'flat',
@@ -110,7 +123,7 @@ export function useFocusedOrderBook({ marketId, selectedTokenId, selectedNoToken
         .finally(() => {
           if (controller === currentController) controller = null;
           if (!cancelled && !document.hidden && requestSeq === tokenLobRequestRef.current) {
-            timer = window.setTimeout(loadBook, LOB_REFRESH_INTERVAL_MS);
+            timer = window.setTimeout(loadBook, Math.max(retryAfterMs, Math.min(60_000, LOB_REFRESH_INTERVAL_MS * 2 ** failures)) + Math.random() * 500);
           }
         });
     };

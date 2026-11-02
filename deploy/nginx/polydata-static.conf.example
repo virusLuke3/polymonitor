@@ -126,7 +126,24 @@ server {
     # The connection zone is declared by
     # /etc/nginx/conf.d/polydata-lob-limits.conf. Bound slow LOB reads per
     # client so they cannot consume every main API request slot.
-    location ^~ /wm-api/runtime/lob/ {
+    # The LOB V2 snapshot reader has its own bounded event loop; slow catalog queries
+    # must not queue the selected token's book behind the main API workers.
+    location ~ ^/wm-api/runtime/lob/token/([0-9]+)$ {
+        limit_conn polydata_lob_conn 4;
+        limit_conn polydata_market_conn 12;
+        limit_req zone=polydata_book_client burst=4 nodelay;
+        limit_req_status 429;
+        add_header Retry-After $polydata_retry_after always;
+        limit_conn_status 429;
+        proxy_pass http://127.0.0.1:18861/book/$1$is_args$args;
+        proxy_http_version 1.1;
+        proxy_connect_timeout 1s;
+        proxy_read_timeout 3s;
+        proxy_send_timeout 3s;
+        proxy_cache off;
+    }
+
+    location /wm-api/runtime/lob/ {
         limit_conn polydata_lob_conn 4;
         limit_conn_status 429;
         proxy_pass __POLYDATA_API_UPSTREAM__/runtime/lob/;
@@ -138,6 +155,24 @@ server {
         proxy_connect_timeout 10s;
         proxy_read_timeout 60s;
         proxy_send_timeout 60s;
+    }
+
+    # Shared across workers and clients; retries cannot multiply DB admission.
+    location ~ ^/wm-api/(markets|market-groups|trades|oracle|system/health)(/|$) {
+        limit_conn polydata_market_conn 12;
+        limit_conn_status 429;
+        limit_req zone=polydata_market_rate burst=16 nodelay;
+        limit_req_status 429;
+        add_header Retry-After $polydata_retry_after always;
+        rewrite ^/wm-api/(.*)$ /$1 break;
+        proxy_pass __POLYDATA_API_UPSTREAM__;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 2s;
+        proxy_read_timeout 25s;
     }
 
     location /wm-api/ {

@@ -784,29 +784,6 @@ function preferLoadedBundle(primary: WorkspaceBundle, secondary: WorkspaceBundle
 
 const workspaceBundleInflight = new Map<string, Promise<WorkspaceBundle>>();
 
-function emptyWorkspaceBundle(): WorkspaceBundle {
-  return {
-    market: null,
-    identity: null,
-    diagnostics: null,
-    health: null,
-    evidence: null,
-    group: null,
-    selectedOutcome: null,
-    price: null,
-    chart: null,
-    trades: [],
-    oracle: null,
-    content: null,
-    lob: null,
-    servingSource: null,
-    servingUpdatedAt: null,
-    generatedAt: null,
-    focusStatus: null,
-    cacheLayers: null,
-  };
-}
-
 export function fetchMarketWideAiSnapshot(lens: MarketWideAiInsightLens, timeoutMs = 8000, signal?: AbortSignal) {
   return apiGetWithTimeout<MarketWideAiInsightResponse>(
     `/runtime/agent/market-wide-insights/${encodeURIComponent(lens)}`,
@@ -833,11 +810,12 @@ export async function fetchWorkspaceBundle(
     const lobPromise = includeLob ? fetchMarketLob(marketId, 1800, options.signal) : Promise.resolve(null);
     const detailPromise = fetchMarketWorkspaceBundle(marketId, 22000, options.signal)
       .catch((error) => {
-        if (options.signal?.aborted) throw error;
+        if (options.signal?.aborted || error instanceof ApiHttpError && [429, 502, 503, 504].includes(error.status)) throw error;
         return fetchMarketDetailBundle(marketId, 12000, options.signal);
       });
     const [detailResult, contentResult, lobResult] = await Promise.allSettled([detailPromise, contentPromise, lobPromise]);
-    const detailBundle = detailResult.status === 'fulfilled' ? detailResult.value : emptyWorkspaceBundle();
+    if (detailResult.status === 'rejected') throw detailResult.reason;
+    const detailBundle = detailResult.value;
     const secondary: WorkspaceBundle = {
       market: null,
       identity: null,
@@ -866,7 +844,7 @@ export async function fetchWorkspaceBundle(
 
   if (!options.signal) {
     workspaceBundleInflight.set(inflightKey, request);
-    void request.finally(() => workspaceBundleInflight.delete(inflightKey));
+    void request.then(() => workspaceBundleInflight.delete(inflightKey), () => workspaceBundleInflight.delete(inflightKey));
   }
   return request;
 }

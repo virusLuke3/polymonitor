@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import threading
 import time
+import uuid
+from collections import OrderedDict
 from typing import Any, Dict, Optional
 
 
@@ -25,6 +27,7 @@ class CacheState:
     runtime_lock: Any = field(default_factory=threading.Lock)
     markets_cache: dict = field(default_factory=dict)
     markets_lock: Any = field(default_factory=threading.Lock)
+    snapshot_retry_at: Any = field(default_factory=OrderedDict)
 
 
 def get_redis_client(ctx: CacheState):
@@ -73,6 +76,8 @@ def get_cached_runtime_payload(ctx: CacheState, namespace: str, cache_key: str) 
 def set_cached_runtime_payload(ctx: CacheState, namespace: str, cache_key: str, payload: Any, ttl_seconds: int) -> Any:
     composite_key = f"{namespace}:{cache_key}"
     with ctx.runtime_lock:
+        if len(ctx.runtime_cache) >= 512 and composite_key not in ctx.runtime_cache:
+            ctx.runtime_cache.pop(next(iter(ctx.runtime_cache)))
         ctx.runtime_cache[composite_key] = {
             "payload": payload,
             "expires_at": time.monotonic() + max(1, ttl_seconds),
@@ -129,11 +134,11 @@ def _store_snapshot_payload(ctx: CacheState, namespace: str, cache_key: str, pay
     ctx.snapshot_store.set(namespace, cache_key, payload, ttl_seconds)
 
 
-def _refresh_snapshot_payload_async(ctx: CacheState, namespace: str, cache_key: str, builder, ttl_seconds: int) -> None:
+def _admit_snapshot(ctx, namespace, cache_key):
     resources = ctx.resources
     refresh_key = f"{namespace}:{cache_key}"
     with resources.snapshot_lock:
-        if refresh_key in resources.snapshot_refreshing:
+        if refresh_key in resources.snapshot_refreshing or ctx.snapshot_retry_at.get(refresh_key, 0) > time.monotonic():
             return
         if not resources.snapshot_slots.acquire(blocking=False):
             ctx.application.logger.info(
@@ -143,23 +148,60 @@ def _refresh_snapshot_payload_async(ctx: CacheState, namespace: str, cache_key: 
             )
             return
         resources.snapshot_refreshing.add(refresh_key)
+    owner = uuid.uuid4().hex
+    client = get_redis_client(ctx)
+    lock_key = _redis_key(ctx, "snapshot-admission", refresh_key)
+    if client is not None:
+        try:
+            if not client.set(lock_key, owner, nx=True, ex=120):
+                _release_snapshot(ctx, refresh_key, None, lock_key, owner, failed=False)
+                return
+        except Exception:
+            # Keep the process-wide slot bound even if shared admission is down.
+            client = None
+    return refresh_key, client, lock_key, owner
+
+
+def _release_snapshot(ctx, refresh_key, client, lock_key, owner, *, failed):
+    if client is not None:
+        try:
+            # A failed builder retains the distributed lease briefly as cooldown.
+            client.eval("if redis.call('get',KEYS[1]) == ARGV[1] then "
+                        "if ARGV[2] == '1' then return redis.call('expire',KEYS[1],15) "
+                        "else return redis.call('del',KEYS[1]) end end return 0",
+                        1, lock_key, owner, '1' if failed else '0')
+        except Exception:
+            pass
+    with ctx.resources.snapshot_lock:
+        ctx.resources.snapshot_refreshing.discard(refresh_key)
+        if failed:
+            ctx.snapshot_retry_at[refresh_key] = time.monotonic() + 15
+            while len(ctx.snapshot_retry_at) > 512:
+                ctx.snapshot_retry_at.popitem(last=False)
+        else:
+            ctx.snapshot_retry_at.pop(refresh_key, None)
+    ctx.resources.snapshot_slots.release()
+
+
+def _refresh_snapshot_payload_async(ctx: CacheState, namespace: str, cache_key: str, builder, ttl_seconds: int) -> None:
+    admission = _admit_snapshot(ctx, namespace, cache_key)
+    if admission is None:
+        return
 
     def refresh() -> None:
+        failed = True
         try:
             payload = builder()
             _store_snapshot_payload(ctx, namespace, cache_key, payload, ttl_seconds)
+            failed = False
             ctx.application.logger.info("snapshot-refresh completed namespace=%s key=%s", namespace, cache_key)
         except Exception:
             ctx.application.logger.exception("snapshot-refresh failed namespace=%s key=%s", namespace, cache_key)
         finally:
-            with resources.snapshot_lock:
-                resources.snapshot_refreshing.discard(refresh_key)
-            resources.snapshot_slots.release()
+            _release_snapshot(ctx, *admission, failed=failed)
 
-    if not resources.start_thread(refresh, name=f"snapshot-refresh:{namespace}"):
-        with resources.snapshot_lock:
-            resources.snapshot_refreshing.discard(refresh_key)
-        resources.snapshot_slots.release()
+    if not ctx.resources.start_thread(refresh, name=f"snapshot-refresh:{namespace}"):
+        _release_snapshot(ctx, *admission, failed=True)
 
 
 def get_snapshot_payload(ctx: CacheState, namespace: str, cache_key: str, builder, *, ttl_seconds: int) -> Any:
@@ -176,14 +218,21 @@ def get_snapshot_payload(ctx: CacheState, namespace: str, cache_key: str, builde
         return {**stale_payload, "stale": True, "cacheStatus": "stale"}
 
     # Bare lists cannot carry a stale marker; refresh before returning them.
+    admission = _admit_snapshot(ctx, namespace, cache_key)
+    if admission is None:
+        raise TimeoutError("Snapshot refresh is pending or cooling down")
+    failed = True
     try:
         payload = builder()
+        _store_snapshot_payload(ctx, namespace, cache_key, payload, ttl_seconds)
+        failed = False
+        return payload
     except Exception:
         ctx.application.logger.exception("snapshot-builder failed namespace=%s key=%s", namespace, cache_key)
         raise
 
-    _store_snapshot_payload(ctx, namespace, cache_key, payload, ttl_seconds)
-    return payload
+    finally:
+        _release_snapshot(ctx, *admission, failed=failed)
 
 
 def get_markets_payload_cached(

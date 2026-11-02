@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from flask import Blueprint, jsonify, request
+from api.readiness import CachedProbe
 
 
 @dataclass(frozen=True)
@@ -14,10 +15,13 @@ class SystemRouteDependencies:
     build_seed_health_payload: Callable[[], Any]
     describe_db_target: Callable[[], str]
     get_redis_client: Callable[[], Any]
+    probe_database: Callable[[], Any] | None = None
 
 
 def create_system_blueprint(dependencies: SystemRouteDependencies) -> Blueprint:
     bp = Blueprint("system_routes", __name__)
+    database_probe = CachedProbe(dependencies.probe_database or (lambda: False))
+    redis_probe = CachedProbe(lambda: bool((client := dependencies.get_redis_client()) and client.ping()))
 
     @bp.route("/system/health", methods=["GET"])
     def api_system_health():
@@ -38,20 +42,24 @@ def create_system_blueprint(dependencies: SystemRouteDependencies) -> Blueprint:
     @bp.route("/health", methods=["GET"])
     def health():
         try:
-            database_ready = bool(dependencies.describe_db_target())
+            database_ready = database_probe()
         except Exception:
             database_ready = False
         try:
-            client = dependencies.get_redis_client()
-            redis_ready = bool(client and client.ping())
+            redis_ready = redis_probe()
         except Exception:
             redis_ready = False
-        return jsonify(
+        response = jsonify(
             {
                 "status": "ok" if database_ready and redis_ready else "degraded",
                 "database": database_ready,
                 "redis": redis_ready,
             }
         )
+        response.status_code = 200 if database_ready and redis_ready else 503
+        response.headers["Cache-Control"] = "no-store"
+        if response.status_code == 503:
+            response.headers["Retry-After"] = "15"
+        return response
 
     return bp

@@ -116,4 +116,6 @@ def register_http_hooks(app, allowed_origins):
         app.logger.exception(
             "unhandled-error request_id=%s method=%s path=%s error=%s", request_id, request.method, request.path, error
         )
+        if isinstance(error, (TimeoutError, ConnectionError)) or (auth_service.psycopg and isinstance(error, auth_service.psycopg.OperationalError)):
+            return (jsonify({"status": "unavailable", "error": "Data source temporarily unavailable", "requestId": request_id}), 503, {"Retry-After": "15"})
         return (jsonify({"error": "Internal server error", "requestId": request_id}), 500)

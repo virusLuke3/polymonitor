@@ -14,10 +14,20 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping
 
-from db import dict_from_row, get_backend, get_connection
+from db import dict_from_row, get_backend, get_connection as _direct_connection
+from flask import current_app, has_app_context
 from db.db import psycopg
 
 from api.auth_schema import schema_is_ready
+
+
+def get_connection():
+    # Authentication is part of the same API connection budget as panel reads.
+    if has_app_context():
+        runtime = current_app.extensions.get("polydata_runtime")
+        if runtime is not None:
+            return runtime.api_db_context["get_connection"]()
+    return _direct_connection()
 
 
 SESSION_COOKIE_DEFAULT = "__Host-polydata-session"

@@ -45,7 +45,7 @@ def test_live_source_preserves_receive_time_without_database_or_cache(monkeypatc
     yes = side()
     engine(
         monkeypatch,
-        {"source": "market-data", "runtimeModel": "websocket-live", "yes": yes, "no": side("", "unavailable")},
+        {"source": "market-data", "runtimeModel": "lob-v2", "yes": yes, "no": side("", "unavailable")},
     )
     result = lob_service.get_runtime_lob_by_token_payload("123", market_id=42)
     assert result["bookStatus"] == "live"
@@ -69,7 +69,7 @@ def test_stale_or_wrong_identity_cannot_be_live(monkeypatch, fault):
         yes.pop("receivedAt")
     engine(
         monkeypatch,
-        {"source": "market-data", "runtimeModel": "websocket-live", "yes": yes, "no": side("", "unavailable")},
+        {"source": "market-data", "runtimeModel": "lob-v2", "yes": yes, "no": side("", "unavailable")},
     )
     assert lob_service.get_runtime_lob_by_token_payload("123")["bookStatus"] in {"stale", "unavailable"}
 
@@ -85,7 +85,7 @@ def test_source_outage_returns_explicit_unavailable_without_rest_fallback(monkey
 def test_both_outcomes_required_for_pair_live(monkeypatch):
     engine(
         monkeypatch,
-        {"source": "market-data", "runtimeModel": "websocket-live", "yes": side(), "no": side("456", "warming")},
+        {"source": "market-data", "runtimeModel": "lob-v2", "yes": side(), "no": side("456", "warming")},
     )
     result = lob_service.get_runtime_lob_by_token_payload("123", no_token_id="456")
     assert result["bookStatus"] == "warming"
@@ -118,7 +118,7 @@ def test_batch_read_deadline_is_bounded_without_changing_other_readers(monkeypat
         def __exit__(self, *args): pass
         def get(self, *args, **kwargs):
             timeouts.append(kwargs['timeout'])
-            return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {'source': 'market-data', 'runtimeModel': 'websocket-live', 'yes': side('123'), 'no': side('', 'unavailable')})
+            return SimpleNamespace(raise_for_status=lambda: None, json=lambda: {'source': 'market-data', 'runtimeModel': 'lob-v2', 'yes': side('123'), 'no': side('', 'unavailable')})
     monkeypatch.setattr(lob_service.requests, 'Session', Session)
     lob_service.get_runtime_lob_by_token_payload('123')
     lob_service.get_runtime_lob_by_token_payload('123', read_timeout_seconds=3)
