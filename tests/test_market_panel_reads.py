@@ -145,7 +145,7 @@ def test_queries_are_readonly_and_release_leases_on_timeout(runtime):
     runtime._api_connection_factory = Mock(return_value=connection)
     with pytest.raises(TimeoutError):
         MarketPanelReader(runtime).query("SELECT expensive")
-    statements = [c.args[0] for c in cursor.execute.call_args_list]
+    statements = [part for c in cursor.execute.call_args_list for part in c.args[0].split('; ')]
     assert "SET TRANSACTION READ ONLY" in statements
     assert "SET LOCAL statement_timeout = '1000ms'" in statements
     connection.close.assert_called_once()

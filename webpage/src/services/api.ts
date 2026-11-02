@@ -196,7 +196,7 @@ export function fetchMarketsPage(page = 1, query = '', pageSize = 160, signal?: 
     status: 'active',
   });
   if (query.trim()) params.set('q', query.trim());
-  return apiGetWithTimeout<MarketsPayload>(`/markets?${params.toString()}`, 3500, signal);
+  return apiGetWithTimeout<MarketsPayload>(`/markets?${params.toString()}`, 10000, signal);
 }
 
 export async function fetchAllActiveMarkets(query = '', pageSize = 160, maxPages = 8, signal?: AbortSignal,

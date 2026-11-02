@@ -9,6 +9,7 @@ import { panelFromRenderer } from '@/panels/definePanel';
 type Inputs = PanelInputs<'bootstrap' | 'bundle' | 'marketGroups' | 'markets' | 'selectedMarket' | 'selectedMarketGroupDetail' | 'selectedMarketGroupId' | 'selectedMarketGroupOutcomeKey' | 'selectedMarketId'>;
 
 function complementPrice(value?: string | number | null) {
+  if (value === null || value === undefined || value === '') return null;
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return null;
   return Math.max(0, Math.min(1, 1 - numeric));

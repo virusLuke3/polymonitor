@@ -1076,6 +1076,10 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const hasServingTradeActivity = Number(displayedTrades || 0) > 0 || Number(displayedVolume || 0) > 0;
   const focusedHistoryEmptyText = isBlockCloseView
     ? 'No local OrderFilled block-close history is available for this market yet.'
+    : ['unavailable', 'warming'].includes(chartStatus)
+      ? 'Price history could not be read. Retrying with backoff.'
+      : chartStatus === 'empty'
+        ? 'No stored trades were found in this bounded chart window.'
     : chartStatus === 'snapshot'
       ? 'Only a latest-price snapshot is available for this market.'
       : hasServingTradeActivity

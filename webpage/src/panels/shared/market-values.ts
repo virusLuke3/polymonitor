@@ -4,6 +4,7 @@ import { useI18n } from '@/services/i18n';
 export type MarketI18n = Pick<ReturnType<typeof useI18n>, 't' | 'formatDateTime' | 'formatNumber' | 'formatPercent' | 'formatRelativeTime'>;
 
 export function localizedPercent(value: string | number | null | undefined, i18n: MarketI18n) {
+  if (value === null || value === undefined || value === '') return '--';
   const numeric = Number(value);
   return Number.isFinite(numeric) ? i18n.formatPercent(numeric) : '--';
 }

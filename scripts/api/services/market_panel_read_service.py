@@ -42,13 +42,14 @@ class MarketPanelReader:
             connection = self.runtime._api_connection_factory(self.runtime.SETTINGS.database.sqlite_path)
             try:
                 cursor = connection.cursor()
-                cursor.execute("SET TRANSACTION READ ONLY")
-                cursor.execute("SET LOCAL statement_timeout = '1000ms'")
-                cursor.execute("SET LOCAL lock_timeout = '100ms'")
-                cursor.execute("SET LOCAL work_mem = '4MB'")
-                cursor.execute("SET LOCAL max_parallel_workers_per_gather = 0")
-                cursor.execute("SET LOCAL jit = off")
-                cursor.execute("SET LOCAL enable_hashjoin = off")
+                # One round trip across the existing database tunnel, rather
+                # than seven sequential setup round trips per bounded query.
+                cursor.execute("SET TRANSACTION READ ONLY; "
+                               "SET LOCAL statement_timeout = '1000ms'; "
+                               "SET LOCAL lock_timeout = '100ms'; "
+                               "SET LOCAL work_mem = '4MB'; "
+                               "SET LOCAL max_parallel_workers_per_gather = 0; "
+                               "SET LOCAL jit = off; SET LOCAL enable_hashjoin = off")
                 cursor.execute(sql, tuple(params))
                 return [dict(row) for row in cursor.fetchall()]
             finally:
