@@ -1,5 +1,6 @@
 import type { RuntimeMarketTicker } from '@/types';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { PanelDataControls } from '@/panels/shared/PanelDataControls';
 import { Panel, PanelLoading } from '@/components/Panel';
 import type { PanelRenderMap } from '@/panels/types';
 import { emptyState } from '@/panels/shared/renderers';
@@ -119,14 +120,12 @@ function CryptoOverviewPanel({ onSync }: { onSync: () => void }) {
   }, []);
 
   return (
-    <Panel title={copy('title', 'CRYPTO')} badge="SPOT" status="muted" count={crypto ? items.length : '—'} className="wm-market-panel wm-crypto-market-panel" dataPanelId="crypto-watch">
-      <div className="wm-crypto-toolbar"><button onClick={onSync}>{cn ? '同步行情 / PM' : 'Synchronized / PM'}</button></div>
-      <div className="wm-crypto-toolbar"><button type="button" disabled={feed.status.fetching} onClick={() => void feed.refresh()}>{feed.status.fetching ? cn ? '刷新中…' : 'Refreshing…' : cn ? '刷新' : 'Refresh'}</button></div>
-      <p className="wm-crypto-clock">{checked && <span>{cn ? '检查' : 'Checked'} <time data-crypto-checked-at dateTime={checked}>{clock(checked)}</time></span>}{crypto && <span>{cn ? '快照' : 'Snapshot'} <time data-crypto-snapshot-at dateTime={crypto.generatedAt}>{clock(crypto.generatedAt)}</time></span>}</p>
+    <Panel title={copy('title', 'CRYPTO')} badge="SPOT" status="muted" count={crypto ? items.length : '—'} className="wm-market-panel wm-crypto-market-panel" dataPanelId="crypto-watch" controls={<PanelDataControls fetching={feed.status.fetching} onRefresh={() => void feed.refresh()}><p className="wm-crypto-clock">{checked && <span>{cn ? '检查' : 'Checked'} <time data-crypto-checked-at dateTime={checked}>{clock(checked)}</time></span>}{crypto && <span>{cn ? '快照' : 'Snapshot'} <time data-crypto-snapshot-at dateTime={crypto.generatedAt}>{clock(crypto.generatedAt)}</time></span>}</p>{crypto && <p className="wm-crypto-clock">{cn ? '采集成功' : 'Acquired'} {crypto.coverage.succeeded}/{crypto.coverage.expected}{!!crypto.coverage.retained && ` · ${cn ? '保留' : 'Retained'} ${crypto.coverage.retained}`}</p>}</PanelDataControls>}>
+      <div className="wm-panel-tabs"><button onClick={onSync}>{cn ? '同步行情 / PM' : 'Synchronized / PM'}</button></div>
       {feed.loading && <PanelLoading />}
       {feed.fromCache && <p className="wm-crypto-notice">{cn ? '显示缓存报价，正在检查更新。' : 'Showing saved quotes while checking updates.'}</p>}
       {(feed.error || feed.status.phase === 'stale') && <p className="wm-crypto-notice" role="status">{cn ? '刷新失败或采集超时；保留有效报价并自动重试。' : 'Refresh or collector overdue; retaining usable quotes and retrying automatically.'}</p>}
-      {crypto && <p className="wm-crypto-clock">{cn ? '采集成功' : 'Acquired'} {crypto.coverage.succeeded}/{crypto.coverage.expected}{!!crypto.coverage.retained && ` · ${cn ? '保留' : 'Retained'} ${crypto.coverage.retained}`}</p>}
+
       {cryptoBoard(items, copy('empty', 'No crypto prices loaded yet.'), tickDirections, {
         topMove: shared('topMove', 'top move'),
         average24h: shared('average24h', 'avg 24h'),

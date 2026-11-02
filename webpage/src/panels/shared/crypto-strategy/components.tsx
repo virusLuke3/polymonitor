@@ -1,6 +1,7 @@
 import type { ComponentChildren } from 'preact';
 import { Panel, PanelLoading } from '@/components/Panel';
 import { useI18n } from '@/services/i18n';
+import { PanelDataControls } from '@/panels/shared/PanelDataControls';
 import { ASSETS, marketUrl, validPoints, type Point, type Reference } from './model';
 import { useCryptoAsset, useCryptoInputs } from './resource';
 import './styles.css';
@@ -10,12 +11,17 @@ export const compact = (value: number | null | undefined) => value == null || !N
 export const time = (value: string | number | undefined | null) => value == null || !Number.isFinite(new Date(value).getTime()) ? '—' : new Date(value).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
 export function useCopy() { const { locale } = useI18n(); return (zh: string, en: string) => locale.startsWith('zh') ? zh : en; }
 
-export function Frame({ id, title, badge, children, assets = true }: {id: string; title: string; badge: string; children: ComponentChildren; assets?: boolean}) {
+export function Frame({ id, title, badge, children, assets = true, filters }: {id: string; title: string; badge: string; children: ComponentChildren; assets?: boolean; filters?: ComponentChildren}) {
   const feed = useCryptoInputs(), [asset, select] = useCryptoAsset(), t = useCopy();
-  return <Panel title={title} badge={badge} status="muted" dataPanelId={id} className="wm-market-panel wm-cstrategy-panel">
-    <div className="wm-cstrategy-toolbar"><button disabled={feed.status.fetching} onClick={() => void feed.refresh()}>{t('刷新','Refresh')}</button></div>
-    <p className="wm-cstrategy-meta">{t('快照','Snapshot')} {feed.data?.generatedAt ? new Date(feed.data.generatedAt).toLocaleString() : '—'} · {t('检查','Checked')} {time(feed.status.checkedAt)}</p>
-    {assets && <div className="wm-cstrategy-tabs" aria-label={t('共享币种选择','Shared asset selection')}>{ASSETS.map(a => <button key={a} aria-pressed={asset===a} onClick={() => select(a)}>{a}</button>)}</div>}
+  return <Panel title={title} badge={badge} status="muted" dataPanelId={id} className="wm-market-panel wm-cstrategy-panel"
+    controls={<PanelDataControls fetching={feed.status.fetching} onRefresh={() => void feed.refresh()}>
+      <p>{t('快照','Snapshot')} {feed.data?.generatedAt ? new Date(feed.data.generatedAt).toLocaleString() : '—'}</p>
+      <p>{t('检查','Checked')} {time(feed.status.checkedAt)}</p>
+    </PanelDataControls>}>
+    {(assets || filters) && <div className="wm-cstrategy-filter-bar">
+      {assets && <div className="wm-panel-tabs" aria-label={t('共享币种选择','Shared asset selection')}>{ASSETS.map(a => <button key={a} aria-pressed={asset===a} onClick={() => select(a)}>{a}</button>)}</div>}
+      {filters}
+    </div>}
     {feed.loading && <PanelLoading/>}
     {(feed.error || feed.status.phase === 'stale') && <p className="wm-cstrategy-notice">{t('数据延迟或读取失败，保留原始时间。','Delayed or unavailable data; original timestamps retained.')}</p>}
     {children}
@@ -27,7 +33,7 @@ export function Stats({items}: {items: {label: string; value: string}[]}) {
 }
 export function Notice({children}: {children: ComponentChildren}) { return <p className="wm-cstrategy-notice">{children}</p>; }
 
-export function Series({points = [], label, color = 'var(--accent-cyan, #6ed3ef)', domain, maxGapMs = 120000}: {points?: Point[]; label: string; color?: string; domain?: [number,number]; maxGapMs?: number}) {
+export function Series({points = [], label, color = 'var(--ds-color-info)', domain, maxGapMs = 120000}: {points?: Point[]; label: string; color?: string; domain?: [number,number]; maxGapMs?: number}) {
   const rows = validPoints(points), t = useCopy();
   if (rows.length < 2) return <div className="wm-cstrategy-chart-empty">{label} · {t('历史样本不足','Insufficient history')}</div>;
   const left = domain?.[0] ?? rows[0]!.t, right = domain?.[1] ?? rows[rows.length-1]!.t;

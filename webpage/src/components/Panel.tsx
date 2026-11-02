@@ -1,5 +1,7 @@
 import { type ComponentChildren } from 'preact';
 import { useI18n } from '@/services/i18n';
+import { usePanelRuntimeView } from '@/panels/PanelRuntimeView';
+import { RuntimeStatusBadge } from '@/components/design-system/StatusPrimitives';
 
 type PanelProps = {
   title: string;
@@ -59,16 +61,20 @@ export function Panel({
   loadingDetail,
   children,
 }: PanelProps) {
+  const runtime = usePanelRuntimeView()?.status;
+  const routineStatus = /^(ready|fresh|live|ok)$/i.test(runtime?.label || runtime?.freshness || runtime?.phase || '');
   return (
     <section className={`wm-panel${className ? ` ${className}` : ''}`} data-panel-id={dataPanelId}>
       <header className="wm-panel-header">
         <div className="wm-panel-title-wrap">
-          <h3 className="wm-panel-title">{title}</h3>
+          <h3 className="wm-panel-title" title={title}>{title}</h3>
           {titleControls ? <div className="wm-panel-title-controls">{titleControls}</div> : null}
           {badge && badge.trim().toUpperCase() !== 'PARTIAL' ? <span className={`wm-panel-badge ${status}`}>{badge}</span> : null}
         </div>
         <div className="wm-panel-header-right">
           {controls}
+          {runtime && runtime.phase !== 'idle' && runtime.phase !== 'loading' && !(runtime.phase === 'ready' && routineStatus)
+            ? <RuntimeStatusBadge status={runtime} compact /> : null}
           {count !== undefined ? <span className="wm-panel-count">{count}</span> : null}
         </div>
       </header>

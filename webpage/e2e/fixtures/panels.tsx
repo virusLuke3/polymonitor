@@ -12,7 +12,7 @@ import '../../src/styles/panel-layout-stability.css';
 const root = document.getElementById('root')!;
 const noop = () => {};
 const context: PanelRenderContext = {
-  bootstrap: null, markets: [], marketGroups: [], marketGroupSort: 'active',
+  bootstrap: null, markets: [], marketGroups: [], marketGroupSort: 'volume',
   setMarketGroupSort: noop, marketCatalogRefreshing: false, marketCatalogError: null,
   refreshMarketCatalog: async () => {}, selectedMarketId: null, setSelectedMarketId: noop,
   prefetchMarketFocus: noop, focusMarketGroup: noop, selectedMarketGroupId: null,

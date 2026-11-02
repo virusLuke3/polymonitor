@@ -74,6 +74,8 @@ has a response clock, which is labeled as such; no quote-native time is invented
 | Gamma discovery | At most 500 active Crypto events per scan, with a 12-second request budget |
 
 `READY` requires accepted current quotes and successful venue qualification.
+These are internal resource states, not mandatory header badges. The UI follows
+[the shared panel shell](../webpage/src/panels/styles/shell.css): no generic PARTIAL or cadence labels; keep specific source gaps and quote clocks visible, and put full diagnostic clocks in expandable details.
 `PARTIAL` preserves usable sources while exposing missing periods, failures,
 retained quotes or qualification degradation. `STALE` does not advance a saved
 snapshot's clock. Retained quotes do not contribute to current means or alerts.

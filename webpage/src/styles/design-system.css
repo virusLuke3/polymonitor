@@ -182,23 +182,12 @@ html[lang='zh-CN'] {
   line-height: 1.55;
 }
 
-.ds-panel-status-anchor {
-  position: absolute;
-  z-index: 12;
-  top: 9px;
-  right: 36px;
-  pointer-events: none;
-}
 
 .wm-panel-slot[data-runtime-phase]:not([data-runtime-phase='idle']) {
   outline: none;
 }
 
 @media (max-width: 720px) {
-  .ds-panel-status-anchor {
-    top: 7px;
-    right: 32px;
-  }
 
   .ds-status-badge.is-compact {
     max-width: 78px;

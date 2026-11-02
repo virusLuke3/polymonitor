@@ -1500,55 +1500,9 @@ html[lang='zh-CN'] .wm-focused-market-list .wm-market-sort-caption {
   box-shadow: none;
 }
 
-.wm-focused-market-row .wm-panel .wm-panel-header, .wm-focused-market-row .wm-market-panel .wm-panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-height: 32px;
-  padding: 0 10px;
-  border: 0;
-  border-bottom: 1px solid var(--wm-terminal-divider);
-  background: var(--wm-terminal-elevated);
-}
 
-.wm-focused-market-row .wm-panel .wm-panel-title, .wm-focused-market-row .wm-market-panel .wm-panel-title {
-  line-height: 1;
-  color: var(--wm-terminal-primary);
-  font-family: var(--font-body);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-}
 
-.wm-focused-market-row .wm-panel .wm-panel-badge, .wm-focused-market-row .wm-market-panel .wm-panel-badge {
-  min-height: 18px;
-  padding: 0 6px;
-  border: 1px solid rgba(34, 197, 94, 0.22);
-  border-radius: 3px;
-  background: rgba(34, 197, 94, 0.08);
-  color: #86efac;
-  font-family: var(--font-body);
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.4px;
-  text-transform: uppercase;
-  box-shadow: none;
-}
 
-.wm-focused-market-row .wm-panel .wm-panel-count, .wm-focused-market-row .wm-market-panel .wm-panel-count {
-  letter-spacing: 0;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  min-width: 26px;
-  min-height: 18px;
-  border-radius: 2px;
-  background: var(--ds-color-border);
-  color: var(--wm-terminal-muted);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 400;
-}
 
 .wm-focused-market-row .wm-panel .wm-panel-body, .wm-focused-market-row .wm-market-panel .wm-panel-body, .wm-focused-oracle-feed .wm-panel-body {
   min-height: 0;

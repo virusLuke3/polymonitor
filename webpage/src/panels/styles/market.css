@@ -471,40 +471,8 @@
 .wm-panel-slot[data-workspace-panel-id='market-summary']:hover > .wm-panel,
 .wm-panel-slot[data-workspace-panel-id='market-summary'].panel-drop-target > .wm-panel,
 .wm-panel-slot[data-workspace-panel-id='market-summary'].dragging-source > .wm-panel {
-  border: 1px solid #2a2a2a;
-  background: #141414;
-  box-shadow: none;
   contain: paint;
   min-height: 0;
-}
-
-.wm-panel-slot[data-workspace-panel-id='market-summary'] > .wm-panel > .wm-panel-header {
-  min-height: 0;
-  padding: 6px 10px;
-  border-bottom: 1px solid #2a2a2a;
-  background: rgba(255, 255, 255, 0.03);
-  box-shadow: none;
-}
-
-.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-panel-title {
-  color: #f0f2f0;
-  font-family: var(--font-body);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 1px;
-  line-height: 1.2;
-}
-
-.wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-panel-badge {
-  padding: 2px 6px;
-  border-color: rgba(57, 255, 115, 0.18);
-  border-radius: 3px;
-  background: rgba(57, 255, 115, 0.035);
-  box-shadow: none;
-  font-family: var(--font-body);
-  font-size: 9.5px;
-  font-weight: 600;
-  letter-spacing: 0.35px;
 }
 
 .wm-panel-slot[data-workspace-panel-id='market-summary'] .wm-market-summary-panel .wm-panel-body {

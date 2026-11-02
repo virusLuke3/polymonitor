@@ -7,7 +7,6 @@ import {
 import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { PanelLoading } from '@/components/Panel';
-import { RuntimeStatusBadge } from '@/components/design-system/StatusPrimitives';
 import type { PanelRuntimeStatus } from '@/panels/types';
 import { useI18n } from '@/services/i18n';
 import { PanelResourceView, PanelResourceVisibility, usePanelResourceBinding } from '@/panels/usePanelResource';
@@ -213,7 +212,7 @@ export function PanelWorkspaceSlot({
   const startDrag = (event: MouseEvent) => {
     if (event.button !== 0 || !slotRef.current) return;
     const target = event.target as HTMLElement;
-    if (target.closest('button, a, input, select, textarea, [role="button"], .wm-panel-resize-handle, .wm-panel-col-resize-handle')) return;
+    if (target.closest('button, a, input, select, textarea, summary, .wm-panel-data-popover, [role="button"], .wm-panel-resize-handle, .wm-panel-col-resize-handle')) return;
     if (!target.closest('.wm-panel-header')) return;
     const rect = slotRef.current.getBoundingClientRect();
     dragRef.current = {
@@ -425,7 +424,6 @@ function PanelRuntimeBoundary({
 }: PanelRuntimeBoundaryProps) {
   const { t, formatDateTime } = useI18n();
   const phase = status?.phase || 'idle';
-  const showBadge = Boolean(status) && phase !== 'idle' && phase !== 'loading';
   const showNotice = phase === 'stale' || phase === 'degraded' || phase === 'error' || phase === 'suspended';
   const updatedLabel = status?.updatedAt
     ? formatDateTime(status.updatedAt)
@@ -441,11 +439,6 @@ function PanelRuntimeBoundary({
   return (
     <>
       {children}
-      {showBadge && status ? (
-        <div className="ds-panel-status-anchor">
-          <RuntimeStatusBadge status={status} compact />
-        </div>
-      ) : null}
       {loading ? (
         <div className="wm-panel-slot-loading">
           <PanelLoading detail={t('panelRuntime.syncingPanel')} />

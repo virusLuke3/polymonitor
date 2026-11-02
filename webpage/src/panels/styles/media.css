@@ -14,14 +14,7 @@
   font-weight: 760;
 }
 
-.wm-market-tv-panel .wm-panel-title,
-.wm-market-youtube-panel .wm-panel-title,
-.wm-market-tv-panel .wm-panel-badge,
-.wm-market-youtube-panel .wm-panel-badge,
-.wm-market-tv-panel .wm-panel-count,
-.wm-market-youtube-panel .wm-panel-count {
-  font-weight: 950;
-}
+
 
 .wm-market-tv-layout {
   display: grid;

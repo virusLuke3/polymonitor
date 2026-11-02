@@ -1,6 +1,6 @@
 import { gotoMapScene, selectMapLayers } from './fixtures/browser';
 import { expect, test, type Page } from '@playwright/test';
-import { fixtureBundle, fixtureMarkets, installDashboard } from './fixtures/dashboard';
+import { fixtureBundle, fixtureMarkets, installDashboard, knownPanelIds } from './fixtures/dashboard';
 import { GENERATED_AT, installFixtures } from './fixtures/world-event-map';
 
 test.afterEach(async ({ page }) => {
@@ -150,15 +150,15 @@ for (const width of [1440, 390]) {
     await settled(page);
     expect(await caption.screenshot({ animations: 'disabled' })).toEqual(coldCaption);
     const sort = page.getByRole('combobox', { name: '市场排序', exact: true });
-    await expect(caption).toHaveText('活跃度与成交量');
+    await expect(caption).toHaveText('成交量');
     await expect(caption).toHaveCSS('line-height', '14px');
     await sort.focus();
     await page.keyboard.press('ArrowDown');
     await page.keyboard.press('Enter');
-    await expect(sort).toHaveValue('volume');
-    await expect(caption).toHaveText('成交量');
+    await expect(sort).toHaveValue('close');
+    await expect(caption).toHaveText('截止时间');
     await expect(sort).toBeFocused();
-    await expect(page.locator('.wm-market-sort-explainer')).toContainText('24 小时成交量');
+    await expect(page.locator('.wm-market-sort-explainer')).toContainText('截止时间');
   });
 }
 
@@ -364,7 +364,7 @@ for (const width of [1440, 390]) {
     await page.locator('.wm-focused-market-row').scrollIntoViewIfNeeded();
     await visual(page, `market-selected-${width}.png`);
     let release!: () => Promise<void>;
-    await page.route('**/wm-api/market-groups?**', route => { release = () => route.fulfill({ json: { items: [] } }); });
+    await page.route('**/wm-api/markets?**', route => { release = () => route.fulfill({ json: { items: [] } }); });
     const refresh = page.locator('.wm-market-refresh');
     await refresh.click();
     await expect(refresh).toBeDisabled();
@@ -377,7 +377,7 @@ for (const width of [1440, 390]) {
 
 test('panel drag, constrained resize, enable and remote layout restore', async ({ page }) => {
   await installDashboard(page);
-  let saved: any = { exists: true, revision: 1, activePanelIds: ['active-markets','price-chart','lob-depth','global-orderfilled','oracle-feed','global-transport-shipping','breaking-event-radar'], panelLayout: {}, preferences: {}, updatedAt: '2026-08-26T03:00:00Z' };
+  let saved: any = { exists: true, revision: 1, activePanelIds: ['active-markets','price-chart','lob-depth','global-orderfilled','oracle-feed','global-transport-shipping','breaking-event-radar'], panelLayout: {}, preferences: { knownDefaultPanelIds: await knownPanelIds() }, updatedAt: '2026-08-26T03:00:00Z' };
   await page.route('**/wm-api/product/workspace-layout', async route => {
     if (route.request().method() === 'PUT') saved = { ...saved, ...route.request().postDataJSON(), revision: saved.revision + 1 };
     await route.fulfill({ json: saved });

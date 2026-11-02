@@ -6,6 +6,11 @@
   position: relative;
   height: 100%;
   min-height: 200px;
+  color: var(--ds-color-text);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  border-radius: 0;
   background: var(--ds-color-surface-2);
   border: 1px solid var(--ds-color-border);
   box-shadow: none;
@@ -25,6 +30,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
+  flex-shrink: 0;
   border-bottom: 1px solid var(--ds-color-border);
   background: rgba(255, 255, 255, 0.025);
   cursor: grab;
@@ -36,6 +43,7 @@
 }
 
 .wm-panel-title-wrap {
+  flex: 1 1 auto;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -64,15 +72,22 @@
   font-weight: 600;
   letter-spacing: 1px;
   text-transform: uppercase;
-  line-height: 1.18;
+  line-height: 1.5;
+  color: var(--ds-color-text);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .wm-panel-badge {
+  flex-shrink: 0;
+  line-height: 1.2;
   font-family: var(--font-mono);
   padding: 2px 7px;
   border-radius: 3px;
   border: 1px solid var(--ds-color-border);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.4px;
   text-transform: uppercase;
@@ -91,6 +106,8 @@
 }
 
 .wm-panel-count {
+  font-weight: 400;
+  flex-shrink: 0;
   min-width: 24px;
   text-align: center;
   padding: 2px 6px;
@@ -100,6 +117,69 @@
   font-family: var(--font-mono);
   font-size: 10px;
 }
+
+/* Header actions and expandable data diagnostics, shared by business families. */
+.wm-panel-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--ds-color-text-secondary);
+  font: 14px/1 var(--font-mono);
+  cursor: pointer;
+  list-style: none;
+}
+.wm-panel-action::-webkit-details-marker { display: none; }
+.wm-panel-action:hover { color: var(--ds-color-text); background: var(--ds-color-surface-3); }
+.wm-panel-action:disabled { opacity: .45; cursor: default; }
+.wm-panel-action:focus-visible { outline: 2px solid var(--ds-color-info); outline-offset: 1px; }
+.wm-panel-data-popover {
+  position: absolute;
+  top: 38px;
+  right: 8px;
+  left: 8px;
+  max-height: calc(100% - 46px);
+  overflow: auto;
+  z-index: 10;
+  padding: 8px;
+  border: 1px solid var(--ds-color-border);
+  background: var(--ds-color-surface-1);
+  color: var(--ds-color-text-secondary);
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.wm-panel-data-popover p { margin: 4px 0; }
+.wm-panel-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  border-bottom: 1px solid var(--ds-color-border);
+  margin-bottom: 6px;
+}
+.wm-panel-tabs button {
+  flex-shrink: 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 5px 7px;
+  background: transparent;
+  color: var(--ds-color-text-secondary);
+  font: 11px/1.5 var(--font-body);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.wm-panel-tabs button[aria-pressed='true'] { color: var(--ds-color-text); border-bottom-color: currentColor; }
+.wm-panel-tabs button:focus-visible { outline: 2px solid var(--ds-color-info); outline-offset: -2px; }
 
 .wm-panel-header-overlay {
   position: absolute;
@@ -166,7 +246,8 @@
   padding: 8px;
   min-height: 0;
   flex: 1;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   scrollbar-width: thin;
   scrollbar-color: #3a3a3a transparent;
 }
@@ -378,8 +459,8 @@
 }
 
 .wm-panel-body::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  width: 4px;
+  height: 4px;
 }
 
 .wm-panel-body::-webkit-scrollbar-track {
@@ -411,40 +492,9 @@
   font-weight: 950;
 }
 
-.wm-market-panel .wm-panel-header {
-  min-height: 36px;
-  padding: 5px 7px 5px 9px;
-  background: #151515;
-}
 
-.wm-market-panel .wm-panel-title {
-  font-size: 10.5px;
-  font-weight: 800;
-  letter-spacing: 0;
-  color: #f5f5f5;
-  line-height: 1.12;
-}
 
-.wm-market-panel .wm-panel-badge {
-  padding: 2px 8px;
-  border-color: #27342a;
-  background: #111b14;
-  color: var(--wm-green);
-  font-size: 9.5px;
-  font-weight: 800;
-  letter-spacing: 0;
-}
 
-.wm-market-panel .wm-panel-count {
-  min-width: 30px;
-  height: 22px;
-  padding: 3px 7px;
-  border-radius: 6px;
-  background: #202124;
-  color: #a9acaa;
-  font-size: 12px;
-  font-weight: 800;
-}
 
 .wm-market-panel-controls {
   display: flex;
@@ -617,15 +667,9 @@
 }
 
 @media (max-width: 720px) {
-  .wm-market-panel .wm-panel-header {
-    align-items: stretch;
-    flex-direction: column;
-    gap: 8px;
-  }
 
-  .wm-market-panel .wm-panel-header-right,
-.wm-market-panel-controls {
-    width: 100%;
+  .wm-market-panel-controls {
+    max-width: 100%;
   }
 
   .commodities-grid {
@@ -659,44 +703,10 @@
   text-transform: uppercase;
 }
 
-.wm-panel:not(.wm-market-panel) {
-  border-color: var(--ds-color-border);
-  background: var(--ds-color-surface-2);
-  box-shadow: none;
-}
 
-.wm-panel:not(.wm-market-panel) .wm-panel-header {
-  min-height: 32px;
-  padding: 6px 10px;
-  border-bottom-color: var(--ds-color-border);
-  background: rgba(255, 255, 255, 0.025);
-}
 
-.wm-panel:not(.wm-market-panel) .wm-panel-title {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 1px;
-  color: #f3f5f5;
-}
 
-.wm-panel:not(.wm-market-panel) .wm-panel-badge {
-  border-color: rgba(57, 255, 115, 0.24);
-  border-radius: 3px;
-  background: rgba(57, 255, 115, 0.06);
-  color: var(--wm-green);
-  font-size: 10px;
-  font-weight: 600;
-}
 
-.wm-panel:not(.wm-market-panel) .wm-panel-count {
-  min-width: 24px;
-  padding: 2px 6px;
-  border-radius: 2px;
-  background: var(--ds-color-border);
-  color: #929894;
-  font-size: 10px;
-  font-weight: 400;
-}
 
 .wm-panel:not(.wm-market-panel) .wm-panel-body {
   padding: 8px;

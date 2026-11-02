@@ -1,40 +1,35 @@
 .wm-funding-panel .wm-panel-body { overflow-x: hidden; }
-.wm-funding-toolbar, .wm-funding-filters, .wm-funding-pagination { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
-.wm-funding-toolbar { justify-content: flex-end; }
-.wm-funding-panel button, .wm-funding-panel input { font: inherit; color: inherit; background: #182027; border: 1px solid #3a515b; padding: 5px 8px; min-height: 30px; }
-.wm-funding-panel button { cursor: pointer; }
-.wm-funding-panel button:disabled { opacity: .55; cursor: default; }
-.wm-funding-panel button[aria-pressed='true'] { color: #6ddbf5; border-color: #6ddbf5; }
-.wm-funding-panel input { min-width: 0; flex: 1 1 125px; width: 100%; }
-.wm-funding-panel button:focus-visible, .wm-funding-panel input:focus-visible, .wm-funding-panel a:focus-visible, .wm-funding-panel summary:focus-visible { outline: 2px solid #6ddbf5; outline-offset: 2px; }
-.wm-funding-toolbar span, .wm-funding-clock { color: #a9b5b7; font-size: 10px; overflow-wrap: anywhere; }
-.wm-funding-clock { display: flex; flex-wrap: wrap; gap: 5px 10px; margin: 7px 0; }
-.wm-funding-notice { border: 1px solid #73581e; color: #e6c578; padding: 7px; font-size: 11px; line-height: 1.5; }
-.wm-funding-sources { display: flex; flex-wrap: wrap; gap: 6px; margin: 7px 0; font-size: 9px; }
-.wm-funding-sources span { border: 1px solid #344440; padding: 3px 5px; }
-.wm-funding-sources .ok { color: #41eb79; }
-.wm-funding-sources .partial, .wm-funding-saved { color: #e6c578; }
-.wm-funding-radar-strip { margin: 8px 0; }
+.wm-funding-filters { flex-wrap: wrap; }
+.wm-funding-panel .wm-panel-body input,.wm-funding-pagination button { font: inherit; color: var(--ds-color-text); background: var(--ds-color-surface-1); border: 1px solid var(--ds-color-border); padding: 3px 5px; min-width: 0; }
+.wm-funding-panel input { flex: 1 1 110px; width: 100%; font-size: 11px; }
+.wm-funding-panel input:focus-visible,.wm-funding-panel a:focus-visible,.wm-funding-panel summary:focus-visible { outline: 2px solid var(--ds-color-info); outline-offset: 1px; }
+.wm-funding-clock { color: var(--ds-color-text-secondary); font-size: 10px; overflow-wrap: anywhere; display: flex; flex-wrap: wrap; gap: 4px 8px; margin: 4px 0; }
+.wm-funding-notice { border-left: 2px solid var(--ds-color-warning); color: var(--ds-color-warning); padding: 3px 6px; font-size: 11px; line-height: 1.5; }
+.wm-funding-sources { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0; font-size: 10px; }
+.wm-funding-sources .ok { color: var(--ds-color-positive); }
+.wm-funding-sources .partial,.wm-funding-saved { color: var(--ds-color-warning); }
+.wm-funding-radar-strip { margin: 6px 0; }
 .wm-funding-radar-strip em { white-space: normal; overflow-wrap: anywhere; }
-.wm-funding-list { display: grid; gap: 8px; }
-.wm-funding-card { border: 1px solid #303b3b; border-left: 3px solid #9ca9a9; padding: 8px; background: #171c1d; min-width: 0; }
-.wm-funding-card.longs-pay { border-left-color: #39f37e; }
-.wm-funding-card.shorts-pay { border-left-color: #ff626a; }
-.wm-funding-card-head { display: flex; gap: 10px; justify-content: space-between; }
-.wm-funding-card-head > div { display: grid; gap: 4px; min-width: 0; }
+.wm-funding-radar-strip span { border: 0; background: none; padding: 0; }
+.wm-funding-list { display: grid; }
+.wm-funding-card { border-bottom: 1px solid var(--ds-color-border); padding: 8px 0; min-width: 0; }
+.wm-funding-card-head { display: flex; gap: 8px; justify-content: space-between; }
+.wm-funding-card-head > div { display: grid; gap: 2px; min-width: 0; }
 .wm-funding-card-head > div:last-child { text-align: right; }
-.wm-funding-card-head strong { font-size: 14px; font-variant-numeric: tabular-nums; }
-.wm-funding-card-head span { font-size: 9px; color: #aab5b7; overflow-wrap: anywhere; line-height: 1.4; }
-.wm-funding-comparison { font-size: 10px; margin: 8px 0; color: #adbabc; line-height: 1.5; }
+.wm-funding-card-head strong { font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.wm-funding-card.longs-pay [data-funding-strongest] { color: var(--ds-color-positive); }
+.wm-funding-card.shorts-pay [data-funding-strongest] { color: var(--ds-color-critical); }
+.wm-funding-card-head span { font-size: 10px; color: var(--ds-color-text-secondary); overflow-wrap: anywhere; }
+.wm-funding-comparison { font-size: 10px; margin: 3px 0; color: var(--ds-color-text-secondary); line-height: 1.5; }
 .wm-funding-venues { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(145px, 100%), 1fr)); gap: 6px; }
-.wm-funding-quote { border: 1px solid #303b3b; padding: 6px; display: grid; gap: 4px; min-width: 0; font-size: 9px; color: #aab5b7; }
+.wm-funding-quote { padding: 6px 0; display: grid; gap: 3px; min-width: 0; font-size: 10px; color: var(--ds-color-text-secondary); }
 .wm-funding-quote > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px; }
-.wm-funding-quote strong { color: #edf2f2; font-variant-numeric: tabular-nums; font-size: 11px; }
-.wm-funding-quote a, .wm-funding-markets a { color: #6ddbf5; }
+.wm-funding-quote strong { color: var(--ds-color-text); font-variant-numeric: tabular-nums; font-size: 11px; }
+.wm-funding-quote a,.wm-funding-markets a { color: var(--ds-color-info); }
 .wm-funding-quote span { line-height: 1.5; overflow-wrap: anywhere; }
-.wm-funding-quote.retained, .wm-funding-quote.stale { border-color: #73581e; }
-.wm-funding-markets { margin-top: 7px; font-size: 10px; line-height: 1.5; }
+.wm-funding-quote.retained,.wm-funding-quote.stale { border-left: 2px solid var(--ds-color-warning); padding-left: 5px; }
+.wm-funding-panel .wm-panel-body details { margin-top: 4px; font-size: 10px; line-height: 1.5; }
 .wm-funding-markets a { display: block; padding: 4px 0; overflow-wrap: anywhere; }
-.wm-funding-panel summary { cursor: pointer; color: #adbabc; }
-.wm-funding-pagination { justify-content: space-between; margin-top: 10px; font-size: 10px; }
-.wm-funding-coverage { margin-top: 10px; font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.wm-funding-panel .wm-panel-body summary { cursor: pointer; color: var(--ds-color-text-secondary); }
+.wm-funding-pagination { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; margin-top: 8px; font-size: 10px; }
+.wm-funding-coverage { overflow-wrap: anywhere; }

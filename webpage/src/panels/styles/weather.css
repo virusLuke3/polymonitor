@@ -32,36 +32,10 @@
   overflow-x: hidden;
 }
 
-.wm-weather-news-panel .wm-panel-header {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px;
-  padding: 6px 8px 6px 10px;
-}
 
-.wm-weather-news-panel .wm-panel-title-wrap {
-  flex: 1 1 auto;
-  min-width: 0;
-  gap: 7px;
-  overflow: hidden;
-}
 
-.wm-weather-news-panel .wm-panel-title {
-  flex: 0 1 auto;
-  max-width: 128px;
-  line-height: 1.12;
-}
 
-.wm-weather-news-panel .wm-panel-badge {
-  flex: 0 0 auto;
-  padding-inline: 8px;
-}
 
-.wm-weather-news-panel .wm-panel-header-right {
-  flex: 0 0 auto;
-  gap: 6px;
-  min-width: 96px;
-}
 
 .wm-global-temperature-monitor-panel .wm-panel-body,
 .wm-weather-market-browser-panel .wm-panel-body {

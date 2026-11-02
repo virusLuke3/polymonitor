@@ -34,8 +34,27 @@ for (const width of [1440,390]) test(`crypto strategy source states and controls
     expect(await panel.evaluate(el=>el.scrollWidth<=el.clientWidth+1)).toBe(true);
     expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
   }
+  await page.evaluate(()=>window.panelHarness.mount('crypto-oracle-reference'));
+  await expect(page.locator('.wm-cstrategy-empty')).toBeVisible();
+  await expect(page.locator('.wm-cstrategy-stats')).toHaveCount(0);
   await page.evaluate(()=>window.panelHarness.mount('crypto-order-flow'));
   await expect(page.locator('.wm-cstrategy-stats')).toContainText('99');
+  const flowPanel = page.locator('.wm-panel');
+  await expect(flowPanel.locator('.wm-panel-title')).toHaveCSS('font-size', '11px');
+  await expect(flowPanel.locator('.wm-panel-title')).toHaveCSS('font-weight', '600');
+  await expect(page.locator('.wm-panel-slot')).toHaveCSS('box-shadow', 'none');
+  await expect(flowPanel.locator('.wm-panel-header').getByRole('button', { name: 'Refresh', exact: true })).toBeVisible();
+  await expect(flowPanel.locator('.wm-panel-body')).not.toContainText('Snapshot');
+  await expect(flowPanel.locator('.wm-panel-data-popover')).not.toBeVisible();
+  const chart = await flowPanel.locator('.wm-cstrategy-chart svg').boundingBox();
+  const body = await flowPanel.locator('.wm-panel-body').boundingBox();
+  expect(chart!.y + chart!.height).toBeLessThanOrEqual(body!.y + body!.height);
+  await flowPanel.getByLabel('Data details', { exact: true }).click();
+  await expect(flowPanel.locator('.wm-panel-data-popover')).toBeVisible();
+  await expect(flowPanel.locator('.wm-panel-data-popover')).toContainText('Snapshot');
+  await flowPanel.getByLabel('Data details', { exact: true }).press('Escape');
+  await expect(flowPanel.locator('.wm-panel-data-popover')).not.toBeVisible();
+
   await page.getByRole('button',{name:'ETH',exact:true}).click();
   await page.evaluate(()=>window.panelHarness.mount('crypto-perp-funding'));
   await expect(page.getByRole('button',{name:'ETH',exact:true})).toHaveAttribute('aria-pressed','true');

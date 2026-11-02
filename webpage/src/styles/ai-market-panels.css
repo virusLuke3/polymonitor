@@ -8,47 +8,11 @@
   -webkit-overflow-scrolling: touch;
 }
 
-.wm-ai-market-panel .wm-panel-header {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px;
-  min-height: 36px;
-  padding: 5px 7px 5px 9px;
-}
 
-.wm-ai-market-panel .wm-panel-title-wrap {
-  min-width: 0;
-  gap: 7px;
-  overflow: hidden;
-}
 
-.wm-ai-market-panel .wm-panel-title {
-  min-width: 0;
-  max-width: 184px;
-  color: #f4f6f5;
-  font-size: 10.5px;
-  font-weight: 900;
-  letter-spacing: 0;
-  line-height: 1.12;
-}
 
-.wm-ai-market-panel .wm-panel-badge {
-  flex: 0 0 auto;
-  padding: 2px 8px;
-  font-size: 9.5px;
-  letter-spacing: 0;
-}
 
-.wm-ai-market-panel .wm-panel-header-right {
-  gap: 5px;
-}
 
-.wm-ai-market-panel .wm-panel-count {
-  min-width: 30px;
-  height: 22px;
-  border-radius: 7px;
-  font-size: 10.5px;
-}
 
 .wm-ai-insights {
   display: flex;
