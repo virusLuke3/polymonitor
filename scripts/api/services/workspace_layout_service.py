@@ -149,6 +149,15 @@ def _normalized_payload(payload: Mapping[str, Any]) -> tuple[list[str], dict[str
         "showPanelLibrary": raw_panel_library,
         "marketGroupSort": market_group_sort,
     }
+    # Keep this optional for older clients. Absence means a legacy layout whose
+    # default panels have not yet been reconciled by the workspace.
+    if "knownDefaultPanelIds" in raw_preferences:
+        known_defaults = raw_preferences["knownDefaultPanelIds"]
+        if (not isinstance(known_defaults, list) or len(known_defaults) > 1000
+                or any(not isinstance(panel, str) or not PANEL_ID_PATTERN.fullmatch(panel)
+                       for panel in known_defaults)):
+            raise AuthError(400, "INVALID_WORKSPACE_LAYOUT", "knownDefaultPanelIds must be an array of valid panel IDs.")
+        preferences["knownDefaultPanelIds"] = list(dict.fromkeys(known_defaults))
 
     client_updated_at = payload.get("clientUpdatedAt")
     normalized_client_time: str | None = None

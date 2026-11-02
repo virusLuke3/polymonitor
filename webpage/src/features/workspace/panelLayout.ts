@@ -15,6 +15,5 @@ export function effectivePanelLayout(id: string, width: number) {
   if (id === 'market-tv-wire' || id === 'market-youtube-channels') {
     return { rowSpan: 2, column: `span ${width <= 760 ? 1 : id === 'market-youtube-channels' && width > 1500 ? 3 : 2}` };
   }
-  if (id === 'market-summary' && width <= 760) return { rowSpan: 1, column: '1 / span 2' };
-  return { rowSpan: 1, column: `span ${['breaking-event-radar', 'global-transport-shipping'].includes(id) ? 2 : 1}` };
+  return { rowSpan: 1, column: `span ${width > 760 && ['breaking-event-radar', 'global-transport-shipping'].includes(id) ? 2 : 1}` };
 }

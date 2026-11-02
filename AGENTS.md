@@ -13,6 +13,13 @@ Preserve unrelated user changes in a dirty worktree. Keep implementation and
 verification scoped to the requested task, and report unverified production
 states explicitly.
 
+Newly developed Panels must be enabled by default and appear directly in the
+existing workspace unless the user explicitly requests otherwise. Use the
+shared default-panel reconciliation for local and account layouts. Do not add
+special navigation or require manual activation, layout resets, or cache
+clearing. Verify discovery from the ordinary homepage with an existing layout,
+and preserve its order, sizes, and subsequent explicit panel hides.
+
 For frontend changes, the user has authorized committing and pushing the task's
 own changes, deploying that exact commit to GCP, and verifying the real
 `https://polymonitor.club` UI. Preserve unrelated work, stage only owned paths or

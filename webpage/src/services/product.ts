@@ -79,6 +79,7 @@ export type WorkspaceLayout = {
     mapZoom?: number;
     showPanelLibrary?: boolean;
     marketGroupSort?: string;
+    knownDefaultPanelIds?: string[];
   };
   clientUpdatedAt: string | null;
   updatedAt: string | null;

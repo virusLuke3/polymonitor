@@ -1,5 +1,4 @@
 import { useDashboardData } from '@/features/workspace/useDashboardData';
-import { CRYPTO_STRATEGY_PANEL_IDS } from '@/features/workspace/panelCollections';
 import { useMarketCatalog, useMarketSearch } from '@/features/market-focus/useMarketCatalog';
 import {
   useWorkspacePreferences,
@@ -155,29 +154,6 @@ function WorldMonitorApp() {
   const { worldEventMap, setRendererViewport, aviationStatus, setMapRendererKind, layers, region, mapZoom, setRegion, setMapZoom,
     countryIndex, mapVisibleEventCount, onMapVisibilityChange, onMapPresentationChange, worldEventMapEvents, mapSourceStatuses } = useWorldEventMapController(runtime);
   const { workspaceSyncStatus, workspaceSyncUpdatedAt, retryWorkspaceSync } = useWorkspaceSync(workspace, { region, mapZoom, setRegion, setMapZoom });
-  const requestedCryptoPanels = useRef(new URLSearchParams(window.location.search).get('panels') === 'crypto');
-  const [focusCryptoPanels, setFocusCryptoPanels] = useState(false);
-  useEffect(() => {
-    // Apply explicit navigation after account hydration so an old cloud layout
-    // cannot hide the requested panels again. Ordinary visits keep all choices.
-    if (!requestedCryptoPanels.current || !workspace.panelPrefsLoaded || loading || workspaceSyncStatus === 'checking') return;
-    requestedCryptoPanels.current = false;
-    workspace.setActivePanelIds(current => [
-      ...CRYPTO_STRATEGY_PANEL_IDS,
-      ...current.filter(id => !CRYPTO_STRATEGY_PANEL_IDS.includes(id)),
-    ]);
-    const url = new URL(window.location.href);
-    url.searchParams.delete('panels');
-    window.history.replaceState(window.history.state, '', url);
-    setFocusCryptoPanels(true);
-  }, [workspace.panelPrefsLoaded, workspaceSyncStatus, loading]);
-  useEffect(() => {
-    if (!focusCryptoPanels || !CRYPTO_STRATEGY_PANEL_IDS.every(id => activePanelIds.includes(id))) return;
-    const grid = document.getElementById('workspace-panels');
-    grid?.scrollIntoView({ block: 'start' });
-    grid?.focus({ preventScroll: true });
-    setFocusCryptoPanels(false);
-  }, [focusCryptoPanels, activePanelIds]);
   const [commandQuery, setCommandQuery] = useState('');
   const [commandTab, setCommandTab] = useState<CommandPaletteTab>('markets');
   const [commandActiveMarketId, setCommandActiveMarketId] = useState<number | null>(null);

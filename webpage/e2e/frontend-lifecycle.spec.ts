@@ -1,6 +1,6 @@
 import { installLocalAssets } from './fixtures/browser';
 import { expect, test, type Page } from '@playwright/test';
-import { fixtureBundle } from './fixtures/dashboard';
+import { fixtureBundle, knownPanelIds } from './fixtures/dashboard';
 import { GENERATED_AT, installFixtures, mapResponse } from './fixtures/world-event-map';
 import type {} from './fixtures/lifecycle';
 test.use({ baseURL: `http://127.0.0.1:${process.env.POLYMONITOR_E2E_PORT || 4174}` });
@@ -230,13 +230,14 @@ test('two panel views use one data owner and one cache', async ({ page }) => {
 });
 
 async function workspaceServer(page: Page, options: { conflict?: boolean; remote?: Record<string, unknown> } = {}) {
+  const KNOWN_PANEL_IDS = await knownPanelIds();
   const writes: Array<{ body: any; reply: () => Promise<void> }> = [];
   await page.route('**/wm-api/auth/session', route => route.fulfill({ json: {
     enabled: true, authenticated: true, user: { id: 7, username: 'workspace-fixture', role: 'user' }, csrfToken: 'fixture-only',
   } }));
   await page.route('**/wm-api/product/workspace-layout', async route => {
     const base = { exists: true, revision: 4, activePanelIds: ['active-markets', 'price-chart'], panelLayout: {},
-      preferences: { showPanelLibrary: true, viewMode: '3d', region: 'europe', mapZoom: 4 },
+      preferences: { knownDefaultPanelIds: KNOWN_PANEL_IDS, showPanelLibrary: true, viewMode: '3d', region: 'europe', mapZoom: 4 },
       updatedAt: GENERATED_AT, clientUpdatedAt: GENERATED_AT, ...options.remote };
     if (route.request().method() === 'GET') return route.fulfill({ json: base });
     const body = route.request().postDataJSON();

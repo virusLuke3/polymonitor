@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { DEFAULT_PANEL_IDS, PANEL_LIBRARY } from '@/panels/registry';
 import type { PanelLayoutPrefs } from './panelLayout';
+import { reconcileDefaultPanels } from './defaultPanels';
 import { AuthApiError, fetchAuthSession } from '@/services/auth';
 import { fetchWorkspaceLayout, saveWorkspaceLayout } from '@/services/product';
 import { clampMapZoom, isWorldEventRegion, type WorldEventRegion } from '@/features/world-event-map';
@@ -8,6 +9,7 @@ import type { BootstrapPayload, MarketGroupSort } from '@/types';
 export type MapViewMode = '3d' | '2d';
 type WorkspaceSyncStatus = 'checking' | 'local' | 'saving' | 'synced' | 'conflict' | 'error';
 const PANEL_STORAGE_KEY = 'polydata:workspace-panels:v4';
+const KNOWN_DEFAULT_PANELS_KEY = 'polydata:workspace-known-default-panels:v1';
 const PANEL_LAYOUT_STORAGE_KEY = 'polydata:workspace-panel-layout:v4';
 const PANEL_LAYOUT_PROMOTION_STORAGE_KEY = 'polydata:workspace-panel-layout-promotions:v1';
 const PROMOTED_WIDE_PANEL_IDS = ['breaking-event-radar', 'global-transport-shipping'];
@@ -85,6 +87,7 @@ export function useWorkspacePreferences() {
   const enableAllPanels = () => updatePanelIds(sanitizePanelIds(PANEL_LIBRARY.map((panel) => panel.id)));
   const restorePanels = (bootstrap?: BootstrapPayload | null) => updatePanelIds(defaultWorkspacePanelIds(bootstrap));
   const [activePanelIds, setActivePanelIds] = useState<string[]>([]);
+  const [knownDefaultPanelIds, setKnownDefaultPanelIds] = useState<string[]>([]);
   const updatePanelIds = useCallback((value: string[] | ((current: string[]) => string[])) => {
     panelPreferencesOwned.current = true;
     setActivePanelIds(value);
@@ -94,9 +97,13 @@ export function useWorkspacePreferences() {
     panelPreferencesOwned.current = true;
     setActivePanelIds(defaultWorkspacePanelIds(payload));
   }, []);
-  const applyAccountPanels = useCallback((ids: string[]) => {
+  const applyAccountPanels = useCallback((ids: string[], knownIds?: string[]) => {
     accountLayoutApplied.current = true;
-    setActivePanelIds(sanitizePanelIds(ids));
+    const next = reconcileDefaultPanels(sanitizePanelIds(ids), DEFAULT_PANEL_IDS, knownIds);
+    setActivePanelIds(next.activePanelIds);
+    setKnownDefaultPanelIds(next.knownDefaultPanelIds);
+    return JSON.stringify(ids) !== JSON.stringify(next.activePanelIds)
+      || JSON.stringify(knownIds) !== JSON.stringify(next.knownDefaultPanelIds);
   }, []);
   const [panelLayoutPrefs, setPanelLayoutPrefs] = useState<PanelLayoutPrefs>(() => readJsonStorage<PanelLayoutPrefs>(PANEL_LAYOUT_STORAGE_KEY, {}));
   const [panelPrefsLoaded, setPanelPrefsLoaded] = useState(false);
@@ -116,8 +123,10 @@ export function useWorkspacePreferences() {
     const saved = readJsonStorage<unknown>(PANEL_STORAGE_KEY, null);
     const hasSavedLayout = Array.isArray(saved) && saved.every((id) => typeof id === 'string');
     panelPreferencesOwned.current = hasSavedLayout;
-    // An explicit empty list is a valid preference, not a first visit.
-    setActivePanelIds(hasSavedLayout ? sanitizePanelIds(saved) : DEFAULT_PANEL_IDS);
+    const next = reconcileDefaultPanels(hasSavedLayout ? sanitizePanelIds(saved) : DEFAULT_PANEL_IDS,
+      DEFAULT_PANEL_IDS, readJsonStorage<unknown>(KNOWN_DEFAULT_PANELS_KEY, null));
+    setActivePanelIds(next.activePanelIds);
+    setKnownDefaultPanelIds(next.knownDefaultPanelIds);
     setPanelPrefsLoaded(true);
   }, []);
 
@@ -141,7 +150,8 @@ export function useWorkspacePreferences() {
   useEffect(() => {
     if (!panelPrefsLoaded || typeof window === 'undefined') return;
     window.localStorage.setItem(PANEL_STORAGE_KEY, JSON.stringify(activePanelIds));
-  }, [activePanelIds, panelPrefsLoaded]);
+    window.localStorage.setItem(KNOWN_DEFAULT_PANELS_KEY, JSON.stringify(knownDefaultPanelIds));
+  }, [activePanelIds, knownDefaultPanelIds, panelPrefsLoaded]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -196,18 +206,18 @@ export function useWorkspacePreferences() {
     });
   };
 
-  return { layoutWidth, applyBootstrapPanels, applyAccountPanels, enableAllPanels, restorePanels, activePanelIds, setActivePanelIds: updatePanelIds, panelLayoutPrefs, setPanelLayoutPrefs, panelPrefsLoaded, viewMode, setViewMode, showPanelLibrary, setShowPanelLibrary, marketGroupSort, setMarketGroupSort, togglePanel, moveWorkspacePanel, resizeWorkspacePanel, resetWorkspacePanelLayout };
+  return { layoutWidth, applyBootstrapPanels, applyAccountPanels, enableAllPanels, restorePanels, activePanelIds, knownDefaultPanelIds, setActivePanelIds: updatePanelIds, panelLayoutPrefs, setPanelLayoutPrefs, panelPrefsLoaded, viewMode, setViewMode, showPanelLibrary, setShowPanelLibrary, marketGroupSort, setMarketGroupSort, togglePanel, moveWorkspacePanel, resizeWorkspacePanel, resetWorkspacePanelLayout };
 }
 export function useWorkspaceSync(workspace: ReturnType<typeof useWorkspacePreferences>, camera: {
   region: WorldEventRegion; mapZoom: number;
   setRegion: (region: WorldEventRegion) => void; setMapZoom: (zoom: number) => void;
 }) {
-  const { activePanelIds, panelLayoutPrefs, panelPrefsLoaded, viewMode, showPanelLibrary, marketGroupSort } = workspace;
+  const { activePanelIds, knownDefaultPanelIds, panelLayoutPrefs, panelPrefsLoaded, viewMode, showPanelLibrary, marketGroupSort } = workspace;
   const { region, mapZoom } = camera;
   const value = useMemo(() => ({
     activePanelIds, panelLayout: panelLayoutPrefs,
-    preferences: { region, viewMode, mapZoom, showPanelLibrary, marketGroupSort },
-  }), [activePanelIds, panelLayoutPrefs, region, viewMode, mapZoom, showPanelLibrary, marketGroupSort]);
+    preferences: { region, viewMode, mapZoom, showPanelLibrary, marketGroupSort, knownDefaultPanelIds },
+  }), [activePanelIds, panelLayoutPrefs, region, viewMode, mapZoom, showPanelLibrary, marketGroupSort, knownDefaultPanelIds]);
   const snapshot = JSON.stringify(value);
   const latest = useRef({ value, snapshot, workspace, camera });
   latest.current = { value, snapshot, workspace, camera };
@@ -220,6 +230,7 @@ export function useWorkspaceSync(workspace: ReturnType<typeof useWorkspacePrefer
   const ready = useRef(false);
   const writing = useRef(false);
   const applying = useRef(false);
+  const accountDefaultsAdded = useRef(false);
   const acknowledged = useRef('');
   const localHydrated = useRef(false);
   const userId = useRef<number | string | null>(null);
@@ -290,7 +301,7 @@ export function useWorkspaceSync(workspace: ReturnType<typeof useWorkspacePrefer
       } else {
         applying.current = true;
         const { workspace: target, camera: map } = latest.current;
-        target.applyAccountPanels(server.activePanelIds);
+        accountDefaultsAdded.current = target.applyAccountPanels(server.activePanelIds, server.preferences?.knownDefaultPanelIds);
         const valid = new Set(PANEL_LIBRARY.map((panel) => panel.id));
         target.setPanelLayoutPrefs(Object.fromEntries(Object.entries(server.panelLayout || {}).filter(([id]) => valid.has(id))));
         const prefs = server.preferences || {};
@@ -322,7 +333,16 @@ export function useWorkspaceSync(workspace: ReturnType<typeof useWorkspacePrefer
   useEffect(() => {
     if (!panelPrefsLoaded) return;
     if (applying.current) {
-      applying.current = false; acknowledged.current = snapshot; localHydrated.current = true;
+      applying.current = false; localHydrated.current = true;
+      if (accountDefaultsAdded.current) {
+        accountDefaultsAdded.current = false;
+        // Persist the reconciled account layout, including its default catalog,
+        // so another browser can distinguish new panels from explicit hides.
+        acknowledged.current = '';
+        markLocalChange();
+        setStatus('saving');
+        schedule();
+      } else acknowledged.current = snapshot;
       return;
     }
     if (localHydrated.current) markLocalChange();

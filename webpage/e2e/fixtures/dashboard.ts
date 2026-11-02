@@ -1,6 +1,17 @@
 import type { Page } from '@playwright/test';
 import { GENERATED_AT, installFixtures, transportPayload } from './world-event-map';
 
+// Fixtures describe a deliberately customized layout after discovering installed modules.
+export async function knownPanelIds() {
+  const { readdirSync, readFileSync } = await import('node:fs');
+  const root = new URL('../../src/panels/modules/', import.meta.url);
+  return [...new Set(readdirSync(root, { withFileTypes: true }).filter(entry => entry.isDirectory()).flatMap(entry => {
+    const dir = new URL(`${entry.name}/`, root);
+    const file = readdirSync(dir).find(name => /^index\.tsx?$/.test(name))!;
+    return [entry.name, ...Array.from(readFileSync(new URL(file, dir), 'utf8').matchAll(/\bid\s*:\s*['"]([^'"]+)['"]/g), match => match[1]!)];
+  }))];
+}
+
 export const DASHBOARD_PANELS = ['active-markets', 'price-chart', 'lob-depth', 'global-orderfilled', 'oracle-feed', 'global-transport-shipping', 'breaking-event-radar'];
 export const fixtureMarkets = [1, 2].map((id) => ({
   id, slug: `fixture-market-${id}`, title: `Fixture market ${id}`, status: 'active',
@@ -28,19 +39,21 @@ export function fixtureBundle(id: number) {
 }
 
 export async function installDashboard(page: Page, locale = 'en', panelIds = DASHBOARD_PANELS) {
+  const KNOWN_PANEL_IDS = await knownPanelIds();
   await page.clock.setFixedTime(new Date(GENERATED_AT));
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.addInitScript(({ locale, panels }) => {
+  await page.addInitScript(({ locale, panels, known }) => {
     localStorage.setItem('polydata:locale:v1', locale);
     localStorage.setItem('polydata:workspace-panels:v4', JSON.stringify(panels));
-  }, { locale, panels: panelIds });
+    localStorage.setItem('polydata:workspace-known-default-panels:v1', JSON.stringify(known));
+  }, { locale, panels: panelIds, known: KNOWN_PANEL_IDS });
   await installFixtures(page);
   await page.route('**/wm-api/**', async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace(/^\/wm-api/, '');
     const json = (body: unknown, status = 200) => route.fulfill({ status, json: body });
     if (path === '/auth/session') return json({ enabled: true, authenticated: true, user: { id: 1, username: 'fixture-user', role: 'admin', forcePasswordChange: false }, csrfToken: 'fixture-only', allowedScopes: [] });
-    if (path === '/product/workspace-layout') return json({ exists: true, revision: 1, activePanelIds: panelIds, panelLayout: {}, preferences: {}, clientUpdatedAt: GENERATED_AT, updatedAt: GENERATED_AT });
+    if (path === '/product/workspace-layout') return json({ exists: true, revision: 1, activePanelIds: panelIds, panelLayout: {}, preferences: { knownDefaultPanelIds: KNOWN_PANEL_IDS }, clientUpdatedAt: GENERATED_AT, updatedAt: GENERATED_AT });
     if (path === '/bootstrap') return json({ generatedAt: GENERATED_AT, defaultWorkspace: { name: 'Fixture', panels: panelIds }, featuredMarket: fixtureMarkets[0], activeMarketsPreview: fixtureMarkets, activeMarketGroupsPreview: [], globalTradesPreview: [], globalOraclePreview: [], latestContentPreview: [], recentTradesPreview: [], oraclePreview: [], contentPreview: [], pricePreview: null, systemHealth: { apiStatus: 'ok', database: 'fixture' } });
     if (path === '/markets' || path === '/markets/search') return json({ items: fixtureMarkets, pagination: { page: 1, pageSize: 80, total: 2, totalPages: 1, hasMore: false } });
     const marketMatch = path.match(/^\/markets\/(\d+)\/(focus-tile|workspace|detail|chart)$/);
