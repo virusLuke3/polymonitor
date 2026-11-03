@@ -1661,6 +1661,18 @@ html[lang='zh-CN'] .wm-focused-market-list .wm-market-sort-caption {
   overflow: hidden;
 }
 
+.wm-focus-chart-card.has-history-note {
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+}
+
+.wm-focus-history-note {
+  margin: 0;
+  padding: 6px 10px;
+  color: var(--wm-terminal-secondary);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 .wm-focused-market-row .wm-focus-detail-grid, .wm-focused-market-row .wm-focus-chart-wrap {
   height: 100%;
   min-height: 0;

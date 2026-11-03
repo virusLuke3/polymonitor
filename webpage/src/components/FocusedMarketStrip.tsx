@@ -1192,7 +1192,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
               </div>
             </div>
 
-            <div className="wm-focus-chart-card">
+            <div className={`wm-focus-chart-card${['partial', 'stale'].includes(chartStatus) ? ' has-history-note' : ''}`}>
               <div className="wm-focus-price-strip" aria-label="selected market quote">
                 <span><em>YES</em> <strong>{formatBookPrice(liveDisplayedYesPrice)}</strong></span>
                 <span><em>NO</em> <strong>{formatBookPrice(liveDisplayedNoPrice)}</strong></span>
@@ -1228,8 +1228,8 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                   )}</span>
                 </div>
               </div>
-              {chartStatus === 'partial' ? <p>Recent stored fills · up to 600 points from the latest 86,400 blocks. Full interval history is not available in this view.</p> : null}
-              {chartStatus === 'stale' ? <p>History refresh failed; showing the previous read.</p> : null}
+              {chartStatus === 'partial' ? <p className="wm-focus-history-note">Recent stored fills · up to 600 points from the latest 86,400 blocks. Full interval history is not available in this view.</p> : null}
+              {chartStatus === 'stale' ? <p className="wm-focus-history-note">History refresh failed; showing the previous read.</p> : null}
               <div className={`wm-focus-detail-grid${showFocusedOutcomeRail ? '' : ' compact'}`}>
                 <div className="wm-focus-chart-wrap">
                   {detail
