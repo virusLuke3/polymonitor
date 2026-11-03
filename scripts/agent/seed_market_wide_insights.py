@@ -22,6 +22,22 @@ from agent.market_wide.snapshot import DEFAULT_LENSES, seed_market_wide_snapshot
 from api.runtime import ServiceRuntime
 
 
+def seed_runtime():
+    from api.config import load_api_settings
+    from api.db_pool import ApiPostgresConnectionPool
+    settings = load_api_settings()
+    if settings.database.backend not in {"postgres", "postgresql"}:
+        return ServiceRuntime(settings=settings)
+    # Scheduled evidence reads cannot borrow the HTTP pool's retained sessions.
+    # Only one Agent seed connection is admitted across overlapping jobs.
+    pool = ApiPostgresConnectionPool(settings.database.connect, max_size=1, acquire_timeout_seconds=20,
+        budget_name="agent-seed-postgres-connections", budget_capacity=1)
+    def connect(*args, **kwargs):
+        return pool.acquire(*args, **kwargs)
+    connect.close = pool.close
+    return ServiceRuntime(settings=settings, connection_factory=connect)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Seed market-wide Agent insight snapshots.")
     parser.add_argument("--lens", action="append", choices=DEFAULT_LENSES, help="Lens to seed. Repeatable. Defaults to all lenses.")
@@ -33,7 +49,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    with ServiceRuntime() as runtime:
+    with seed_runtime() as runtime:
         context = runtime.agent_snapshot_context
         lenses = tuple(args.lens or DEFAULT_LENSES)
         snapshots = seed_market_wide_snapshots(context, lenses, live=not args.fallback_only, force=args.force)

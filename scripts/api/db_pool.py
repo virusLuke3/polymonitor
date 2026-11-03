@@ -53,10 +53,14 @@ class ApiPostgresConnectionPool:
         *,
         max_size: int,
         acquire_timeout_seconds: float,
+        budget_name: str = "postgres-connections",
+        budget_capacity: int = 4,
     ) -> None:
         self._connection_factory = connection_factory
         self._max_size = max(1, max_size)
         self._acquire_timeout_seconds = max(0.1, acquire_timeout_seconds)
+        self._budget_name = budget_name
+        self._budget_capacity = max(1, budget_capacity)
         self._condition = threading.Condition()
         self._idle: deque[Any] = deque()
         self._connection_count = 0
@@ -100,7 +104,7 @@ class ApiPostgresConnectionPool:
         if create_connection:
             permit = None
             try:
-                permit = try_permit("postgres-connections", 4)
+                permit = try_permit(self._budget_name, self._budget_capacity)
                 if permit is None:
                     raise TimeoutError("API PostgreSQL connection budget full")
                 # Queue admission and a cold TCP connection have separate budgets.

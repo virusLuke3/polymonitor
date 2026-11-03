@@ -206,7 +206,7 @@ class FinanceWatchPanelsWatcher:
         previous = self.seed_meta_store.load(SEED_META_NAMESPACE, panel_id) or {}
         attempted_at = utc_now_iso()
         last_success_at = previous.get("lastSuccessAt")
-        if not preserve_last_success and status in {"ok", "partial", "degraded", "preserved"}:
+        if not preserve_last_success and status in {"ok", "empty", "partial", "degraded", "preserved"}:
             last_success_at = attempted_at
         payload = build_seed_meta_payload(
             panel_id=panel_id,
@@ -236,6 +236,9 @@ class FinanceWatchPanelsWatcher:
             record_count = len(payload.get("items") or []) if isinstance(payload, dict) else 0
             status = str(payload.get("status") or ("ok" if record_count else "empty")) if isinstance(payload, dict) else "error"
             replace_with_empty = panel_id == "broker-research-watch" and status == "empty"
+            if (panel_id in {"defi-security-watch", "ipo-news-watch", "blockchain-policy-news"}
+                    and status == "empty" and (payload.get("sources") or {}).get("googleNewsRss") == "empty"):
+                replace_with_empty = True
             if previous and (status == "error" or record_count <= 0) and not replace_with_empty:
                 self.store_payload(panel_id, previous)
                 self.store_seed_meta(

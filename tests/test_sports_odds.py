@@ -228,3 +228,35 @@ class SportsOddsWatcherTestCase(unittest.TestCase):
         self.assertEqual("preserved", result["status"])
         stored = json.loads(fake_redis.get(watcher.redis_key()) or "{}")
         self.assertEqual("old-event", stored["items"][0]["id"])
+
+    def test_successful_empty_refresh_retires_finished_events(self):
+        watcher, fake_redis, _ = self.make_watcher()
+        watcher.store_payload({"generatedAt": "2026-10-29T01:45:34Z", "status": "ok", "items": [{"id": "finished"}]})
+        payload = {"generatedAt": "2026-11-03T08:00:00Z", "status": "empty",
+                   "sources": {"theOddsApi": "ok"}, "items": []}
+        with patch.object(sports_odds_service, "fetch_live_sports_odds_payload", return_value=payload):
+            result = watcher.run_once()
+        self.assertEqual("empty", result["status"])
+        stored = json.loads(fake_redis.get(watcher.redis_key()))
+        self.assertEqual([], stored["items"])
+        self.assertEqual(payload["generatedAt"], stored["generatedAt"])
+        meta = json.loads(fake_redis.get("polydata:seed-meta:sports:sports-odds"))
+        self.assertEqual("empty", meta["status"])
+        self.assertIsNone(meta["errorSummary"])
+        self.assertEqual(meta["lastAttemptAt"], meta["lastSuccessAt"])
+
+    def test_missing_key_does_not_erase_last_observation_or_advance_success(self):
+        watcher, fake_redis, _ = self.make_watcher()
+        previous = {"generatedAt": "2026-11-03T07:00:00Z", "status": "ok", "items": [{"id": "prior"}]}
+        with patch.object(sports_odds_service, "fetch_live_sports_odds_payload", return_value=previous):
+            watcher.run_once()
+        before = json.loads(fake_redis.get("polydata:seed-meta:sports:sports-odds"))
+        failed = {"generatedAt": "2026-11-03T08:00:00Z", "status": "degraded",
+                  "sources": {"theOddsApi": "missing-key"}, "items": []}
+        with patch.object(sports_odds_service, "fetch_live_sports_odds_payload", return_value=failed):
+            result = watcher.run_once()
+        self.assertEqual("preserved", result["status"])
+        stored = json.loads(fake_redis.get(watcher.redis_key()))
+        self.assertEqual(previous["generatedAt"], stored["generatedAt"])
+        after = json.loads(fake_redis.get("polydata:seed-meta:sports:sports-odds"))
+        self.assertEqual(before["lastSuccessAt"], after["lastSuccessAt"])

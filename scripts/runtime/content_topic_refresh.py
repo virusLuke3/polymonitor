@@ -22,7 +22,11 @@ def content_runtime():
     settings = load_api_settings()
     if settings.database.backend not in {'postgres', 'postgresql'}:
         return ServiceRuntime(settings=settings)
-    pool = ApiPostgresConnectionPool(settings.database.connect, max_size=1, acquire_timeout_seconds=20)
+    # The HTTP readers retain their four sessions, including idle sessions.
+    # The singleton collector needs one session in the watch parent and one in
+    # its bounded child; it must not compete for those reader-only permits.
+    pool = ApiPostgresConnectionPool(settings.database.connect, max_size=1, acquire_timeout_seconds=20,
+        budget_name="content-postgres-connections", budget_capacity=2)
     def connect(*args, **kwargs):
         return pool.acquire(*args, **kwargs)
     connect.close = pool.close

@@ -505,6 +505,8 @@ def fetch_live_sports_odds_payload(
         "dateFormat": "iso",
     }
     payload = dependencies.http_json_get(url, params=params, timeout=12, headers=_headers())
+    if not isinstance(payload, list):
+        raise ValueError("Sports odds response must be an event list")
     quota_getter = dependencies.get_http_quota
     quota = quota_getter() if callable(quota_getter) else {}
     events = payload if isinstance(payload, list) else []

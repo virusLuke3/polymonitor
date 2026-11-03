@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any, Dict, List
 from xml.etree import ElementTree
@@ -13,6 +13,7 @@ from api.services.finance_watch.common import (
     _news_url,
     _payload,
     _strip_html,
+    utc_now_iso,
 )
 
 NEWS_QUERIES = {
@@ -23,12 +24,16 @@ NEWS_QUERIES = {
 
 
 def _parse_rss_items(xml_text: str, *, panel_id: str, limit: int) -> List[Dict[str, Any]]:
-    try:
-        root = ElementTree.fromstring(xml_text)
-    except ElementTree.ParseError:
-        return []
+    # Invalid transport/markup must not masquerade as a successful empty feed.
+    root = ElementTree.fromstring(xml_text)
+    if root.tag != "rss" or root.find("channel") is None:
+        raise ValueError("News response is not an RSS channel")
+    now = datetime.fromisoformat(utc_now_iso().replace("Z", "+00:00"))
+    cutoff = now - timedelta(days=7)
     rows: List[Dict[str, Any]] = []
-    for item in root.findall(".//item")[: max(1, limit * 2)]:
+    # RSS search results are relevance-ranked, not chronological. Select the
+    # latest observations before applying the panel's display limit.
+    for item in root.findall(".//item"):
         title = _strip_html(item.findtext("title"))
         description = _strip_html(item.findtext("description"))
         source = _compact_source(item.findtext("source") or "Google News")
@@ -40,6 +45,11 @@ def _parse_rss_items(xml_text: str, *, panel_id: str, limit: int) -> List[Dict[s
                 published_at = parsedate_to_datetime(published_raw).astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
             except (TypeError, ValueError):
                 published_at = None
+        if not published_at or not title:
+            continue
+        published = datetime.fromisoformat(published_at.replace("Z", "+00:00"))
+        if not cutoff <= published <= now + timedelta(minutes=1):
+            continue
         tags = _news_tags(panel_id, title, description)
         rows.append(
             {
@@ -55,9 +65,8 @@ def _parse_rss_items(xml_text: str, *, panel_id: str, limit: int) -> List[Dict[s
                 "tone": "down" if any(tag in {"HACK", "EXPLOIT", "ALERT", "ENFORCE"} for tag in tags) else "neutral",
             }
         )
-        if len(rows) >= limit:
-            break
-    return rows
+    rows.sort(key=lambda row: row["publishedAt"], reverse=True)
+    return rows[:limit]
 
 
 def _headline_entity(title: str, source: str) -> str:
@@ -103,7 +112,7 @@ def build_news_payload(
     title: str,
     limit: int,
 ) -> Dict[str, Any]:
-    query = NEWS_QUERIES[panel_id]
+    query = f"({NEWS_QUERIES[panel_id]}) when:7d"
     xml_text = _http_text_get(ctx, _news_url(ctx, query), timeout=16)
     rows = _parse_rss_items(xml_text, panel_id=panel_id, limit=limit)
     return _payload(panel_id, title=title, items=rows, summary={"query": query}, sources={"googleNewsRss": "ok" if rows else "empty"})

@@ -174,7 +174,7 @@ class SportsOddsWatcher:
         previous = self.seed_meta_store.load(SEED_META_NAMESPACE, SEED_META_CACHE_KEY) or {}
         attempted_at = utc_now_iso()
         last_success_at = previous.get("lastSuccessAt")
-        if not preserve_last_success and status in {"ok", "degraded", "preserved"}:
+        if not preserve_last_success and status in {"ok", "empty", "degraded", "preserved"}:
             last_success_at = attempted_at
         payload = build_seed_meta_payload(
             panel_id="sports-odds",
@@ -207,7 +207,9 @@ class SportsOddsWatcher:
             raise
 
         record_count = len(payload.get("items") or [])
-        if previous and record_count <= 0:
+        healthy_empty = (payload.get("status") == "empty"
+                         and (payload.get("sources") or {}).get("theOddsApi") == "ok")
+        if previous and record_count <= 0 and not healthy_empty:
             self.store_payload(previous)
             self.store_seed_meta(
                 status="preserved",
@@ -230,10 +232,10 @@ class SportsOddsWatcher:
         self.store_payload(payload)
         status = str(payload.get("status") or ("ok" if record_count else "degraded"))
         self.store_seed_meta(
-            status=status if status in {"ok", "degraded"} else "degraded",
+            status=status if status in {"ok", "empty", "degraded"} else "degraded",
             record_count=record_count,
             source_states=payload.get("sources") if isinstance(payload.get("sources"), dict) else {},
-            error_summary=None if record_count else "Sports odds payload contained no events",
+            error_summary=None if record_count or healthy_empty else "Sports odds payload contained no events",
             metadata={
                 "quota": payload.get("quota") if isinstance(payload.get("quota"), dict) else {},
                 "refreshPolicy": payload["refreshPolicy"],

@@ -393,10 +393,8 @@ def _return_skipped_snapshot(snapshot: dict[str, Any], reason: str) -> dict[str,
 
 def build_market_wide_seed_payload(helpers: dict[str, Any], lens: Any, *, run_id: str | None = None) -> dict[str, Any]:
     normalized_lens = normalize_lens(lens)
-    active_markets = _safe_call(helpers, "get_active_markets_snapshot", {}, 80, False, True)
-    if not _items(active_markets):
-        active_markets = _safe_call(helpers, "get_active_markets_snapshot", {}, 80)
-    market_groups = _safe_call(helpers, "get_market_groups_payload", {}, "", 1, 60, "active")
+    active_markets = _safe_call(helpers, "get_active_markets_snapshot", {}, 80)
+    market_groups = _safe_call(helpers, "get_market_groups_payload", {}, query="", page=1, page_size=60)
     content = _safe_call(helpers, "get_latest_content_payload", {}, 12)
     markets = _items(active_markets)[:80]
     payload = {

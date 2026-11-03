@@ -253,7 +253,7 @@ class MarketWideAgentGraphTestCase(unittest.TestCase):
         }
         helpers = {
             "get_active_markets_snapshot": lambda *args: {"items": [active_market]},
-            "get_market_groups_payload": lambda query, page, page_size, status: {"items": []},
+            "get_market_groups_payload": lambda *, query, page, page_size: {"items": []},
             "get_latest_content_payload": lambda limit: {"items": []},
             "get_recent_trades_snapshot": lambda limit: [],
             "get_recent_oracle_snapshot": lambda limit: [],
@@ -411,7 +411,7 @@ class MarketWideAgentGraphTestCase(unittest.TestCase):
         stored: dict[tuple[str, str], Any] = {}
         helpers = {
             "get_active_markets_snapshot": lambda *args: {"items": [{"title": "A", "category": "politics"}]},
-            "get_market_groups_payload": lambda query, page, page_size, status: {"items": [{"title": "B", "category": "sports"}]},
+            "get_market_groups_payload": lambda *, query, page, page_size: {"items": [{"title": "B", "category": "sports"}]},
             "get_latest_content_payload": lambda limit: {"items": []},
             "get_recent_trades_snapshot": lambda limit: [],
             "get_recent_oracle_snapshot": lambda limit: [],
@@ -429,7 +429,7 @@ class MarketWideAgentGraphTestCase(unittest.TestCase):
     def test_gateway_seed_delegates_budget_to_gateway_host(self):
         helpers = {
             "get_active_markets_snapshot": lambda *args: {"items": []},
-            "get_market_groups_payload": lambda query, page, page_size, status: {"items": []},
+            "get_market_groups_payload": lambda *, query, page, page_size: {"items": []},
             "get_latest_content_payload": lambda limit: {"items": []},
             "get_recent_trades_snapshot": lambda limit: [],
             "get_recent_oracle_snapshot": lambda limit: [],
@@ -449,7 +449,7 @@ class MarketWideAgentGraphTestCase(unittest.TestCase):
     def test_gateway_seed_timeout_falls_back_without_crashing(self):
         helpers = {
             "get_active_markets_snapshot": lambda *args: {"items": []},
-            "get_market_groups_payload": lambda query, page, page_size, status: {"items": []},
+            "get_market_groups_payload": lambda *, query, page, page_size: {"items": []},
             "get_latest_content_payload": lambda limit: {"items": []},
             "get_recent_trades_snapshot": lambda limit: [],
             "get_recent_oracle_snapshot": lambda limit: [],
@@ -464,3 +464,22 @@ class MarketWideAgentGraphTestCase(unittest.TestCase):
         self.assertTrue(snapshot["liveAttempted"])
         self.assertEqual(snapshot["data"]["status"], "gateway-error")
         self.assertIn("gateway timed out", snapshot["data"]["error"])
+
+
+def test_seed_refresh_uses_current_reader_call_signatures():
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    logger = Mock()
+    seen = []
+    def catalog(page_size=40, **kwargs):
+        seen.append(("catalog", page_size))
+        return {"items": [{"id": 1, "title": "Current market"}]}
+    def groups(*, query="", page=1, page_size=50):
+        seen.append(("groups", page_size))
+        return {"items": [{"groupId": "market:1", "title": "Current group"}]}
+    payload = build_market_wide_seed_payload({"app": SimpleNamespace(logger=logger),
+        "get_active_markets_snapshot": catalog, "get_market_groups_payload": groups}, "overview")
+    assert payload["markets"][0]["id"] == 1
+    assert payload["marketGroups"][0]["groupId"] == "market:1"
+    assert seen == [("catalog", 80), ("groups", 60)]
+    logger.exception.assert_not_called()
