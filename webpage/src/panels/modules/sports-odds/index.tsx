@@ -45,6 +45,7 @@ function nextSortMode(current: SortMode): SortMode {
 
 function summaryLine(payload: RuntimeSportsOddsPayload | null | undefined, items: RuntimeSportsOddsItem[], copy: ReturnType<typeof useSpecialistCopy>['copy']) {
   if (sourceStatus(payload) === 'missing-key') return copy('keyMissing', 'The Odds API key missing');
+  if (sourceStatus(payload) === 'empty') return copy('noCurrentEvents', 'No upcoming events in this feed.');
   if (!items.length) return copy('noneLoaded', 'No sportsbook odds loaded');
   const wide = Number(payload?.summary?.wideCount || 0);
   if (wide > 0) return copy('wideChecks', '{count} wide consensus checks', { count: wide });
@@ -109,11 +110,14 @@ function OddsList({ payload, sortMode }: { payload?: RuntimeSportsOddsPayload | 
   const { copy } = useSpecialistCopy('sports-odds');
   const items = useMemo(() => sortItems(payload?.items || [], sortMode), [payload, sortMode]);
   if (!items.length) {
+    const status = sourceStatus(payload);
     return (
       <div className="wm-odds-empty-state">
-        <span>{sourceStatus(payload).toUpperCase()}</span>
-        <strong>{copy('warming', 'Sportsbook feed is warming.')}</strong>
-        <em>{copy('keyHelp', 'Set POLYDATA_THE_ODDS_API_KEY to enable live bookmaker odds.')}</em>
+        <span>{status.toUpperCase()}</span>
+        <strong>{status === 'empty' ? copy('noCurrentEvents', 'No upcoming events in this feed.') : copy('warming', 'Sportsbook feed is warming.')}</strong>
+        <em>{status === 'missing-key'
+          ? copy('keyHelp', 'Set POLYDATA_THE_ODDS_API_KEY to enable live bookmaker odds.')
+          : copy('autoRefresh', 'Updates continue automatically.')}</em>
       </div>
     );
   }
@@ -125,7 +129,7 @@ function SportsOddsPanel({ payload }: { payload?: RuntimeSportsOddsPayload | nul
   const [showHelp, setShowHelp] = useState(false);
   const [sortMode, setSortMode] = useState<SortMode>('signal');
   const items = payload?.items || [];
-  const degraded = sourceStatus(payload) !== 'ok';
+  const degraded = !['ok', 'empty'].includes(sourceStatus(payload));
   return (
     <Panel
       title={copy('title', 'SPORTS ODDS')}
