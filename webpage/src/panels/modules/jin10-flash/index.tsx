@@ -195,6 +195,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: true,
 }, {
   tier: 'fast',
+  intervalMs: 60000,
   limit: 24,
   fetchData: (context, limit) => fetchRuntimeJin10(limit, context?.signal),
 });

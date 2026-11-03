@@ -162,6 +162,8 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: false,
 }, {
   tier: 'slow',
+  staleAfterMs: 10800000,
+  intervalMs: 3600000,
   limit: 8,
   fetchData: (context, limit) => fetchRuntimeCpiReleaseCalendar(limit, context?.signal),
 });

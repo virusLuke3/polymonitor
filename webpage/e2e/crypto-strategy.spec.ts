@@ -144,3 +144,27 @@ test('reference reads its own source and distinguishes failures from unsupported
   await page.getByRole('button',{name:'SOL',exact:true}).click();
   await expect(page.locator('.wm-cstrategy-notice[role=status]')).toContainText('not connected for this asset');
 });
+
+
+test('historical inflows load once and refresh manually without strategy polling', async ({page}) => {
+  await installDashboard(page, 'en', ['crypto-exchange-inflow']);
+  await page.clock.install({time: new Date()});
+  let requests = 0;
+  await page.route('**/wm-api/runtime/crypto/order-flow', route => {
+    requests++;
+    return route.fulfill({json: {
+      schemaVersion: 1, kind: 'crypto-strategy', status: 'partial', generatedAt: new Date().toISOString(),
+      assets: {}, references: {}, options: {}, stablecoins: [],
+      inflows: {mode: 'historical', rows: [{date: '2026-06-26', exchange: 'Binance', inflow: 6, outflow: 4, net: 2, transactions: 3}]},
+    }});
+  });
+  await page.goto('/e2e/panels.html');
+  await page.waitForFunction(() => window.panelHarness);
+  await page.evaluate(() => window.panelHarness.mount('crypto-exchange-inflow'));
+  await expect(page.locator('.wm-panel')).toContainText('Historical BTC research');
+  await expect.poll(() => requests).toBe(1);
+  await page.clock.fastForward(10 * 60_000);
+  expect(requests).toBe(1);
+  await page.getByRole('button', {name: 'Refresh', exact: true}).click();
+  await expect.poll(() => requests).toBe(2);
+});

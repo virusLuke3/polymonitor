@@ -66,7 +66,7 @@ export function useDashboardData(workspace: Pick<ReturnType<typeof useWorkspaceP
       window.clearTimeout(startupTimer);
       releaseStartup();
     });
-    const timer = window.setInterval(() => void refresh(), 30_000);
+    const timer = window.setInterval(() => void refresh(), 300_000);
     const onVisibility = () => {
       if (document.hidden) { refreshController?.abort(); refreshController = null; }
       else void refresh();

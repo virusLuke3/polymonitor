@@ -167,7 +167,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: true,
 }, {
   tier: 'slow',
-  intervalMs: 45000,
+  intervalMs: 900000,
   limit: 8,
   fetchData: (context, limit) => fetchRuntimeSportsOdds(limit, context?.signal),
 });

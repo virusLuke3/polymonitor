@@ -237,6 +237,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: true,
 }, {
   tier: 'slow',
+  intervalMs: 300000,
   limit: 8,
   fetchData: (context, limit) => fetchRuntimeCommodityEquityTransmission(limit, context?.signal),
 });

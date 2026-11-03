@@ -110,5 +110,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: false,
 }, {
   tier: 'slow',
+  staleAfterMs: 5400000,
+  intervalMs: 1800000,
   fetchData: (context) => fetchRuntimeInflationNowcast(context?.signal),
 });

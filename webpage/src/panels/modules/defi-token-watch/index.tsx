@@ -93,7 +93,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: true,
 }, {
   tier: 'slow',
-  intervalMs: 60000,
+  intervalMs: 300000,
   limit: 10,
   fetchData: (context, limit) => fetchRuntimeDefiTokenWatch(limit, context?.signal),
 });

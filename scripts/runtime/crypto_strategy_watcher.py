@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from api.config import load_api_settings
 from api.services.crypto_strategy import providers
+from api.services.crypto_strategy.cadence import SourceCadence
 from api.services.crypto_strategy.contracts import number
 from api.services.crypto_strategy.store import Store, database_path
 
@@ -80,12 +81,13 @@ def main():
     lock = open(path + ".writer.lock", "a")
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     store = Store(path)
+    cadence = SourceCadence()
     base = os.environ.get("POLYDATA_CRYPTO_STRATEGY_BYBIT", "https://api.bybit.com")
     while True:
         start = time.monotonic()
         try:
             now = int(time.time() * 1000)
-            payload = providers.collect(get, bybit_base=base, reference_url="", now=now)
+            payload = providers.collect(get, bybit_base=base, reference_url="", now=now, cadence=cadence)
             payload = enrich(payload, store, now, os.environ.get("POLYDATA_CRYPTO_EXCHANGE_FLOW_FILE"))
             store.publish(payload, now)
             print(json.dumps({"generatedAt": payload["generatedAt"], "assets": {k: v.get("status") for k, v in payload["assets"].items()}, "options": {k: len(v.get("expiries", [])) for k,v in payload["options"].items()}}), flush=True)

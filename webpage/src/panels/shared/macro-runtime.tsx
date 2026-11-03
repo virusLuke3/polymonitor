@@ -4,7 +4,7 @@ import type { RuntimeMacroRegistryPayload } from '@/types';
 import './macro-runtime.css';
 
 export const macroRefreshPolicy = {
-  tier: 'slow' as const, intervalMs: 30_000, staleAfterMs: 45 * 60_000,
+  tier: 'slow' as const, intervalMs: 30 * 60_000, staleAfterMs: 45 * 60_000,
   requestTimeoutMs: 12_000, batch: false,
 };
 

@@ -4,8 +4,8 @@ import type { PanelRuntimeStatus } from '@/panels/types';
 export const COMMODITY_SYMBOLS = ['^VIX', 'GC=F', 'SI=F', 'HG=F', 'PL=F', 'PA=F', 'ALI=F', 'CL=F', 'BZ=F', 'NG=F', 'TTF=F', 'RB=F', 'HO=F', 'URA', 'LIT', 'COAL', 'ZW=F', 'ZC=F', 'ZS=F', 'ZR=F', 'KC=F', 'SB=F', 'CC=F', 'CT=F'];
 export const FX_SYMBOLS = ['EURUSD=X', 'GBPUSD=X', 'USDJPY=X', 'USDCNY=X', 'USDINR=X', 'AUDUSD=X', 'USDCHF=X', 'USDCAD=X', 'USDTRY=X'];
 const SYMBOLS = [...COMMODITY_SYMBOLS, ...FX_SYMBOLS];
-export const REFRESH_MS = 20_000;
-export const MAX_AGE_MS = 180_000;
+export const REFRESH_MS = 300_000;
+export const MAX_AGE_MS = 900_000;
 export const RETAIN_MS = 15 * 60_000;
 export type Quote = RuntimeMarketTicker & {
   quoteAt: string | null; fetchedAt: string | null;
@@ -51,7 +51,7 @@ export function parseCommodities(value: unknown): CommodityPayload {
   return {
     kind: 'commodities', generatedAt,
     status: raw.status === 'stale' ? 'stale' : failedSymbols.length || raw.status === 'degraded' ? 'degraded' : 'ok',
-    items, refreshIntervalSeconds: finite(raw.refreshIntervalSeconds) ?? 60,
+    items, refreshIntervalSeconds: finite(raw.refreshIntervalSeconds) ?? 300,
     coverage: { expected: SYMBOLS.length, succeeded: items.length - retained, retained, missing: missingSymbols.length, failedSymbols },
   };
 }

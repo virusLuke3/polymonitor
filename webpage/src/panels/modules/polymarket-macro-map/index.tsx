@@ -179,6 +179,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: false,
 }, {
   tier: 'slow',
+  intervalMs: 180000,
   limit: 12,
   fetchData: (context, limit) => fetchRuntimePolymarketMacroMap(limit, context?.signal),
 });

@@ -15,10 +15,14 @@ import type { RuntimePanelMetadata } from '@/services/api';
 import { ApiHttpError } from '@/services/api';
 import { readResourceCache, writeResourceCache, resourceIsCurrent } from './resource-cache';
 
+const DEFAULT_REFRESH_INTERVAL_MS: Record<PanelRefreshTier, number> = {
+  bootstrap: 0, fast: 60_000, slow: 10 * 60_000, manual: 0,
+};
+
 const DEFAULT_STALE_AFTER_MS: Record<PanelRefreshTier, number> = {
   bootstrap: 5 * 60_000,
-  fast: 60_000,
-  slow: 15 * 60_000,
+  fast: 3 * 60_000,
+  slow: 45 * 60_000,
   manual: Number.POSITIVE_INFINITY,
 };
 
@@ -226,7 +230,7 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
             const failures = current.failureCount + 1;
             const retryable = !(error && typeof error === 'object' && 'retryable' in error && error.retryable === false)
               && (!(error instanceof ApiHttpError) || [408, 425, 429].includes(error.status) || error.status >= 500);
-            const interval = owner.refreshPolicy?.intervalMs ?? 30_000;
+            const interval = (owner.refreshPolicy?.intervalMs ?? DEFAULT_REFRESH_INTERVAL_MS[owner.refreshPolicy?.tier || 'slow']) || 60_000;
             const ceiling = Math.max(interval, owner.refreshPolicy?.retry?.maxDelayMs ?? 60_000);
             const backoff = retryDelay(owner, failures) ?? Math.min(ceiling, interval * 2 ** Math.min(4, Math.max(0, failures - 3)));
             const delay = Math.max(advised, backoff) + Math.floor(Math.random() * backoff * 0.1);
@@ -290,7 +294,7 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
         const status = statusesRef.current[panel.id];
         if (status?.error && (status.retryable === false || (status.nextRetryAt ?? 0) > now)) return false;
         if (status?.lastAttemptAt == null) return true;
-        const interval = policy.intervalMs ?? (policy.tier === 'fast' || policy.tier === 'slow' ? 20_000 : 0);
+        const interval = policy.intervalMs ?? DEFAULT_REFRESH_INTERVAL_MS[policy.tier];
         return interval > 0 && now - status.lastAttemptAt >= interval;
       });
       if (due.length) void refreshPanels(due, { reason: 'interval' });

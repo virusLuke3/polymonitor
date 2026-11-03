@@ -140,6 +140,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: true,
 }, {
   tier: 'fast',
+  intervalMs: 180000,
   limit: 10,
   fetchData: (context, limit) => fetchRuntimeF1(limit, context?.signal),
 });

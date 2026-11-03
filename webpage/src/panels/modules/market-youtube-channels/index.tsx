@@ -392,7 +392,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: true,
 }, {
   tier: 'slow',
-  intervalMs: 180000,
+  intervalMs: 900000,
   limit: YOUTUBE_PANEL_LIMIT,
   fetchData: (context, limit) => fetchRuntimeMarketYoutubeChannels(limit, undefined, context?.signal),
 });

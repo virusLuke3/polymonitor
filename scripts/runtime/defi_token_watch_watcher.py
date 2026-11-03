@@ -33,7 +33,7 @@ from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
 from runtime.snapshot_store import SnapshotStore
 
 
-DEFAULT_INTERVAL_SECONDS = 120
+DEFAULT_INTERVAL_SECONDS = 300
 DEFAULT_LIMIT = 10
 SEED_META_NAMESPACE = "seed-meta:finance"
 SEED_META_CACHE_KEY = "defi-token-watch"

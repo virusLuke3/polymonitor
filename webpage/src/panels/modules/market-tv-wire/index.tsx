@@ -570,7 +570,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: true,
 }, {
   tier: 'slow',
-  intervalMs: 180000,
+  intervalMs: 900000,
   limit: 60,
   fetchData: (context, limit) => fetchRuntimeMarketTvWire(limit, undefined, context?.signal),
 });

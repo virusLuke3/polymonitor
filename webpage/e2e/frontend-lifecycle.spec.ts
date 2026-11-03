@@ -668,6 +668,8 @@ test('registered analysis snapshots refresh independently and pause when hidden'
   expect(requested.sort()).toEqual(['overview', 'special', 'trend']);
   await page.evaluate(() => window.frontendHarness.setPanels(['oracle-timeline']));
   await page.clock.runFor(60_000);
+  expect(requested).toHaveLength(3);
+  await page.clock.runFor(840_000);
   await expect.poll(() => requested.length).toBe(4);
   expect(requested[3]).toBe('trend');
   await page.evaluate(() => window.frontendHarness.runtime!.setPanelVisible('oracle-timeline', false));
@@ -961,3 +963,28 @@ for (const editPanels of [false, true]) {
     expect(writes.length).toBe(editPanels ? 1 : 0);
   });
 }
+
+
+test('default cadence checks fast data each minute and slow data each ten minutes with manual override', async ({ page }) => {
+  await harness(page, 'runtime-defaults');
+  const counts = () => page.evaluate(() => ({
+    fast: window.frontendHarness.requests.filter(r => r.id === 'fast').length,
+    slow: window.frontendHarness.requests.filter(r => r.id === 'slow').length,
+  }));
+  expect(await counts()).toEqual({ fast: 1, slow: 1 });
+  await page.clock.runFor(20_000);
+  expect(await counts()).toEqual({ fast: 1, slow: 1 });
+  await page.clock.runFor(41_000);
+  expect(await counts()).toEqual({ fast: 2, slow: 1 });
+  await page.clock.runFor(540_000);
+  expect((await counts()).slow).toBe(2);
+  await page.evaluate(() => window.frontendHarness.runtime!.refreshIds(['slow'], { reason: 'manual', force: true }));
+  expect((await counts()).slow).toBe(3);
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  const before = await counts();
+  await page.clock.runFor(1_200_000);
+  expect(await counts()).toEqual(before);
+});

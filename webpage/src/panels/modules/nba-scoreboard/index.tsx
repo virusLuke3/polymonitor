@@ -58,6 +58,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: true,
 }, {
   tier: 'slow',
+  intervalMs: 60000,
   limit: 10,
   fetchData: (context, limit) => fetchRuntimeNba(limit, context?.signal),
 });

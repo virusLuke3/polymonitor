@@ -15,13 +15,28 @@ def bybit(get, base, endpoint, **params):
     return value
 
 
-def venue_asset(get, base, asset, now):
+def venue_asset(get, base, asset, now, cadence=None):
     symbol = asset + "USDT"
     result = {"asset": asset, "venue": "Bybit", "symbol": symbol, "quoteCurrency": "USDT", "errors": {}}
 
     def read(key, endpoint, **params):
+        def fetch():
+            value = bybit(get, base, endpoint, symbol=symbol, **params)
+            if endpoint == "kline":
+                # Never let a cached, still-forming candle become a completed
+                # candle merely because wall time crossed its closing time.
+                value = {**value, "result": {**value["result"], "list": [
+                    row for row in value["result"].get("list", [])
+                    if isinstance(row, list) and row and number(row[0]) is not None
+                    and number(row[0]) + 60_000 <= now
+                ]}}
+            return value
         try:
-            return bybit(get, base, endpoint, symbol=symbol, **params)
+            interval_ms = {"kline": 60_000, "open-interest": 300_000, "funding/history": 900_000}.get(endpoint)
+            if cadence is not None and interval_ms:
+                return cadence.read((base, asset, key), now, interval_ms,
+                                    fetch)
+            return fetch()
         except (OSError, ValueError, KeyError, TypeError) as exc:
             result["errors"][key] = type(exc).__name__
             return None
@@ -169,10 +184,15 @@ def stablecoins(get, now):
     return result
 
 
-def collect(get, *, bybit_base, reference_url, now, lob_url=None):
-    jobs = {asset: lambda a=asset: venue_asset(get, bybit_base, a, now) for asset in ASSETS}
+def collect(get, *, bybit_base, reference_url, now, lob_url=None, cadence=None):
+    jobs = {asset: lambda a=asset: venue_asset(get, bybit_base, a, now, cadence) for asset in ASSETS}
     jobs.update({"options:" + a: lambda a=a: options(get, a, now) for a in ("BTC", "ETH")})
     jobs["stablecoins"] = lambda: stablecoins(get, now)
+    if cadence is not None:
+        for key in ("options:BTC", "options:ETH", "stablecoins"):
+            fetch = jobs[key]
+            interval_ms = 60_000 if key == "stablecoins" else 300_000
+            jobs[key] = lambda k=key, f=fetch, ms=interval_ms: cadence.read(k, now, ms, f)
     if reference_url:
         jobs["references"] = lambda: references(get, reference_url, now, lob_url)
     results = {}

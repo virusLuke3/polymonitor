@@ -382,7 +382,7 @@ export function createFinanceWatchPanel(config: FinancePanelConfig) {
     snapshot: watchSnapshot('finance', config.id, limit),
   }, {
     tier: 'slow',
-    intervalMs: 300000,
+    intervalMs: 600000,
     staleAfterMs: 900000,
     retry: { attempts: 8, baseDelayMs: 2000, maxDelayMs: 15000 },
     limit,

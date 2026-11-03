@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 from api.services.seed_recovery import age_seconds
 
-MAX_SEED_AGE_SECONDS = 180
+MAX_SEED_AGE_SECONDS = 900
 RETAIN_SECONDS = 900
 
 
@@ -33,7 +33,7 @@ def merge_snapshot(payload: dict, previous: dict, entries: list[tuple[str, str, 
     return {
         **payload, "kind": "crypto", "items": rows,
         "generatedAt": payload.get("generatedAt") if fresh else previous.get("generatedAt") or "",
-        "lastAttemptAt": now, "status": "degraded" if failed else "ok", "refreshIntervalSeconds": 60,
+        "lastAttemptAt": now, "status": "degraded" if failed else "ok", "refreshIntervalSeconds": 300,
         "coverage": {"expected": len(entries), "succeeded": len(entries) - len(failed), "retained": len(retained),
                      "missing": len(missing), "failedSymbols": failed},
     }

@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
-MAX_SEED_AGE_SECONDS = 180
+MAX_SEED_AGE_SECONDS = 900
 RETAIN_SECONDS = 900
 _recovery_lock = threading.Lock()
 _last_recovery_attempt = float("-inf")
@@ -81,7 +81,7 @@ def merge_snapshot(payload: dict, previous: dict, entries: list[tuple[str, str, 
         "coverage": {"expected": len(entries), "succeeded": len(entries) - len(failed),
                      "retained": len(retained), "missing": len(missing),
                      "failedSymbols": failed, "retainedSymbols": retained, "missingSymbols": missing},
-        "source": "Yahoo Finance", "refreshIntervalSeconds": 60,
+        "source": "Yahoo Finance", "refreshIntervalSeconds": 300,
         "error": f"{len(failed)} quote acquisitions failed; {len(retained)} last good quotes retained" if failed else None,
     }
 

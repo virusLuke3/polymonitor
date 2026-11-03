@@ -1,6 +1,6 @@
 import type { PanelRuntimeStatus } from '@/panels/types';
 
-export const TRADE_REFRESH_MS = 30_000;
+export const TRADE_REFRESH_MS = 120_000;
 export const TRADE_MAX_AGE_MS = 300_000;
 export const TRADE_RECOVERY_AGE_MS = 900_000;
 export type TradeKind = 'whale-trades' | 'flow-watch';

@@ -1,7 +1,7 @@
 import type { PanelRuntimeStatus } from '@/panels/types';
 
 export const ALPHA_LIMIT = 8;
-export const ALPHA_REFRESH_MS = 30_000;
+export const ALPHA_REFRESH_MS = 120_000;
 export const ALPHA_MAX_AGE_MS = 300_000;
 export const ALPHA_RESOURCE_KEY = `alpha-signal:global:token-flow-v1:${ALPHA_LIMIT}`;
 export interface AlphaSignal {

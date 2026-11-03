@@ -244,7 +244,7 @@ def fetch_live_crypto_funding_watch_payload(ctx: CryptoFundingContext, limit: in
     return {"schemaVersion": contracts.SCHEMA_VERSION, "kind": "crypto-funding", "generatedAt": generated,
         "lastAttemptAt": now, "lastSuccessAt": now if fresh_quotes else previous.get("lastSuccessAt"),
         "status": status, "source": "binance/bybit-funding", "cacheMode": "seeded",
-        "refreshIntervalSeconds": 30, "freshnessWindowSeconds": contracts.FRESH_SECONDS,
+        "refreshIntervalSeconds": 60, "freshnessWindowSeconds": contracts.FRESH_SECONDS,
         "sources": {name: detail["status"] for name, detail in source_details.items()}, "sourceDetails": source_details,
         "venues": [name for name in urls if any(q["exchange"] == name for q in quotes.values())],
         "assets": assets, "items": list(quotes.values()),
@@ -264,7 +264,7 @@ def normalize_crypto_funding_payload(payload: Any, *, settings: Any, limit: int 
                                     generated_at: str | None = None) -> dict:
     if not isinstance(payload, dict) or payload.get("schemaVersion") != contracts.SCHEMA_VERSION:
         return {"schemaVersion": contracts.SCHEMA_VERSION, "kind": "crypto-funding", "generatedAt": None,
-                "status": "warming", "assets": [], "items": [], "refreshIntervalSeconds": 30}
+                "status": "warming", "assets": [], "items": [], "refreshIntervalSeconds": 60}
     assets = payload.get("assets", [])[:max(1, min(contracts.MAX_LIMIT, limit))]
     ids = {q["id"] for row in assets for q in row.get("quotes", [])}
     return {**payload, "assets": assets, "items": [q for q in payload.get("items", []) if q.get("id") in ids],

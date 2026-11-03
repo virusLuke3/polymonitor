@@ -39,9 +39,14 @@ status and manual refresh to shared family controls.
 
 | Family | Browser checks | Collector cadence | Fresh seed | Maximum retained seed |
 | --- | --- | --- | --- | --- |
-| Crypto | 5 seconds | Existing market group watcher, default 60 seconds | 3 minutes | 15 minutes |
-| Finance factory (11 panels) | 5 minutes | Existing finance watcher, default 10 minutes | 15 minutes | 30 minutes |
-| Tech factory (3 panels) | 5 minutes | Existing tech watcher, default 10 minutes | 15 minutes | 30 minutes |
+| Crypto | 5 minutes | Existing market group watcher, default 5 minutes | 15 minutes | 15 minutes |
+| Finance factory (11 panels) | 10 minutes | Existing finance watcher, default 10 minutes | 15 minutes | 30 minutes |
+| Tech factory (3 panels) | 10 minutes | Existing tech watcher, default 10 minutes | 15 minutes | 30 minutes |
+
+See [Panel cadence](panel-data-cadence.md) for domain-specific targets and
+production evidence. Undeclared fast/slow intervals default to 1/10 minutes;
+bootstrap/manual resources do not poll periodically. Execution-related
+resources retain their explicit low-latency intervals.
 
 The Finance/Tech factories preserve batching and their configured limits. Their
 shared parser bounds rows, sanitizes malformed fields, rejects mismatched panel

@@ -3,7 +3,7 @@ import { installDashboard } from './fixtures/dashboard';
 import { GENERATED_AT } from './fixtures/world-event-map';
 test.use({ baseURL: `http://127.0.0.1:${process.env.POLYMONITOR_E2E_PORT || 4174}` });
 
-test('crypto checks every 5s, publishes changed prices, preserves outages and restores validated cache', async ({ page }) => {
+test('crypto checks every 5m, publishes changed prices, preserves outages and restores validated cache', async ({ page }) => {
   await installDashboard(page, 'en', ['crypto-watch']);
   await page.clock.install({ time: new Date(GENERATED_AT) });
   let price = 110, requests = 0, fail = false;
@@ -22,12 +22,15 @@ test('crypto checks every 5s, publishes changed prices, preserves outages and re
   const btc = page.locator('[data-crypto-symbol="BTC-USD"]');
   await expect(btc).toContainText('$110.00');
   price = 120;
-  await page.clock.runFor(6000);
+  const initialRequests = requests;
+  await page.clock.runFor(60_000);
+  expect(requests).toBe(initialRequests);
+  await page.clock.runFor(241_000);
   await expect(btc).toContainText('$120.00');
   expect(requests).toBeGreaterThanOrEqual(2);
   const checked = await page.locator('[data-crypto-checked-at]').getAttribute('datetime');
   fail = true;
-  await page.clock.runFor(6000);
+  await page.clock.runFor(301_000);
   await expect(btc).toContainText('$120.00');
   await expect(page.locator('.wm-crypto-notice')).toContainText('retrying automatically');
   expect(await page.locator('[data-crypto-checked-at]').getAttribute('datetime')).toBe(checked);

@@ -1,14 +1,14 @@
 import { useState } from 'preact/hooks';
 import { panelFromRenderer } from '@/panels/definePanel';
 import { Frame, Notice, Series, Stats, direction, signed, signedCompact, compact, fmt, useCopy } from '@/panels/shared/crypto-strategy/components';
-import { useCryptoInputs } from '@/panels/shared/crypto-strategy/resource';
+import { cryptoHistoryResource, useCryptoInputs } from '@/panels/shared/crypto-strategy/resource';
 
 function Inflows() {
-  const feed=useCryptoInputs(), [exchange,setExchange]=useState('Binance'), [days,setDays]=useState(30), t=useCopy(), data=feed.data?.inflows;
+  const feed=useCryptoInputs(cryptoHistoryResource), [exchange,setExchange]=useState('Binance'), [days,setDays]=useState(30), t=useCopy(), data=feed.data?.inflows;
   const available=(data?.rows||[]).filter(r=>r.exchange===exchange).sort((a,b)=>a.date.localeCompare(b.date));
   const end=Date.parse(available[available.length-1]?.date||'');
   const rows=available.filter(r=>Date.parse(r.date)>end-days*86400000);
-  return <Frame id="crypto-exchange-inflow" title={t('交易所链上流入','EXCHANGE INFLOWS')} badge="HISTORICAL" assets={false} filters={<div className="wm-panel-tabs">{['Binance','Coinbase'].map(e=><button key={e} aria-pressed={exchange===e} onClick={()=>setExchange(e)}>{e}</button>)}{[30,90,180].map(d=><button key={d} aria-pressed={days===d} onClick={()=>setDays(d)}>{d}d</button>)}</div>}>
+  return <Frame resource={cryptoHistoryResource} id="crypto-exchange-inflow" title={t('交易所链上流入','EXCHANGE INFLOWS')} badge="HISTORICAL" assets={false} filters={<div className="wm-panel-tabs">{['Binance','Coinbase'].map(e=><button key={e} aria-pressed={exchange===e} onClick={()=>setExchange(e)}>{e}</button>)}{[30,90,180].map(d=><button key={d} aria-pressed={days===d} onClick={()=>setDays(d)}>{d}d</button>)}</div>}>
 
     <p className="wm-cstrategy-meta" data-tone="warning">{t('历史 BTC · 非实时流入','Historical BTC research · not live')}</p>
     {rows.length ? <>

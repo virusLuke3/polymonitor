@@ -24,6 +24,6 @@ export const panel = runtimePanelFromRenderer(renderers, {
   description: 'Trend Watch from a saved market sample, with generation and freshness status.',
   defaultEnabled: false,
 }, {
-  tier: 'bootstrap', intervalMs: 60_000, staleAfterMs: 12 * 60 * 60_000, batch: false,
+  tier: 'bootstrap', intervalMs: 15 * 60_000, staleAfterMs: 12 * 60 * 60_000, batch: false,
   fetchData: (context) => fetchInsightSnapshot('trend', context?.signal),
 });

@@ -37,6 +37,8 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: false,
 }, {
   tier: 'slow',
+  staleAfterMs: 64800000,
+  intervalMs: 21600000,
   limit: 8,
   fetchData: (context, limit) => fetchRuntimeSupplyTariffImportWatch(limit, context?.signal),
 });

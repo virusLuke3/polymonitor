@@ -12,7 +12,7 @@ export { validScope } from './model';
 export function useIntelResource(marketId: number | null, scope: 'market' | 'global', days: number, active?: boolean) {
   const key = resourceId({ marketId, scope, days });
   const contract = useMemo<PanelResource<IntelSnapshot>>(() => ({
-    key, title: 'Related Intelligence', maxAgeMs: 5 * 60_000, staleAgeMs: 30 * 60_000, cache: { version: 4, maxChars: 512_000 },
+    key, title: 'Related Intelligence', maxAgeMs: 15 * 60_000, staleAgeMs: 30 * 60_000, cache: { version: 4, maxChars: 512_000 },
     refreshPolicy: { tier: 'fast', intervalMs: INTEL_REFRESH_MS, staleAfterMs: INTEL_STALE_MS },
     fetch: async context => scope === 'market'
         ? await fetchMarketContent(marketId!, INTEL_ITEM_LIMIT, 8000, context?.signal, days)

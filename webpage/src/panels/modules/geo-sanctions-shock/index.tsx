@@ -208,6 +208,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   snapshot: macroSnapshot('geo-sanctions-shock', true),
 }, {
   ...macroRefreshPolicy,
+  intervalMs: 300_000,
   staleAfterMs: 10 * 60_000,
   limit: 2000,
   fetchData: (context, limit) => fetchRuntimeGeoSanctionsShock(limit, context?.signal),

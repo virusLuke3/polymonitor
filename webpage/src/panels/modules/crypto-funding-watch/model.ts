@@ -1,7 +1,7 @@
 import type { PanelRuntimeStatus } from '@/panels/types';
 import { RuntimeResponseError } from '@/panels/runtime-store';
 
-export const REFRESH_MS = 15_000, MAX_AGE_MS = 90_000, RETAIN_MS = 900_000;
+export const REFRESH_MS = 60_000, MAX_AGE_MS = 180_000, RETAIN_MS = 900_000;
 export type FundingQuote = {
   id: string; asset: string; exchange: 'Binance' | 'Bybit'; symbol: string;
   fundingRatePercent: number; fundingIntervalHours: number | null; fundingRatePercent8h: number | null;
@@ -93,7 +93,7 @@ export function parseFunding(value: unknown, now = Date.now()): FundingPayload {
     kind: 'crypto-funding', schemaVersion: 3, generatedAt,
     status: raw.status === 'stale' || !fresh.length ? 'stale' : rejected || fresh.length !== quotes.length || fresh.some(q => q.fundingIntervalHours == null)
       || raw.status !== 'ok' || Object.values(sources).some(state => state !== 'ok') ? 'degraded' : 'ok',
-    refreshIntervalSeconds: Math.max(15, Math.min(300, finite(raw.refreshIntervalSeconds) ?? 30)), assets, sources, sourceDetails,
+    refreshIntervalSeconds: Math.max(15, Math.min(300, finite(raw.refreshIntervalSeconds) ?? 60)), assets, sources, sourceDetails,
     coverage: { expectedQuotes: count(rawCoverage.expectedQuotes), succeeded: fresh.length,
       retained: quotes.filter(q => q.acquisitionState === 'retained').length, missing: count(rawCoverage.missing) + rejected,
       unknownPeriod: quotes.filter(q => q.fundingIntervalHours == null).length, totalAssets: count(raw.totalAssets) || assets.length,

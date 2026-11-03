@@ -2,7 +2,7 @@ import type { RuntimeMarketTicker } from '@/types';
 import type { PanelRuntimeStatus } from '@/panels/types';
 import { RuntimeResponseError } from '@/panels/runtime-store';
 
-export const REFRESH_MS = 5000, MAX_AGE_MS = 180_000, RETAIN_MS = 900_000;
+export const REFRESH_MS = 300_000, MAX_AGE_MS = 900_000, RETAIN_MS = 900_000;
 export const CRYPTO_SYMBOL_ORDER = ['BTC-USD', 'ETH-USD', 'SOL-USD', 'BNB-USD', 'XRP-USD', 'DOGE-USD', 'ADA-USD', 'AVAX-USD', 'LINK-USD', 'LTC-USD', 'DOT-USD', 'TRX-USD', 'BCH-USD'] as const;
 export type CryptoQuote = RuntimeMarketTicker & { quoteAt: string | null; fetchedAt: string | null; changeBasis: string; source: string; acquisitionState: 'ok' | 'retained'; volumeBasis: string };
 export type CryptoPayload = { kind: 'crypto'; generatedAt: string; status: string; items: CryptoQuote[]; refreshIntervalSeconds: number; coverage: { expected: number; succeeded: number; retained: number; missing: number } };
@@ -36,7 +36,7 @@ export function parseCrypto(value: unknown): CryptoPayload {
   const retained = items.filter(item => item.acquisitionState === 'retained').length;
   return {
     kind: 'crypto', generatedAt, status: raw.status === 'stale' ? 'stale' : retained || items.length < CRYPTO_SYMBOL_ORDER.length || ['degraded', 'partial', 'unknown'].includes(String(raw.status)) ? 'degraded' : 'ok',
-    items, refreshIntervalSeconds: finite(raw.refreshIntervalSeconds) ?? 60,
+    items, refreshIntervalSeconds: finite(raw.refreshIntervalSeconds) ?? 300,
     coverage: { expected: CRYPTO_SYMBOL_ORDER.length, succeeded: items.length - retained, retained, missing: CRYPTO_SYMBOL_ORDER.length - items.length },
   };
 }

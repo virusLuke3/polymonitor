@@ -97,6 +97,8 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: false,
 }, {
   tier: 'slow',
+  staleAfterMs: 64800000,
+  intervalMs: 21600000,
   limit: 6,
   fetchData: (context, limit) => fetchRuntimeEnergyGasolineShock(limit, context?.signal),
 });

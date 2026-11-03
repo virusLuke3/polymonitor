@@ -228,7 +228,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: true,
 }, {
   tier: 'slow',
-  intervalMs: 30000,
+  intervalMs: 120000,
   limit: 3,
   fetchData: (context, limit) => fetchRuntimeGridEsports(limit, context?.signal),
 });

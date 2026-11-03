@@ -217,6 +217,9 @@ def test_api_cold_start_does_not_request_exchanges_and_hot_reads_do_not_write_sq
     ctx['SNAPSHOT_STORE'].set.assert_not_called()
     ctx['utc_now_iso'] = lambda: '2026-10-04T10:02:00Z'
     result = service.get_crypto_funding_watch_snapshot(ctx)
+    assert result['cacheMode'] == 'seed'
+    ctx['utc_now_iso'] = lambda: '2026-10-04T10:04:00Z'
+    result = service.get_crypto_funding_watch_snapshot(ctx)
     assert result['cacheMode'] == 'stale-seed' and result['status'] == 'stale'
     assert result['generatedAt'] == NOW
 

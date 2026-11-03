@@ -37,7 +37,7 @@ from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
 from runtime.snapshot_store import SnapshotStore
 
 
-DEFAULT_INTERVAL_SECONDS = 60
+DEFAULT_INTERVAL_SECONDS = 300
 SEED_META_NAMESPACE = "seed-meta:markets"
 SEED_META_SERVICE_NAME = "polydata-market-group-seed.service"
 

@@ -97,6 +97,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: true,
 }, {
   tier: 'slow',
+  intervalMs: 300000,
   limit: 12,
   fetchData: (context, limit) => fetchRuntimeNewMarketSignals(limit, context?.signal),
 });

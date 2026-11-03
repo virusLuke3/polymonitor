@@ -30,7 +30,7 @@ from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, utc_now_is
 from runtime.snapshot_store import SnapshotStore
 
 
-DEFAULT_INTERVAL_SECONDS = 60
+DEFAULT_INTERVAL_SECONDS = 300
 DEFAULT_LIMIT = 12
 SEED_META_NAMESPACE = "seed-meta:evidence"
 SEED_META_CACHE_KEY = "breaking-event-radar"

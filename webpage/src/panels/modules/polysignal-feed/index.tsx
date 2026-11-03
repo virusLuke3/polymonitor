@@ -253,6 +253,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: true,
 }, {
   tier: 'slow',
+  intervalMs: 120000,
   limit: 8,
   fetchData: (context, limit) => fetchRuntimePolySignal(limit, context?.signal),
 });

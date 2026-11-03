@@ -1,8 +1,8 @@
 import type { ContentItem, ContentPayload } from '@/types';
 import type { PanelRuntimeStatus } from '@/panels/types';
 
-export const INTEL_REFRESH_MS = 30_000;
-export const INTEL_STALE_MS = 3 * 60_000;
+export const INTEL_REFRESH_MS = 300_000;
+export const INTEL_STALE_MS = 15 * 60_000;
 export const INTEL_ITEM_LIMIT = 100;
 export const INTEL_RENDER_BATCH = 30;
 export type IntelResource = { marketId: number | null; scope: 'market' | 'global'; days: number };

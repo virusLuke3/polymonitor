@@ -111,6 +111,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   defaultEnabled: true,
 }, {
   tier: 'slow',
+  intervalMs: 60000,
   limit: 8,
   fetchData: (context, limit) => fetchRuntimeNbaMatchupPredictor(limit, context?.signal),
 });
