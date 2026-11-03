@@ -6,7 +6,7 @@ import {
 } from '@/features/workspace/panelLayout';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { PanelLoading } from '@/components/Panel';
+import { Panel, PanelLoading } from '@/components/Panel';
 import type { PanelRuntimeStatus } from '@/panels/types';
 import { useI18n } from '@/services/i18n';
 import { PanelResourceView, PanelResourceVisibility, usePanelResourceBinding } from '@/panels/usePanelResource';
@@ -52,6 +52,7 @@ type ResizeState = {
 
 type PanelWorkspaceSlotProps = {
   panelId: string;
+  title?: string;
   size: PanelSizeHint;
   layoutPrefs: PanelLayoutPrefs;
   layoutWidth: number;
@@ -98,6 +99,7 @@ function removeResizeListeners(state: ResizeState) {
 
 export function PanelWorkspaceSlot({
   panelId,
+  title,
   size,
   layoutPrefs,
   layoutWidth,
@@ -392,7 +394,7 @@ export function PanelWorkspaceSlot({
         <PanelRuntimeBoundary loading={resource ? false : loading} status={actualStatus} onRetry={resource?.refresh ?? onRetry} resourceManaged={Boolean(resource)}>
           <PanelRuntimeView.Provider value={{ status: actualStatus, refresh: resource?.refresh ?? onRetry }}><PanelResourceView.Provider value={panelId}><PanelResourceVisibility.Provider value={resourceVisible}>{children}</PanelResourceVisibility.Provider></PanelResourceView.Provider></PanelRuntimeView.Provider>
         </PanelRuntimeBoundary>
-      ) : <div className="wm-panel-slot-deferred" aria-hidden="true" />}
+      ) : <Panel title={title ?? panelId} className="wm-panel-slot-deferred">{null}</Panel>}
       {resizeEnabled ? (
         <>
           <button

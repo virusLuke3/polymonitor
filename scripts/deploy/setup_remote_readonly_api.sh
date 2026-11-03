@@ -252,6 +252,20 @@ server {
         try_files \$uri \$uri/ /index.html;
     }
 
+    # Entry documents and release metadata select the current hashed assets.
+    # Revalidate on ordinary visits, including URLs with saved map parameters.
+    location = /index.html {
+        add_header Cache-Control "no-cache" always;
+    }
+
+    location = /sw.js {
+        add_header Cache-Control "no-cache" always;
+    }
+
+    location = /release-sha {
+        add_header Cache-Control "no-cache" always;
+    }
+
     location = /operations {
         return 404;
     }

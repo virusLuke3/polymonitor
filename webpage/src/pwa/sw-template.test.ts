@@ -7,13 +7,45 @@ function worker() {
   const cache = { match: vi.fn().mockResolvedValue(undefined), put: vi.fn().mockResolvedValue(undefined) };
   const fetch = vi.fn();
   const listeners: Record<string, (event: any) => void> = {};
-  const cacheFirst = runInNewContext(`${source}\ncacheFirst`, {
+  const open = vi.fn().mockResolvedValue(cache);
+  const handlers = runInNewContext(`${source}\n({ cacheFirst, networkFirst })`, {
     self: { location: { origin: 'https://polymonitor.test' }, addEventListener: (name: string, fn: any) => { listeners[name] = fn; } },
-    caches: { open: async () => cache }, fetch, Response, URL, setTimeout,
-  }) as (request: Request) => Promise<Response>;
-  return { cacheFirst, cache, fetch, listeners };
+    caches: { open }, fetch, Response, URL, setTimeout,
+  }) as Record<'cacheFirst' | 'networkFirst', (request: Request) => Promise<Response>>;
+  return { ...handlers, cache, open, fetch, listeners };
 }
 const asset = () => new Request('https://polymonitor.test/assets/GlobeMapRenderer.js');
+
+describe('service worker homepage freshness', () => {
+  const home = () => new Request('https://polymonitor.test/?center=0,37&zoom=1.66');
+  it('returns the new homepage even when caching it fails and an old homepage exists', async () => {
+    const w = worker();
+    w.cache.match.mockResolvedValue(new Response('old release without new panels'));
+    w.cache.put.mockRejectedValue(new Error('QuotaExceededError'));
+    w.fetch.mockResolvedValue(new Response('current release with new panels'));
+    expect(await (await w.networkFirst(home())).text()).toBe('current release with new panels');
+    expect(w.cache.match).not.toHaveBeenCalled();
+    expect(w.fetch).toHaveBeenCalledWith(expect.any(Request), { cache: 'no-cache' });
+  });
+  it('loads the homepage when browser cache storage is unavailable', async () => {
+    const w = worker();
+    w.open.mockRejectedValue(new Error('storage unavailable'));
+    w.fetch.mockResolvedValue(new Response('current homepage'));
+    expect(await (await w.networkFirst(home())).text()).toBe('current homepage');
+  });
+  it('uses the cached root when offline with a new map URL', async () => {
+    const w = worker();
+    w.fetch.mockRejectedValue(new TypeError('offline'));
+    w.cache.match.mockImplementation(async key => key === '/' ? new Response('offline homepage') : undefined);
+    expect(await (await w.networkFirst(home())).text()).toBe('offline homepage');
+  });
+  it('returns a network error when offline and cache storage also fails', async () => {
+    const w = worker();
+    w.fetch.mockRejectedValue(new TypeError('offline'));
+    w.open.mockRejectedValue(new Error('storage unavailable'));
+    expect((await w.networkFirst(home())).type).toBe('error');
+  });
+});
 
 describe('service worker static asset recovery', () => {
   it('retries a connection failure once before exposing it to the module loader', async () => {

@@ -41,7 +41,15 @@ for (const width of [1440, 390]) {
     await legacyWorkspace(page);
     await page.route('**/wm-api/auth/session', route => route.fulfill({ json: { authenticated: false } }));
     await page.goto('/');
-    for (const id of newPanels) await expect(page.locator(`[data-workspace-panel-id="${id}"]`)).toBeAttached();
+    for (const id of newPanels) {
+      const slot = page.locator(`[data-workspace-panel-id="${id}"]`);
+      await expect(slot).toBeAttached();
+      // Titles must exist before scrolling so browser Find and assistive
+      // navigation can discover panels whose expensive bodies are deferred.
+      await expect(slot).toHaveAttribute('data-content-ready', 'false');
+      await expect(slot.locator('.wm-panel-title')).toHaveCount(1);
+      await expect(slot.locator('.wm-panel-title')).not.toHaveText('');
+    }
     const catalog: string[] = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!), catalogKey);
     const expected = inGrid([...oldPanels, ...catalog.filter(id => !oldPanels.includes(id))]);
     await expect.poll(() => gridIds(page)).toEqual(expected);
@@ -51,6 +59,11 @@ for (const width of [1440, 390]) {
     await rememberForReload(page);
     await page.reload();
     await expect.poll(() => gridIds(page)).toEqual(expected);
+    const flow = page.locator('[data-workspace-panel-id="crypto-order-flow"]');
+    await flow.locator('.wm-panel-title').scrollIntoViewIfNeeded();
+    await expect(flow).toHaveAttribute('data-content-ready', 'true');
+    await expect(flow.locator('.wm-panel-title')).toHaveCount(1);
+    await expect(flow.locator('.wm-panel-slot-deferred')).toHaveCount(0);
     // Persist a subsequent explicit hide, then exercise normal hydration again.
     await page.evaluate(key => {
       const ids = JSON.parse(localStorage.getItem(key)!);
@@ -110,4 +123,24 @@ test('a future default panel is added to a customized layout without reviving kn
   await page.route('**/wm-api/auth/session', route => route.fulfill({ json: { authenticated: false } }));
   await page.goto('/');
   await expect.poll(() => gridIds(page)).toEqual(['commodities-watch', 'crypto-order-flow']);
+});
+
+test('searchable offscreen titles do not start panel data requests before scrolling', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await installDashboard(page, 'en', ['world-clock', 'crypto-order-flow']);
+  await page.route('**/wm-api/auth/session', route => route.fulfill({ json: { authenticated: false } }));
+  let requests = 0;
+  await page.route('**/wm-api/runtime/crypto/order-flow', route => {
+    requests++;
+    return route.fulfill({ status: 503, json: { error: 'test source unavailable' } });
+  });
+  await page.goto('/');
+  const slot = page.locator('[data-workspace-panel-id="crypto-order-flow"]');
+  await expect(slot).toHaveAttribute('data-content-ready', 'false');
+  await expect(slot.getByRole('heading', { name: /^Crypto order flow$/i })).toBeAttached();
+  expect(requests).toBe(0);
+  await slot.locator('.wm-panel-title').scrollIntoViewIfNeeded();
+  await expect(slot).toHaveAttribute('data-content-ready', 'true');
+  await expect.poll(() => requests).toBeGreaterThan(0);
+  await expect(slot.locator('.wm-panel-title')).toHaveCount(1);
 });

@@ -623,6 +623,7 @@ function WorldMonitorApp() {
               <PanelWorkspaceSlot
                 key={panelId}
                 panelId={panelId}
+                title={localizedPanelMeta(entry, t).title}
                 size={entry.size}
                 layoutPrefs={panelLayoutPrefs}
                 layoutWidth={layoutWidth}

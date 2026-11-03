@@ -69,16 +69,24 @@ self.addEventListener('notificationclick', (event) => {
 });
 
 async function networkFirst(request) {
-  const cache = await caches.open(SHELL_CACHE);
   try {
-    const response = await fetch(request);
-    if (response.ok) await cache.put(request, response.clone());
+    // HTML selects the release's module graph. Revalidate it even when the
+    // browser still considers a previous entry document fresh.
+    const response = await fetch(request, { cache: 'no-cache' });
+    if (response.ok) {
+      // A storage failure is not a network failure: never replace a newly
+      // downloaded release with an older cached homepage.
+      try { await (await caches.open(SHELL_CACHE)).put(request, response.clone()); } catch {}
+    }
     return response;
   } catch {
-    return (await cache.match(request))
-      || (await cache.match('/'))
-      || (await cache.match(OFFLINE_URL))
-      || Response.error();
+    try {
+      const cache = await caches.open(SHELL_CACHE);
+      return (await cache.match(request))
+        || (await cache.match('/'))
+        || (await cache.match(OFFLINE_URL))
+        || Response.error();
+    } catch { return Response.error(); }
   }
 }
 
