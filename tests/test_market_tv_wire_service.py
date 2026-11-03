@@ -507,3 +507,29 @@ def test_market_tv_wire_seed_keeps_curated_manifest_items_when_iptv_is_large(mon
     assert "yt-low-score" in ids
     assert len(payload["items"]) >= 24
     assert not any(item_id.startswith("iptv-") for item_id in ids)
+
+
+def test_tv_watcher_counts_probe_time_toward_its_refresh_interval(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from runtime import market_tv_wire_watcher as worker, environment
+    clock = [0.0]
+    fake = Mock()
+    def run():
+        clock[0] += 260  # Production HLS probing takes several minutes.
+        return {"status": "ok", "payload": {"items": []}}
+    fake.run_once.side_effect = run
+    sleeps = []
+    def sleep(seconds):
+        sleeps.append(seconds)
+        raise KeyboardInterrupt()
+    monkeypatch.setattr(environment, "load_environment", lambda: None)
+    monkeypatch.setattr(worker, "load_api_settings", lambda: SimpleNamespace(
+        redis_url="fixture", redis_prefix="fixture", snapshot_sqlite_path="fixture"))
+    monkeypatch.setattr(worker, "MarketTvWireWatcher", lambda **kwargs: fake)
+    monkeypatch.setattr(worker.sys, "argv", ["watcher", "--watch", "--interval", "900"])
+    monkeypatch.setattr(worker, "time", SimpleNamespace(monotonic=lambda: clock[0], sleep=sleep))
+    import pytest
+    with pytest.raises(KeyboardInterrupt):
+        worker.main()
+    assert sleeps == [640]

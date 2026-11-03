@@ -252,6 +252,7 @@ def main() -> int:
         print(json.dumps(_result_summary(watcher.run_once()), ensure_ascii=False), file=sys.stderr)
         return 0
     while True:
+        started_at = time.monotonic()
         try:
             print(json.dumps(_result_summary(watcher.run_once()), ensure_ascii=False), file=sys.stderr)
         except KeyboardInterrupt:
@@ -259,7 +260,9 @@ def main() -> int:
         except Exception as exc:
             watcher.store_meta_fail_soft(status="error", record_count=0, source_states={"marketTvWire": {"status": "error"}}, error_summary=str(exc), preserve=True)
             print(f"[market-tv-wire] ERROR {exc}", file=sys.stderr)
-        time.sleep(max(60, args.interval))
+        # Probing the catalog can take minutes. Count that work toward the
+        # refresh interval so each cycle does not drift by the probe duration.
+        time.sleep(max(60, args.interval - (time.monotonic() - started_at)))
 
 
 if __name__ == "__main__":
