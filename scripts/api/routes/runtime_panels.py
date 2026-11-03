@@ -11,6 +11,7 @@ from flask import Blueprint, Response, current_app, jsonify, request
 
 from api.contracts import api_envelope, api_error, runtime_panel_metadata
 from api.runtime_panels import RUNTIME_PANEL_MODULES, get_panel_by_id
+from api.runtime_panels.registry import LEGACY_PANEL_ROUTES
 from api.runtime_panels.types import RuntimePanelContext
 from api.services import hls_proxy_service, youtube_embed_service, youtube_live_probe_service
 
@@ -119,8 +120,8 @@ def create_runtime_panels_blueprint(dependencies: RuntimePanelRouteDependencies)
             limit = panel.clamp_limit(raw_limit)
             try:
                 payload = _get_panel_snapshot(panel, dependencies.panel_context, limit)
-                payloads[panel.panel_id] = payload
-                panel_meta[panel.panel_id] = runtime_panel_metadata(panel, payload)
+                payloads[panel_id] = payload
+                panel_meta[panel_id] = runtime_panel_metadata(panel, payload)
             except Exception as exc:
                 current_app.logger.exception("runtime-panels batch failed panel_id=%s", panel_id)
                 legacy_errors[panel_id] = exc.__class__.__name__
@@ -459,5 +460,8 @@ def create_runtime_panels_blueprint(dependencies: RuntimePanelRouteDependencies)
             return jsonify(payload)
 
         bp.add_url_rule(panel.route, endpoint, _handler, methods=["GET"])
+        for legacy_route, canonical_route in LEGACY_PANEL_ROUTES.items():
+            if panel.route == canonical_route:
+                bp.add_url_rule(legacy_route, endpoint + "_legacy", _handler, methods=["GET"])
 
     return bp

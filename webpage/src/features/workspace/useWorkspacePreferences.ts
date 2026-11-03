@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { DEFAULT_PANEL_IDS, PANEL_LIBRARY } from '@/panels/registry';
 import type { PanelLayoutPrefs } from './panelLayout';
 import { reconcileDefaultPanels } from './defaultPanels';
+import { canonicalPanelId, migratePanelLayout } from './panelIdentity';
 import { AuthApiError, fetchAuthSession } from '@/services/auth';
 import { fetchWorkspaceLayout, saveWorkspaceLayout } from '@/services/product';
 import { clampMapZoom, isWorldEventRegion, type WorldEventRegion } from '@/features/world-event-map';
@@ -34,7 +35,7 @@ function reorderPanelIds(panelIds: string[], draggedPanelId: string, targetPanel
 function sanitizePanelIds(panelIds: string[]) {
   const valid = new Set(PANEL_LIBRARY.map((panel) => panel.id));
   const unique: string[] = [];
-  for (const panelId of panelIds) {
+  for (const panelId of panelIds.map(canonicalPanelId)) {
     if (!valid.has(panelId) || unique.includes(panelId)) continue;
     unique.push(panelId);
   }
@@ -108,7 +109,7 @@ export function useWorkspacePreferences() {
     return JSON.stringify(ids) !== JSON.stringify(next.activePanelIds)
       || JSON.stringify(knownIds) !== JSON.stringify(next.knownDefaultPanelIds);
   }, []);
-  const [panelLayoutPrefs, setPanelLayoutPrefs] = useState<PanelLayoutPrefs>(() => readJsonStorage<PanelLayoutPrefs>(PANEL_LAYOUT_STORAGE_KEY, {}));
+  const [panelLayoutPrefs, setPanelLayoutPrefs] = useState<PanelLayoutPrefs>(() => migratePanelLayout(readJsonStorage<PanelLayoutPrefs>(PANEL_LAYOUT_STORAGE_KEY, {})));
   const [panelPrefsLoaded, setPanelPrefsLoaded] = useState(false);
   const [viewMode, setViewMode] = useState<MapViewMode>(() => {
     const override = readSearchParam('view');
@@ -312,7 +313,7 @@ export function useWorkspaceSync(workspace: ReturnType<typeof useWorkspacePrefer
         const { workspace: target, camera: map } = latest.current;
         accountDefaultsAdded.current = target.applyAccountPanels(server.activePanelIds, server.preferences?.knownDefaultPanelIds);
         const valid = new Set(PANEL_LIBRARY.map((panel) => panel.id));
-        target.setPanelLayoutPrefs(Object.fromEntries(Object.entries(server.panelLayout || {}).filter(([id]) => valid.has(id))));
+        target.setPanelLayoutPrefs(Object.fromEntries(Object.entries(migratePanelLayout(server.panelLayout || {})).filter(([id]) => valid.has(id))));
         const prefs = server.preferences || {};
         // URL camera and view always take precedence over account defaults.
         if (!readSearchParam('region') && !readSearchParam('center') && !readSearchParam('zoom') && isWorldEventRegion(prefs.region)) map.setRegion(prefs.region);

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Seed alpha, whale, and suspicious trade signal panel snapshots."""
+"""Seed Alpha, whale, suspicious flow, and PolySignal snapshots."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ except ImportError:
     redis = None
 
 from api.config import ApiSettings, load_api_settings
-from api.services import polybeats_service, signal_service
+from api.services import polysignal_feed_service, signal_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
 from runtime.snapshot_store import SnapshotStore
 from runtime.telegram_panel_publish import publish_cached_panel_snapshot
@@ -36,7 +36,7 @@ from runtime.telegram_panel_publish import publish_cached_panel_snapshot
 DEFAULT_ALPHA_LIMIT = 8
 DEFAULT_WHALE_LIMIT = 14
 DEFAULT_SUSPICIOUS_LIMIT = 12
-DEFAULT_POLYBEATS_LIMIT = 8
+DEFAULT_POLYSIGNAL_LIMIT = 8
 DEFAULT_SIGNAL_DATA_STALE_AFTER_SECONDS = 7 * 24 * 60 * 60
 SEED_META_NAMESPACE = "seed-meta:signals"
 
@@ -72,15 +72,15 @@ COMPONENTS = {
         "cache_key_builder": signal_service.build_suspicious_trades_cache_key,
         "fetcher": signal_service.fetch_live_suspicious_trades_payload,
     },
-    "polybeats": {
-        "panel_id": polybeats_service.PANEL_ID,
-        "cache_key": polybeats_service.PANEL_ID,
-        "namespace": polybeats_service.SNAPSHOT_NAMESPACE,
-        "service_name": "polydata-polybeats-feed-seed.service",
-        "limit_env": "POLYDATA_POLYBEATS_LIMIT",
-        "default_limit": DEFAULT_POLYBEATS_LIMIT,
-        "cache_key_builder": polybeats_service.build_polybeats_cache_key,
-        "fetcher": polybeats_service.fetch_live_polybeats_payload,
+    "polysignal": {
+        "panel_id": polysignal_feed_service.PANEL_ID,
+        "cache_key": polysignal_feed_service.PANEL_ID,
+        "namespace": polysignal_feed_service.SNAPSHOT_NAMESPACE,
+        "service_name": "polydata-polysignal-feed-seed.service",
+        "limit_env": "POLYDATA_POLYSIGNAL_LIMIT",
+        "default_limit": DEFAULT_POLYSIGNAL_LIMIT,
+        "cache_key_builder": polysignal_feed_service.build_polysignal_cache_key,
+        "fetcher": polysignal_feed_service.fetch_live_polysignal_payload,
     },
 }
 
@@ -181,6 +181,7 @@ class SignalsWatcher:
     ) -> None:
         if redis is None:
             raise RuntimeError("redis package is required. Install scripts/requirements.txt")
+        component = "polysignal" if component == "polybeats" else component
         if component not in COMPONENTS:
             raise ValueError(f"Unsupported signal component: {component}")
         if not str(redis_url or "").strip():
@@ -294,7 +295,7 @@ class SignalsWatcher:
             self._service_runtime.resources.clickhouse_read_timeout_seconds = 10.0
         if self.component == "alpha":
             return self._service_runtime.alpha_signal_context
-        return self._service_runtime.polybeats_context if self.component == "polybeats" else self._service_runtime.signal_context
+        return self._service_runtime.polysignal_context if self.component == "polysignal" else self._service_runtime.signal_context
 
     def fetch_payload(self) -> Dict[str, Any]:
         fetcher: Callable[..., Dict[str, Any]] = self.spec["fetcher"]
@@ -407,7 +408,7 @@ class SignalsWatcher:
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Seed signal panel snapshots into Redis and SQLite")
-    parser.add_argument("--component", choices=sorted(COMPONENTS.keys()), required=True)
+    parser.add_argument("--component", choices=sorted([*COMPONENTS, "polybeats"]), required=True)
     parser.add_argument("--watch", action="store_true", help="Run continuously instead of once")
     parser.add_argument("--limit", type=int, default=0, help="Override the component default limit")
     return parser
@@ -418,8 +419,9 @@ def main() -> int:
     load_environment()
     args = build_arg_parser().parse_args()
     settings = load_api_settings()
+    args.component = "polysignal" if args.component == "polybeats" else args.component
     spec = COMPONENTS[args.component]
-    limit = args.limit or int(os.environ.get(str(spec["limit_env"]), spec["default_limit"]))
+    limit = args.limit or int(polysignal_feed_service.config_value(str(spec["limit_env"]), spec["default_limit"]))
     watcher = SignalsWatcher(
         redis_url=settings.redis_url,
         redis_prefix=settings.redis_prefix,

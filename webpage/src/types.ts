@@ -1718,7 +1718,7 @@ export type RuntimeSignalPayload = {
   generatedAt?: string;
 };
 
-export type RuntimePolybeatsWallet = RuntimeSignalAddress & {
+export type RuntimePolySignalWallet = RuntimeSignalAddress & {
   netCashPnlProxy?: string | null;
   tradeCashPnl?: string | null;
   redeemCashflow?: string | null;
@@ -1729,13 +1729,13 @@ export type RuntimePolybeatsWallet = RuntimeSignalAddress & {
   qualityTier?: string | null;
   qualityErrorPct?: string | null;
   qualityReason?: string | null;
-  categoryEdge?: RuntimePolybeatsCategoryEdge | null;
-  marketExposure?: RuntimePolybeatsMarketExposure[];
+  categoryEdge?: RuntimePolySignalCategoryEdge | null;
+  marketExposure?: RuntimePolySignalMarketExposure[];
   riskFlags?: string[];
-  recentTrades?: RuntimePolybeatsTradeEvidence[];
+  recentTrades?: RuntimePolySignalTradeEvidence[];
 };
 
-export type RuntimePolybeatsPnlSummary = {
+export type RuntimePolySignalPnlSummary = {
   address?: string | null;
   safeBlock?: number | string | null;
   realizedTradePnl?: string | null;
@@ -1751,7 +1751,7 @@ export type RuntimePolybeatsPnlSummary = {
   makerRebateUsdc?: string | null;
 };
 
-export type RuntimePolybeatsQuality = {
+export type RuntimePolySignalQuality = {
   address?: string | null;
   qualityTier?: string | null;
   errorPct?: string | null;
@@ -1765,7 +1765,7 @@ export type RuntimePolybeatsQuality = {
   rank?: string | number | null;
 };
 
-export type RuntimePolybeatsCategoryEdge = {
+export type RuntimePolySignalCategoryEdge = {
   category?: string | null;
   tradeCount?: number | string | null;
   buyNotional?: string | null;
@@ -1778,7 +1778,7 @@ export type RuntimePolybeatsCategoryEdge = {
   resolvedMarketCount?: number | string | null;
 };
 
-export type RuntimePolybeatsTradeEvidence = {
+export type RuntimePolySignalTradeEvidence = {
   txHash?: string | null;
   marketId?: number | string | null;
   marketTitle?: string | null;
@@ -1796,7 +1796,7 @@ export type RuntimePolybeatsTradeEvidence = {
   taker?: string | null;
 };
 
-export type RuntimePolybeatsMarketExposure = {
+export type RuntimePolySignalMarketExposure = {
   marketId?: number | string | null;
   title?: string | null;
   conditionId?: string | null;
@@ -1813,21 +1813,21 @@ export type RuntimePolybeatsMarketExposure = {
   lastTradeBlock?: number | string | null;
 };
 
-export type RuntimePolybeatsAddressProfile = {
+export type RuntimePolySignalAddressProfile = {
   address?: string | null;
   shortAddress?: string | null;
   generatedAt?: string | null;
   safeBlock?: number | string | null;
-  pnlSummary?: RuntimePolybeatsPnlSummary | null;
-  quality?: RuntimePolybeatsQuality | null;
-  categoryStats?: RuntimePolybeatsCategoryEdge[];
-  categoryEdge?: RuntimePolybeatsCategoryEdge | null;
-  recentTrades?: RuntimePolybeatsTradeEvidence[];
-  marketExposure?: RuntimePolybeatsMarketExposure[];
+  pnlSummary?: RuntimePolySignalPnlSummary | null;
+  quality?: RuntimePolySignalQuality | null;
+  categoryStats?: RuntimePolySignalCategoryEdge[];
+  categoryEdge?: RuntimePolySignalCategoryEdge | null;
+  recentTrades?: RuntimePolySignalTradeEvidence[];
+  marketExposure?: RuntimePolySignalMarketExposure[];
   riskFlags?: string[];
 };
 
-export type RuntimePolybeatsMarketInfo = {
+export type RuntimePolySignalMarketInfo = {
   marketId?: number | string | null;
   title?: string | null;
   slug?: string | null;
@@ -1848,7 +1848,7 @@ export type RuntimePolybeatsMarketInfo = {
   enableNegRisk?: boolean | null;
 };
 
-export type RuntimePolybeatsAgentSummary = {
+export type RuntimePolySignalAgentSummary = {
   brief?: string | null;
   whyItMatters?: string | null;
   walletRead?: string | null;
@@ -1859,24 +1859,24 @@ export type RuntimePolybeatsAgentSummary = {
   tags?: string[];
 };
 
-export type RuntimePolybeatsItem = RuntimeTradeSignal & {
+export type RuntimePolySignalItem = RuntimeTradeSignal & {
   id?: string | null;
   signalType?: string | null;
   domain?: string | null;
   marketSlug?: string | null;
   marketCategory?: string | null;
   tags?: string[];
-  wallets?: RuntimePolybeatsWallet[];
-  addressProfiles?: RuntimePolybeatsAddressProfile[];
-  orderfilled?: RuntimePolybeatsTradeEvidence | null;
-  tradeEvidence?: RuntimePolybeatsTradeEvidence[];
-  market?: RuntimePolybeatsMarketInfo | null;
+  wallets?: RuntimePolySignalWallet[];
+  addressProfiles?: RuntimePolySignalAddressProfile[];
+  orderfilled?: RuntimePolySignalTradeEvidence | null;
+  tradeEvidence?: RuntimePolySignalTradeEvidence[];
+  market?: RuntimePolySignalMarketInfo | null;
   marketIntel?: {
     netFlow?: Record<string, unknown> | null;
     pnlQualitySummary?: Record<string, unknown> | null;
     riskFlags?: string[];
   } | null;
-  agentSummary?: RuntimePolybeatsAgentSummary | null;
+  agentSummary?: RuntimePolySignalAgentSummary | null;
   evidencePacket?: Record<string, unknown> | null;
   reasonCodes?: string[];
   explanation?: string | null;
@@ -1890,8 +1890,8 @@ export type RuntimePolybeatsItem = RuntimeTradeSignal & {
   contentText?: string | null;
 };
 
-export type RuntimePolybeatsPayload = {
-  items: RuntimePolybeatsItem[];
+export type RuntimePolySignalPayload = {
+  items: RuntimePolySignalItem[];
   generatedAt?: string;
   status?: string | null;
   cacheMode?: string | null;

@@ -35,7 +35,7 @@ from api.services import (
     market_service,
     natural_hazards,
     new_market_signal_service,
-    polybeats_service,
+    polysignal_feed_service,
     polymarket_macro_map_service,
     query_service,
     runtime_service,
@@ -347,7 +347,7 @@ def bind_services(runtime: ServiceRuntime) -> None:
         "set_cached_json": runtime.set_cached_json,
         "utc_now_iso": utc_now_iso,
     }
-    runtime.polybeats_context = {
+    runtime.polysignal_context = {
         "_resources": runtime.resources,
         "SIGNAL_RUNTIME_TTL_SECONDS": runtime.SETTINGS.signal_runtime_ttl_seconds,
         "SNAPSHOT_STORE": runtime.SNAPSHOT_STORE,
@@ -869,8 +869,8 @@ def build_blueprints(runtime: ServiceRuntime):
                     get_alpha_signal_snapshot=lambda limit=8: signal_service.get_alpha_signal_snapshot(
                         runtime.signal_context, limit=limit
                     ),
-                    get_polybeats_snapshot=lambda limit=8: polybeats_service.get_polybeats_snapshot(
-                        runtime.polybeats_context, limit=limit
+                    get_polysignal_snapshot=lambda limit=8: polysignal_feed_service.get_polysignal_snapshot(
+                        runtime.polysignal_context, limit=limit
                     ),
                     get_whale_trades_snapshot=lambda limit=14: signal_service.get_whale_trades_snapshot(
                         runtime.signal_context, limit=limit

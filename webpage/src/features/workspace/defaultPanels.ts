@@ -1,8 +1,10 @@
+import { canonicalPanelId } from './panelIdentity';
+
 /** Add newly shipped defaults once; an absent, already known panel stays hidden. */
 export function reconcileDefaultPanels(activeIds: string[], defaultIds: string[], knownIds: unknown) {
-  const known = new Set(Array.isArray(knownIds) ? knownIds.filter((id): id is string => typeof id === 'string') : []);
+  const known = new Set(Array.isArray(knownIds) ? knownIds.filter((id): id is string => typeof id === 'string').map(canonicalPanelId) : []);
   return {
-    activePanelIds: [...new Set([...activeIds, ...defaultIds.filter(id => !known.has(id))])],
+    activePanelIds: [...new Set([...activeIds.map(canonicalPanelId), ...defaultIds.filter(id => !known.has(id))])],
     knownDefaultPanelIds: [...new Set([...known, ...defaultIds])],
   };
 }

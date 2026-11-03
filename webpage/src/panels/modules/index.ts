@@ -13,7 +13,7 @@ import { panel as breakingEventRadar } from './breaking-event-radar';
 import { panel as marketTvWire } from './market-tv-wire';
 import { panel as marketYoutubeChannels } from './market-youtube-channels';
 import { panel as alphaSignal } from './alpha-signal';
-import { panel as polybeatsFeed } from './polybeats-feed';
+import { panel as polysignalFeed } from './polysignal-feed';
 import { panel as whaleTracker } from './whale-tracker';
 import { panel as suspiciousFlow } from './suspicious-flow';
 import { panel as commoditiesWatch } from './commodities-watch';
@@ -90,7 +90,7 @@ export const PANEL_MODULES: PanelModule[] = [
   marketTvWire,
   marketYoutubeChannels,
   alphaSignal,
-  polybeatsFeed,
+  polysignalFeed,
   whaleTracker,
   suspiciousFlow,
   commoditiesWatch,

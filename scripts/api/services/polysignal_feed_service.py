@@ -12,13 +12,18 @@ from agent.common.llm_client import OpenAICompatibleClient
 from . import address_intel_service, signal_cluster_service
 
 
-PANEL_ID = "polybeats-feed"
-SNAPSHOT_NAMESPACE = "snapshot:signals:polybeats"
+PANEL_ID = "polysignal-feed"
+SNAPSHOT_NAMESPACE = "snapshot:signals:polysignal"
 DEFAULT_LIMIT = 8
 MIN_CLUSTER_NOTIONAL = Decimal("250")
 
 
-def build_polybeats_cache_key(limit: int = DEFAULT_LIMIT) -> str:
+def config_value(name: str, default=None):
+    """Prefer PolySignal settings; accept the old deployment keys during migration."""
+    return os.environ.get(name, os.environ.get(name.replace("POLYDATA_POLYSIGNAL_", "POLYDATA_POLYBEATS_"), default))
+
+
+def build_polysignal_cache_key(limit: int = DEFAULT_LIMIT) -> str:
     return json.dumps({"limit": int(limit or DEFAULT_LIMIT)}, sort_keys=True, ensure_ascii=True)
 
 
@@ -106,7 +111,7 @@ def _get_markets(ctx: dict, market_ids: Iterable[Any]) -> Dict[int, Dict[str, An
     except Exception:
         logger = getattr(ctx.get("app"), "logger", None)
         if logger is not None:
-            logger.exception("polybeats market metadata query failed")
+            logger.exception("polysignal market metadata query failed")
         rows = []
     return {int(row.get("id")): row for row in rows if row.get("id") is not None}
 
@@ -152,7 +157,7 @@ def _address_cash_pnl(ctx: dict, addresses: Iterable[Any]) -> Dict[str, Dict[str
         except Exception:
             logger = getattr(ctx.get("app"), "logger", None)
             if logger is not None:
-                logger.exception("polybeats trade pnl query failed")
+                logger.exception("polysignal trade pnl query failed")
     if ctx["table_exists"]("non_trade_cashflows"):
         try:
             rows = ctx["query_all"](
@@ -177,7 +182,7 @@ def _address_cash_pnl(ctx: dict, addresses: Iterable[Any]) -> Dict[str, Dict[str
         except Exception:
             logger = getattr(ctx.get("app"), "logger", None)
             if logger is not None:
-                logger.exception("polybeats non-trade pnl query failed")
+                logger.exception("polysignal non-trade pnl query failed")
     for address, item in stats.items():
         item["netCashPnlProxy"] = item["tradeCashPnl"] + item["redeemCashflow"]
         item["netCashPnlProxyText"] = ctx["format_trade_decimal"](item["netCashPnlProxy"])
@@ -242,7 +247,7 @@ def _truthy_env(name: str, default: bool = False) -> bool:
 
 
 def _llm_enabled() -> bool:
-    raw = os.environ.get("POLYDATA_POLYBEATS_LLM_ENABLED")
+    raw = config_value("POLYDATA_POLYSIGNAL_LLM_ENABLED")
     if raw is not None and raw.strip():
         return raw.strip().lower() in {"1", "true", "yes", "on"}
     return _truthy_env("POLYDATA_AGENT_ENABLED", False)
@@ -293,7 +298,7 @@ def _llm_brief(ctx: dict, item: Dict[str, Any], fallback: str) -> str:
     client = OpenAICompatibleClient()
     if not client.configured:
         return fallback
-    allowed, budget = claim_agent_live_call("polybeats-brief")
+    allowed, budget = claim_agent_live_call("polysignal-brief")
     if not allowed:
         item["dailyBudget"] = budget
         item["narrativeError"] = "agent-budget-exhausted"
@@ -301,13 +306,13 @@ def _llm_brief(ctx: dict, item: Dict[str, Any], fallback: str) -> str:
     item["dailyBudget"] = budget
     context = _llm_context(item, fallback)
     system_prompt = (
-        "You are the polyData PolyBeats flow analyst. Return compact JSON only. "
+        "You are the polyData PolySignal flow analyst. Return compact JSON only. "
         "Analyze clustered Polymarket trading flow for a dashboard. "
         "Use the provided wallet history, cash PnL proxy, market probability, and related content. "
         "Be factual, hedge uncertainty, and do not give financial advice."
     )
     user_prompt = (
-        "Write one concise PolyBeats explanation from this JSON context.\n\n"
+        "Write one concise PolySignal explanation from this JSON context.\n\n"
         "Required JSON schema:\n"
         '{"brief":"two short sentences max, English, dashboard-ready"}\n\n'
         f"Context:\n{json.dumps(context, ensure_ascii=False, default=str)}"
@@ -319,7 +324,7 @@ def _llm_brief(ctx: dict, item: Dict[str, Any], fallback: str) -> str:
                 {"role": "user", "content": user_prompt},
             ],
             max_tokens=180,
-            workflow_name="polydata-polybeats-brief",
+            workflow_name="polydata-polysignal-brief",
         )
         raw = extract_json_object(raw_text)
         brief = compact_text(raw.get("brief"), 700)
@@ -337,20 +342,20 @@ def _llm_brief(ctx: dict, item: Dict[str, Any], fallback: str) -> str:
     except Exception as exc:
         logger = getattr(ctx.get("app"), "logger", None)
         if logger is not None:
-            logger.exception("polybeats llm brief failed")
+            logger.exception("polysignal llm brief failed")
         item["narrativeError"] = compact_text(str(exc), 180)
         return fallback
     return fallback
 
 
 def _build_payload(ctx: dict, limit: int) -> Dict[str, Any]:
-    recent_limit = max(180, int(limit or DEFAULT_LIMIT) * int(os.environ.get("POLYDATA_POLYBEATS_TRADE_MULTIPLIER", "32")))
+    recent_limit = max(180, int(limit or DEFAULT_LIMIT) * int(config_value("POLYDATA_POLYSIGNAL_TRADE_MULTIPLIER", "32")))
     try:
         recent_trades = ctx["get_recent_trades"](limit=recent_limit)
     except Exception:
         logger = getattr(ctx.get("app"), "logger", None)
         if logger is not None:
-            logger.exception("polybeats recent trade source failed")
+            logger.exception("polysignal recent trade source failed")
         recent_trades = []
 
     addresses_by_market: Dict[int, set[str]] = {}
@@ -369,8 +374,8 @@ def _build_payload(ctx: dict, limit: int) -> Dict[str, Any]:
         notional = _safe_decimal(ctx, trade.get("notional"), price * size)
         market_notional_rank[market_id_int] = market_notional_rank.get(market_id_int, Decimal("0")) + notional
 
-    max_profile_markets = int(os.environ.get("POLYDATA_POLYBEATS_PROFILE_MARKETS", "8"))
-    max_profile_addresses = int(os.environ.get("POLYDATA_POLYBEATS_PROFILE_ADDRESSES", "20"))
+    max_profile_markets = int(config_value("POLYDATA_POLYSIGNAL_PROFILE_MARKETS", "8"))
+    max_profile_addresses = int(config_value("POLYDATA_POLYSIGNAL_PROFILE_ADDRESSES", "20"))
     profiled_market_ids = {
         market_id
         for market_id, _ in sorted(market_notional_rank.items(), key=lambda item: item[1], reverse=True)[:max_profile_markets]
@@ -386,9 +391,9 @@ def _build_payload(ctx: dict, limit: int) -> Dict[str, Any]:
         except Exception:
             logger = getattr(ctx.get("app"), "logger", None)
             if logger is not None:
-                logger.exception("polybeats address profiles failed")
+                logger.exception("polysignal address profiles failed")
 
-    clusters = signal_cluster_service.build_polybeats_clusters(ctx, recent_trades, address_profiles_by_market, limit=max(limit * 2, limit))
+    clusters = signal_cluster_service.build_polysignal_clusters(ctx, recent_trades, address_profiles_by_market, limit=max(limit * 2, limit))
     clusters = [
         cluster for cluster in clusters
         if _safe_decimal(ctx, (cluster.get("metrics") or {}).get("totalNotional") or cluster.get("notional")) >= MIN_CLUSTER_NOTIONAL
@@ -402,7 +407,7 @@ def _build_payload(ctx: dict, limit: int) -> Dict[str, Any]:
     pnl_by_address = _address_cash_pnl(ctx, all_addresses)
 
     items: list[Dict[str, Any]] = []
-    llm_max = int(os.environ.get("POLYDATA_POLYBEATS_LLM_MAX_ITEMS", "3") or 3)
+    llm_max = int(config_value("POLYDATA_POLYSIGNAL_LLM_MAX_ITEMS", "3") or 3)
     for index, cluster in enumerate(clusters):
         market_id = int(cluster.get("marketId") or 0)
         market = markets.get(market_id)
@@ -428,7 +433,7 @@ def _build_payload(ctx: dict, limit: int) -> Dict[str, Any]:
         top = _top_wallet(wallets)
         item = {
             **cluster,
-            "id": f"polybeats:{market_id}:{cluster.get('outcome')}:{cluster.get('side')}:{cluster.get('timestamp') or index}",
+            "id": f"polysignal:{market_id}:{cluster.get('outcome')}:{cluster.get('side')}:{cluster.get('timestamp') or index}",
             "domain": domain,
             "marketSlug": (market or {}).get("slug"),
             "marketCategory": (market or {}).get("category"),
@@ -447,7 +452,7 @@ def _build_payload(ctx: dict, limit: int) -> Dict[str, Any]:
         "generatedAt": ctx["utc_now_iso"](),
         "status": "ok" if items else "empty",
         "cacheMode": "live-build",
-        "source": "polyData polybeats flow builder",
+        "source": "polyData polysignal flow builder",
         "sources": {
             "trades": "trades_v2",
             "profiles": "address_trade_totals/address_market_stats",
@@ -458,11 +463,11 @@ def _build_payload(ctx: dict, limit: int) -> Dict[str, Any]:
     }
 
 
-def fetch_live_polybeats_payload(ctx: dict, limit: int = DEFAULT_LIMIT) -> Dict[str, Any]:
+def fetch_live_polysignal_payload(ctx: dict, limit: int = DEFAULT_LIMIT) -> Dict[str, Any]:
     return _build_payload(ctx, max(1, int(limit or DEFAULT_LIMIT)))
 
 
-def get_polybeats_snapshot(ctx: dict, limit: int = DEFAULT_LIMIT) -> Dict[str, Any]:
+def get_polysignal_snapshot(ctx: dict, limit: int = DEFAULT_LIMIT) -> Dict[str, Any]:
     from .signal_service import get_signal_snapshot
 
-    return get_signal_snapshot(ctx, namespace=SNAPSHOT_NAMESPACE, cache_key=build_polybeats_cache_key(), limit=limit)
+    return get_signal_snapshot(ctx, namespace=SNAPSHOT_NAMESPACE, cache_key=build_polysignal_cache_key(), limit=limit)

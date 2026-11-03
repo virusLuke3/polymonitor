@@ -1403,7 +1403,7 @@ a.wm-orderfilled-row {
   font-family: var(--font-mono);
 }
 
-.wm-polybeats-panel .wm-panel-body {
+.wm-polysignal-panel .wm-panel-body {
   padding: 8px;
   overflow-x: hidden;
   overflow-y: auto;
@@ -1411,19 +1411,19 @@ a.wm-orderfilled-row {
   scrollbar-width: thin;
 }
 
-.wm-polybeats-layout,
-.wm-polybeats-list {
+.wm-polysignal-layout,
+.wm-polysignal-list {
   min-width: 0;
   display: flex;
   flex-direction: column;
 }
 
-.wm-polybeats-layout {
+.wm-polysignal-layout {
   gap: 7px;
   font-family: var(--font-mono);
 }
 
-.wm-polybeats-hero {
+.wm-polysignal-hero {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -1435,27 +1435,27 @@ a.wm-orderfilled-row {
   background: rgba(255, 255, 255, 0.025);
 }
 
-.wm-polybeats-hero.bullish {
+.wm-polysignal-hero.bullish {
   border-left-color: var(--wm-green);
 }
 
-.wm-polybeats-hero.bearish {
+.wm-polysignal-hero.bearish {
   border-left-color: var(--wm-red);
 }
 
-.wm-polybeats-hero div {
+.wm-polysignal-hero div {
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
-.wm-polybeats-hero span,
-.wm-polybeats-meta,
-.wm-polybeats-wallet span,
-.wm-polybeats-wallet em,
-.wm-polybeats-values em,
-.wm-polybeats-detail-wallet em {
+.wm-polysignal-hero span,
+.wm-polysignal-meta,
+.wm-polysignal-wallet span,
+.wm-polysignal-wallet em,
+.wm-polysignal-values em,
+.wm-polysignal-detail-wallet em {
   color: #7d827f;
   font-size: 9px;
   font-weight: 800;
@@ -1463,14 +1463,14 @@ a.wm-orderfilled-row {
   text-transform: uppercase;
 }
 
-.wm-polybeats-hero strong {
+.wm-polysignal-hero strong {
   color: #f2f4f2;
   font-size: 13px;
   font-weight: 900;
   letter-spacing: 0;
 }
 
-.wm-polybeats-hero em {
+.wm-polysignal-hero em {
   color: #e4e8e4;
   font-size: 12px;
   font-style: normal;
@@ -1479,11 +1479,11 @@ a.wm-orderfilled-row {
   white-space: nowrap;
 }
 
-.wm-polybeats-list {
+.wm-polysignal-list {
   gap: 6px;
 }
 
-.wm-polybeats-row {
+.wm-polysignal-row {
   min-width: 0;
   border: 1px solid #242424;
   border-left: 2px solid #8a6cff;
@@ -1491,21 +1491,21 @@ a.wm-orderfilled-row {
   transition: background 140ms ease, border-color 140ms ease;
 }
 
-.wm-polybeats-row.bullish {
+.wm-polysignal-row.bullish {
   border-left-color: var(--wm-green);
 }
 
-.wm-polybeats-row.bearish {
+.wm-polysignal-row.bearish {
   border-left-color: var(--wm-red);
 }
 
-.wm-polybeats-row:hover,
-.wm-polybeats-row.active {
+.wm-polysignal-row:hover,
+.wm-polysignal-row.active {
   border-color: #333936;
   background: #181a18;
 }
 
-.wm-polybeats-row-main {
+.wm-polysignal-row-main {
   display: grid;
   grid-template-columns: 32px minmax(0, 1fr) minmax(72px, auto);
   gap: 8px;
@@ -1519,7 +1519,7 @@ a.wm-orderfilled-row {
   cursor: pointer;
 }
 
-.wm-polybeats-glyph {
+.wm-polysignal-glyph {
   width: 25px;
   height: 25px;
   display: inline-flex;
@@ -1533,26 +1533,26 @@ a.wm-orderfilled-row {
   line-height: 1;
 }
 
-.wm-polybeats-glyph.bullish {
+.wm-polysignal-glyph.bullish {
   border-color: rgba(57, 255, 115, 0.35);
   color: var(--wm-green);
   background: rgba(57, 255, 115, 0.08);
 }
 
-.wm-polybeats-glyph.bearish {
+.wm-polysignal-glyph.bearish {
   border-color: rgba(255, 75, 75, 0.35);
   color: var(--wm-red);
   background: rgba(255, 75, 75, 0.08);
 }
 
-.wm-polybeats-copy {
+.wm-polysignal-copy {
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
-.wm-polybeats-meta {
+.wm-polysignal-meta {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -1560,7 +1560,7 @@ a.wm-orderfilled-row {
   min-width: 0;
 }
 
-.wm-polybeats-source {
+.wm-polysignal-source {
   display: inline-flex;
   align-items: center;
   height: 15px;
@@ -1575,8 +1575,8 @@ a.wm-orderfilled-row {
   color: #b7a8ff;
 }
 
-.wm-polybeats-domain,
-.wm-polybeats-action {
+.wm-polysignal-domain,
+.wm-polysignal-action {
   display: inline-flex;
   align-items: center;
   height: 15px;
@@ -1590,37 +1590,37 @@ a.wm-orderfilled-row {
   white-space: nowrap;
 }
 
-.wm-polybeats-domain.risk {
+.wm-polysignal-domain.risk {
   border-color: rgba(255, 143, 36, 0.35);
   color: #ffb66b;
 }
 
-.wm-polybeats-domain.sports {
+.wm-polysignal-domain.sports {
   border-color: rgba(126, 220, 255, 0.35);
   color: #7edcff;
 }
 
-.wm-polybeats-domain.crypto {
+.wm-polysignal-domain.crypto {
   border-color: rgba(138, 108, 255, 0.35);
   color: #b7a8ff;
 }
 
-.wm-polybeats-domain.economic {
+.wm-polysignal-domain.economic {
   border-color: rgba(246, 182, 31, 0.35);
   color: #f6c75d;
 }
 
-.wm-polybeats-action.bullish {
+.wm-polysignal-action.bullish {
   border-color: rgba(57, 255, 115, 0.35);
   color: var(--wm-green);
 }
 
-.wm-polybeats-action.bearish {
+.wm-polysignal-action.bearish {
   border-color: rgba(255, 75, 75, 0.35);
   color: var(--wm-red);
 }
 
-.wm-polybeats-title {
+.wm-polysignal-title {
   display: -webkit-box;
   overflow: hidden;
   color: #f0f2ef;
@@ -1632,7 +1632,7 @@ a.wm-orderfilled-row {
   -webkit-box-orient: vertical;
 }
 
-.wm-polybeats-explanation {
+.wm-polysignal-explanation {
   display: -webkit-box;
   overflow: hidden;
   margin: 0;
@@ -1645,11 +1645,11 @@ a.wm-orderfilled-row {
   -webkit-box-orient: vertical;
 }
 
-.wm-polybeats-row.active .wm-polybeats-explanation {
+.wm-polysignal-row.active .wm-polysignal-explanation {
   -webkit-line-clamp: 4;
 }
 
-.wm-polybeats-values {
+.wm-polysignal-values {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -1658,21 +1658,21 @@ a.wm-orderfilled-row {
   font-variant-numeric: tabular-nums;
 }
 
-.wm-polybeats-values strong {
+.wm-polysignal-values strong {
   color: #f6f8f5;
   font-size: 13px;
   font-weight: 900;
   white-space: nowrap;
 }
 
-.wm-polybeats-values span {
+.wm-polysignal-values span {
   color: #c9cfca;
   font-size: 11px;
   font-weight: 900;
   white-space: nowrap;
 }
 
-.wm-polybeats-detail {
+.wm-polysignal-detail {
   display: grid;
   gap: 4px;
   margin-top: 3px;
@@ -1680,7 +1680,7 @@ a.wm-orderfilled-row {
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.wm-polybeats-detail-wallet {
+.wm-polysignal-detail-wallet {
   min-width: 0;
   display: grid;
   grid-template-columns: minmax(70px, auto) minmax(64px, auto) minmax(0, 1fr);
@@ -1690,7 +1690,7 @@ a.wm-orderfilled-row {
   font-size: 9px;
 }
 
-.wm-polybeats-source-link {
+.wm-polysignal-source-link {
   min-width: 0;
   display: grid;
   gap: 7px;
@@ -1703,13 +1703,13 @@ a.wm-orderfilled-row {
   white-space: nowrap;
 }
 
-.wm-polybeats-detail-wallet b {
+.wm-polysignal-detail-wallet b {
   color: #d7ddd8;
   font-weight: 900;
   font-variant-numeric: tabular-nums;
 }
 
-.wm-polybeats-row-foot {
+.wm-polysignal-row-foot {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
@@ -1717,7 +1717,7 @@ a.wm-orderfilled-row {
   padding: 0 9px 8px 49px;
 }
 
-.wm-polybeats-wallet {
+.wm-polysignal-wallet {
   min-width: 0;
   display: flex;
   align-items: center;
@@ -1727,22 +1727,22 @@ a.wm-orderfilled-row {
   white-space: nowrap;
 }
 
-.wm-polybeats-wallet strong {
+.wm-polysignal-wallet strong {
   color: #c9cfca;
   font-size: 10px;
   font-weight: 900;
   font-variant-numeric: tabular-nums;
 }
 
-.wm-polybeats-wallet.up strong {
+.wm-polysignal-wallet.up strong {
   color: var(--wm-green);
 }
 
-.wm-polybeats-wallet.down strong {
+.wm-polysignal-wallet.down strong {
   color: var(--wm-red);
 }
 
-.wm-polybeats-market-button {
+.wm-polysignal-market-button {
   min-width: 48px;
   height: 24px;
   border: 1px solid rgba(138, 108, 255, 0.34);
@@ -1755,12 +1755,12 @@ a.wm-orderfilled-row {
   letter-spacing: 0.05em;
 }
 
-.wm-polybeats-market-button:disabled {
+.wm-polysignal-market-button:disabled {
   cursor: default;
   opacity: 0.45;
 }
 
-.wm-polybeats-market-button:not(:disabled):hover {
+.wm-polysignal-market-button:not(:disabled):hover {
   border-color: rgba(138, 108, 255, 0.58);
   background: rgba(138, 108, 255, 0.16);
 }

@@ -82,12 +82,12 @@ def _trades():
     ]
 
 
-def test_polybeats_cluster_related_news_disabled_by_default(monkeypatch):
+def test_polysignal_cluster_related_news_disabled_by_default(monkeypatch):
     monkeypatch.delenv("POLYDATA_SIGNAL_RELATED_NEWS_ENABLED", raising=False)
     monkeypatch.setattr(outcome_semantics_service, "annotate_raw_trade_rows", _project_up_down)
     related_calls = []
 
-    clusters = signal_cluster_service.build_polybeats_clusters(_ctx(related_calls), _trades(), {}, limit=4)
+    clusters = signal_cluster_service.build_polysignal_clusters(_ctx(related_calls), _trades(), {}, limit=4)
 
     assert clusters
     assert related_calls == []
@@ -95,12 +95,12 @@ def test_polybeats_cluster_related_news_disabled_by_default(monkeypatch):
     assert clusters[0]["sourceLabel"] == "CHAIN+$"
 
 
-def test_polybeats_cluster_related_news_enabled(monkeypatch):
+def test_polysignal_cluster_related_news_enabled(monkeypatch):
     monkeypatch.setenv("POLYDATA_SIGNAL_RELATED_NEWS_ENABLED", "1")
     monkeypatch.setattr(outcome_semantics_service, "annotate_raw_trade_rows", _project_up_down)
     related_calls = []
 
-    clusters = signal_cluster_service.build_polybeats_clusters(_ctx(related_calls), _trades(), {}, limit=4)
+    clusters = signal_cluster_service.build_polysignal_clusters(_ctx(related_calls), _trades(), {}, limit=4)
 
     assert related_calls == [(123, 2)]
     assert clusters[0]["relatedContent"][0]["source"] == "TestWire"

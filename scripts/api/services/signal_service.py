@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
@@ -51,7 +52,7 @@ def _sanitize_signal_payload(ctx: dict, namespace: str, payload: Dict[str, Any])
     items = [dict(item) for item in payload.get("items") or [] if isinstance(item, dict)]
     positions_by_mode: Dict[str, List[int]] = {"raw": [], "aggregate": [], "probe": []}
     currently_verified_positions: set[int] = set()
-    aggregate_kinds = {"volume-flow", "market-flow", "momentum", "polybeats"}
+    aggregate_kinds = {"volume-flow", "market-flow", "momentum", "polysignal", "polybeats"}
     for index, item in enumerate(items):
         if (item.get("marketId") or item.get("market_id")) is None:
             continue
@@ -135,6 +136,22 @@ def _load_signal_seed(ctx: dict, *, namespace: str, cache_key: str) -> Optional[
         store = ctx.get("SNAPSHOT_STORE")
         payload = store.get_stale(namespace, cache_key) if store is not None else None
     if not isinstance(payload, dict):
+        # Read-only migration fallback: preserve the old source clock and run
+        # verification under the canonical channel, never a fifth channel.
+        if namespace == "snapshot:signals:polysignal":
+            payload = _load_signal_seed(ctx, namespace="snapshot:signals:polybeats", cache_key=cache_key)
+            if isinstance(payload, dict):
+                payload = deepcopy(payload)
+                if payload.get("source") == "polyData polybeats flow builder":
+                    payload["source"] = "polyData polysignal flow builder"
+                for item in payload.get("items") or []:
+                    if not isinstance(item, dict):
+                        continue
+                    if item.get("kind") == "polybeats":
+                        item["kind"] = "polysignal"
+                    if str(item.get("id") or "").startswith("polybeats:"):
+                        item["id"] = "polysignal:" + item["id"].split(":", 1)[1]
+                return payload
         return None
     return payload
 

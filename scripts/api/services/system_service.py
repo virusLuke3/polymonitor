@@ -413,10 +413,10 @@ SEED_META_SPECS = [
         "defaultIntervalSeconds": 120,
     },
     {
-        "panelId": "polybeats-feed",
+        "panelId": "polysignal-feed",
         "namespace": "seed-meta:signals",
-        "cacheKey": "polybeats-feed",
-        "serviceName": "polydata-polybeats-feed-seed.service",
+        "cacheKey": "polysignal-feed",
+        "serviceName": "polydata-polysignal-feed-seed.service",
         "intervalEnv": "POLYDATA_SIGNAL_WATCH_INTERVAL_SECONDS",
         "defaultIntervalSeconds": 120,
     },

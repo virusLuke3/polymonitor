@@ -119,12 +119,12 @@ def test_stalled_work_has_a_fixed_capacity_and_shutdown_does_not_admit_more(ctx)
         release.wait(5)
         return value
     try:
-        for name in ("alpha", "whales", "flow"):
+        for name in ("alpha", "whales", "flow", "polysignal"):
             with pytest.raises(SignalReadPending):
                 read_verified_seed(ctx, name, {}, blocked, wait_seconds=.01)
         with pytest.raises(SignalReadPending, match="capacity"):
             read_verified_seed(ctx, "unexpected", {}, blocked)
-        assert len(ctx["_resources"].signal_reads) == 3
+        assert len(ctx["_resources"].signal_reads) == 4
     finally:
         release.set()
         for check in ctx["_resources"].signal_reads.values():

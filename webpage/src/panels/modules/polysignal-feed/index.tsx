@@ -8,12 +8,12 @@ import {
 } from '../../shared/formatters';
 import { useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
-import { fetchRuntimePolybeats } from '@/services/api';
-import type { RuntimePolybeatsItem, RuntimePolybeatsPayload, RuntimePolybeatsWallet } from '@/types';
+import { fetchRuntimePolySignal } from '@/services/api';
+import type { RuntimePolySignalItem, RuntimePolySignalPayload, RuntimePolySignalWallet } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '@/panels/definePanel';
 
-function badgeLabel(payload?: RuntimePolybeatsPayload | null) {
+function badgeLabel(payload?: RuntimePolySignalPayload | null) {
   const status = String(payload?.status || '').toLowerCase();
   const cacheMode = String(payload?.cacheMode || '').toLowerCase();
   if (status === 'empty') return 'QUIET';
@@ -22,28 +22,28 @@ function badgeLabel(payload?: RuntimePolybeatsPayload | null) {
   return 'LIVE';
 }
 
-function panelStatus(payload?: RuntimePolybeatsPayload | null): 'live' | 'muted' {
+function panelStatus(payload?: RuntimePolySignalPayload | null): 'live' | 'muted' {
   const status = String(payload?.status || '').toLowerCase();
   return status === 'empty' ? 'muted' : 'live';
 }
 
-function signalBias(item: RuntimePolybeatsItem) {
+function signalBias(item: RuntimePolySignalItem) {
   const explicit = String(item.bias || '').toLowerCase();
   if (explicit === 'bearish' || explicit === 'bullish') return explicit;
   if (String(item.outcome || '').toUpperCase() === 'NO') return 'bearish';
   return 'bullish';
 }
 
-function actionLabel(item: RuntimePolybeatsItem) {
+function actionLabel(item: RuntimePolySignalItem) {
   const side = String(item.side || item.action?.label || 'BUY').toUpperCase();
   const outcome = String(item.outcome || item.action?.outcome || 'YES').toUpperCase();
   return `${side} ${outcome}`;
 }
 
-function primaryWallet(item: RuntimePolybeatsItem): RuntimePolybeatsWallet | null {
+function primaryWallet(item: RuntimePolySignalItem): RuntimePolySignalWallet | null {
   const wallets = item.wallets || [];
   if (!wallets.length) return null;
-  const first = wallets[0] as RuntimePolybeatsWallet;
+  const first = wallets[0] as RuntimePolySignalWallet;
   return wallets.reduce((best, wallet) => {
     const bestScore = Number(best.smartScore || 0);
     const score = Number(wallet.smartScore || 0);
@@ -51,7 +51,7 @@ function primaryWallet(item: RuntimePolybeatsItem): RuntimePolybeatsWallet | nul
   }, first);
 }
 
-function metricValue(item: RuntimePolybeatsItem, key: 'totalNotional' | 'currentProbability' | 'avgPrice' | 'accountCount' | 'tradeCount') {
+function metricValue(item: RuntimePolySignalItem, key: 'totalNotional' | 'currentProbability' | 'avgPrice' | 'accountCount' | 'tradeCount') {
   return item.metrics?.[key] ?? null;
 }
 
@@ -71,17 +71,17 @@ function domainClass(value?: string | null) {
   return 'pmkt';
 }
 
-function WalletStrip({ wallet }: { wallet: RuntimePolybeatsWallet | null }) {
+function WalletStrip({ wallet }: { wallet: RuntimePolySignalWallet | null }) {
   if (!wallet) {
     return (
-      <div className="wm-polybeats-wallet muted">
+      <div className="wm-polysignal-wallet muted">
         <span>WALLET</span>
         <strong>TRACKING</strong>
       </div>
     );
   }
   return (
-    <div className={`wm-polybeats-wallet ${pnlTone(wallet.netCashPnlProxy)}`}>
+    <div className={`wm-polysignal-wallet ${pnlTone(wallet.netCashPnlProxy)}`}>
       <span>{wallet.shortAddress || shortHash(wallet.address, 6, 4)}</span>
       <strong>{formatCurrencyCompact(wallet.netCashPnlProxy)}</strong>
       <em>{formatCompact(wallet.tradeCount)} trades</em>
@@ -89,13 +89,13 @@ function WalletStrip({ wallet }: { wallet: RuntimePolybeatsWallet | null }) {
   );
 }
 
-function PolybeatsRow({
+function PolySignalRow({
   item,
   active,
   onSelect,
   onToggle,
 }: {
-  item: RuntimePolybeatsItem;
+  item: RuntimePolySignalItem;
   active: boolean;
   onSelect: () => void;
   onToggle: () => void;
@@ -107,44 +107,44 @@ function PolybeatsRow({
   const accounts = metricValue(item, 'accountCount') || item.wallets?.length || 0;
   const trades = metricValue(item, 'tradeCount') || 0;
   return (
-    <article className={`wm-polybeats-row ${bias} ${active ? 'active' : ''}`}>
-      <button type="button" className="wm-polybeats-row-main" onClick={onToggle} title={item.marketTitle || item.title || 'PolySignal signal'}>
-        <span className={`wm-polybeats-glyph ${bias}`}>PB</span>
-        <div className="wm-polybeats-copy">
-          <div className="wm-polybeats-meta">
-            <span className="wm-polybeats-source">PMKT FLOW</span>
-            <span className={`wm-polybeats-domain ${domainClass(item.domain)}`}>{String(item.domain || 'PMKT').toUpperCase()}</span>
-            <span className={`wm-polybeats-action ${bias}`}>{actionLabel(item)}</span>
+    <article className={`wm-polysignal-row ${bias} ${active ? 'active' : ''}`}>
+      <button type="button" className="wm-polysignal-row-main" onClick={onToggle} title={item.marketTitle || item.title || 'PolySignal signal'}>
+        <span className={`wm-polysignal-glyph ${bias}`}>PS</span>
+        <div className="wm-polysignal-copy">
+          <div className="wm-polysignal-meta">
+            <span className="wm-polysignal-source">PMKT FLOW</span>
+            <span className={`wm-polysignal-domain ${domainClass(item.domain)}`}>{String(item.domain || 'PMKT').toUpperCase()}</span>
+            <span className={`wm-polysignal-action ${bias}`}>{actionLabel(item)}</span>
             <span>{formatRelative(item.timestamp)}</span>
           </div>
-          <strong className="wm-polybeats-title">{item.marketTitle || item.title || 'Market flow detected'}</strong>
-          <p className="wm-polybeats-explanation">{item.explanation || item.summary || 'Wallet flow clustered around this market.'}</p>
+          <strong className="wm-polysignal-title">{item.marketTitle || item.title || 'Market flow detected'}</strong>
+          <p className="wm-polysignal-explanation">{item.explanation || item.summary || 'Wallet flow clustered around this market.'}</p>
           {active ? (
-            <div className="wm-polybeats-detail">
+            <div className="wm-polysignal-detail">
               {(item.wallets || []).slice(0, 3).map((walletItem) => (
-                <div key={walletItem.address || walletItem.shortAddress} className="wm-polybeats-detail-wallet">
+                <div key={walletItem.address || walletItem.shortAddress} className="wm-polysignal-detail-wallet">
                   <span>{walletItem.shortAddress || shortHash(walletItem.address, 6, 4)}</span>
                   <b>{formatCurrencyCompact(walletItem.netCashPnlProxy)}</b>
                   <em>{formatCompact(walletItem.marketVolumeNotional)} market vol</em>
                 </div>
               ))}
               {(item.relatedContent || []).slice(0, 1).map((source) => (
-                <span key={source.url || source.title || 'source'} className="wm-polybeats-source-link">
+                <span key={source.url || source.title || 'source'} className="wm-polysignal-source-link">
                   {source.source || 'INTEL'} / {source.title || 'related source'}
                 </span>
               ))}
             </div>
           ) : null}
         </div>
-        <div className="wm-polybeats-values">
+        <div className="wm-polysignal-values">
           <strong>{formatCurrencyCompact(notional)}</strong>
           <span>{probabilityLabel(probability)}</span>
           <em>{accounts}W / {trades}T</em>
         </div>
       </button>
-      <div className="wm-polybeats-row-foot">
+      <div className="wm-polysignal-row-foot">
         <WalletStrip wallet={wallet} />
-        <button type="button" className="wm-polybeats-market-button" onClick={onSelect} disabled={!item.marketId}>
+        <button type="button" className="wm-polysignal-market-button" onClick={onSelect} disabled={!item.marketId}>
           VIEW
         </button>
       </div>
@@ -152,12 +152,12 @@ function PolybeatsRow({
   );
 }
 
-function PolybeatsFeedPanel({
+function PolySignalFeedPanel({
   payload,
   selectedMarketId,
   setSelectedMarketId,
 }: {
-  payload?: RuntimePolybeatsPayload | null;
+  payload?: RuntimePolySignalPayload | null;
   selectedMarketId: number | null;
   setSelectedMarketId: (marketId: number) => void;
 }) {
@@ -189,12 +189,12 @@ function PolybeatsFeedPanel({
           <p>Clusters recent Polymarket fills, profiles participating wallets, attaches related intel, and generates a short flow explanation.</p>
         </div>
       ) : null}
-      className="wm-market-panel wm-polybeats-panel"
-      dataPanelId="polybeats-feed"
+      className="wm-market-panel wm-polysignal-panel"
+      dataPanelId="polysignal-feed"
     >
-      <div className="wm-polybeats-layout">
+      <div className="wm-polysignal-layout">
         {top ? (
-          <div className={`wm-polybeats-hero ${signalBias(top)}`}>
+          <div className={`wm-polysignal-hero ${signalBias(top)}`}>
             <div>
               <span>TOP FLOW</span>
               <strong>{actionLabel(top)}</strong>
@@ -203,12 +203,12 @@ function PolybeatsFeedPanel({
           </div>
         ) : null}
         {items.length ? (
-          <div className="wm-polybeats-list">
+          <div className="wm-polysignal-list">
             {items.map((item, index) => {
               const itemId = item.id || `${item.marketId || 'market'}-${item.outcome || 'outcome'}-${index}`;
               const marketId = Number(item.marketId);
               return (
-                <PolybeatsRow
+                <PolySignalRow
                   key={itemId}
                   item={item}
                   active={expandedId === itemId || (Number.isFinite(marketId) && selectedMarketId === marketId)}
@@ -230,11 +230,11 @@ function PolybeatsFeedPanel({
 }
 
 const renderers: PanelRenderMap<'selectedMarketId' | 'setSelectedMarketId'> = {
-  'polybeats-feed': {
+  'polysignal-feed': {
     render: (ctx) => {
-      const payload = ctx.runtimeData['polybeats-feed'] as RuntimePolybeatsPayload | undefined;
+      const payload = ctx.runtimeData['polysignal-feed'] as RuntimePolySignalPayload | undefined;
       return (
-        <PolybeatsFeedPanel
+        <PolySignalFeedPanel
           payload={payload}
           selectedMarketId={ctx.selectedMarketId}
           setSelectedMarketId={ctx.setSelectedMarketId}
@@ -246,7 +246,7 @@ const renderers: PanelRenderMap<'selectedMarketId' | 'setSelectedMarketId'> = {
 
 export const panel = runtimePanelFromRenderer(renderers, {
   contextKeys: ['selectedMarketId', 'setSelectedMarketId'],
-  id: 'polybeats-feed',
+  id: 'polysignal-feed',
   title: 'PolySignal',
   eyebrow: 'signal',
   description: 'Smart-money flow, wallet history, and explainable market briefs.',
@@ -254,5 +254,5 @@ export const panel = runtimePanelFromRenderer(renderers, {
 }, {
   tier: 'slow',
   limit: 8,
-  fetchData: (context, limit) => fetchRuntimePolybeats(limit, context?.signal),
+  fetchData: (context, limit) => fetchRuntimePolySignal(limit, context?.signal),
 });

@@ -171,7 +171,7 @@ def _related_news(ctx: dict, market_id: Optional[int]) -> list[Dict[str, Any]]:
     ]
 
 
-def build_polybeats_clusters(
+def build_polysignal_clusters(
     ctx: dict,
     trades: list[Dict[str, Any]],
     address_profiles_by_market: Dict[int, Dict[str, Dict[str, Any]]],
@@ -288,7 +288,7 @@ def build_polybeats_clusters(
         source_tag = str((related[0].get("source") if related else "FLOW") or "FLOW").upper()[:3]
         clusters.append(
             {
-                "kind": "polybeats",
+                "kind": "polysignal",
                 "severity": _severity(score),
                 "bias": bias,
                 "sourceLabel": source_label,
@@ -338,3 +338,7 @@ def build_polybeats_clusters(
         reverse=True,
     )
     return clusters[:limit]
+
+
+# Legacy Python callers may migrate independently; all active product callers use PolySignal.
+build_polybeats_clusters = build_polysignal_clusters

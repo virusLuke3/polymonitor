@@ -461,7 +461,7 @@ GCP_UNITS=(
   polydata-market-group-seed.service
   polydata-nba-seed.service
   polydata-new-market-signal.service
-  polydata-polybeats-feed-seed.service
+  polydata-polysignal-feed-seed.service
   polydata-polymarket-macro-map-seed.service
   polydata-quant-backtest-runner.service
   polydata-sports-odds-seed.service
