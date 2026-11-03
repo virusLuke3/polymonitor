@@ -865,7 +865,7 @@ def build_blueprints(runtime: ServiceRuntime):
         runtime_panels_routes.create_runtime_panels_blueprint(
             runtime_panels_routes.RuntimePanelRouteDependencies(
                 panel_context=runtime_panel_types.RuntimePanelContext(
-                    get_crypto_strategy_snapshot=lambda: _crypto_strategy_snapshot(_crypto_strategy_path(runtime.SETTINGS.snapshot_sqlite_path)),
+                    get_crypto_strategy_snapshot=lambda reference_only=False: _crypto_strategy_snapshot(_crypto_strategy_path(runtime.SETTINGS.snapshot_sqlite_path), reference_only=reference_only),
                     get_alpha_signal_snapshot=lambda limit=8: signal_service.get_alpha_signal_snapshot(
                         runtime.signal_context, limit=limit
                     ),

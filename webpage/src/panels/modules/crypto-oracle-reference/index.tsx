@@ -1,27 +1,30 @@
 import { useEffect, useState } from 'preact/hooks';
 import { panelFromRenderer } from '@/panels/definePanel';
 import { Frame, MarketLink, Notice, Series, Stats, direction, signed, fmt, time, useCopy } from '@/panels/shared/crypto-strategy/components';
-import { useCryptoAsset, useCryptoInputs } from '@/panels/shared/crypto-strategy/resource';
+import { cryptoReferenceResource, useCryptoAsset, useCryptoInputs } from '@/panels/shared/crypto-strategy/resource';
 import { referenceUsable } from '@/panels/shared/crypto-strategy/model';
 
 function Reference() {
-  const feed=useCryptoInputs(), [asset]=useCryptoAsset(), t=useCopy(), ref=feed.data?.references[asset], market=ref?.market;
+  const feed=useCryptoInputs(cryptoReferenceResource), [asset]=useCryptoAsset(), t=useCopy(), ref=feed.data?.references[asset], market=ref?.market;
   const [now,setNow]=useState(Date.now);
   // Display-only clock: validity must expire even when network refreshes fail.
   useEffect(()=>{const id=window.setInterval(()=>setNow(Date.now()),1000);return()=>window.clearInterval(id);},[]);
   const usable=referenceUsable(ref,now), value=Number(ref?.latest?.value), current=Number.isFinite(value)&&value>0?value:null;
   const anchorValue=Number(market?.anchor?.value), anchor=Number.isFinite(anchorValue)&&anchorValue>0?anchorValue:null;
+  const currentMarket=!!market && market.starts_at_ms<=now && market.ends_at_ms>now;
   const at=ref?.latest?.event_at_ms, fresh=!!at && now-at>=-1000 && now-at<=15000 && ref?.status==='ok';
   const distance=usable && current!=null && anchor!=null?current-anchor:null;
-  const message=current==null ? t('当前服务未提供该币种的指定源观测。','This service has no designated-source observations for this asset.')
+  const message=ref?.status==='unsupported' ? t('该币种尚未接入合约指定源。','Designated contract source is not connected for this asset.')
+    : ref?.error==='REFERENCE_READ_FAILED' || ref?.error==='TWAP_READ_FAILED' ? t('指定源读取失败；保留最后观测与原始时间。','Designated source read failed; last observations and original timestamps retained.')
+    : current==null ? t('当前服务未提供该币种的指定源观测。','This service has no designated-source observations for this asset.')
     : !fresh ? t('观测已过期，以下保留最后价格与原始时间；当前距离不可用。','Observation expired. Last price and original time retained; current distance unavailable.')
     : market && market.ends_at_ms<=now ? t('合约已结束；等待当轮合约绑定。','Contract ended; awaiting the current market binding.')
     : !usable ? t('已收到指定源价格；尚无核验通过的当轮合约绑定。','Source price received; current contract binding is not verified.')
     : anchor==null ? t('当轮开盘阈值尚未核验，当前距离不可用。','Opening threshold is not verified; current distance unavailable.') : null;
-  return <Frame id="crypto-oracle-reference" title={t('合约指定价格源','CONTRACT REFERENCE')} badge="TWAP">
+  return <Frame id="crypto-oracle-reference" title={t('合约指定价格源','CONTRACT REFERENCE')} badge="TWAP" resource={cryptoReferenceResource}>
     {message && !feed.loading && <p className="wm-cstrategy-notice" data-tone="warning" role="status">{message}</p>}
     {current!=null && <>
-      <Stats items={[{label:fresh?t('指定源 USD','Reference USD'):t('最后观测 USD','Last observed USD'),value:fmt(current),tone:fresh?'info':'warning',primary:true},{label:t('目标价 USD','Price to beat USD'),value:fmt(usable?anchor:null),tone:'warning'},{label:t('距离阈值 USD','Distance USD'),value:signed(distance),tone:direction(distance)}]}/>
+      <Stats items={[{label:fresh?t('指定源 USD','Reference USD'):t('最后观测 USD','Last observed USD'),value:fmt(current),tone:fresh?'info':'warning',primary:true},{label:t('目标价 USD','Price to beat USD'),value:fmt(currentMarket?anchor:null),tone:'warning'},{label:t('距离阈值 USD','Distance USD'),value:signed(distance),tone:direction(distance)}]}/>
       <Series points={ref?.history} label={t('官方 60秒 TWAP · USD','Official 60s TWAP · USD')} maxGapMs={3000} tone={fresh?'info':'warning'}/>
       <p className="wm-cstrategy-meta">{ref?.latest?.feed_id} · {time(at)}</p>
     </>}

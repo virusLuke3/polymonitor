@@ -42,9 +42,16 @@ class Store:
         self.conn.commit()
 
 
-def get_snapshot(path):
+def get_snapshot(path, *, reference_only=False):
     import time
     from .contracts import iso
+    from .native_reference import current_references
+    references = current_references()
+    if reference_only:
+        now = time.time() * 1000
+        return {"schemaVersion": 1, "kind": "crypto-strategy", "status": "partial", "generatedAt": iso(now),
+                "collectedAt": now, "references": references, "assets": {}, "options": {}, "stablecoins": [],
+                "inflows": {"mode": "unavailable", "rows": []}}
     try:
         data = read_snapshot(path)
     except (OSError, sqlite3.Error, ValueError):
@@ -53,4 +60,4 @@ def get_snapshot(path):
         return {"schemaVersion": 1, "kind": "crypto-strategy", "status": "warming", "generatedAt": None,
                 "assets": {}, "options": {}, "stablecoins": [], "inflows": {"mode": "unavailable", "rows": []}}
     age = time.time() * 1000 - data["collectedAt"]
-    return {**data, "status": "stale" if age > 120000 or age < -30000 else data["status"], "servedAt": iso(time.time() * 1000)}
+    return {**data, "references": references, "status": "stale" if age > 120000 or age < -30000 else data["status"], "servedAt": iso(time.time() * 1000)}

@@ -82,7 +82,9 @@ def options(get, asset, now):
 
 
 def references(get, url, now, lob_url=None):
-    raw = get(url.rstrip("/") + "/snapshot")
+    raw = get(url.rstrip("/") + "/crypto/reference")
+    if raw.get("source") != "market-data" or raw.get("schemaVersion") != 1:
+        raise ValueError("REFERENCE_OWNER_IDENTITY_INVALID")
     result = {}
     for asset in ASSETS:
         item = raw.get("assets", {}).get(asset, {})
@@ -111,11 +113,14 @@ def references(get, url, now, lob_url=None):
                 bid, ask = number(quote.get("best_bid")), number(quote.get("best_ask"))
                 received = number(quote.get("received_at_ms"))
                 if quote.get("condition_id") == market["condition_id"] and quote.get("asset_id") == token and bid is not None and ask is not None and 0 <= bid <= ask <= 1 and received and now - 60000 <= received <= now + 1000:
-                    quotes[side] = {"token": token, "bid": bid, "ask": ask, "observedAt": quote.get("book_observed_at"), "receivedAt": quote.get("received_at_ms")}
+                    quotes[side] = {"token": token, "bid": bid, "ask": ask, "observedAt": quote.get("book_observed_at"), "receivedAt": quote.get("received_at_ms"),
+                        "quality": quote.get("quality"), "snapshotAt": quote.get("snapshot_at"),
+                        "upstreamCompleteness": quote.get("upstream_completeness", "UNKNOWN")}
         result[asset] = {"market": market_out, "latest": latest_out, "history": points(prices, "event_at_ms", "value"),
             "spotHistory": points(item.get("binance", []), "event_at_ms", "value"), "quotes": quotes,
-            "source": "Existing market-data TWAP / Binance receipt archive",
-            "status": "ok" if latest and 0 <= now - latest["event_at_ms"] < 15000 else "stale" if latest else "unavailable",
+            "source": "market-data canonical market metadata and official TWAP archive",
+            "error": item.get("read_error"), "marketError": item.get("market_error"),
+            "status": "unsupported" if asset not in ("BTC", "ETH") else "ok" if latest and not item.get("read_error") and 0 <= now - latest["event_at_ms"] < 15000 else "stale" if latest else "unavailable",
             "windowModel": "UNAVAILABLE_RAW_WINDOW_OBSERVATIONS"}
     if lob_url:
         # Reuse the existing read-only market-data owner; never collect a book here.

@@ -10,7 +10,7 @@
 | `crypto-order-flow` 订单流 | C080 | Bybit 最近最多 60 笔现货主动买卖、样本 CVD、50 档快照失衡及前 10 档详情。 | 不是完整时间区间流量；增量 OFI、多交易所确认尚未实现。 |
 | `crypto-funding-watch` 资金费率 | C079 | 保留原有双交易所费率、真实结算周期和覆盖；增加共享币种最近最多 100 次 Bybit 已结算费率及样本分位。 | 历史未补齐长期窗口；样本分位不能称为长期极端程度。 |
 | `crypto-perp-funding` 持仓与基差 | C078 / C079 | 永续 OI 数量及名义金额、5 分钟 OI 序列、15m/1h/4h 变化、mark/spot 与 mark/index bps。 | REST 跨响应基差超过 5 秒时间差不计算；未实现完整期限结构、清算和跨所 OI。 |
-| `crypto-oracle-reference` 合约指定源 | O043 / C081 / G072 / C082 | 目标为直接复用 market-data 的合约身份、60 秒官方 TWAP、开盘阈值和原始 E18；当前适配器仍接收旧快照契约，原始库直读尚未接入；验证币种、窗口、比较符、合约期限及阈值归属。 | 指定源过期就禁用当前距离；开盘展示值保留精度标签。原始窗口贡献和剩余窗口概率未实现；SOL/XRP 暂无绑定。 |
+| `crypto-oracle-reference` 合约指定源 | O043 / C081 / G072 / C082 | 通过 market-data 现有只读入口直接投影 canonical 合约、原始 60 秒官方 TWAP、开盘阈值和 E18；验证币种、窗口、比较符、期限、token 和阈值归属。 | 指定源过期就禁用当前距离；开盘展示值保留精度标签。原始窗口贡献和剩余窗口概率未实现；SOL/XRP 暂无绑定。 |
 | `options-implied-probability` 期权隐含概率 | O041 / C075 / Q074 / G077 | BTC/ETH、未来七天中最多三个到期、真实双边报价支持的看涨价差概率带与买卖区间。 | 折现因子假设为 1；是阈值带平均风险中性尾概率参考，不是精确数字期权概率。未与 PM 到期匹配，不给 PM 概率差或交易结论。 |
 | `crypto-exchange-inflow` 交易所链上流入 | Q076 | 复用现有 Dune BTC 历史研究归档，按日期与 Binance/Coinbase 聚合转入、转出、净额；30/90/180 日历天。 | 实时来源未接入；标签为事后获取，严格 PIT 未验收；转入不是卖出，未识别内部转账仍可能存在。 |
 | `stablecoin-monitor` 稳定币压力 | Q079 | USDC/USDT 的 Coinbase 与 Kraken USD 报价、偏离 bps、来源差异和观测持续时间。 | 连续采样缺口重置持续时间；无原生报价时间时明确为接收时间。不是完整压力事件档案。 |
@@ -19,7 +19,7 @@
 
 前端共享资源 `webpage/src/panels/shared/crypto-strategy/resource.ts` 使用 `usePanelResource`，key 为 `crypto-strategy:four-assets:v1`，浏览器检查 15 秒，服务采集目标 30 秒，快照超过 120 秒标记 stale。多个消费者共享请求与取消；没有新建每 Panel 定时器。共享 BTC/ETH/SOL/XRP 选择仅影响这一组 Panel，不冒充主工作区的任意合约绑定。历史期权与资金费率保留自己的到期/结算时刻。
 
-API 注册四个新增视图路径：`/runtime/crypto/order-flow`、`/runtime/crypto/oracle-reference`、`/runtime/crypto/options`、`/runtime/crypto/exchange-inflow`。它们读取同一个快照；前端仅请求第一个路径避免重复传输。响应必须匹配 schemaVersion、kind 和资产身份；嵌套序列、盘口、期权与流入记录也校验。
+API 注册四个新增视图路径：`/runtime/crypto/order-flow`、`/runtime/crypto/oracle-reference`、`/runtime/crypto/options`、`/runtime/crypto/exchange-inflow`。订单流、期权、流入继续共享公共行情快照。合约指定源独立使用 `/runtime/crypto/oracle-reference` 与公共 Runtime 资源 `crypto-reference:market-data:v1`，5 秒刷新，15 秒观测时效；不依赖公共行情采集是否成功。响应必须匹配 schemaVersion、kind 和资产身份；嵌套序列、盘口、期权与流入记录也校验。
 
 数据拥有者为 `scripts/api/services/crypto_strategy/`。`crypto_strategy_watcher.py` 是单写入者（文件锁），落盘到主 snapshot SQLite 相邻的 `crypto_strategy.sqlite3`，或由 `POLYDATA_CRYPTO_STRATEGY_DB` 指定。API 使用 SQLite `mode=ro`，GET 不采集、不建表。全周期异常保留旧快照与原始时间；单来源失败保留其他来源并标注缺失。观测保留七天；单序列响应最多 300 点；上游价格档案最多 900 点。该存储不是研究级长期原始归档。
 
@@ -27,15 +27,19 @@ API 注册四个新增视图路径：`/runtime/crypto/order-flow`、`/runtime/cr
 
 指定源的数据拥有者是 `market-data`。实盘原始观测在 XUE 的 `/mnt/hdd22t/market-data/chainlink-twap-60/YYYY-MM-DD/twap.sqlite3`；读取应使用只读连接，保留 E18、来源身份、观察/发布/接收时钟，并排除冲突、重复和时钟异常。当前覆盖 BTC/ETH。
 
-旧适配器把 workbench `/snapshot` 当成必需中转，并配置 SUN 28075 → GCP 28076 专用 SSH 转发；用户已明确停用这条通道，不能将其当成故障自动恢复。已有本机数据不需要重新采集，workbench 也不是正式数据拥有者。当前线上尚未改为读取原始 TWAP 库，不得把本机读库成功说成公网 Panel 已有实时价格。现有 PostgreSQL/ClickHouse 连接不会自动包含 XUE 的 SQLite 文件；新的接入必须先验证已有数据访问入口，不能默认增加每个 Panel 独有的传输服务。
+合约源复用 market-data 现有 `market-data-lob-http.service` 的 `/crypto/reference` 只读投影：canonical PostgreSQL 提供当前 5 分钟合约与原始规则，原始 TWAP SQLite 提供 BTC/ETH 观测。数据当前物理位于 XUE，拥有者通过已有归档 SSH 访问执行有时限的只读查询；不启动工作台或复制原始库。GCP 复用已运行的 18861 数据读取通道。入口单次并发合并、1 秒缓存；API 失败退避 3 秒并保留已读观测及原始时间。
 
-PM 报价优先使用源中已核验的绑定报价，缺失时读取现有 `/runtime/lob/books` 的 market-data live book，核验 token、continuity、heartbeat 和 staleAfter；不另建 LOB 采集器。PM 历史按 condition/token 分开，避免下一轮合约串线。
+开盘阈值仅取观察时间**恰好等于合约开始时间**的有效官方 TWAP，保留原始 E18；缺失就显示缺失，不用临近价格或上一轮代替。查询限定当天/前一天文件、每资产最多 901 条，图表最多 300 点；断流保留最后真实观测，长期停采超出两天不扫描整个档案。过期观测不能计算当前距离。
+
+PM 报价复用同一个 market-data 拥有者的已提交盘口快照，核验 condition/token 归属并保留源事件时间。当前盘口只证明可读取快照，显示 `Book snapshot`，`upstreamCompleteness=UNKNOWN`；读取时间不是行情产生时间，不把它标为连续实时盘口，也不从这种快照制造 PM 历史。不开新 LOB 采集器。
+
+旧 workbench `/snapshot` 和 SUN 28075 → GCP 28076 专用转发均不再参与本 Panel；已停用的专用转发保持停用。上游采集连接故障、原始库读取故障、观测过期、当轮规则/阈值缺失分别核验，不能用服务 active 状态代替原始数据时效。
 
 链上历史导出工具 `scripts/runtime/export_crypto_flow_history.py` 只读已有归档的 manifest 和 transaction_flows，校验记录数，用 Decimal 按日聚合。生产仅需要约 44 KB 的派生 JSON，保留原 manifest hash、dataset ID、实际覆盖期与标签限制；不复制原始归档、不把历史标为 live。
 
 ## 部署与运行
 
-GCP 使用既有 `polydata-crypto-strategy-seed.service` 采集公共行情。旧单元仍声明指定源 28076，这不是有效的数据接入证明；截至本次核验该端口不可用，专用转发已停用。LOB 只读入口为 18500，链上派生文件默认 `/opt/polyData/data/crypto_exchange_flow_history.json`。服务重启不清空历史；网络不可用不会阻塞 API 请求。
+GCP 公共行情仍由 `polydata-crypto-strategy-seed.service` 写入，已移除旧 28076 和重复盘口入口配置。API 安装 `deploy/systemd/polydata-api.service.d/70-crypto-reference.conf`，配置 `POLYDATA_CRYPTO_REFERENCE_READER_URL=http://127.0.0.1:18861`。源端配置见 market-data 的 `lob_v2/deploy/systemd/market-data-lob-http.service.d/30-crypto-reference.conf`，只增加已有 HTTP reader 的读库配置，不添加监听端口、采集器或专用转发。链上派生文件仍默认 `/opt/polyData/data/crypto_exchange_flow_history.json`。
 
 `polydata-crypto-reference-tunnel.service` 保留为旧部署记录，不再作为安装步骤。禁止为修复空 Panel 擅自启动已停用的工作台、下载网关或专用转发。
 

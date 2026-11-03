@@ -81,13 +81,11 @@ def main():
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     store = Store(path)
     base = os.environ.get("POLYDATA_CRYPTO_STRATEGY_BYBIT", "https://api.bybit.com")
-    reference_url = os.environ.get("POLYDATA_CRYPTO_REFERENCE_URL", "")
     while True:
         start = time.monotonic()
         try:
             now = int(time.time() * 1000)
-            payload = providers.collect(get, bybit_base=base, reference_url=reference_url, now=now,
-                                        lob_url=os.environ.get("POLYDATA_CRYPTO_LOB_READER_URL"))
+            payload = providers.collect(get, bybit_base=base, reference_url="", now=now)
             payload = enrich(payload, store, now, os.environ.get("POLYDATA_CRYPTO_EXCHANGE_FLOW_FILE"))
             store.publish(payload, now)
             print(json.dumps({"generatedAt": payload["generatedAt"], "assets": {k: v.get("status") for k, v in payload["assets"].items()}, "options": {k: len(v.get("expiries", [])) for k,v in payload["options"].items()}}), flush=True)

@@ -11,4 +11,4 @@ MAX_LIMIT = 4
 def get_snapshot(ctx: RuntimePanelContext, *, limit: int = DEFAULT_LIMIT) -> dict:
     if ctx.get_crypto_strategy_snapshot is None:
         return {"status": "warming", "kind": "crypto-strategy", "schemaVersion": 1, "generatedAt": None}
-    return ctx.get_crypto_strategy_snapshot()
+    return ctx.get_crypto_strategy_snapshot(reference_only=True)

@@ -51,7 +51,7 @@ def reference_fixture():
                   price_kind="twap", window_seconds=60, comparator=">=", anchor=dict(value="100", condition_id="0xabc"))
     price = dict(value="101", event_at_ms=NOW-1000, received_at_ms=NOW, feed_id="rtds:crypto_prices_twap_sixty:btc/usd",
                  price_kind="twap", window_seconds=60, quote_currency="USD", full_accuracy_value="101000000000000000000")
-    return {"assets":{"BTC":{"market":market, "prices":[price], "quotes":{}}}}
+    return {"source":"market-data", "schemaVersion":1, "assets":{"BTC":{"market":market, "prices":[price], "quotes":{}}}}
 
 
 def test_oracle_identity_future_staleness_and_anchor_binding():
@@ -67,6 +67,53 @@ def test_oracle_identity_future_staleness_and_anchor_binding():
     assert read()["latest"] == {}
     raw["assets"]["BTC"]["market"]["ends_at_ms"] = NOW
     assert read()["market"] is None
+
+
+def test_reference_owner_route_snapshot_quality_and_unknown_assets():
+    raw = reference_fixture()
+    calls = []
+    raw['assets']['BTC']['quotes']['123456'] = dict(condition_id='0xabc',asset_id='123456',
+        best_bid=.4,best_ask=.5,received_at_ms=NOW,book_observed_at=None,quality='snapshot',upstream_completeness='UNKNOWN')
+    def get(url):
+        calls.append(url)
+        return raw
+    data = references(get,'http://existing-market-data',NOW)
+    assert calls == ['http://existing-market-data/crypto/reference']
+    assert data['BTC']['quotes']['UP']['quality'] == 'snapshot'
+    assert data['BTC']['quotes']['UP']['upstreamCompleteness'] == 'UNKNOWN'
+    assert data['SOL']['status'] == 'unsupported'
+    raw['source'] = 'workbench'
+    with pytest.raises(ValueError, match='IDENTITY'):
+        references(get,'http://existing-market-data',NOW)
+
+
+def test_native_reference_refresh_retains_original_times_when_reader_fails(monkeypatch):
+    from api.services.crypto_strategy import native_reference as native
+    monkeypatch.setenv('POLYDATA_CRYPTO_REFERENCE_READER_URL','http://owner')
+    monkeypatch.setattr(native,'_cached',None)
+    monkeypatch.setattr(native,'_url',None)
+    monkeypatch.setattr(native,'_expires',0)
+    monkeypatch.setattr(native.time,'time',lambda: NOW/1000)
+    monkeypatch.setattr(native,'_get',lambda url: reference_fixture())
+    first=native.current_references()
+    monkeypatch.setattr(native,'_expires',0)
+    def fail(url): raise OSError('offline')
+    monkeypatch.setattr(native,'_get',fail)
+    retained=native.current_references()
+    assert retained['BTC']['latest']==first['BTC']['latest']
+    assert retained['BTC']['status']=='stale'
+    assert retained['BTC']['error']=='REFERENCE_READ_FAILED'
+    assert retained['SOL']['status']=='unsupported'
+
+
+def test_reference_resource_works_without_venue_snapshot(tmp_path,monkeypatch):
+    from api.services.crypto_strategy import native_reference as native
+    monkeypatch.setattr(native,'current_references',lambda:{'BTC':{'status':'ok'}})
+    payload=get_snapshot(str(tmp_path/'missing'),reference_only=True)
+    assert payload['references']['BTC']['status']=='ok'
+    assert payload['assets']=={}
+    assert payload['generatedAt']
+    assert not (tmp_path/'missing').exists()
 
 
 def test_basis_requires_aligned_clocks():

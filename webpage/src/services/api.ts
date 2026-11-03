@@ -234,6 +234,10 @@ export function fetchCryptoStrategyInputs(signal?: AbortSignal): Promise<unknown
   return apiGetWithTimeout('/runtime/crypto/order-flow', 10000, signal);
 }
 
+export function fetchCryptoReferenceInputs(signal?: AbortSignal): Promise<unknown> {
+  return apiGetWithTimeout('/runtime/crypto/oracle-reference', 10000, signal, 'no-store');
+}
+
 export function fetchRuntimeCryptoFundingWatch(limit = 80, signal?: AbortSignal) {
   return apiGetWithTimeout<unknown>(`/runtime/crypto/funding-watch?limit=${limit}`, 8000, signal, 'no-store');
 }

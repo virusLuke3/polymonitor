@@ -20,6 +20,7 @@ for (const width of [1440,390]) test(`crypto strategy source states and controls
     inflows:{mode:'historical',rows:[{date:'2026-06-25',exchange:'Binance',inflow:5,outflow:4,net:1,transactions:2},{date:'2026-06-26',exchange:'Binance',inflow:6,outflow:4,net:2,transactions:3}]},
   };
   await page.route('**/wm-api/runtime/crypto/order-flow',route=>{ requests++; return offline?route.fulfill({status:503,json:{error:'fixture outage'}}):route.fulfill({json:fixture}); });
+  await page.route('**/wm-api/runtime/crypto/oracle-reference',route=>route.fulfill({json:fixture}));
   await page.goto('/e2e/panels.html');
   await page.waitForFunction(()=>window.panelHarness);
   for (const id of ids) {
@@ -96,7 +97,7 @@ test('reference keeps source observations but expires the current contract dista
   const market={asset:'BTC',market_id:'1',condition_id:'0x123',slug:'btc-test',outcomes:{},starts_at_ms:now-60000,ends_at_ms:now+10000,window_seconds:60,price_kind:'twap',comparator:'>=',rule_version:'test',rule_url:'https://data.chain.link/streams/btc-usd-twap-60s-streams',anchor:{value:'100',source:'fixture',precision:'exact_e18'}};
   const reference={status:'ok',market,latest:{value:'101',event_at_ms:now,window_seconds:60},history:[{t:now-1000,v:100},{t:now,v:101}],quotes:{}};
   const fixture={schemaVersion:1,kind:'crypto-strategy',status:'partial',generatedAt:new Date(now).toISOString(),collectedAt:now,assets:{},references:{BTC:reference},options:{},stablecoins:[],inflows:{mode:'unavailable',rows:[]}};
-  await page.route('**/wm-api/runtime/crypto/order-flow',route=>route.fulfill({json:fixture}));
+  await page.route('**/wm-api/runtime/crypto/oracle-reference',route=>route.fulfill({json:fixture}));
   await page.goto('/e2e/panels.html');
   await page.waitForFunction(()=>window.panelHarness);
   await page.evaluate(()=>window.panelHarness.mount('crypto-oracle-reference'));
@@ -111,4 +112,35 @@ test('reference keeps source observations but expires the current contract dista
   await expect(page.locator('.wm-cstrategy-notice[role=status]')).toContainText('Observation expired');
   await expect(values.first()).toHaveAttribute('data-tone','warning');
   await expect(page.locator('.wm-cstrategy-chart svg')).toBeVisible();
+});
+
+test('reference reads its own source and distinguishes failures from unsupported assets', async ({page}) => {
+  await installDashboard(page,'en',['crypto-oracle-reference']);
+  const now=Date.now();
+  await page.clock.install({time:new Date(now)});
+  let nativeReads=0, publicReads=0, failed=false;
+  const ref={status:'ok',latest:{value:'101',event_at_ms:now,window_seconds:60},history:[{t:now-1000,v:100},{t:now,v:101}],quotes:{},
+    market:{asset:'BTC',market_id:'1',condition_id:'0x123',slug:'btc-test',outcomes:{},starts_at_ms:now-60000,ends_at_ms:now+120000,window_seconds:60,price_kind:'twap',comparator:'>=',rule_version:'test',rule_url:'https://data.chain.link/streams/btc-usd-twap-60s-streams',anchor:{value:'100',source:'fixture',precision:'exact_e18'}}};
+  await page.route('**/wm-api/runtime/crypto/order-flow',route=>{publicReads++;return route.fulfill({status:503,json:{error:'public sources down'}})});
+  await page.route('**/wm-api/runtime/crypto/oracle-reference',route=>{
+    nativeReads++;
+    return route.fulfill({json:{schemaVersion:1,kind:'crypto-strategy',status:'partial',generatedAt:new Date().toISOString(),collectedAt:now,assets:{},references:{BTC:failed?{...ref,status:'stale',error:'REFERENCE_READ_FAILED'}:ref,SOL:{status:'unsupported'}},options:{},stablecoins:[],inflows:{mode:'unavailable',rows:[]}}});
+  });
+  await page.goto('/e2e/panels.html');
+  await page.waitForFunction(()=>window.panelHarness);
+  await page.evaluate(()=>window.panelHarness.mount('crypto-oracle-reference'));
+  await expect(page.locator('.wm-cstrategy-stats strong').last()).toHaveText('+1.00');
+  const before=nativeReads;
+  await page.clock.fastForward(6000);
+  await expect.poll(()=>nativeReads).toBeGreaterThan(before);
+  expect(publicReads).toBe(0);
+  failed=true;
+  await page.getByRole('button',{name:'Refresh',exact:true}).click();
+  await expect(page.locator('.wm-cstrategy-notice[role=status]')).toContainText('read failed');
+  const stats=page.locator('.wm-cstrategy-stats strong');
+  await expect(stats.nth(0)).toHaveText('101.00');
+  await expect(stats.nth(1)).toHaveText('100.00');
+  await expect(stats.nth(2)).toHaveText('—');
+  await page.getByRole('button',{name:'SOL',exact:true}).click();
+  await expect(page.locator('.wm-cstrategy-notice[role=status]')).toContainText('not connected for this asset');
 });

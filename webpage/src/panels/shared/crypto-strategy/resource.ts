@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
-import { fetchCryptoStrategyInputs } from '@/services/api';
+import { fetchCryptoReferenceInputs, fetchCryptoStrategyInputs } from '@/services/api';
 import { usePanelResource, type PanelResource } from '@/panels/usePanelResource';
 import { parseInputs, type Asset, type StrategyInputs } from './model';
 
@@ -11,7 +11,13 @@ export const cryptoStrategyResource: PanelResource<StrategyInputs> = {
   updatedAt: value => Date.parse(value.generatedAt),
   statusLabel: value => value.status === 'stale' ? 'STALE' : value.status === 'partial' ? 'PARTIAL' : 'READY',
 };
-export const useCryptoInputs = () => usePanelResource(cryptoStrategyResource);
+export const cryptoReferenceResource: PanelResource<StrategyInputs> = {
+  ...cryptoStrategyResource, key: 'crypto-reference:market-data:v1', title: 'Contract reference',
+  maxAgeMs: 15000,
+  refreshPolicy: { tier: 'fast', intervalMs: 5000, staleAfterMs: 15000, requestTimeoutMs: 12000 },
+  fetch: context => fetchCryptoReferenceInputs(context?.signal),
+};
+export const useCryptoInputs = (resource = cryptoStrategyResource) => usePanelResource(resource);
 
 let currentAsset: Asset = 'BTC';
 const subscribers = new Set<(value: Asset) => void>();

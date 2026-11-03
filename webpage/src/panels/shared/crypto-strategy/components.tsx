@@ -3,7 +3,7 @@ import { Panel, PanelLoading } from '@/components/Panel';
 import { useI18n } from '@/services/i18n';
 import { PanelDataControls } from '@/panels/shared/PanelDataControls';
 import { ASSETS, marketUrl, validPoints, type Point, type Reference } from './model';
-import { useCryptoAsset, useCryptoInputs } from './resource';
+import { cryptoStrategyResource, useCryptoAsset, useCryptoInputs } from './resource';
 import './styles.css';
 
 export const fmt = (value: number | null | undefined, digits = 2) => value == null || !Number.isFinite(value) ? '—' : value.toLocaleString('en-US', { maximumFractionDigits: digits, minimumFractionDigits: digits });
@@ -15,8 +15,8 @@ export const signedCompact = (value: number | null | undefined) => `${value != n
 export const time = (value: string | number | undefined | null) => value == null || !Number.isFinite(new Date(value).getTime()) ? '—' : new Date(value).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
 export function useCopy() { const { locale } = useI18n(); return (zh: string, en: string) => locale.startsWith('zh') ? zh : en; }
 
-export function Frame({ id, title, badge, children, assets = true, filters }: {id: string; title: string; badge: string; children: ComponentChildren; assets?: boolean; filters?: ComponentChildren}) {
-  const feed = useCryptoInputs(), [asset, select] = useCryptoAsset(), t = useCopy();
+export function Frame({ id, title, badge, children, assets = true, filters, resource = cryptoStrategyResource }: {id: string; title: string; badge: string; children: ComponentChildren; assets?: boolean; filters?: ComponentChildren; resource?: typeof cryptoStrategyResource}) {
+  const feed = useCryptoInputs(resource), [asset, select] = useCryptoAsset(), t = useCopy();
   return <Panel title={title} badge={badge} status="muted" dataPanelId={id} className="wm-market-panel wm-cstrategy-panel"
     controls={<PanelDataControls fetching={feed.status.fetching} onRefresh={() => void feed.refresh()}>
       <p>{t('快照','Snapshot')} {feed.data?.generatedAt ? new Date(feed.data.generatedAt).toLocaleString() : '—'}</p>
@@ -60,7 +60,7 @@ export function MarketLink({reference}: {reference?: Reference}) {
   if (!url || !market || market.ends_at_ms <= Date.now()) return <p className="wm-cstrategy-meta">{t('当前没有核验通过的合约关联','No verified current contract binding')}</p>;
   return <div className="wm-cstrategy-market"><a href={url} target="_blank" rel="noopener noreferrer">{market.asset} · {t('本轮涨跌合约','Current UP/DOWN market')} ↗</a>
     <span>{t('截止','Ends')} {time(market.ends_at_ms)}</span>
-    {Object.entries(reference?.quotes || {}).map(([side,q]) => <span key={side}>{side} {fmt(q.bid*100,1)} / {fmt(q.ask*100,1)}¢ · {time(q.observedAt)}</span>)}
+    {Object.entries(reference?.quotes || {}).map(([side,q]) => <span key={side}>{side} {fmt(q.bid*100,1)} / {fmt(q.ask*100,1)}¢ · {q.quality === 'snapshot' ? t('盘口快照','Book snapshot') : ''} {time(q.observedAt)}</span>)}
     {!Object.keys(reference?.quotes || {}).length && <span>{t('PM 盘口暂缺','PM book unavailable')}</span>}
   </div>;
 }

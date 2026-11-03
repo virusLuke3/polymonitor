@@ -13,12 +13,12 @@ export type CryptoAsset = {
   errors?: Record<string, string>;
 };
 export type Reference = {
-  status?: string; history?: Point[]; spotHistory?: Point[];
+  status?: string; error?: string; marketError?: string; history?: Point[]; spotHistory?: Point[];
   latest?: { value?: string; full_accuracy_value?: string; event_at_ms?: number; received_at_ms?: number; feed_id?: string; precision?: string; window_seconds?: number };
   market?: { asset: string; market_id: string; condition_id: string; slug: string; outcomes: Record<string,string>; starts_at_ms: number; ends_at_ms: number;
     rule_version: string; rule_url: string; window_seconds: number; price_kind: string; comparator: string;
     anchor?: { value: string; source: string; precision: string }; opening_alignment?: { status: string } };
-  quotes?: Record<string, { token: string; bid: number; ask: number; observedAt: string; receivedAt: number; history?: Point[] }>;
+  quotes?: Record<string, { token: string; bid: number; ask: number; observedAt: string; receivedAt: number; history?: Point[]; quality?: string; snapshotAt?: string; upstreamCompleteness?: string }>;
 };
 export type OptionBand = { strike: number; lowerStrike: number; upperStrike: number; probability: number; low: number; high: number; iv: number | null; instruments: string[] };
 export type OptionExpiry = { expiry: string; underlying: number; bands: OptionBand[] };
