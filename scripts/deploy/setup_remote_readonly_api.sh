@@ -132,48 +132,6 @@ POLYDATA_MARKETS_LATEST_SNAPSHOT_FALLBACK=1
 POLYDATA_ALLOWED_ORIGINS=
 POLYDATA_CLOB_API_BASE=https://clob.polymarket.com
 POLYDATA_CLOB_WS_URL=wss://ws-subscriptions-clob.polymarket.com/ws/market
-POLYDATA_API_LOB_WEBSOCKET_ENABLED=0
-POLYDATA_LOB_WEBSOCKET_ENABLED=1
-POLYDATA_LOB_RUNTIME_STATUS_PATH=/tmp/polydata/local-orderbook-websocket-status.json
-POLYDATA_LOB_RUNTIME_STATUS_WRITE_INTERVAL_SECONDS=2
-POLYDATA_LOB_COVERAGE_LIMIT=250
-POLYDATA_LOB_COVERAGE_TOPICS=worldcup,crypto,politics
-POLYDATA_LOB_COVERAGE_REFRESH_SECONDS=60
-POLYDATA_LOB_BOOTSTRAP_MARKET_LIMIT=6
-POLYDATA_LOB_WS_PERSIST_ENABLED=1
-POLYDATA_LOB_UNCHANGED_SNAPSHOT_MIN_INTERVAL_SECONDS=300
-POLYDATA_LOB_MAINTENANCE_INTERVAL_SECONDS=21600
-POLYDATA_LOB_ROLLUP_BEFORE_DAYS=7
-POLYDATA_LOB_HOT_RETENTION_DAYS=14
-POLYDATA_LOB_WARM_RETENTION_DAYS=14
-POLYDATA_LOB_COLD_RETENTION_DAYS=7
-POLYDATA_LOB_MAINTENANCE_BATCH_SIZE=5000
-POLYDATA_LOB_DRIFT_CHECK_INTERVAL_SECONDS=60
-POLYDATA_LOB_DRIFT_CHECK_MAX_PER_TICK=3
-POLYDATA_LOB_DRIFT_SECONDS_HOT=900
-POLYDATA_LOB_DRIFT_SECONDS_WARM=1800
-POLYDATA_LOB_DRIFT_SECONDS_COLD=3600
-POLYDATA_LOB_STALE_IDLE_SECONDS_HOT=120
-POLYDATA_LOB_STALE_IDLE_SECONDS_WARM=300
-POLYDATA_LOB_STALE_IDLE_SECONDS_COLD=900
-POLYDATA_LOB_CLICKHOUSE_ENABLED=0
-POLYDATA_LOB_CLICKHOUSE_TIERS=hot,warm
-POLYDATA_LOB_CLICKHOUSE_DELTA_TABLE=quant_lob_delta_fact
-POLYDATA_LOB_CLICKHOUSE_LEVEL_TABLE=quant_lob_level_fact
-POLYDATA_LOB_CLICKHOUSE_BATCH_SIZE=250
-POLYDATA_LOB_CLICKHOUSE_FLUSH_INTERVAL_SECONDS=5
-POLYDATA_LOB_CLICKHOUSE_TTL_DAYS=30
-POLYDATA_LOB_CLICKHOUSE_WRITE_LEVELS=1
-POLYDATA_LOB_WORLDCUP_GUARD_INTERVAL_SECONDS=300
-POLYDATA_LOB_WORLDCUP_GUARD_API_TIMEOUT_SECONDS=60
-POLYDATA_LOB_WORLDCUP_GUARD_COVERAGE_API_TIMEOUT_SECONDS=15
-POLYDATA_LOB_WORLDCUP_GUARD_RUN_TIMEOUT_SECONDS=120
-POLYDATA_LOB_WORLDCUP_GUARD_POSTGRES_STATEMENT_TIMEOUT_MS=15000
-POLYDATA_LOB_WORLDCUP_GUARD_STATUS_PATH=/tmp/polydata/worldcup-lob-guard-status.json
-POLYDATA_LOB_WORLDCUP_GUARD_LOOKAHEAD_HOURS=36
-POLYDATA_LOB_WORLDCUP_GUARD_LOOKBACK_HOURS=12
-POLYDATA_LOB_WORLDCUP_GUARD_MIN_MARKETS=1
-POLYDATA_LOB_WORLDCUP_GUARD_CLICKHOUSE_ENABLED=0
 EOF
 
 cat > "${LOCAL_TUNNEL_SERVICE}" <<EOF
@@ -204,7 +162,7 @@ StartLimitBurst=5
 Type=simple
 WorkingDirectory=${REMOTE_REPO_ROOT}
 EnvironmentFile=%h/.config/polydata/polydata.env
-ExecStart=/bin/bash -lc 'POLYDATA_LOB_WEBSOCKET_ENABLED="${POLYDATA_API_LOB_WEBSOCKET_ENABLED:-0}" exec "${REMOTE_REPO_ROOT}/.venv/bin/gunicorn" --workers "${POLYDATA_GUNICORN_WORKERS:-3}" --threads "${POLYDATA_GUNICORN_THREADS:-4}" --bind "${POLYDATA_API_HOST:-127.0.0.1}:${POLYDATA_API_PORT:-18500}" --timeout 180 --graceful-timeout 30 --max-requests "${POLYDATA_GUNICORN_MAX_REQUESTS:-300}" --max-requests-jitter "${POLYDATA_GUNICORN_MAX_REQUESTS_JITTER:-60}" scripts.api.app:app'
+ExecStart=/bin/bash -lc 'exec "${REMOTE_REPO_ROOT}/.venv/bin/gunicorn" --workers "${POLYDATA_GUNICORN_WORKERS:-3}" --threads "${POLYDATA_GUNICORN_THREADS:-4}" --bind "${POLYDATA_API_HOST:-127.0.0.1}:${POLYDATA_API_PORT:-18500}" --timeout 180 --graceful-timeout 30 --max-requests "${POLYDATA_GUNICORN_MAX_REQUESTS:-300}" --max-requests-jitter "${POLYDATA_GUNICORN_MAX_REQUESTS_JITTER:-60}" "scripts.api.app:create_app(start_runtime=True)"'
 Restart=always
 RestartSec=15
 TimeoutStopSec=45
@@ -426,6 +384,11 @@ REMOTE_WEB_ROOT="${REMOTE_WEB_ROOT:-/var/www/polydata}"
 sudo apt update
 sudo apt install -y nginx redis-server python3-venv python3-pip rsync
 
+# Applies to the whole production host, including user service journals.
+sudo install -D -m 644 "${REMOTE_REPO_ROOT}/deploy/journald/60-polymonitor.conf" \
+  /etc/systemd/journald.conf.d/60-polymonitor.conf
+sudo systemctl restart systemd-journald.service
+
 mkdir -p "${HOME}/.config/polydata"
 mkdir -p "${HOME}/.config/systemd/user"
 mkdir -p "${REMOTE_REPO_ROOT}/data"
@@ -453,9 +416,6 @@ GCP_UNITS=(
   polydata-grid-esports-seed.service
   polydata-inflation-nowcast-seed.service
   polydata-jin10-seed.service
-  polydata-lob-websocket.service
-  polydata-lob-maintenance.service
-  polydata-worldcup-lob-guard.service
   polydata-macro-cpi-panels-seed.service
   polydata-macro-cpi-registry-seed.service
   polydata-market-group-seed.service
@@ -463,7 +423,6 @@ GCP_UNITS=(
   polydata-new-market-signal.service
   polydata-polysignal-feed-seed.service
   polydata-polymarket-macro-map-seed.service
-  polydata-quant-backtest-runner.service
   polydata-sports-odds-seed.service
   polydata-suspicious-trades-seed.service
   polydata-serving-healthcheck.service
@@ -586,7 +545,7 @@ tr -d '\r' < \"\$headers\" | grep -q '^HTTP/.* 206'
 echo pmtiles-range-ok"
 
 echo "[6/7] Remote service status ..."
-ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "systemctl --user --no-pager --full status polydata-gcp.target polydata-db-tunnel.service polydata-api.service polydata-lob-websocket.service | sed -n '1,220p'"
+ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "systemctl --user --no-pager --full status polydata-gcp.target polydata-db-tunnel.service polydata-api.service | sed -n '1,220p'"
 ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "for unit in polydata-market-sync.service polydata-active-market-serving-refresh.service polydata-active-market-serving-refresh.timer polydata-trade-sync.service polydata-oracle-sync.service polydata-analytics-sync.service polydata-event-market-serving.service polydata-market-workspace-serving.service polydata-db-reverse-tunnel.service polydata-local-collector.target; do state=\$(systemctl --user is-active \"\$unit\" 2>/dev/null || true); printf '%s %s\n' \"\$unit\" \"\$state\"; test \"\$state\" != active; done"
 ssh "${SSH_OPTS[@]}" "${REMOTE_USER}@${REMOTE_HOST}" "sudo systemctl --no-pager --full status nginx redis-server | sed -n '1,160p'"
 
