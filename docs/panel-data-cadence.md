@@ -25,10 +25,10 @@
 | Funding 概览 | 60 秒 | 60 秒 | 预估费率会变化，结算周期不等于报价周期 |
 | Alpha／Whales／Flow Watch／PolySignal | 2 分钟 | 既有 2 分钟 | 对齐信号发布 |
 | Related Intelligence | 5 分钟 | 保留各来源 3／5／10／15 分钟 | 采集按来源区分 |
-| Breaking Event Radar | 5 分钟 | 5 分钟 | 与概览检查对齐 |
-| TV／YouTube 目录 | 15 分钟 | 配置 15 分钟；单轮不重叠 | 视频播放不随目录轮询停止；运行中的单轮耗时须单独核验 |
+| Breaking Event Radar | 5 分钟 | 每轮结束后等待 5 分钟 | 与概览检查对齐 |
+| TV／YouTube 目录 | 15 分钟 | 起点到起点 15 分钟，超时轮次至少休息 60 秒；单轮不重叠 | 视频播放不随目录轮询停止；已安装 main 上既有的周期修正 |
 | Tech／Finance 工厂 Panel | 10 分钟 | 既有 10 分钟；部分共享外源 15 分钟 | 条目原始发布时间仍有意义 |
-| DeFi Token Watch | 5 分钟 | 5 分钟 | 概览报价 |
+| DeFi Token Watch | 5 分钟 | 每轮结束后等待 5 分钟 | 概览报价 |
 | Commodity Equity Transmission | 5 分钟 | 组合已有商品快照 | 不新增外源采集 |
 | Geo／Sanctions | 5 分钟 | 既有 5 分钟 | 继续与地图共享数据 |
 | CPI／宏观五个注册视图 | 30 分钟 | 既有 30 分钟组装 | 基础序列大多 6 小时采集 |
@@ -71,4 +71,33 @@
 
 ## 交付与实测记录
 
-待完成代码、迁移后运行配置及线上核验后填写确切提交、版本、请求观察窗口、测试结果和剩余失败。
+### 发布与运行身份
+
+- 前端代码提交：`b4784f2d1772260abb7f61bd1bb26d189de53aaf`，已推送 main；通过 `git archive` 导出后执行 `npm ci` 与正式构建。未使用脏工作区产物。
+- 实际发布到迁移后的腾讯云 `/var/www/polydata`。`polymonitor.club` 与 `www.polymonitor.club` 的 `/release-sha` 均返回上述版本；服务器 `index.html`、`sw.js` 与构建结果哈希一致。
+- 迁移后的本机后端保留原路由、代理、数据库配置，仅安装 11 个相关 Python 文件及 6 项周期配置；17 项文件／配置哈希逐一核验。回滚原件与 receipt 保存于 `~/.local/share/polymonitor/cadence-releases/b4784f2d/`。
+- 进程参数确认：Market Group `60→300秒`、Funding `30→60秒`、DeFi `120→300秒`、Radar `60→300秒`、New Market Signal `20→300秒`；Crypto Strategy 仍按 30 秒出快照，在内部对慢来源限频。TV 同时安装已提交的起点到起点计时修正。
+- API 使用 Gunicorn HUP 平滑加载时效规则，未恢复旧 GCP 采集或专用转发。实时公开 Funding payload 已返回 `refreshIntervalSeconds=60`、`freshnessWindowSeconds=180`。
+
+### 代码与浏览器验证
+
+- 相关后端测试 **150 通过**，覆盖本次领域规则及地图共用的 geo／transport／weather；前端单元测试 **376 通过、1 跳过**。
+- 公共生命周期与 Crypto 浏览器回归最终 **40 项通过**；另 3 项 Contract／历史流入测试通过。保留 1 项原有 bootstrap 测试失败：等待健康结果后直接断言成交已完成；在本次修改前的 `88dde661` 导出中也复现。
+- 全仓质量脚本完成密钥扫描、systemd、Python 编译、Shell 语法与 Ruff 检查；全量 pytest **887 通过、27 失败**。其中 26 项在保留工作区其他修改、移除本次修改的基线中也失败；另一项打包启动测试在禁用网络的测试环境断言 `/health=200` 失败，其相同健康检查在基线也返回 503。未改动这些数据库／ClickHouse／发布等其他任务内容。
+- `npm audit --audit-level=high` 未通过：既有 Vite 高风险开发依赖及 Vitest 中风险告警，锁文件本次未改。构建、语言、前端边界和地图 bundle 检查通过。不能把上述结果描述成“全仓检查全绿”。
+
+### 生产观察
+
+- 2026-11-03 北京时间约 20:00 开始验证：相邻两次行情采集结果相隔 **299.8 秒**；Funding 正常后续轮次约 **60.0 秒**，首次轮次因来源响应约 63 秒。
+- 真实生产 UI 的桌面 2518×1249、手机 390×844 截图使用真实 API／瓦片；桌面 5 列、手机 1 列，无横向溢出，桌面重新进入后布局保存值一致。首轮手机观察因滚动后可见性变化未等到报价，第二轮保持 Panel 可见后正常显示，首次失败证据亦保留。
+- 浏览器首屏完成后，在北京时间 **20:03:15～20:08:46** 连续观察约 **330 秒**：`/wm-api/runtime/markets/crypto` **仅发出 1 次自动刷新**，前 270 秒无重复请求，约第 300 秒发出该次请求。报价列表仍可见，浏览器无未捕获 JavaScript 异常。手机第二轮也显示实际 BTC 报价。
+
+### 仍存在的数据和验收限制
+
+- 来源失败早于此次发布：加密同步行情／Order Flow／Derivatives 的 Bybit 读取仍有 `URLError`，Options 无可用期权观测，Stablecoin 的 Coinbase／Kraken 仍返回 unavailable；慢来源成功后保留时间的行为由测试验证，线上失败窗口不能作为成功采集验收。
+- Funding 的 Binance 分支仍产出新数据，Bybit 分支本轮失败并保留旧值；DeFi 仍有来源失败而保留历史快照。来源故障没有被本次调度更改掩盖。
+- 生产浏览器记录到市场目录及选中市场 Oracle／Focus／Flow／Chart 的间歇 503；这些是市场读取失败，不是本次已修复项。独立 `/health` 抽查为 **200、database=true、redis=true**，只说明该次依赖检查通过。
+- Contract 抽查 BTC 有当前源观测、ETH 当次源观测已过期、SOL／XRP unsupported；5 秒读取保持，但读取周期不保证源观测存在。
+- 30 分钟／6 小时策略以已发布配置、文件身份和调度测试为证据；这次数分钟观察没有覆盖其完整周期。历史流入仍是历史资料。
+
+完整日志、运行参数、哈希、真实页面截图和请求记录保存在 [本次核验目录](../webpage/artifacts/panel-cadence-20261103/)；历史的修改前周期 CSV 保持原样。
