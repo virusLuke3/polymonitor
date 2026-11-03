@@ -43,11 +43,11 @@ def read_flow(reader, market_id, *, limit=50, before=None, chart_range=None):
                 nonlocal calls
                 calls += 1
                 remaining = deadline - time.monotonic()
-                # 4 MiB watermark + 56 MiB indexed facts + 4 MiB timestamps.
+                # 4 MiB watermark + 24 MiB keys + 32 MiB facts + 4 MiB times.
                 # Limits are checked at granule boundaries, not physical IO.
-                if calls > 3 or remaining <= 0:
+                if calls > 4 or remaining <= 0:
                     raise TimeoutError("Panel trade request budget exhausted")
-                context["_resources"].clickhouse = replace(settings, max_bytes_to_read=(56 if calls == 2 else 4) * 1024**2)
+                context["_resources"].clickhouse = replace(settings, max_bytes_to_read=(4, 24, 32, 4)[calls - 1] * 1024**2)
                 rows = ch._query_json_rows(context, sql, timeout_seconds=min(3, remaining))
                 if rows is None:
                     raise TimeoutError("Panel trade query unavailable")
@@ -65,28 +65,48 @@ def read_flow(reader, market_id, *, limit=50, before=None, chart_range=None):
             # The block bound is a scan guard, not proof of time completeness.
             # Timestamp filtering below enforces the requested chart interval.
             seconds = RANGES[chart_range] if chart_range else 86400
-            lower = max(0, upper - seconds + 1)
+            # This panel serves recent fills, not an unbounded historical scan.
+            # Older parts may reconstruct variant flags from wide raw records.
+            # A wider chart axis must not multiply the source read workload.
+            scan_blocks = min(seconds, 86400)
+            lower = max(0, upper - scan_blocks + 1)
             token_sql = ",".join(f"'{token}'" for token in tokens)
             cursor_sql = f"AND (block_number, log_index, tx_hash) < ({before[0]}, {before[1]}, '{before[2]}')" if before else ""
-            # Published primary-store contract, independent of legacy table
-            # aliases or other consumers' historical fallback configuration.
-            block_col = "canonical_block_number"
-            table = "orderfilled_fact_primary_v1"
-            token_filter = f"AND canonical_token_id IN ({token_sql})"
-            rows = read(f"""SELECT {ch._orderfilled_projection_sql(include_time=False)} FROM (
-                SELECT tx_hash, log_index, market_id, maker, taker, price, size, side_code, outcome_code,
-                       token_id, block_number, order_hash, maker_amount, taker_amount, fee, contract
-                FROM {table}
-                WHERE intDiv({block_col},1000000) BETWEEN {lower // 1000000} AND {upper // 1000000}
-                  AND {block_col} BETWEEN {lower} AND {upper}
-                  AND token_id IN ({token_sql}) {token_filter} {cursor_sql}
+            # Seek narrow event keys before reading wide variant/amount columns.
+            # Values still come from the published fact view, never unchecked
+            # base rows; its source variants and identity checks are preserved.
+            chosen = read(f"""SELECT market_id, token_id, block_number, log_index, tx_hash
+                FROM orderfilled_events_v1
+                PREWHERE intDiv(block_number,1000000) BETWEEN {lower // 1000000} AND {upper // 1000000}
+                  AND block_number BETWEEN {lower} AND {upper} AND token_id IN ({token_sql})
+                WHERE fact_variant_count > 0 {cursor_sql}
                 ORDER BY block_number DESC, log_index DESC, tx_hash DESC LIMIT {limit + 1}
-                ) f ORDER BY block_number DESC, log_index DESC, tx_hash DESC FORMAT JSONEachRow""")
+                FORMAT JSONEachRow""")
+            rows = []
+            if chosen:
+                if any(str(r["token_id"]) not in tokens or len(str(r["tx_hash"])) != 64
+                       or any(c not in '0123456789abcdef' for c in str(r["tx_hash"])) for r in chosen):
+                    raise TimeoutError("Invalid indexed trade identity")
+                identities = ",".join(f"({int(r['market_id'])},'{r['token_id']}',{int(r['block_number'])},{int(r['log_index'])},'{r['tx_hash']}')" for r in chosen)
+                partitions = ",".join(str(p) for p in sorted({int(r["block_number"]) // 1000000 for r in chosen}))
+                fields = ("f.tx_hash, f.log_index, f.market_id, concat('0x', f.token_id) AS token_id, "
+                          "toString(f.price) AS price, f.block_number") if chart_range else ch._orderfilled_projection_sql(include_time=False)
+                rows = read(f"""SELECT {fields} FROM orderfilled_fact_primary_v1 f
+                    WHERE intDiv(canonical_block_number,1000000) IN ({partitions})
+                    AND (canonical_market_id,canonical_token_id,canonical_block_number,canonical_log_index,canonical_tx_hash)
+                        IN ({identities})
+                    ORDER BY block_number DESC,log_index DESC,tx_hash DESC FORMAT JSONEachRow""")
+                identity = lambda r: (int(r["block_number"]), int(r["log_index"]), str(r["tx_hash"]))
+                if (len(rows) != len(chosen) or {identity(r) for r in rows} != {identity(r) for r in chosen}
+                    or any(ch._uint256_clickhouse_token(r.get("token_id")) not in tokens for r in rows)):
+                    raise TimeoutError("Trade facts changed during indexed read")
             visible = ch._attach_trade_times(read, rows[:limit])
         if chart_range:
             end = datetime.now(timezone.utc)
             start = end - timedelta(seconds=seconds)
             projected = semantics.project_token_price_series(context, [dict(row, market_id=int(market_id)) for row in visible])
+            if any(row.get("outcomeSemanticsStatus") in {"semantics_query_failed", "semantics_database_unavailable"} for row in projected):
+                raise TimeoutError("Chart outcome evidence unavailable")
             points = []
             for row in reversed(projected):
                 stamp = str(row.get("timestamp") or "")
@@ -110,8 +130,8 @@ def read_flow(reader, market_id, *, limit=50, before=None, chart_range=None):
                              "globalCompleteness": "NOT_PROVEN", "hasMoreInWindow": len(rows) > limit}}
 
     return {"marketId": int(market_id), "localMarketId": int(market_id),
-            **reader.cache.get("chart" if chart_range else "flow", [int(market_id), limit, before, chart_range], build,
-                               ttl=90 if chart_range else 8, max_age=300 if chart_range else 60)}
+            **reader.cache.get("chart" if chart_range else "flow", ["indexed-keys-v2", int(market_id), limit, before, chart_range], build,
+                               ttl=90 if chart_range else 8, max_age=300 if chart_range else 60, background=False)}
 
 
 def read_chart(reader, market_id, *, range_name):

@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import math
 import hashlib
+import time
 
 from api.read_budget import take_read_token, try_permit
 from api.serialization import normalize_market, normalize_oracle_event
@@ -29,6 +30,12 @@ def number(value):
 
 def read_query(connection_factory, database_path, sql, params=()):
     permit = try_permit("panel-postgres", 2)
+    # Absorb a short refresh burst without opening another DB connection or
+    # retrying a statement. The API's bounded workers own this finite wait.
+    deadline = time.monotonic() + 0.75
+    while permit is None and time.monotonic() < deadline:
+        time.sleep(0.025)
+        permit = try_permit("panel-postgres", 2)
     if permit is None:
         raise TimeoutError("Panel PostgreSQL budget full")
     with permit:
@@ -106,7 +113,7 @@ class MarketPanelReader:
             if not rows:
                 return {"_status": 404, "error": "Market identity not available", "marketId": int(market_id)}
             return {"row": rows[0]}
-        value = self.cache.get("record", ["gamma-quotes-v1", int(market_id)], build, ttl=60, max_age=300, admit=False)
+        value = self.cache.get("record", ["gamma-quotes-v1", int(market_id)], build, ttl=60, max_age=300, admit=False, background=False)
         if value.get("_status") == 404:
             raise LookupError("Market identity not available")
         if not value.get("row"):
@@ -182,7 +189,7 @@ class MarketPanelReader:
                     "coverage": "recently-observed-gamma-markets", "sort": sort, "source": "market-data/postgresql", "generatedAt": utc_now()}
         # PostgreSQL admission/rate limits and the per-key cache lock still
         # apply. Slow ClickHouse chart/flow builds must not occupy this lane.
-        return self.cache.get("catalog", ["gamma-quotes-v1", query, page_size, sort], build, ttl=45, max_age=300, admit=False)
+        return self.cache.get("catalog", ["gamma-quotes-v1", query, page_size, sort], build, ttl=45, max_age=300, admit=False, background=False)
 
     def groups(self, *, query="", page=1, page_size=50, sort="volume"):
         catalog = self.catalog(query=query, page=page, page_size=page_size, sort="volume" if sort == "active" else sort)
@@ -242,7 +249,7 @@ class MarketPanelReader:
     def health(self):
         from api.services.panel_read_cache import NAMESPACE
         components = {layer: self.runtime.SNAPSHOT_STORE.get(NAMESPACE + ":health", layer) or {"status": "unknown"}
-                      for layer in ("catalog", "record", "oracle", "flow", "chart")}
+                      for layer in ("catalog", "record", "semantics-v2", "oracle", "flow", "chart")}
         return {"status": "degraded" if any(c["status"] == "unavailable" for c in components.values()) else "observed",
                 "scope": "recent-reads-only", "components": components,
                 "lob": {"status": "unknown", "source": "per-book-response"},
@@ -313,9 +320,11 @@ class MarketPanelReader:
                     "currentStatus": state, "completionStatus": state, "isTradingClosed": row.get("closed"),
                     "isResolved": row.get("is_resolved"), "isFinal": row.get("is_final"),
                     "settlementOutcome": row.get("settlement_outcome") or "UNKNOWN", "settlementSource": row.get("settlement_source"),
-                    "updatedAt": row.get("oracle_updated_at") or row.get("market_state_observed_at"),
+                    "updatedAt": row.get("oracle_updated_at"),
+                    "marketObservedAt": row.get("quote_observed_at") or row.get("market_state_observed_at"),
+                    "lastEventAt": timeline[-1].get("eventTime") if timeline else None,
                     "timeline": timeline, "hasMore": len(events) > 50, "coverage": "latest-50-events"}
-        return {"marketId": int(market_id), "localMarketId": int(market_id), **self.cache.get("oracle", int(market_id), build, ttl=20, max_age=120)}
+        return {"marketId": int(market_id), "localMarketId": int(market_id), **self.cache.get("oracle", ["observations-v2", int(market_id)], build, ttl=30, max_age=120, admit=False, background=False)}
 
     def chart(self, market_id, *, range_name="1d", interval="5m"):
         if range_name not in RANGES:

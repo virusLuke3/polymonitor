@@ -40,8 +40,15 @@ def _live_side(side, token_id: str) -> dict[str, Any]:
         raise ValueError("LOB token identity mismatch")
     result = dict(side)
     status = result.get("bookStatus")
-    if status not in {"warming", "live", "stale", "unavailable"}:
+    if status not in {"warming", "live", "available", "stale", "unavailable"}:
         raise ValueError("Invalid LOB status")
+    if status == "available":
+        # Native snapshots prove availability, not continuous receive-time
+        # coverage. Preserve that distinction instead of rejecting the source.
+        observed = _timestamp(result.get("observedAt"))
+        now = datetime.now(timezone.utc)
+        if not observed or not 0 <= (now - observed).total_seconds() <= 30 or result.get("upstreamReady") is not True:
+            result["bookStatus"] = "stale"
     if status == "live":
         now = datetime.now(timezone.utc)
         heartbeat = _timestamp(result.get("heartbeatAt"))
@@ -90,7 +97,7 @@ def get_runtime_lob_by_token_payload(
             raise ValueError("Unexpected LOB source")
         yes, no = _live_side(payload.get("yes"), token_id), _live_side(payload.get("no"), no_token_id)
         states = {s["bookStatus"] for s in ([yes, no] if no_token_id else [yes])}
-        status = next(s for s in ("unavailable", "stale", "warming", "live") if s in states)
+        status = next(s for s in ("unavailable", "stale", "warming", "available", "live") if s in states)
         times = [s.get("receivedAt") for s in ([yes, no] if no_token_id else [yes]) if s.get("receivedAt")]
         return {
             **envelope,

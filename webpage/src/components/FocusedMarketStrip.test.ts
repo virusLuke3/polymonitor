@@ -41,6 +41,17 @@ describe('live book provenance', () => {
     expect(lobMatchesTokens(live, '123', '456')).toBe(false);
     expect(liveBookStatus({ ...live, yes: { ...live.yes, bookStatus: 'warming' } }, 'yes', now)).toBe('warming');
   });
+
+  it('accepts a recent native snapshot without claiming continuous live provenance', () => {
+    const snapshot: LobPayload = { marketId: 1, yes: { bookStatus: 'available', upstreamReady: true,
+      observedAt: new Date(now).toISOString(), receivedAt: null, eventAt: new Date(now - 45_000).toISOString(),
+      bestBid: '.05', bestAsk: '.06', bids: [{ price: '.05', size: 2 }], asks: [{ price: '.06', size: 3 }] } };
+    expect(liveBookStatus(snapshot, 'yes', now)).toBe('available');
+    expect(liveBookStatus(snapshot, 'yes', now + 31_000)).toBe('stale');
+    expect(bookMidValue(snapshot)).toBeCloseTo(.055);
+    expect(bookMidValue({ ...snapshot, yes: { ...snapshot.yes, bestAsk: null } })).toBeNull();
+    expect(bookMidValue({ ...snapshot, yes: { ...snapshot.yes, bestAsk: '.04' } })).toBeNull();
+  });
 });
 
 

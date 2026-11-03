@@ -32,16 +32,19 @@ function groupHasTerminalProbability(group: MarketGroupItem) {
     ...(group.topOutcomes || []).flatMap((outcome) => [outcome.blockCloseYesPrice, outcome.yesPrice, outcome.noPrice]),
   ];
   return values.some((value) => {
+    if (value == null || value === '') return false;
     const numeric = Number(value);
     return Number.isFinite(numeric) && (numeric <= 0.03 || numeric >= 0.97);
   });
 }
 
 function groupOutcomePrice(outcome: { blockCloseYesPrice?: string | number | null; yesPrice?: string | number | null }) {
-  const blockClose = Number(outcome.blockCloseYesPrice);
-  if (Number.isFinite(blockClose)) return blockClose;
-  const yes = Number(outcome.yesPrice);
-  return Number.isFinite(yes) ? yes : null;
+  for (const value of [outcome.blockCloseYesPrice, outcome.yesPrice]) {
+    if (value == null || value === '') continue;
+    const price = Number(value);
+    if (Number.isFinite(price)) return price;
+  }
+  return null;
 }
 
 function groupOutcomeIsTerminal(outcome: { blockCloseYesPrice?: string | number | null; yesPrice?: string | number | null }) {

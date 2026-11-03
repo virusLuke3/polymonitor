@@ -132,6 +132,8 @@ function focusedOracleStatus(ctx: Inputs, payload: OraclePayload, i18n: OracleI1
         <div><span>{t('atlasOracle.resolution')}</span><strong>{resolved ? outcome : t('atlasOracle.pendingOutcome')}</strong></div>
         <div><span>{t('atlasOracle.events')}</span><strong>{unavailable ? '--' : i18n.formatNumber(payload.timeline?.length || 0)} <small>{payload.timeline?.length ? t('atlasOracle.onchain') : t('atlasOracle.noneYet')}</small></strong></div>
         <div className="wide"><span>{t('atlasOracle.dataUpdated')}</span><strong>{updatedAt ? i18n.formatRelativeTime(updatedAt) : t('atlasOracle.notAvailable')}</strong></div>
+        <div className="wide"><span>{t('atlasOracle.marketObserved')}</span><strong>{payload.marketObservedAt ? i18n.formatRelativeTime(payload.marketObservedAt) : t('atlasOracle.notAvailable')}</strong></div>
+        <div className="wide"><span>{t('atlasOracle.lastRead')}</span><strong>{payload.generatedAt ? i18n.formatRelativeTime(payload.generatedAt) : t('atlasOracle.notAvailable')}</strong></div>
       </div>
       <div className="wm-oracle-section-heading"><span>{t('atlasOracle.lifecycle')}</span></div>
       <div className="wm-oracle-lifecycle" aria-label={t('atlasOracle.lifecycle')}>

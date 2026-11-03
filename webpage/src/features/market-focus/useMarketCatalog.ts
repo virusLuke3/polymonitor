@@ -27,6 +27,9 @@ export function useMarketCatalog(bootstrap: BootstrapPayload | null, enabled: bo
     const promise = Promise.allSettled([
       fetchMarketsPage(1, '', 50, controller.signal, sort).then((catalog) => {
         if (!isCurrent()) return;
+        if (catalog.items?.some((item) => ['semantics_query_failed', 'semantics_database_unavailable'].includes(item.outcomeSemanticsStatus || ''))) {
+          throw new Error('Quote verification is temporarily unavailable; keeping the previous page.');
+        }
         hydrated.current.markets = true;
         setMarkets((catalog.items || []).map((item) => ({ ...item, catalogFetchedAt: catalog.generatedAt }))); setMarketGroups([]); setLoaded(true);
         if (catalog.status === 'stale' && catalog.refreshStatus !== 'refreshing') errors.push('Catalog refresh failed; showing the last stored page.');

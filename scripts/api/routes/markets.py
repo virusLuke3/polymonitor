@@ -37,7 +37,9 @@ def create_markets_blueprint(dependencies: MarketRouteDependencies) -> Blueprint
 
     @bp.errorhandler(TimeoutError)
     def unavailable(_error):
-        return respond({"status": "unavailable", "error": "Market data temporarily unavailable"})
+        return jsonify({"status": "unavailable", "error": "Market data temporarily unavailable"}), 503, {
+            "Retry-After": "15", "Cache-Control": "no-store",
+        }
 
     @bp.errorhandler(ValueError)
     def invalid(_error):
@@ -54,10 +56,22 @@ def create_markets_blueprint(dependencies: MarketRouteDependencies) -> Blueprint
 
     def sanitize(payload: Any, *, market_id: int | None = None) -> Any:
         from api.services.free_content.public import filter_workspace
-        return filter_workspace(dependencies.sanitize_payload(
+        projected = dependencies.sanitize_payload(
             payload,
             market_id=market_id,
-        ))
+        )
+        # A failed proof read is a failed refresh, not a successful page of
+        # null prices. Keep permanent identity rejections fail-closed as before.
+        pending = [projected]
+        while pending:
+            value = pending.pop()
+            if isinstance(value, Mapping):
+                if value.get("outcomeSemanticsStatus") in {"semantics_query_failed", "semantics_database_unavailable"}:
+                    raise TimeoutError("Market outcome evidence temporarily unavailable")
+                pending.extend(value.values())
+            elif isinstance(value, list):
+                pending.extend(value)
+        return filter_workspace(projected)
 
     @bp.route("/health/panels", methods=["GET"])
     def panel_health():

@@ -125,16 +125,81 @@ def test_empty_flow_is_a_fixed_window_not_an_expanding_scan(runtime, monkeypatch
     def query(ctx, sql, **kwargs):
         calls.append(sql)
         assert ctx['_resources'].clickhouse.max_threads == 1
-        assert ctx['_resources'].clickhouse.max_bytes_to_read == (4 if len(calls) == 1 else 56) * 1024**2
+        assert ctx['_resources'].clickhouse.max_bytes_to_read == (4 if len(calls) == 1 else 24) * 1024**2
         return [{"block_number": 90000000, "timestamp": "2026-11-02T00:00:00Z"}] if len(calls) == 1 else []
     monkeypatch.setattr(panel_trade_reader.ch, "_query_json_rows", query)
     monkeypatch.setattr(panel_trade_reader.semantics, "annotate_raw_trade_rows", lambda _, rows: rows)
     result = reader.flow(1)
     assert result["items"] == [] and result["status"] == "ok"
     assert len(calls) == 2
-    assert "canonical_token_id IN" in calls[1]
+    assert "PREWHERE" in calls[1] and "fact_variant_count > 0" in calls[1]
     assert "BETWEEN 89913601 AND 90000000" in calls[1]
     assert result["coverage"]["globalCompleteness"] == "NOT_PROVEN"
+
+
+def test_trade_keys_are_resolved_to_exact_source_facts_within_total_budget(runtime, monkeypatch):
+    reader = MarketPanelReader(runtime)
+    reader.record = Mock(return_value={"yes_token_id": "1", "no_token_id": "2"})
+    key = {"market_id": 7, "token_id": "0" * 63 + "1", "block_number": 90000000, "log_index": 3, "tx_hash": "a" * 64}
+    budgets = []
+    def query(ctx, sql, **kwargs):
+        budgets.append(ctx['_resources'].clickhouse.max_bytes_to_read)
+        if len(budgets) == 1:
+            return [{"block_number": 90000000, "timestamp": "2026-11-03T00:00:00Z"}]
+        if len(budgets) == 2:
+            return [key]
+        if len(budgets) == 3:
+            assert 'orderfilled_fact_primary_v1' in sql
+            assert 'canonical_log_index,canonical_tx_hash)' in sql and key['tx_hash'] in sql
+            return [{**key, 'token_id': '0x' + key['token_id'], 'price': '0.42', 'size': '10'}]
+        return [{"block_number": 90000000, "timestamp": "2026-11-03T00:00:00Z"}]
+    monkeypatch.setattr(panel_trade_reader.ch, '_query_json_rows', query)
+    monkeypatch.setattr(panel_trade_reader.semantics, 'annotate_raw_trade_rows', lambda _, rows: rows)
+    result = reader.flow(7)
+    assert result['status'] == 'ok' and len(result['items']) == 1
+    assert result['items'][0]['price'] == '0.42'
+    assert sum(budgets) == 64 * 1024**2
+
+
+def test_long_chart_range_does_not_expand_the_source_scan(runtime, monkeypatch):
+    reader = MarketPanelReader(runtime)
+    reader.record = Mock(return_value={"yes_token_id": "1", "no_token_id": "2"})
+    calls = []
+    def query(ctx, sql, **kwargs):
+        calls.append(sql)
+        return [{"block_number": 90000000, "timestamp": "2026-11-03T00:00:00Z"}] if len(calls) == 1 else []
+    monkeypatch.setattr(panel_trade_reader.ch, '_query_json_rows', query)
+    monkeypatch.setattr(panel_trade_reader.semantics, 'project_token_price_series', lambda _, rows: rows)
+    result = reader.chart(7, range_name='1m')
+    assert len(calls) == 2 and 'BETWEEN 89913601 AND 90000000' in calls[1]
+    assert result['range'] == '1m' and result['coverage']['complete'] is False
+
+
+def test_expired_fast_read_returns_completed_refresh_instead_of_perpetual_stale(runtime):
+    cache = PanelReadCache(runtime)
+    key = json.dumps(['oracle', 1], separators=(',', ':'))
+    runtime.SNAPSHOT_STORE.set(NAMESPACE, key, {'items': ['old']}, 1)
+    with sqlite3.connect(runtime.SNAPSHOT_STORE.db_path) as db:
+        db.execute('UPDATE panel_snapshots SET expires_at=?, updated_at=?', (int(time.time()) - 1, int(time.time()) - 5))
+    result = cache.get('oracle', 1, lambda: {'items': ['new']}, ttl=30, max_age=120, background=False)
+    assert result['status'] == 'ok' and result['items'] == ['new']
+
+
+def test_transient_semantics_failure_is_503_but_permanent_identity_rejection_is_not():
+    from dataclasses import fields
+    from flask import Flask
+    from api.routes.markets import MarketRouteDependencies, create_markets_blueprint
+    payload = {'items': [{'id': 7, 'outcomeSemanticsStatus': 'semantics_query_failed', 'latestPrice': None}]}
+    deps = {f.name: Mock(return_value={}) for f in fields(MarketRouteDependencies)}
+    deps.update(get_markets_payload=lambda **kwargs: payload, sanitize_payload=lambda value, **kwargs: value)
+    app = Flask(__name__)
+    app.register_blueprint(create_markets_blueprint(MarketRouteDependencies(**deps)))
+    response = app.test_client().get('/markets')
+    assert response.status_code == 503 and response.headers['Retry-After'] == '15'
+    assert 'items' not in response.json
+    payload['items'][0]['outcomeSemanticsStatus'] = 'market_or_projection_missing'
+    response = app.test_client().get('/markets')
+    assert response.status_code == 200 and response.json['items'][0]['latestPrice'] is None
 
 
 def test_queries_are_readonly_and_release_leases_on_timeout(runtime):

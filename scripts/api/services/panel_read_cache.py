@@ -24,7 +24,7 @@ class PanelReadCache:
         self.runtime = runtime
         self.store = runtime.SNAPSHOT_STORE
 
-    def get(self, layer, identity, builder, *, ttl, max_age, admit=True):
+    def get(self, layer, identity, builder, *, ttl, max_age, admit=True, background=True):
         key = json.dumps([layer, identity], sort_keys=True, separators=(",", ":"))
         value = cache.get_cached_runtime_payload(self.runtime.cache, NAMESPACE, key)
         if value is None:
@@ -62,14 +62,15 @@ class PanelReadCache:
                             cache.set_cached_runtime_payload(self.runtime.cache, NAMESPACE, key, payload, ttl)
                             return payload
                         except Exception as error:
-                            self.runtime.app.logger.warning("panel read failed layer=%s error_type=%s", layer, type(error).__name__)
+                            reason = str(error)[:300] if isinstance(error, TimeoutError) else type(error).__name__
+                            self.runtime.app.logger.warning("panel read failed layer=%s error_type=%s reason=%s", layer, type(error).__name__, reason)
                             self.store.set(NAMESPACE + ":health", layer, {"status": "unavailable", "lastAttemptAt": utc_now(), "scope": "last-requested-key"}, 120, max_entries=16)
                             self.store.set(NAMESPACE + ":errors", key, {"failedAt": utc_now()}, 15, max_entries=512)
                             return self._fallback(stale, "unavailable")
                 except TimeoutError:
                     return self._fallback(stale, "warming")
 
-        if stale is not None:
+        if stale is not None and background:
             if not self.runtime.resources.start_thread(build, name="panel-read-refresh"):
                 permit.close()
             return self._fallback(stale, "refreshing")

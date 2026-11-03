@@ -149,6 +149,7 @@ export type MarketGroupChartPayload = {
 };
 
 export type MarketListItem = {
+  outcomeSemanticsStatus?: string;
   primaryOutcomePrice?: string | number | null;
   outcomePrices?: Array<{ tokenId: string; sourceLabel: string; sourceIndex: number; price: string }>;
   priceSource?: string | null;
@@ -246,6 +247,9 @@ export type OraclePayload = {
   status?: string;
   stale?: boolean;
   updatedAt?: string | null;
+  generatedAt?: string | null;
+  marketObservedAt?: string | null;
+  lastEventAt?: string | null;
   hasMore?: boolean;
   marketId: number;
   localMarketId?: number | null;
@@ -492,7 +496,9 @@ export type L2Level = {
 
 export type LobSide = {
   tokenId?: string;
-  bookStatus?: 'warming' | 'live' | 'stale' | 'unavailable';
+  bookStatus?: 'warming' | 'live' | 'available' | 'stale' | 'unavailable';
+  observedAt?: string | null;
+  upstreamReady?: boolean;
   continuity?: boolean;
   receivedAt?: string | null;
   eventAt?: string | null;

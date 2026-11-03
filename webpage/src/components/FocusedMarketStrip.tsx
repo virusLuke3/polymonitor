@@ -64,7 +64,7 @@ function formatBookPrice(value?: string | number | null) {
   if (value == null || value === '') return '--';
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return '--';
-  return `${Math.round(numeric * 100)}c`;
+  return `${Number((numeric * 100).toFixed(2))}c`;
 }
 
 function formatBookShares(value?: string | number | null) {
@@ -96,6 +96,7 @@ function bookDepthTotal(levels?: L2Level[]) {
 }
 
 function isTerminalProbability(value?: string | number | null) {
+  if (value == null || value === '') return false;
   const numeric = Number(value);
   return Number.isFinite(numeric) && (numeric <= 0.02 || numeric >= 0.98);
 }
@@ -966,9 +967,6 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const tradesVerified = flowStatus === 'ok' || trades.length > 0 || Boolean(tradeEvidence && ['ok', 'ready', 'empty'].includes(tradeEvidence.status));
   const chart = bundleMatchesSelected ? (ctx.bundle?.chart || null) : null;
   const activeBook = bookSide === 'no' ? lob?.no : lob?.yes;
-  const activePrice = bookSide === 'no'
-    ? (price?.latestNoPrice ?? price?.latestPrice)
-    : (price?.latestYesPrice ?? price?.latestPrice);
   const spreadValue = activeBook?.spread;
   const askLevels = activeBook?.asks || [];
   const bidLevels = activeBook?.bids || [];
@@ -981,11 +979,11 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const shouldShowOutcomeRail = detail
     ? (detail.outcomes || []).length > 1
     : ((selectedGroup?.outcomes || []).length > 1 || Number(marketStats?.outcomeCount || 2) > 2);
-  const lobObservedAt = timestampMillis(activeBook?.receivedAt);
+  const lobObservedAt = timestampMillis(activeBook?.receivedAt || activeBook?.eventAt);
   const lobStatus = !lob && tokenLobLoading && !tokenLobError ? 'warming' : liveBookStatus(lob, bookSide);
   const lobIsFresh = lobStatus === 'live';
-  const lobYesPrice = liveBookStatus(lob, 'yes') === 'live' ? bookMidValue(lob, 'yes') : null;
-  const lobNoPrice = liveBookStatus(lob, 'no') === 'live' ? bookMidValue(lob, 'no') : null;
+  const lobYesPrice = ['live', 'available'].includes(liveBookStatus(lob, 'yes')) ? bookMidValue(lob, 'yes') : null;
+  const lobNoPrice = ['live', 'available'].includes(liveBookStatus(lob, 'no')) ? bookMidValue(lob, 'no') : null;
   const servingYesPrice = firstProbability(price?.latestYesPrice, price?.latestPrice);
   const catalogYesPrice = firstProbability(
     selectedOutcome?.yesPrice,
@@ -997,7 +995,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
     lobNoPrice,
     price?.latestNoPrice,
     selectedOutcome?.noPrice,
-    displayedYesPrice == null ? null : 1 - displayedYesPrice,
+    focusedMarket?.latestNoPrice,
   );
   const displayedChange = selectedOutcome?.change24h ?? price?.change24h;
   const displayedVolume = selectedOutcome?.volume24h ?? price?.volume24h ?? marketStats?.volume24h;
@@ -1108,13 +1106,13 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
         ? 'Closed · last recorded quote'
         : 'Closed · no live quote'
     : lobYesPrice != null
-      ? `CLOB midpoint · ${formatRefreshAge(lobObservedAt)}`
+      ? `${liveBookStatus(lob, 'yes') === 'live' ? 'CLOB midpoint' : 'Book snapshot midpoint'} · ${formatRefreshAge(lobObservedAt)}`
       : servingYesPrice != null
         ? 'Latest serving quote'
         : catalogYesPrice != null
           ? 'Catalog quote'
           : 'No live quote';
-  const activePriceForBook = hasActiveBookLevels ? activePrice : null;
+  const activePriceForBook = hasActiveBookLevels ? bookMidValue(lob, bookSide) : null;
   const eventCategory = detail?.category || selectedGroup?.category || focusedMarket?.category || marketStats?.category || 'market';
   const outcomeCount = detail?.outcomeCount ?? selectedGroup?.outcomeCount ?? detail?.outcomes?.length ?? marketStats?.outcomeCount ?? null;
   const marketTitle = selectedOutcome?.title
@@ -1131,8 +1129,8 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
     selectedLabel: selectedOutcome?.label || 'YES',
     latestTickIsNow: !marketIsClosed,
   };
-  const lobSyncLabel = lobStatus.toUpperCase();
-  const lobAgeLabel = lobObservedAt ? formatRefreshAge(lobObservedAt) : 'waiting';
+  const lobSyncLabel = lobStatus === 'available' ? 'SNAPSHOT' : lobStatus.toUpperCase();
+  const lobAgeLabel = lobObservedAt ? `${activeBook?.receivedAt ? '' : 'Event '}${formatRefreshAge(lobObservedAt)}` : 'Time unavailable';
   const wrapPanel = (panelId: string, className: string, panel: ComponentChildren) => (
     renderPanelSlot ? renderPanelSlot(panelId, className, panel) : panel
   );
@@ -1230,7 +1228,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
                   )}</span>
                 </div>
               </div>
-              {chartStatus === 'partial' ? <p>Latest stored fills within this range · up to 600 points; full interval coverage is not established.</p> : null}
+              {chartStatus === 'partial' ? <p>Recent stored fills · up to 600 points from the latest 86,400 blocks. Full interval history is not available in this view.</p> : null}
               {chartStatus === 'stale' ? <p>History refresh failed; showing the previous read.</p> : null}
               <div className={`wm-focus-detail-grid${showFocusedOutcomeRail ? '' : ' compact'}`}>
                 <div className="wm-focus-chart-wrap">

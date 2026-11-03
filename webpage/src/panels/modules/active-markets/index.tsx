@@ -167,6 +167,7 @@ function defaultGroupMarketId(group: MarketGroupItem) {
 }
 
 function isTerminalProbability(value?: string | number | null) {
+  if (value == null || value === '') return false;
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return false;
   return numeric <= 0.03 || numeric >= 0.97;
@@ -308,12 +309,12 @@ function groupActiveRank(group: MarketGroupItem) {
 
 function groupBestLivePrice(group: MarketGroupItem) {
   const selectedOutcome = groupDefaultOutcome(group);
-  const selectedPrice = selectedOutcome ? Number(groupOutcomePrice(selectedOutcome)) : NaN;
+  const selectedPrice = Number(selectedOutcome ? groupOutcomePrice(selectedOutcome) ?? NaN : NaN);
   if (Number.isFinite(selectedPrice)) return selectedPrice;
-  const blockClosePrice = Number(group.latestBlockClosePrice);
+  const blockClosePrice = Number(group.latestBlockClosePrice ?? NaN);
   if (Number.isFinite(blockClosePrice)) return blockClosePrice;
   const candidates = [...(group.outcomes || []), ...(group.topOutcomes || [])]
-    .map((outcome) => Number(outcome.blockCloseYesPrice ?? outcome.yesPrice))
+    .map((outcome) => Number(outcome.blockCloseYesPrice ?? outcome.yesPrice ?? NaN))
     .filter((value) => Number.isFinite(value));
   if (!candidates.length) return null;
   return candidates

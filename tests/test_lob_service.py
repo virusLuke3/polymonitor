@@ -96,6 +96,19 @@ def test_token_path_validated_before_upstream_request():
     assert lob_service.get_runtime_lob_by_token_payload("../health")["_status"] == 400
 
 
+def test_native_snapshot_is_available_without_fabricating_receive_continuity(monkeypatch):
+    snapshot = {**side(status='available'), 'receivedAt': None, 'heartbeatAt': None,
+                'continuity': False, 'upstreamReady': True,
+                'observedAt': datetime.now(timezone.utc).isoformat(), 'eventAt': '2026-11-03T00:00:00Z'}
+    engine(monkeypatch, {'source': 'market-data', 'runtimeModel': 'lob-v2',
+                        'yes': snapshot, 'no': side('', 'unavailable')})
+    result = lob_service.get_runtime_lob_by_token_payload('123')
+    assert result['bookStatus'] == 'available'
+    assert result['yes']['receivedAt'] is None and result['yes']['continuity'] is False
+    snapshot['observedAt'] = (datetime.now(timezone.utc) - timedelta(seconds=31)).isoformat()
+    assert lob_service.get_runtime_lob_by_token_payload('123')['bookStatus'] == 'stale'
+
+
 def test_retired_history_endpoint_does_not_query_legacy_database():
     from flask import Flask
     from api.routes.lob import LobRouteDependencies, create_lob_blueprint

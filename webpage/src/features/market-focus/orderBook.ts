@@ -5,6 +5,11 @@ export type RefreshDirection = 'up' | 'down' | 'flat';
 export function liveBookStatus(lob: LobPayload | null | undefined, side: 'yes' | 'no', now = Date.now()) {
   const book = lob?.[side];
   if (!book) return 'unavailable';
+  if (book.bookStatus === 'available') {
+    const observed = timestampMillis(book.observedAt);
+    return book.upstreamReady === true && observed != null && observed <= now && now - observed <= 30_000
+      ? 'available' : 'stale';
+  }
   if (book.bookStatus !== 'live') return book.bookStatus || 'unavailable';
   const received = timestampMillis(book.receivedAt);
   const heartbeat = timestampMillis(book.heartbeatAt);
@@ -54,9 +59,7 @@ export function bookMidValue(lob?: LobPayload | null, side: BookSide = 'yes') {
   if (!hasSideBookLevels(book)) return null;
   const bid = nullableBookNumber(book?.bestBid);
   const ask = nullableBookNumber(book?.bestAsk);
-  if (bid != null && ask != null) return (bid + ask) / 2;
-  if (bid != null) return bid;
-  if (ask != null) return ask;
+  if (bid != null && ask != null && bid >= 0 && ask <= 1 && bid <= ask) return (bid + ask) / 2;
   return null;
 }
 
