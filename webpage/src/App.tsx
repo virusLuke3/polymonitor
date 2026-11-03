@@ -147,7 +147,7 @@ function WorldMonitorApp() {
   });
   const { runtimeData, getStatus: getPanelRuntimeStatus, refreshPanels } = runtime;
   const { bootstrap, health, globalTrades, globalOracle, latestContent, loading, error } = useDashboardData(workspace, runtime);
-  const { markets, marketGroups, marketCatalogRefreshing, marketCatalogError, refreshMarketCatalog, catalogLoaded } = useMarketCatalog(bootstrap, true, marketGroupSort);
+  const { markets, marketGroups, marketCatalogRefreshing, marketCatalogError, catalogLoaded } = useMarketCatalog(bootstrap, true, marketGroupSort);
   const { selectedMarketId, setSelectedMarketId, resetMarketSelection, selectedMarketGroupId, selectedMarketGroupOutcomeKey, setSelectedMarketGroupOutcomeKey,
     selectedMarketGroupDetail, selectedMarketGroupChart, selectedMarketGroupChartRange, setSelectedMarketGroupChartRange,
     bundle, bundleLoading, focusMarketGroup, error: focusError } = useMarketFocus({ bootstrap, markets, marketGroups, catalogLoaded });
@@ -269,7 +269,6 @@ function WorldMonitorApp() {
     setMarketGroupSort,
     marketCatalogRefreshing,
     marketCatalogError,
-    refreshMarketCatalog,
     selectedMarketId,
     setSelectedMarketId,
     focusMarketGroup,

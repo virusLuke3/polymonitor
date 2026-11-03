@@ -14,7 +14,7 @@ const noop = () => {};
 const context: PanelRenderContext = {
   bootstrap: null, markets: [], marketGroups: [], marketGroupSort: 'volume',
   setMarketGroupSort: noop, marketCatalogRefreshing: false, marketCatalogError: null,
-  refreshMarketCatalog: async () => {}, selectedMarketId: null, setSelectedMarketId: noop,
+  selectedMarketId: null, setSelectedMarketId: noop,
   prefetchMarketFocus: noop, focusMarketGroup: noop, selectedMarketGroupId: null,
   selectedMarketGroup: null, selectedMarketGroupOutcomeKey: null, setSelectedMarketGroupOutcomeKey: noop,
   selectedMarketGroupDetail: null, selectedMarketGroupChart: null, selectedMarketGroupChartRange: '1d',

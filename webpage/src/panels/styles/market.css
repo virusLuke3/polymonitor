@@ -23,19 +23,6 @@
   text-transform: uppercase;
 }
 
-.wm-market-catalog-delayed .wm-panel-badge,
-.wm-market-catalog-stale .wm-panel-badge {
-  color: #fbbf24;
-  border-color: rgba(245, 158, 11, 0.28);
-  background: rgba(245, 158, 11, 0.08);
-}
-
-.wm-market-catalog-error .wm-panel-badge {
-  color: #fb7185;
-  border-color: rgba(244, 63, 94, 0.28);
-  background: rgba(244, 63, 94, 0.08);
-}
-
 .wm-market-search {
   display: flex;
   align-items: center;

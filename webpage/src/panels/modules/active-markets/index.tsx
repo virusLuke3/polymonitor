@@ -1,4 +1,4 @@
-import { useMarketSearch } from '@/features/market-focus/useMarketCatalog';
+import { MARKET_CATALOG_AUTO_REFRESH_MS, useMarketSearch } from '@/features/market-focus/useMarketCatalog';
 import { createContext } from 'preact';
 import { useContext, useEffect, useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
@@ -9,12 +9,6 @@ import { globalMarkets } from '@/panels/shared/selectors';
 import { useI18n, type MessageKey } from '@/services/i18n';
 import { localizedCurrency, MarketI18n, localizedPercent, localizedCompact, firstFiniteValue, uniqueGroupOutcomes, groupDisplayTradeCount, groupDisplayVolume } from '../../shared/market-values';
 import { panelFromRenderer } from '@/panels/definePanel';
-
-const MARKET_CATALOG_AUTO_REFRESH_MS = 45_000;
-
-const MARKET_ACTIVITY_DELAYED_MS = 60 * 60 * 1000;
-
-const MARKET_ACTIVITY_STALE_MS = 2 * 60 * 60 * 1000;
 
 const MARKET_SORT_OPTIONS: ReadonlyArray<{ value: MarketGroupSort; label: MessageKey }> = [
   { value: 'volume', label: 'atlasMarket.sort.volume' },
@@ -62,15 +56,6 @@ function newestTimestamp(values: Array<string | null | undefined>) {
 
 function marketCatalogGeneratedAt(groups: MarketGroupItem[]) {
   return newestTimestamp(groups.map((group) => group.generatedAt));
-}
-
-function marketCatalogActivityAt(groups: MarketGroupItem[]) {
-  return newestTimestamp(groups.flatMap((group) => [
-    group.lastActivityAt,
-    group.createdAt,
-    ...(group.outcomes || []).map((outcome) => outcome.lastTradeAt),
-    ...(group.topOutcomes || []).map((outcome) => outcome.lastTradeAt),
-  ]));
 }
 
 
@@ -508,7 +493,6 @@ function ActiveMarketsPanel({
   focusMarketGroup,
   marketCatalogRefreshing,
   marketCatalogError,
-  refreshMarketCatalog,
 }: {
   markets: MarketListItem[];
   marketGroups: MarketGroupItem[];
@@ -520,7 +504,6 @@ function ActiveMarketsPanel({
   focusMarketGroup: (group: MarketGroupItem, outcomeKey?: string | null, marketId?: number | null) => void;
   marketCatalogRefreshing: boolean;
   marketCatalogError: string | null;
-  refreshMarketCatalog: () => Promise<void>;
 }) {
   const i18n = useI18n();
   const { t } = i18n;
@@ -573,33 +556,8 @@ function ActiveMarketsPanel({
   const hasGroups = marketGroups.length > 0 && visibleGroups.some(groupHasMarketCoverage);
   const panelCount = hasGroups ? visibleGroups.length : visibleMarkets.length;
   const catalogGeneratedAt = useMemo(() => marketGroups.length ? marketCatalogGeneratedAt(marketGroups) : newestTimestamp(markets.map((m) => m.catalogFetchedAt)), [marketGroups, markets]);
-  const catalogActivityAt = useMemo(() => marketGroups.length ? marketCatalogActivityAt(marketGroups) : (markets.length ? Math.min(...markets.map((m) => parseTimestamp(m.observedAt))) : 0), [marketGroups, markets]);
-  const catalogActivityAge = catalogActivityAt ? Math.max(0, clockNow - catalogActivityAt) : Number.POSITIVE_INFINITY;
-  const catalogTone = marketCatalogError
-    ? 'error'
-    : !catalogGeneratedAt
-      ? 'waiting'
-      : catalogActivityAge > MARKET_ACTIVITY_STALE_MS
-          ? 'stale'
-          : catalogActivityAge > MARKET_ACTIVITY_DELAYED_MS
-            ? 'delayed'
-            : 'fresh';
-  const catalogStatusLabel = marketCatalogRefreshing
-    ? t('atlasMarket.catalog.refreshing')
-    : catalogTone === 'fresh'
-      ? t('atlasMarket.catalog.fresh')
-      : catalogTone === 'stale'
-        ? t('atlasMarket.catalog.stale')
-        : catalogTone === 'error'
-          ? t('atlasMarket.catalog.error')
-          : catalogTone === 'waiting'
-            ? t('atlasMarket.catalog.waiting')
-            : t('atlasMarket.catalog.delayed');
   const generatedAtLabel = catalogGeneratedAt
     ? i18n.formatRelativeTime(new Date(catalogGeneratedAt).toISOString())
-    : '--';
-  const activityAtLabel = catalogActivityAt
-    ? i18n.formatRelativeTime(new Date(catalogActivityAt).toISOString())
     : '--';
   const sortHelp = t(MARKET_SORT_HELP_KEYS[marketGroupSort]);
   const rows = useMemo(() => hasGroups
@@ -612,10 +570,8 @@ function ActiveMarketsPanel({
   return (
     <Panel
       title={t('atlasMarket.markets')}
-      badge={catalogStatusLabel}
-      status={catalogTone === 'fresh' ? 'live' : 'muted'}
       count={panelCount}
-      className={`wm-market-panel wm-market-catalog-${catalogTone}`}
+      className="wm-market-panel"
       controls={
         <div className="wm-market-panel-controls">
           <select
@@ -644,25 +600,9 @@ function ActiveMarketsPanel({
           placeholder={t('atlasMarket.searchPlaceholder')}
         />
       </label>
-      <div className={`wm-market-catalog-health is-${catalogTone}`} role="status" aria-live="polite">
-        <div>
-          <span className="wm-market-catalog-dot" aria-hidden="true" />
-          <strong>{catalogStatusLabel}</strong>
-          <span>{t('atlasMarket.catalog.activity', { time: activityAtLabel })}</span>
-        </div>
-        <button
-          type="button"
-          className="wm-market-refresh"
-          onClick={() => void refreshMarketCatalog()}
-          disabled={marketCatalogRefreshing}
-          title={marketCatalogError || t('atlasMarket.catalog.refreshTitle')}
-        >
-          {marketCatalogRefreshing ? t('atlasMarket.catalog.refreshingShort') : t('atlasMarket.catalog.refresh')}
-        </button>
-      </div>
       <div className="wm-market-sort-explainer">
         <span>{sortHelp} · {t('atlasMarket.catalog.pageScope')}</span>
-        <em>{t('atlasMarket.catalog.sync', { time: generatedAtLabel })} · {t('atlasMarket.catalog.auto', { seconds: MARKET_CATALOG_AUTO_REFRESH_MS / 1000 })}</em>
+        <em>{t('atlasMarket.catalog.sync', { time: generatedAtLabel })} · {t('atlasMarket.catalog.auto', { minutes: MARKET_CATALOG_AUTO_REFRESH_MS / 60_000 })}</em>
       </div>
       {searchResult.loading ? <p>{t('atlasMarket.catalog.refreshing')}</p> : searchResult.unavailable ? <p>{t('atlasMarket.catalog.error')}</p> : null}
       <CatalogClock.Provider value={clockNow}>
@@ -674,7 +614,7 @@ function ActiveMarketsPanel({
   );
 }
 
-const renderers: PanelRenderMap<'bootstrap' | 'focusMarketGroup' | 'marketCatalogError' | 'marketCatalogRefreshing' | 'marketGroupSort' | 'marketGroups' | 'markets' | 'refreshMarketCatalog' | 'selectedMarketGroupId' | 'selectedMarketId' | 'setMarketGroupSort' | 'setSelectedMarketId'> = {
+const renderers: PanelRenderMap<'bootstrap' | 'focusMarketGroup' | 'marketCatalogError' | 'marketCatalogRefreshing' | 'marketGroupSort' | 'marketGroups' | 'markets' | 'selectedMarketGroupId' | 'selectedMarketId' | 'setMarketGroupSort' | 'setSelectedMarketId'> = {
   'active-markets': {
     render: (ctx) => (
       <ActiveMarketsPanel
@@ -688,14 +628,13 @@ const renderers: PanelRenderMap<'bootstrap' | 'focusMarketGroup' | 'marketCatalo
         focusMarketGroup={ctx.focusMarketGroup}
         marketCatalogRefreshing={ctx.marketCatalogRefreshing}
         marketCatalogError={ctx.marketCatalogError}
-        refreshMarketCatalog={ctx.refreshMarketCatalog}
       />
     ),
   },
 };
 
 export const panel = panelFromRenderer(renderers, {
-  contextKeys: ['bootstrap', 'focusMarketGroup', 'marketCatalogError', 'marketCatalogRefreshing', 'marketGroupSort', 'marketGroups', 'markets', 'refreshMarketCatalog', 'selectedMarketGroupId', 'selectedMarketId', 'setMarketGroupSort', 'setSelectedMarketId'],
+  contextKeys: ['bootstrap', 'focusMarketGroup', 'marketCatalogError', 'marketCatalogRefreshing', 'marketGroupSort', 'marketGroups', 'markets', 'selectedMarketGroupId', 'selectedMarketId', 'setMarketGroupSort', 'setSelectedMarketId'],
   id: 'active-markets',
   title: 'Active Markets',
   eyebrow: 'market',

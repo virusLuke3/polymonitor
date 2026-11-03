@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 import { fetchMarketsPage, fetchMarketSearch } from '@/services/api';
 import type { BootstrapPayload, MarketListItem, MarketGroupItem, MarketGroupSort } from '@/types';
 
-/** One owner for the active catalog; manual refresh joins the current request. */
+export const MARKET_CATALOG_AUTO_REFRESH_MS = 5 * 60_000;
+
+/** One owner for the active catalog, refreshed only while the page is visible. */
 export function useMarketCatalog(bootstrap: BootstrapPayload | null, enabled: boolean, sort: MarketGroupSort = 'volume') {
   const [markets, setMarkets] = useState<MarketListItem[]>([]);
   const [marketGroups, setMarketGroups] = useState<MarketGroupItem[]>([]);
@@ -13,14 +15,13 @@ export function useMarketCatalog(bootstrap: BootstrapPayload | null, enabled: bo
   const mounted = useRef(true);
   const hydrated = useRef({ markets: false, groups: false });
   const retryAt = useRef(0);
-  const failures = useRef(0);
-  const refreshMarketCatalog = useCallback((manual = true): Promise<void> => {
+  const refreshCatalog = useCallback((): Promise<void> => {
     if (requestRef.current) return requestRef.current.promise;
-    if (document.hidden && !manual) return Promise.resolve();
+    if (document.hidden) return Promise.resolve();
     if (Date.now() < retryAt.current) return Promise.resolve();
+    retryAt.current = Date.now() + MARKET_CATALOG_AUTO_REFRESH_MS;
     const controller = new AbortController();
     setRefreshing(true);
-    if (manual) setError(null);
     const isCurrent = () => !controller.signal.aborted && mounted.current;
     const errors: string[] = [];
     let retryAfterMs = 0;
@@ -42,8 +43,7 @@ export function useMarketCatalog(bootstrap: BootstrapPayload | null, enabled: bo
     ]).then(() => {
       if (isCurrent()) {
         setLoaded(true); setError(errors[0] || null);
-        failures.current = errors.length ? Math.min(3, failures.current + 1) : 0;
-        retryAt.current = Date.now() + (errors.length ? Math.max(retryAfterMs, 15_000 * 2 ** (failures.current - 1)) : 0);
+        retryAt.current = Math.max(retryAt.current, Date.now() + retryAfterMs);
       }
     }).finally(() => {
       if (requestRef.current?.controller === controller) requestRef.current = null;
@@ -59,25 +59,28 @@ export function useMarketCatalog(bootstrap: BootstrapPayload | null, enabled: bo
   }, [bootstrap]);
   useEffect(() => {
     if (!enabled) return;
-    retryAt.current = 0; failures.current = 0;
+    retryAt.current = 0;
     setMarkets([]); setLoaded(false); setError(null);
-    void refreshMarketCatalog(false);
-    const timer = window.setInterval(() => void refreshMarketCatalog(false), 45_000);
+    void refreshCatalog();
+    const timer = window.setInterval(() => void refreshCatalog(), MARKET_CATALOG_AUTO_REFRESH_MS);
     const resume = () => {
-      if (!document.hidden) void refreshMarketCatalog(false);
-      else { requestRef.current?.controller.abort(); requestRef.current = null; }
+      if (!document.hidden) void refreshCatalog();
+      else if (requestRef.current) {
+        requestRef.current.controller.abort(); requestRef.current = null;
+        retryAt.current = 0;
+      }
     };
     document.addEventListener('visibilitychange', resume);
     return () => {
       window.clearInterval(timer); document.removeEventListener('visibilitychange', resume);
       requestRef.current?.controller.abort(); requestRef.current = null;
     };
-  }, [enabled, refreshMarketCatalog]);
+  }, [enabled, refreshCatalog]);
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; requestRef.current?.controller.abort(); requestRef.current = null; };
   }, []);
-  return { markets, marketGroups, marketCatalogRefreshing, marketCatalogError, refreshMarketCatalog, catalogLoaded };
+  return { markets, marketGroups, marketCatalogRefreshing, marketCatalogError, catalogLoaded };
 }
 
 /** Command search has a separate query identity and no periodic refresh. */

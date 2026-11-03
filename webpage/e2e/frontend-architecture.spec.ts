@@ -346,7 +346,7 @@ for (const state of ['loading', 'empty', 'error', 'stale', 'closed'] as const) {
 }
 
 for (const width of [1440, 390]) {
-  test(`market hover, keyboard, selected and disabled controls ${width}`, async ({ page }) => {
+  test(`market hover, keyboard and selection without manual refresh ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     await installDashboard(page);
     await gotoMapScene(page, '/?view=2d&mapPerf=1&renderer=svg&time=all&layers=earthquakes-volcanoes');
@@ -363,15 +363,9 @@ for (const width of [1440, 390]) {
     await expect(page.locator('.wm-focus-detail-panel')).toContainText('Fixture market 2');
     await page.locator('.wm-focused-market-row').scrollIntoViewIfNeeded();
     await visual(page, `market-selected-${width}.png`);
-    let release!: () => Promise<void>;
-    await page.route('**/wm-api/markets?**', route => { release = () => route.fulfill({ json: { items: [] } }); });
-    const refresh = page.locator('.wm-market-refresh');
-    await refresh.click();
-    await expect(refresh).toBeDisabled();
-    await settled(page);
-    await expect(page.locator('.wm-focused-market-list')).toHaveScreenshot(`catalog-refresh-disabled-${width}.png`, { animations: 'disabled', maxDiffPixels: 0, threshold: 0 });
-    await release();
-    await expect(refresh).toBeEnabled();
+    const catalog = page.locator('.wm-focused-market-list');
+    await expect(catalog.locator('.wm-market-refresh, .wm-market-catalog-health, .wm-panel-badge')).toHaveCount(0);
+    await expect(catalog.locator('.wm-market-sort-explainer')).toContainText('Auto 5m');
   });
 }
 
