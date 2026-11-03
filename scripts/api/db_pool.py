@@ -197,9 +197,12 @@ def build_api_connection_factory(
     pool = ApiPostgresConnectionPool(
         connection_factory,
         max_size=pool_size,
-        acquire_timeout_seconds=min(0.2, _env_float(
+        # Queries crossing the existing tunnel commonly hold a lease for
+        # 0.3-0.6s. A 0.2s queue rejected ordinary simultaneous panel refreshes.
+        # Wait briefly for reuse; keep the same four-connection host ceiling.
+        acquire_timeout_seconds=min(1.0, _env_float(
             "POLYDATA_API_POSTGRES_POOL_ACQUIRE_TIMEOUT_SECONDS",
-            0.2,
+            1.0,
         )),
     )
 

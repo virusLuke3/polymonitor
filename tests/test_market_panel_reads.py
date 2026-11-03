@@ -252,6 +252,26 @@ def test_worker_pool_cannot_reserve_sibling_connection_share(runtime, monkeypatc
         connect.close()
 
 
+def test_pool_absorbs_normal_tunnel_latency_without_opening_another_connection(runtime, monkeypatch):
+    from threading import Timer
+    from api.db_pool import build_api_connection_factory
+    monkeypatch.setenv('POLYDATA_API_POSTGRES_POOL_SIZE', '1')
+    monkeypatch.setenv('POLYDATA_API_POSTGRES_POOL_ACQUIRE_TIMEOUT_SECONDS', '8')
+    factory = Mock(return_value=Mock())
+    connect = build_api_connection_factory(factory, lambda: 'postgres')
+    first = connect()
+    release = Timer(0.3, first.close)
+    release.start()
+    try:
+        second = connect()
+        second.close()
+        assert factory.call_count == 1
+    finally:
+        release.join()
+        first.close()
+        connect.close()
+
+
 def test_catalog_caps_page_and_ranks_current_quotes_without_a_newest_market_window(runtime):
     reader = MarketPanelReader(runtime)
     reader.query = Mock(return_value=[])
