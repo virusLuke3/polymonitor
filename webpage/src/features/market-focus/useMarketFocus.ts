@@ -117,7 +117,7 @@ export function useMarketFocus({ bootstrap, markets, marketGroups, catalogLoaded
     let lastSuccess = 0;
     setBundle((base) => base ? { ...base, chart: null } : base);
     return pollPanel(
-      (signal) => fetchMarketChart(id, range, undefined, 6000, signal),
+      (signal) => fetchMarketChart(id, range, undefined, 10000, signal),
       (chart) => {
         if (selected.current !== id || chart.marketId !== id || chart.range !== range) return;
         lastSuccess = Date.now();

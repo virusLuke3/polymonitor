@@ -36,7 +36,9 @@ def read_flow(reader, market_id, *, limit=50, before=None, chart_range=None):
             context = {"app": reader.runtime.app, "get_backend": lambda: "postgres", "query_all": reader.semantic_query,
                        "_resources": SimpleNamespace(clickhouse=settings, clickhouse_read_timeout_seconds=None,
                                                      clickhouse_slots=threading.BoundedSemaphore(1))}
-            deadline = time.monotonic() + 4.0
+            # Four bounded reads cross the tunnel sequentially. Network wait
+            # needs its own allowance; SQL time, bytes and concurrency stay fixed.
+            deadline = time.monotonic() + 6.0
             calls = 0
 
             def read(sql):
@@ -50,7 +52,7 @@ def read_flow(reader, market_id, *, limit=50, before=None, chart_range=None):
                 context["_resources"].clickhouse = replace(settings, max_bytes_to_read=(4, 24, 32, 4)[calls - 1] * 1024**2)
                 rows = ch._query_json_rows(context, sql, timeout_seconds=min(3, remaining))
                 if rows is None:
-                    raise TimeoutError("Panel trade query unavailable")
+                    raise TimeoutError(f"Panel trade query unavailable at read {calls}")
                 return rows
 
             watermarks = read("""SELECT block_number,

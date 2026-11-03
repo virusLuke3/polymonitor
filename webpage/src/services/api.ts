@@ -628,7 +628,7 @@ async function fetchMarketWorkspaceBundle(marketId: number, timeoutMs = 6500, si
 
 export function fetchMarketFlow(marketId: number, signal?: AbortSignal) {
   return apiGetWithTimeout<{ marketId: number; items: TradeRow[]; status: string; sourceUpdatedAt?: string;
-    coverage?: { fromBlock: number; toBlock: number; globalCompleteness: string } }>(`/markets/${marketId}/flow?limit=50`, 6000, signal);
+    coverage?: { fromBlock: number; toBlock: number; globalCompleteness: string } }>(`/markets/${marketId}/flow?limit=50`, 10000, signal);
 }
 
 export function fetchMarketOracle(marketId: number, signal?: AbortSignal) {
