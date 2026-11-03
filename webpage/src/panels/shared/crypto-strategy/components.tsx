@@ -8,6 +8,10 @@ import './styles.css';
 
 export const fmt = (value: number | null | undefined, digits = 2) => value == null || !Number.isFinite(value) ? '—' : value.toLocaleString('en-US', { maximumFractionDigits: digits, minimumFractionDigits: digits });
 export const compact = (value: number | null | undefined) => value == null || !Number.isFinite(value) ? '—' : new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 2 }).format(value);
+export type Tone = 'neutral' | 'positive' | 'negative' | 'info' | 'warning';
+export const direction = (value: number | null | undefined): Tone => value == null || !Number.isFinite(value) || value === 0 ? 'neutral' : value > 0 ? 'positive' : 'negative';
+export const signed = (value: number | null | undefined, digits = 2, suffix = '') => value == null || !Number.isFinite(value) ? '—' : `${value > 0 ? '+' : ''}${fmt(value, digits)}${suffix}`;
+export const signedCompact = (value: number | null | undefined) => `${value != null && Number.isFinite(value) && value > 0 ? '+' : ''}${compact(value)}`;
 export const time = (value: string | number | undefined | null) => value == null || !Number.isFinite(new Date(value).getTime()) ? '—' : new Date(value).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
 export function useCopy() { const { locale } = useI18n(); return (zh: string, en: string) => locale.startsWith('zh') ? zh : en; }
 
@@ -28,12 +32,12 @@ export function Frame({ id, title, badge, children, assets = true, filters }: {i
   </Panel>;
 }
 
-export function Stats({items}: {items: {label: string; value: string}[]}) {
-  return <div className="wm-cstrategy-stats">{items.map(({label,value}) => <div key={label}><strong>{value}</strong><span>{label}</span></div>)}</div>;
+export function Stats({items}: {items: {label: string; value: string; tone?: Tone; primary?: boolean}[]}) {
+  return <div className="wm-cstrategy-stats">{items.map(({label,value,tone='neutral',primary}) => <div key={label}><strong data-tone={value === '—' ? 'neutral' : tone} className={primary ? 'wm-cstrategy-primary' : undefined}>{value}</strong><span>{label}</span></div>)}</div>;
 }
-export function Notice({children}: {children: ComponentChildren}) { return <p className="wm-cstrategy-notice">{children}</p>; }
+export function Notice({children, tone}: {children: ComponentChildren; tone?: Tone}) { return <p className="wm-cstrategy-notice" data-tone={tone}>{children}</p>; }
 
-export function Series({points = [], label, color = 'var(--ds-color-info)', domain, maxGapMs = 120000}: {points?: Point[]; label: string; color?: string; domain?: [number,number]; maxGapMs?: number}) {
+export function Series({points = [], label, tone = 'info', domain, maxGapMs = 120000}: {points?: Point[]; label: string; tone?: Tone; domain?: [number,number]; maxGapMs?: number}) {
   const rows = validPoints(points), t = useCopy();
   if (rows.length < 2) return <div className="wm-cstrategy-chart-empty">{label} · {t('历史样本不足','Insufficient history')}</div>;
   const left = domain?.[0] ?? rows[0]!.t, right = domain?.[1] ?? rows[rows.length-1]!.t;
@@ -45,8 +49,8 @@ export function Series({points = [], label, color = 'var(--ds-color-info)', doma
     segments[segments.length-1]!.push(`${8+(p.t-left)/(right-left || 1)*284},${y(p.v)}`);
   });
   const axis = (stamp: number) => right-left > 86400000 ? new Date(stamp).toLocaleDateString([], {month:'short',day:'numeric'}) : time(stamp);
-  return <figure className="wm-cstrategy-chart"><figcaption><span>{label}</span><strong>{fmt(rows[rows.length-1]?.v, 4)}</strong></figcaption>
-    <svg viewBox="0 0 300 84" role="img" aria-label={label}><path d="M8 12H292M8 42H292M8 72H292" className="wm-cstrategy-grid"/>{segments.map((p,i)=><polyline key={i} points={p.join(' ')} fill="none" stroke={color} strokeWidth="1.6"/>)}</svg>
+  return <figure className="wm-cstrategy-chart" data-tone={tone}><figcaption><span className="wm-cstrategy-series-key">{label}</span><strong data-tone={tone}>{fmt(rows[rows.length-1]?.v, 4)}</strong></figcaption>
+    <svg viewBox="0 0 300 84" role="img" aria-label={label}><path d="M8 12H292M8 42H292M8 72H292" className="wm-cstrategy-grid"/>{segments.map((p,i)=><polyline key={i} points={p.join(' ')} fill="none" stroke="currentColor" strokeWidth="1.6"/>)}</svg>
     <div className="wm-cstrategy-meta"><span>{axis(left)}</span><span>{axis(right)}</span></div>
   </figure>;
 }

@@ -30,3 +30,12 @@
 .wm-cstrategy-panel code { overflow-wrap: anywhere; white-space: normal; font-size: 10px; }
 .wm-cstrategy-positive { color: var(--ds-color-positive); }
 .wm-cstrategy-negative { color: var(--ds-color-critical); }
+.wm-cstrategy-panel [data-tone='neutral'] { color: var(--ds-color-text); }
+.wm-cstrategy-panel [data-tone='positive'] { color: var(--ds-color-positive); }
+.wm-cstrategy-panel [data-tone='negative'] { color: var(--ds-color-critical); }
+.wm-cstrategy-panel [data-tone='info'] { color: var(--ds-color-info); }
+.wm-cstrategy-panel [data-tone='warning'] { color: var(--ds-color-warning); }
+.wm-cstrategy-stats strong.wm-cstrategy-primary { font-size: 14px; }
+.wm-cstrategy-chart .wm-cstrategy-series-key { color: inherit; }
+.wm-cstrategy-series-key::before { content: ''; display: inline-block; width: 8px; height: 2px; background: currentColor; margin: 0 5px 3px 0; }
+.wm-cstrategy-chart[data-tone] figcaption { color: inherit; }

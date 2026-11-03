@@ -16,9 +16,11 @@ describe('crypto strategy data boundary', () => {
     expect(change([{t:200000,v:100},{t:1000000,v:110}],15)).toBeNull();
   });
   it('gates current oracle distance by time and exact window', () => {
-    const ref = {status:'ok',latest:{event_at_ms:100000,window_seconds:60},market:{ends_at_ms:200000,window_seconds:60,slug:'btc-test'}} as Reference;
+    const ref = {status:'ok',latest:{event_at_ms:100000,window_seconds:60},market:{starts_at_ms:90000,ends_at_ms:200000,window_seconds:60,slug:'btc-test'}} as Reference;
     expect(referenceUsable(ref,101000)).toBe(true);
     expect(referenceUsable(ref,116000)).toBe(false);
+    expect(referenceUsable({...ref,market:{...ref.market!,starts_at_ms:102000}},101000)).toBe(false);
+    expect(referenceUsable({...ref,market:{...ref.market!,ends_at_ms:101000}},101000)).toBe(false);
     expect(referenceUsable({...ref,market:{...ref.market!,window_seconds:1}},101000)).toBe(false);
     expect(marketUrl(ref)).toBe('https://polymarket.com/event/btc-test');
     expect(marketUrl({...ref,market:{...ref.market!,slug:'javascript:bad'}})).toBeNull();

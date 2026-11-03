@@ -80,7 +80,7 @@ export function change(points: Point[] = [], minutes = 15): number | null {
 }
 export function referenceUsable(ref: Reference | undefined, now = Date.now()) {
   const market = ref?.market, at = ref?.latest?.event_at_ms;
-  return !!market && market.ends_at_ms > now && !!at && now-at >= -1000 && now-at <= 15000
+  return !!market && market.starts_at_ms <= now && market.ends_at_ms > now && !!at && now-at >= -1000 && now-at <= 15000
     && ref?.latest?.window_seconds === market.window_seconds && ref.status === 'ok';
 }
 export function marketUrl(ref?: Reference): string | null {

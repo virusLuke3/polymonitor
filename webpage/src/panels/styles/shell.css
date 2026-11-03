@@ -178,7 +178,7 @@
   white-space: nowrap;
   cursor: pointer;
 }
-.wm-panel-tabs button[aria-pressed='true'] { color: var(--ds-color-text); border-bottom-color: currentColor; }
+.wm-panel-tabs button[aria-pressed='true'] { color: var(--ds-color-info); border-bottom-color: currentColor; }
 .wm-panel-tabs button:focus-visible { outline: 2px solid var(--ds-color-info); outline-offset: -2px; }
 
 .wm-panel-header-overlay {
