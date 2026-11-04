@@ -166,3 +166,41 @@ Clash 控制器连接记录显示 BLS 命中 `Match` 规则，链路走当前已
 能够确认的是网络路径决定了本轮成败：当前终端代理路径成功，直连被边缘访问控制拒绝，腾讯链路超时。不能据此断言 BLS 按某个国家或所有云 IP 统一封锁；也不能把腾讯超时解释成 BLS 返回了 403。上一窗口未测试当前 Clash，故不足以判断原站在所有现有路径下均不可达。
 
 优先处理顺序应调整为：修正日历客户端的路由配置读取 → 为生产采集落实经过验证且符合用户出口选择的路径 → 验证真实自动采集、写入及消费者。FRED/纽约联储/FRASER 继续作为冗余与归档方案。不得因本次临时探测成功就把生产 worker 静默改到用户的主代理上。
+
+## 9. 已实施：日常监控与公告归档替换
+
+用户随后明确选择“日常监控与公告归档”，因此本次按该选择替换来源，未采用第 8 节的原站代理修复方向。以下为 **2026-11-04 11:24—11:27，北京时间**的部署及实测记录，持续契约以 [宏观数据契约](macro-panel-data-contract.md#bls-replacement-for-daily-monitoring-and-release-archives) 为准。
+
+### 生效范围、存储与周期
+
+实现提交为 `e31c1f2d`，最终运行代码为 `ef4fa0a4`，均已推送。部署从该提交的 `git archive` 导出，只安装所属的 8 个运行文件；生产目录逐文件 SHA-256 与提交一致。实际运行位置是迁移后的本机后端 `$HOME/.local/share/polymonitor/backend`，不是旧 GCP。四个既有采集/API 服务均处于 active；未新建独立调度器、修改 Clash 或恢复停用隧道。
+
+| 数据链路 | 已生效的采集节奏 | 存储和消费 |
+| --- | --- | --- |
+| FRED 三类发布日历＋纽约联储交叉核验 | 每小时 | 既有 `snapshot:macro:cpi-release-calendar / panel-v1`，供 CPI Calendar 与 Command 读取 |
+| FRASER 的 CPI、就业、PPI 专题及官方 PDF | 各每 6 小时 | 既有内容数据库的 `content_items`、`content_versions`、`content_discoveries`、`content_source_state`；通过既有内容 API 展示 |
+| 公告正式原件 | 新内容按哈希保存，支持有条件请求 | 后端 `data/bls-release-archive/{cpi,nfp,ppi}/` 保存 PDF、提取正文、版本元数据与 `latest.json`，不受新闻展示窗口或内容库 90 天清理影响 |
+| CPI 数值和 Command 汇总 | 保留 30 分钟成功缓存/汇总周期 | 既有 FRED 四条数值序列及 `snapshot:macro-registry:cpi-release-command-center / panel-v2` |
+
+内容 worker 每 60 秒检查一次到期任务，**不等于每分钟请求 FRASER**。本次三条来源成功入库后，数据库记录下一次到期均为北京时间 **17:26:22**。未启用早期建议中的发布后 30 分钟加速，也未保留 BLS 原站 403 周期探测；采用用户选择的日常监控范围。
+
+日历和 FRASER 的请求明确使用直连；本轮来源状态中的 `proxy_mode` 均为 `direct`。已有 FRED 数值链路沿其直连配置运行。来源冲突不自动选日期；暂时失败最多保留七天的最后核验日程，保留原始 `verifiedAt`，不使用硬编码年度日程充当核验结果。参考期取自公告正文，缺失时保持未知。
+
+### 实际写入及消费者核验
+
+- 日历快照生成于北京时间 **11:24:05**，FRED CPI、就业、PPI、纽约联储及三类合成日程状态均为 `ok`、错误为空。下一轮就业为 11 月 6 日、CPI 为 11 月 10 日、PPI 为 11 月 13 日，均为 08:30 ET；参考期由原件的下一次发布说明绑定为 `October 2026`。
+- 三份官方 PDF 已正式归档，共 **2,795,709 字节**，逐份复核哈希、文本及版本元数据。最初接收时间为北京时间 **11:15:24—11:15:30**，公告原始发布时间仍分别为 10 月 14 日、10 月 2 日、10 月 15 日；不会改写成今日新闻。
+- 三类公告于北京时间 **11:26:22**成功写入既有内容库，三条来源状态均为 `ok`、错误为空。以原 BLS 公告 URL 作为稳定身份，复用原 RSS 记录；切换过程中生成的三条重复投影已按精确身份合并，保留版本、发现记录及原件，未清空原内容库。
+- 真实运行 API 的 `/runtime/macro/cpi-release-calendar?limit=12` 和 `/runtime/macro/cpi-release-command-center?limit=36` 均返回 200，业务状态为 `ok`。Command 有 **4 项前值、4 项模型预测**；10 月实际值仍未发布，`actualCount=0` 是正常业务状态。
+- `/content/latest?days=30&limit=100` 返回两条不重复的 BLS 公告（CPI、PPI）；就业公告已超出 30 天。七天窗口为零条，符合原始发布时间。全体新闻仍有其他来源异常，整体 `partial` 不能当成本次三条 BLS 来源失败，也不能将三条成功扩大为全体来源正常。
+- 实际日历 worker 初轮 FRED 请求超时、纽约联储接续成功。调整为项目标识请求头后，最终运行 worker 的 FRED 请求也成功；这仅是本轮结果，不据此断言对方访问控制的具体机制。
+
+运行验收文件位于 `$HOME/.local/share/polymonitor/bls-releases/ef4fa0a41cf97c6aa2da6fecda5cc82ad738a23c/`：`receipt.json`、`acceptance-local.json`、`content-ingest-after-merge.log`、`tests.log`。原件目录的 `projection-cutover-receipt.json` 保留本次精确身份合并的原始记录。
+
+### 验证结果与未验收边界
+
+- 相关测试 **94 通过、1 项明确排除**，所属代码 Ruff 检查通过。覆盖日历解析、夏令时/跨年、来源冲突、原始参考期、保留核验时间、PDF 身份、原件版本、去重、重启读取与新闻时间窗。
+- 排除的原有测试为 `test_public_read_uses_one_database_query_and_reuses_route_market`：固定使用 2026-09-16 的新闻，却按当前日期查询 30 天窗口，现已过期；首次运行因此失败。没有为此修改本任务以外的测试。
+- `make quality` 在文档检查阶段被原有 `docs/panel-data-recovery-2026-11-04.md` 第 32、52 行的个人主目录路径拦截，未改动该文档，不能宣称全仓质量检查通过。
+- **本机生产采集、正式落库、原件和运行 API 已验证；公网页面尚未通过验收。**本轮公网 API/浏览器复核及腾讯连接出现连接或读取超时，尚未取得可确认替换结果的公网 Panel 截图。未在此任务中扩大修改网络通道。
+- 三类来源此次成功入库是部署时显式执行的采集。每小时/每六小时的配置及下一次到期记录已核对，**尚未连续观察完整自动周期，也未经过下一次真实统计发布窗口**。FRASER 收录存在延迟；本次不宣称发布瞬间送达、首次发布数值 vintage 或全部历史原件已经回填。
