@@ -44,3 +44,10 @@ WorldMonitor `65860c21` 的 `live-video-sources.ts`、`live-video/model.ts`、
 已退役且没有已核验备用源的 Reuters TV / The Guardian 从 TV 选择项隐藏；ABC / NBC 仅使用其官方 YouTube 频道，不再反复探测旧 HLS。提高探测超时预算后只重测旧失败结果，成功结果仍复用每日缓存。
 
 欧洲出口的 YouTube 公共 HTML 使用匿名采集 Cookie `SOCS=CAI`，避免进入无直播信息的同意页，依据 [yt-dlp 的匿名初始化](https://github.com/yt-dlp/yt-dlp/blob/master/yt_dlp/extractor/youtube/_base.py)。不读取或保存用户账号 Cookie；登录/访问挑战记为解析失败，不能因此宣布频道停播。
+
+## 最近验收
+
+2026-11-04 前端 `72ab1f61` 已发布，桌面/手机布局检查及本地同频道切源、缓冲/回放拒绝、自动重试测试通过。
+正式直播状态已有 9/12 项解析成功（频道 ID 与固定视频 ID 分别计数，不是 9 个频道）；其余失败按原周期恢复。
+最终实播轮仍有主频道未出画面，未完成全部频道连续播放验收。DW 转发已加入实际清单使用的明确备用目录，未放开任意主机或路径。
+完整窗口、来源失败与存储核对见 [恢复记录](../../../../../docs/panel-data-recovery-2026-11-04.md)，该窗口不代表未来持续健康。

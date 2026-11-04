@@ -107,3 +107,17 @@ LOB 特定 token 的上游未就绪继续检查已有 owner 的实际状态；�
 - 16:40 Finance external 的 Hyperliquid、OKX、Yahoo 传统资产参考、ETF、COT、稳定币均有正式快照，来源状态为 ok；Tradexyz 仍明确为代理来源。
 - 生产前端 `4e6474fc` 已从推送提交的干净导出构建发布，真实主页 DW 的视频时钟推进。随后增加同频道自动退避重试，需以最终发布版本的复测为准。
 - 本轮针对性 Python、前端类型检查与同频道切源/缓冲/录像/自动重试 E2E 通过。全工作区测试在未归本任务修改的 AlphaSignal / ClickHouse 测试中遇到 5 项失败；没有替换这些工作区改动。`npm audit` 仍报告现有 Vite 开发依赖的 1 个 high 与 Vitest 的 2 个 moderate；干净静态构建通过，未把开发服务器部署到生产。
+
+### 下午最终验收窗口与边界（16:59–17:14，北京时间）
+
+可复用的出口、隔离、退避和验收规则已纳入 [Panel 资源契约](panel-resource-contract.md#external-source-routing-and-recovery)，后续 Panel 开发应先读该契约，而非把本节的即时状态当成部署配置。
+
+- 前端 `72ab1f613f49b8fec86deaaec069601dddc5d8e2` 已由干净导出构建部署至腾讯云，公网 release-sha 核对一致。后端补充修复部署至本机现有 backend，包含 `6fe7345f` 的部分报价保留与 YouTube 同意页处理，以及 `97465156` 的 DW 备用媒体路径。未修改主 Clash、market-data/LOB 或纽约节点。
+- 洛杉矶独立 SSH 主进程中断后的补充测试：19.48 秒内恢复真实 Deribit 有效响应；爱尔兰前述测试为 12.69 秒。仅证明这两次中断恢复；洛杉矶运行中仍出现重连，不能宣称长期无波动。
+- 16:59 正式直播解析状态中，Bloomberg/DW/Al Jazeera 三个频道及六个固定直播 ID 为 live；ABC/NBC 和 Sky 固定 ID 仍有解析失败。欧洲出口重定向至 consent.youtube.com 的实测解释了部分失败；匿名 Cookie 请求取得了含 player response 的页面。最终实现将此类访问失败与确认停播区分，错误按 15 分钟重试，不使用 RSS 上传视频冒充直播。
+- 17:06 全球指数完整取得 12 条；17:04 AI 新闻/使用量/产品/价格四类均 ok；DeFi Tokens 17:04 与 17:09 均正常写入 9 条。17:07 Big Tech 新取得 17 条、保留 4 条原时钟旧报价，共 21/24 条，仍为 partial，不能报完整恢复。部分股票/指数失败时最多保留 30 分钟，显式 STALE，旧行不进入本轮市场广度均值。
+- 17:09 核对 Finance external、Global Index、AI、Big Tech、DeFi Tokens、TV 六类正式 SQLite/Redis 内容全部一致。公网六个对应 API（Finance external 由 Liquidity 消费）17:12 均 HTTP 200，生成时间对应正式种子；Big Tech 仍明确 partial。Liquidity 返回 12 条及真实组成数据；本机 /health 为 ok。
+- 加密 17:04–17:09 多轮四币行情/基差/成交/深度与 BTC/ETH 各 3 个期权到期日成功。17:10–17:13 又出现部分历史来源、期权、Kraken USDC 请求失败；17:10 Finance external 的 Hyperliquid/Yahoo 也失败，COT、稳定币与 OKX 仍有数据。因此这是已实现切换/退避并验证成功写入，不能表述为持续完整无失败。
+- 真实最终前端完成桌面/手机检查，但最终实播轮部分 DW/France24/Euronews 候选未出画面；随后连接重试仍遇超时，未取得最终版本所有主频道连续播放证据。此前 DW 在 `4e6474fc` 出画面，只证明当时链路。后台 106 个 HLS 探测成功仍不等于 106 个浏览器可播。
+- DW 主播放清单实际引用 `2015526-b/dwstream103/` 备用目录，原转发白名单未包含，已按明确主机/路径补齐并验证其他路径仍被拒绝。主清单和子清单已返回有效内容，媒体片段仍可因网络超时失败。
+- 最后两组针对性测试分别 58 passed、26 passed（包含重叠用例），Ruff、tracked-secret 检查通过。没有保留本次探测脚本、截图、中间 JSON 或临时构建目录；已有其他任务目录未删除。
