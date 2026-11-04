@@ -106,9 +106,16 @@ class CpiReleaseCalendarWatcher:
         return max(300, int(getattr(self.settings, "cpi_calendar_ttl_seconds", 3600) or 3600))
 
     def _http_text_get(self, url: str, *, timeout: int = 12, headers: Dict[str, str] | None = None) -> str:
-        response = self.requests.get(url, timeout=timeout, headers=headers)
-        response.raise_for_status()
-        return response.text
+        started = time.monotonic()
+        with self.requests.get(url, timeout=(min(6, timeout), timeout), headers=headers, stream=True) as response:
+            response.raise_for_status()
+            chunks, size = [], 0
+            for chunk in response.iter_content(65536):
+                size += len(chunk)
+                if size > 2_500_000 or time.monotonic() - started > timeout:
+                    raise TimeoutError("calendar-response-budget-exhausted")
+                chunks.append(chunk)
+            return b"".join(chunks).decode(response.encoding or "utf-8", errors="replace")
 
     def service_context(self) -> Dict[str, Any]:
         return {
@@ -175,7 +182,7 @@ class CpiReleaseCalendarWatcher:
             expected_interval_seconds=self.interval_seconds,
             status=status,
             last_attempt_at=attempted_at,
-            last_success_at=last_success_at or attempted_at,
+            last_success_at=last_success_at,
             record_count=record_count,
             source_states=source_states,
             error_summary=error_summary,
@@ -183,14 +190,23 @@ class CpiReleaseCalendarWatcher:
             payload_status=payload_status,
             metadata={"result": status},
         )
+        payload["lastSuccessAt"] = last_success_at
         return self.seed_meta_store.store(SEED_META_NAMESPACE, SEED_META_CACHE_KEY, payload)
 
     def run_once(self) -> Dict[str, Any]:
         previous = self.load_previous_payload()
         try:
+            age = (datetime.fromisoformat(utc_now_iso().replace("Z", "+00:00"))
+                   - datetime.fromisoformat(str(previous.get("generatedAt")).replace("Z", "+00:00"))).total_seconds()
+            if not 0 <= age <= 7 * 86400:
+                previous = {}
+        except (ValueError, TypeError):
+            previous = {}
+        try:
             payload = cpi_release_calendar_service.build_cpi_release_calendar_payload(self.service_context())
         except Exception as exc:
             if previous:
+                previous = {**previous, "status": "degraded", "sources": {"calendarSources": "error"}}
                 self.store_payload(previous)
                 self.store_seed_meta(
                     status="preserved",
@@ -207,6 +223,8 @@ class CpiReleaseCalendarWatcher:
 
         record_count = len(payload.get("items") or [])
         if previous and record_count <= 0:
+            previous = {**previous, "status": "degraded", "sources": payload.get("sources", {}),
+                        "sourceErrors": payload.get("sourceErrors", {})}
             self.store_payload(previous)
             self.store_seed_meta(
                 status="preserved",
@@ -226,9 +244,10 @@ class CpiReleaseCalendarWatcher:
             status=status,
             record_count=record_count,
             source_states=payload.get("sources"),
-            error_summary=None if record_count else "CPI calendar payload contained no items",
+            error_summary=json.dumps(payload.get("sourceErrors")) if payload.get("sourceErrors") else (None if record_count else "CPI calendar payload contained no items"),
             cache_mode=payload.get("cacheMode"),
             payload_status=payload.get("status"),
+            preserve_last_success=not any(value == "ok" for key, value in payload.get("sources", {}).items() if key != "pmktBaseline"),
         )
         return {"status": "stored", "payload": payload}
 

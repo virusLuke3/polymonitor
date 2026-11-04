@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 from zoneinfo import ZoneInfo
 
 from api.context import resolve_optional_service_callable, resolve_service_callable
+from api.services import bls_calendar
 
 
 CPI_CALENDAR_SNAPSHOT_NAMESPACE = "snapshot:macro:cpi-release-calendar"
@@ -41,39 +42,6 @@ MONTHS: Dict[str, int] = {
     "november": 11,
     "dec": 12,
     "december": 12,
-}
-
-BLS_2026_FALLBACK_ROWS: Dict[str, tuple[tuple[str, str, str], ...]] = {
-    "cpi": (
-        ("November 2025", "Dec. 18, 2025", "08:30 AM"),
-        ("December 2025", "Jan. 13, 2026", "08:30 AM"),
-        ("January 2026", "Feb. 13, 2026", "08:30 AM"),
-        ("February 2026", "Mar. 11, 2026", "08:30 AM"),
-        ("March 2026", "Apr. 10, 2026", "08:30 AM"),
-        ("April 2026", "May 12, 2026", "08:30 AM"),
-        ("May 2026", "Jun. 10, 2026", "08:30 AM"),
-        ("June 2026", "Jul. 14, 2026", "08:30 AM"),
-        ("July 2026", "Aug. 12, 2026", "08:30 AM"),
-        ("August 2026", "Sep. 11, 2026", "08:30 AM"),
-        ("September 2026", "Oct. 14, 2026", "08:30 AM"),
-        ("October 2026", "Nov. 10, 2026", "08:30 AM"),
-        ("November 2026", "Dec. 10, 2026", "08:30 AM"),
-    ),
-    "nfp": (
-        ("November 2025", "Dec. 16, 2025", "08:30 AM"),
-        ("December 2025", "Jan. 09, 2026", "08:30 AM"),
-        ("January 2026", "Feb. 11, 2026", "08:30 AM"),
-        ("February 2026", "Mar. 06, 2026", "08:30 AM"),
-        ("March 2026", "Apr. 03, 2026", "08:30 AM"),
-        ("April 2026", "May 08, 2026", "08:30 AM"),
-        ("May 2026", "Jun. 05, 2026", "08:30 AM"),
-        ("June 2026", "Jul. 02, 2026", "08:30 AM"),
-        ("July 2026", "Aug. 07, 2026", "08:30 AM"),
-        ("August 2026", "Sep. 04, 2026", "08:30 AM"),
-        ("September 2026", "Oct. 02, 2026", "08:30 AM"),
-        ("October 2026", "Nov. 06, 2026", "08:30 AM"),
-        ("November 2026", "Dec. 04, 2026", "08:30 AM"),
-    ),
 }
 
 
@@ -194,99 +162,6 @@ def _parse_et_datetime(month_token: str, day: str, year: str, time_text: str) ->
         hour = 0
     local_dt = datetime(int(year), month, int(day), hour, minute, tzinfo=EASTERN_TZ)
     return local_dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _parse_release_date_text(raw: str) -> Optional[tuple[str, str, str]]:
-    match = re.match(
-        r"^(Jan\.?|Feb\.?|Mar\.?|Apr\.?|May|Jun\.?|Jul\.?|Aug\.?|Sep\.?|Sept\.?|Oct\.?|Nov\.?|Dec\.?)\s+(\d{1,2}),\s+(\d{4})$",
-        str(raw or "").strip(),
-    )
-    if not match:
-        return None
-    return match.group(1), match.group(2), match.group(3)
-
-
-def _fallback_bls_schedule(*, kind: str, title: str, source: str, url: str) -> List[Dict[str, Any]]:
-    rows = BLS_2026_FALLBACK_ROWS.get(kind, ())
-    items: List[Dict[str, Any]] = []
-    for reference_month, release_date, release_time in rows:
-        date_parts = _parse_release_date_text(release_date)
-        if not date_parts:
-            continue
-        release_at = _parse_et_datetime(date_parts[0], date_parts[1], date_parts[2], release_time)
-        if not release_at:
-            continue
-        items.append(
-            {
-                "id": f"{kind}-{reference_month.lower().replace(' ', '-')}",
-                "kind": kind,
-                "title": title,
-                "referencePeriod": reference_month,
-                "releaseAt": release_at,
-                "releaseTimeEt": release_time,
-                "source": f"{source} fallback",
-                "sourceUrl": url,
-                "marketRelevance": "CPI bucket" if kind == "cpi" else "Fed / labor / unemployment",
-            }
-        )
-    return items
-
-
-def _parse_bls_schedule(
-    ctx: CpiReleaseCalendarContext,
-    *,
-    url: str,
-    kind: str,
-    title: str,
-    source: str,
-) -> tuple[List[Dict[str, Any]], str]:
-    dependencies = _dependencies(ctx)
-    try:
-        html = dependencies.http_text_get(
-            url,
-            timeout=12,
-            headers={
-                "Accept": "text/html",
-                "User-Agent": "polydata-cpi-calendar/1.0",
-            },
-        )
-    except Exception:
-        fallback = _fallback_bls_schedule(kind=kind, title=title, source=source, url=url)
-        if fallback:
-            return fallback, "fallback"
-        raise
-    if "Access Denied" in str(html or ""):
-        return _fallback_bls_schedule(kind=kind, title=title, source=source, url=url), "fallback"
-    lines = _html_to_lines(dependencies, str(html or ""))
-    text = _lines_to_text(lines)
-    pattern = re.compile(
-        r"([A-Z][a-z]+)\s+(\d{4})\s+"
-        r"(Jan\.?|Feb\.?|Mar\.?|Apr\.?|May|Jun\.?|Jul\.?|Aug\.?|Sep\.?|Sept\.?|Oct\.?|Nov\.?|Dec\.?)\s+"
-        r"(\d{1,2}),\s+(\d{4})\s+(\d{1,2}:\d{2}\s+[AP]M)"
-    )
-    items: List[Dict[str, Any]] = []
-    for match in pattern.finditer(text):
-        reference_month = f"{match.group(1)} {match.group(2)}"
-        release_at = _parse_et_datetime(match.group(3), match.group(4), match.group(5), match.group(6))
-        if not release_at:
-            continue
-        items.append(
-            {
-                "id": f"{kind}-{reference_month.lower().replace(' ', '-')}",
-                "kind": kind,
-                "title": title,
-                "referencePeriod": reference_month,
-                "releaseAt": release_at,
-                "releaseTimeEt": match.group(6).upper(),
-                "source": source,
-                "sourceUrl": url,
-                "marketRelevance": "CPI bucket" if kind == "cpi" else "Fed / labor / unemployment",
-            }
-        )
-    if items:
-        return items, "ok"
-    fallback = _fallback_bls_schedule(kind=kind, title=title, source=source, url=url)
-    return fallback, "fallback" if fallback else "empty"
 
 
 def _parse_date_without_year(raw: str, base_year: int) -> Optional[tuple[int, int, int]]:
@@ -505,12 +380,13 @@ def build_cpi_release_calendar_payload(
 ) -> Dict[str, Any]:
     dependencies = _dependencies(ctx)
     settings = dependencies.settings
-    source_states: Dict[str, str] = {}
-    events: List[Dict[str, Any]] = []
+    now_iso = _utc_now_iso(dependencies)
+    now = datetime.fromisoformat(now_iso.replace("Z", "+00:00"))
+    previous = dependencies.snapshot_store.get_stale(CPI_CALENDAR_SNAPSHOT_NAMESPACE, CPI_CALENDAR_CACHE_KEY) if dependencies.snapshot_store else {}
+    events, source_states, source_errors, conflicts = bls_calendar.build(
+        dependencies.http_text_get, dependencies.snapshot_store, now, previous)
 
     source_jobs = (
-        ("blsCpi", lambda: _parse_bls_schedule(ctx, url=settings.cpi_calendar_bls_cpi_url, kind="cpi", title="Consumer Price Index", source="BLS CPI Release Calendar")),
-        ("blsEmployment", lambda: _parse_bls_schedule(ctx, url=settings.cpi_calendar_bls_employment_url, kind="nfp", title="Employment Situation", source="BLS Employment Situation Calendar")),
         ("beaPce", lambda: _parse_bea_schedule(ctx, url=settings.cpi_calendar_bea_schedule_url)),
         ("fomc", lambda: _parse_fomc_schedule(ctx, url=settings.cpi_calendar_fomc_url)),
     )
@@ -531,13 +407,16 @@ def build_cpi_release_calendar_payload(
     now_ts = _parse_iso_ts(now_iso)
     unique_events = {str(event.get("id") or len(events)): event for event in events if event.get("releaseAt")}
     items = sorted(unique_events.values(), key=lambda event: _parse_iso_ts(event.get("releaseAt")))
-    status = "ok" if items and any(value == "ok" for value in source_states.values()) else ("degraded" if items else "warming")
+    calendar_states = [value for key, value in source_states.items() if key != "pmktBaseline"]
+    status = "ok" if items and all(value == "ok" for value in calendar_states) else ("degraded" if items else "warming")
     return {
         "generatedAt": now_iso,
-        "source": "BLS / BEA / Federal Reserve / Polymarket",
-        "sourceUrl": getattr(settings, "cpi_calendar_source_url", ""),
+        "source": "FRED / New York Fed / BLS via FRASER / BEA / Federal Reserve / Polymarket",
+        "sourceUrl": bls_calendar.NYFED_URL,
         "status": status,
         "sources": source_states,
+        "sourceErrors": source_errors,
+        "scheduleConflicts": conflicts,
         "summary": _summary(items, baseline, now_ts),
         "baseline": baseline,
         "consensus": {"status": "optional-unavailable", "label": "High-quality consensus is usually paid; panel uses PMKT implied baseline."},
@@ -568,6 +447,7 @@ def normalize_cpi_release_calendar_payload(
         visible = items
     max_items = max(1, min(int(limit or DEFAULT_ITEM_LIMIT), 20))
     result["items"] = visible[:max_items]
+    result["recentReleases"] = [item for item in items if now_ts - 3 * 86400 <= _parse_iso_ts(item.get("releaseAt")) < now_ts]
     result["summary"] = result.get("summary") if isinstance(result.get("summary"), dict) else _summary(items, result.get("baseline") or {}, now_ts)
     result["baseline"] = result.get("baseline") if isinstance(result.get("baseline"), dict) else {"status": "unavailable"}
     result["consensus"] = result.get("consensus") if isinstance(result.get("consensus"), dict) else {"status": "optional-unavailable"}

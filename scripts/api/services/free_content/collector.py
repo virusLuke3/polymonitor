@@ -81,7 +81,11 @@ def collect_one(storage, snapshot_store, source, old, *, probe=False, conditiona
     }
     try:
         with requests.Session() as session:
-            if source["transport"] == "snapshot" and not probe:
+            if source["transport"] == "fraser-pdf":
+                from .fraser import collect
+                items, meta = collect(session, snapshot_store, source, deadline=deadline, probe=probe)
+                state["last_success_at"] = stamp
+            elif source["transport"] == "snapshot" and not probe:
                 items, snapshot = snapshot_items(snapshot_store, source)
                 meta = {"http_status": None, "final_url": source["feed_url"], "reused_snapshot": True}
                 state["last_success_at"] = snapshot["fetchedAt"]
@@ -216,7 +220,7 @@ def collect_one(storage, snapshot_store, source, old, *, probe=False, conditiona
         meta = getattr(exc, "meta", {})
         state.update(meta)
         state.update(
-            status="error",
+            status="rate_limited" if meta.get("http_status") == 429 else "error",
             error=f"{type(exc).__name__}: {exc}",
             failure_count=failures,
             next_check_at=(

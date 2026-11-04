@@ -66,14 +66,14 @@
       "source_id": "bls-cpi",
       "publisher_id": "bls",
       "publisher_name": "U.S. Bureau of Labor Statistics",
-      "feed_url": "https://www.bls.gov/feed/cpi.rss",
-      "discovery_url": "https://www.bls.gov/feed/",
-      "transport": "rss-atom",
+      "feed_url": "https://fraser.stlouisfed.org/title/consumer-price-index-6838?browse=2020s",
+      "discovery_url": "https://fraser.stlouisfed.org/title/consumer-price-index-6838?browse=2020s",
+      "transport": "fraser-pdf",
       "source_kind": "official_release",
       "topics": [
         "cpi"
       ],
-      "poll_interval_seconds": 600,
+      "poll_interval_seconds": 21600,
       "enabled": true,
       "policy_url": "https://www.bls.gov/bls/linksite.htm",
       "permission_basis": "BLS public-domain text",
@@ -93,41 +93,37 @@
       "probe_status": "passed",
       "probe": {
         "source_id": "bls-cpi",
-        "configured_url": "https://www.bls.gov/feed/cpi.rss",
-        "checked_at": "2026-10-01T02:37:38.689135+00:00",
-        "http_status": 200,
-        "final_url": "https://www.bls.gov/feed/cpi.rss",
-        "bytes": 8394,
-        "items": 12,
-        "sample": [
-          {
-            "title": "CPI for all items increases 0.4% in August; gasoline rises",
-            "link": "",
-            "published": "2026-09-11T07:50:40.968-04:00"
-          }
-        ]
+        "checked_at": "2026-11-04T03:10:35.875756Z",
+        "evidence": "docs/bls-source-research-2026-11-04.md",
+        "transport": "fraser-pdf",
+        "validated": "directory, item metadata, original BLS PDF and extracted release identity",
+        "bytes": 574292,
+        "http_status": 200
       },
       "storage_allowed": true,
       "display_title_allowed": true,
       "display_excerpt_allowed": true,
       "allowed_hosts": [
-        "www.bls.gov"
+        "www.bls.gov",
+        "fraser.stlouisfed.org"
       ],
       "license_url": null,
-      "language": "en"
+      "language": "en",
+      "legacy_feed_url": "https://www.bls.gov/feed/cpi.rss",
+      "release_kind": "cpi"
     },
     {
       "source_id": "bls-empsit",
       "publisher_id": "bls",
       "publisher_name": "U.S. Bureau of Labor Statistics",
-      "feed_url": "https://www.bls.gov/feed/empsit.rss",
-      "discovery_url": "https://www.bls.gov/feed/",
-      "transport": "rss-atom",
+      "feed_url": "https://fraser.stlouisfed.org/title/employment-situation-144?browse=2020s",
+      "discovery_url": "https://fraser.stlouisfed.org/title/employment-situation-144?browse=2020s",
+      "transport": "fraser-pdf",
       "source_kind": "official_release",
       "topics": [
         "employment"
       ],
-      "poll_interval_seconds": 600,
+      "poll_interval_seconds": 21600,
       "enabled": true,
       "policy_url": "https://www.bls.gov/bls/linksite.htm",
       "permission_basis": "BLS public-domain text",
@@ -147,41 +143,37 @@
       "probe_status": "passed",
       "probe": {
         "source_id": "bls-empsit",
-        "configured_url": "https://www.bls.gov/feed/empsit.rss",
-        "checked_at": "2026-10-01T02:37:38.690926+00:00",
-        "http_status": 200,
-        "final_url": "https://www.bls.gov/feed/empsit.rss",
-        "bytes": 8541,
-        "items": 12,
-        "sample": [
-          {
-            "title": "Payroll employment increases by 162,000 in August; unemployment rate unchanged at 4.1%",
-            "link": "",
-            "published": "2026-09-04T07:51:08.695-04:00"
-          }
-        ]
+        "checked_at": "2026-11-04T03:10:39.073607Z",
+        "evidence": "docs/bls-source-research-2026-11-04.md",
+        "transport": "fraser-pdf",
+        "validated": "directory, item metadata, original BLS PDF and extracted release identity",
+        "bytes": 580018,
+        "http_status": 200
       },
       "storage_allowed": true,
       "display_title_allowed": true,
       "display_excerpt_allowed": true,
       "allowed_hosts": [
-        "www.bls.gov"
+        "www.bls.gov",
+        "fraser.stlouisfed.org"
       ],
       "license_url": null,
-      "language": "en"
+      "language": "en",
+      "legacy_feed_url": "https://www.bls.gov/feed/empsit.rss",
+      "release_kind": "nfp"
     },
     {
       "source_id": "bls-ppi",
       "publisher_id": "bls",
       "publisher_name": "U.S. Bureau of Labor Statistics",
-      "feed_url": "https://www.bls.gov/feed/ppi.rss",
-      "discovery_url": "https://www.bls.gov/feed/",
-      "transport": "rss-atom",
+      "feed_url": "https://fraser.stlouisfed.org/title/producer-price-indexes-6837?browse=2020s",
+      "discovery_url": "https://fraser.stlouisfed.org/title/producer-price-indexes-6837?browse=2020s",
+      "transport": "fraser-pdf",
       "source_kind": "official_release",
       "topics": [
         "ppi"
       ],
-      "poll_interval_seconds": 600,
+      "poll_interval_seconds": 21600,
       "enabled": true,
       "policy_url": "https://www.bls.gov/bls/linksite.htm",
       "permission_basis": "BLS public-domain text",
@@ -201,28 +193,24 @@
       "probe_status": "passed",
       "probe": {
         "source_id": "bls-ppi",
-        "configured_url": "https://www.bls.gov/feed/ppi.rss",
-        "checked_at": "2026-10-01T02:37:38.692382+00:00",
-        "http_status": 200,
-        "final_url": "https://www.bls.gov/feed/ppi.rss",
-        "bytes": 8638,
-        "items": 12,
-        "sample": [
-          {
-            "title": "PPI for final demand moves up 0.4% in August; goods advance 1.1%, services rise 0.1%",
-            "link": "",
-            "published": "2026-09-10T07:50:35.512-04:00"
-          }
-        ]
+        "checked_at": "2026-11-04T03:10:43.033304Z",
+        "evidence": "docs/bls-source-research-2026-11-04.md",
+        "transport": "fraser-pdf",
+        "validated": "directory, item metadata, original BLS PDF and extracted release identity",
+        "bytes": 1641399,
+        "http_status": 200
       },
       "storage_allowed": true,
       "display_title_allowed": true,
       "display_excerpt_allowed": true,
       "allowed_hosts": [
-        "www.bls.gov"
+        "www.bls.gov",
+        "fraser.stlouisfed.org"
       ],
       "license_url": null,
-      "language": "en"
+      "language": "en",
+      "legacy_feed_url": "https://www.bls.gov/feed/ppi.rss",
+      "release_kind": "ppi"
     },
     {
       "source_id": "fed-monetary",

@@ -25,6 +25,57 @@ Preact and shared runtime. No new polling owner lives in a renderer.
   cache retention is at most 24 hours. Geo uses its 5-minute source cycle and
   a 10-minute freshness budget. Historical conflict dates are never called live.
 
+## BLS replacement for daily monitoring and release archives
+
+The daily-monitoring path uses direct HTTPS, without inherited Clash/SOCKS
+variables: New York Fed and FRED release calendars, the existing four FRED CPI
+series, and original BLS release PDFs distributed by FRASER. This is a daily
+monitoring/archive contract, not a release-instant trading feed. Cleveland Fed
+nowcasts, BEA, FOMC and Polymarket data keep their existing owners.
+
+- The existing `cpi_release_calendar_watcher` owns calendar acquisition every
+  hour. The `snapshot:macro:cpi-release-calendar / panel-v1` SQLite/Redis identity
+  and existing Calendar/Command consumers remain. NY Fed times use
+  `America/New_York`, FRED times use `America/Chicago`; conflicting times are
+  explicit, and reference months require original release evidence. An absent
+  reference month must not be inferred by subtracting a month from release time.
+- The existing content worker owns the three BLS source IDs, with FRASER
+  directory/PDF transport every six hours. It retains BLS as publisher and
+  records FRASER as distributor. Source state/conditional requests and bounded
+  retries survive restarts. No browser request acquires these sources.
+- Original PDFs, extracted text and metadata are archived under
+  `bls-release-archive/` beside the configured snapshot SQLite file. Content
+  hashes identify immutable versions; per-source manifests identify the latest
+  validated release. This formal archive survives the news store's 90-day
+  pruning. It starts with the latest available report, then preserves releases
+  and revisions observed by this collector; it is not a complete historical
+  backfill. Archive size grows with observed monthly releases, bounded to
+  2.5 MB per downloaded document and 12 versions per item in the news projection.
+- News metadata/excerpts reuse `content_items`, `content_versions`,
+  `content_discoveries`, `content_source_state` and the existing related-news
+  seed. The original publication time, archive first reception and successful
+  check time remain separate. Old reports stay out of the seven-day news view.
+- FRASER uses the existing 45-second source deadline and 90-second collector
+  cycle, one concurrent request chain per FRASER domain, at most one latest
+  report per topic per cycle, and bounded PDF extraction. Calendar calls have
+  per-request time/size limits. Failures preserve validated data and original
+  verification times; no hardcoded annual calendar is reported as verified.
+  Calendar failure retention is seven days. The API carries the previous three
+  days of releases separately for Command's existing post-release window, so a
+  daily collection cannot lose the matching event just an hour after publication.
+  The worker host requires `pdftotext` (Poppler); no browser or API PDF parsing
+  is introduced. Source routing is explicit in the FRASER adapter, and the
+  existing CPI watcher remains direct; FRED numerical reads use their existing
+  direct/no-proxy route.
+- Acceptance covers direct transport, timezone/year rollover, reference binding,
+  conflicting/failed sources, archive versions and restart reuse, original news
+  dates, database writes and the real public Calendar/Command/content APIs.
+  Hourly/six-hourly cadence requires configuration and scheduler tests plus real
+  successful writes; a short deployment check does not establish a full cycle.
+
+Implementation and production evidence are recorded in
+[BLS source investigation](bls-source-research-2026-11-04.md).
+
 ## CPI event identity
 
 Bind events to the official calendar reference month. Never select a forecast

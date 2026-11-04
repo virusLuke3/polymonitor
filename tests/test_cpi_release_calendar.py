@@ -13,7 +13,7 @@ from flask import Flask
 
 
 from api.routes.runtime_panels import create_runtime_panels_blueprint
-from api.services import cpi_release_calendar_service
+from api.services import cpi_release_calendar_service, bls_calendar
 from runtime import cpi_release_calendar_watcher
 from runtime.snapshot_store import SnapshotStore
 
@@ -125,6 +125,11 @@ def make_context(*, http_text_get=None, snapshot_store=None, cached=None, macro_
     }
 
     def default_text_get(url, **kwargs):
+        if url == bls_calendar.NYFED_URL:
+            return '<div>May 2026</div><table class="research-table-1col"><tr><td><div>12<span><a href="https://www.bls.gov/news.release/cpi.toc.htm">Consumer Price Index</a><br/>(08:30)</span></div></td></tr></table>'
+        if url.startswith("https://fred.stlouisfed.org/"):
+            rid = url.split("rid=")[1].split("&")[0]
+            return f'<table class="table-standard-theme"><tr><td>Tuesday May 12, 2026</td></tr><tr><td>7:30 am</td><td><a href="/release?rid={rid}">Release</a></td></tr></table>'
         return fixtures[url]
 
     if macro_payload is None:
@@ -157,8 +162,8 @@ def test_build_payload_maps_official_releases_and_pmkt_baseline():
     payload = cpi_release_calendar_service.get_cpi_release_calendar_snapshot(make_context(), limit=8)
 
     assert payload["status"] == "ok"
-    assert payload["sources"]["blsCpi"] == "ok"
-    assert payload["summary"]["nextCpi"]["referencePeriod"] == "April 2026"
+    assert payload["sources"]["cpiSchedule"] == "ok"
+    assert payload["summary"]["nextCpi"]["referencePeriod"] is None
     assert payload["summary"]["nextPce"]["referencePeriod"] == "April 2026"
     assert payload["summary"]["nextFomc"]["referencePeriod"] == "June 16-17, 2026"
     assert payload["summary"]["baselineProbability"] == 0.57
@@ -171,10 +176,10 @@ def test_connection_failure_returns_renderable_warming_payload():
         limit=8,
     )
 
-    assert payload["status"] == "degraded"
-    assert payload["sources"]["blsCpi"] == "fallback"
+    assert payload["status"] == "warming"
+    assert payload["sources"]["cpiSchedule"] == "error"
     assert payload["sources"]["beaPce"] == "error"
-    assert payload["items"]
+    assert payload["items"] == []
 
 
 def test_timeout_returns_renderable_payload():
@@ -183,7 +188,7 @@ def test_timeout_returns_renderable_payload():
         limit=8,
     )
 
-    assert payload["status"] == "degraded"
+    assert payload["status"] == "warming"
     assert payload["sources"]["beaPce"] == "error"
 
 
@@ -193,7 +198,7 @@ def test_non_200_error_returns_renderable_payload():
         limit=8,
     )
 
-    assert payload["status"] == "degraded"
+    assert payload["status"] == "warming"
     assert payload["sources"]["fomc"] == "error"
 
 
@@ -202,9 +207,9 @@ def test_invalid_empty_source_shape_does_not_crash():
         make_context(http_text_get=lambda *args, **kwargs: "<html></html>"), limit=8
     )
 
-    assert payload["status"] == "degraded"
-    assert payload["sources"]["blsCpi"] == "fallback"
-    assert payload["items"]
+    assert payload["status"] == "warming"
+    assert payload["sources"]["cpiSchedule"] == "error"
+    assert payload["items"] == []
 
 
 def test_stale_snapshot_can_be_returned_by_cache_layer():
@@ -326,15 +331,35 @@ def test_watcher_preserves_previous_snapshot_when_new_payload_is_empty(tmp_path)
         "summary": {"signal": "CALENDAR WARMING"},
     }
 
-    with patch.object(cpi_release_calendar_service, "build_cpi_release_calendar_payload", return_value=empty_payload):
+    with patch.object(cpi_release_calendar_service, "build_cpi_release_calendar_payload", return_value=empty_payload), patch.object(cpi_release_calendar_watcher, "utc_now_iso", return_value="2026-05-11T01:00:00Z"):
         result = watcher.run_once()
 
     assert result["status"] == "preserved"
     stored = json.loads(fake_redis.get(watcher.redis_key()) or "{}")
     assert stored["items"][0]["id"] == "old-cpi"
+    assert stored["generatedAt"] == previous["generatedAt"]
+    assert stored["status"] == "degraded"
     meta = json.loads(fake_redis.get("polydata:seed-meta:macro:cpi-release-calendar") or "{}")
     assert meta["status"] == "preserved"
     assert "Preserved previous snapshot" in meta["errorSummary"]
+
+
+def test_first_failure_does_not_create_a_success_time(tmp_path):
+    watcher, fake_redis = make_watcher(tmp_path)
+    with patch.object(cpi_release_calendar_service, "build_cpi_release_calendar_payload", side_effect=TimeoutError("fixture")):
+        assert watcher.run_once()["status"] == "error"
+    meta = json.loads(fake_redis.get("polydata:seed-meta:macro:cpi-release-calendar") or "{}")
+    assert meta["lastSuccessAt"] is None
+
+
+def test_daily_monitoring_retains_recent_release_for_command_period_binding():
+    context = make_context()
+    context["utc_now_iso"] = lambda: "2026-05-13T12:00:00Z"
+    payload = {"items": [{"id": "cpi-may", "kind": "cpi", "releaseAt": "2026-05-12T12:30:00Z", "referencePeriod": "April 2026"},
+                          {"id": "cpi-june", "kind": "cpi", "releaseAt": "2026-06-10T12:30:00Z"}]}
+    result = cpi_release_calendar_service.normalize_cpi_release_calendar_payload(payload, ctx=context)
+    assert result["recentReleases"][0]["referencePeriod"] == "April 2026"
+    assert result["items"][0]["id"] == "cpi-june"
 
 
 def test_runtime_route_clamps_limit_to_max():

@@ -408,6 +408,8 @@ def _calendar_rows(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
                     "referencePeriod": item.get("referencePeriod"),
                     "releaseAt": item.get("releaseAt"),
                     "releaseTimeEt": item.get("releaseTimeEt"),
+                    "scheduleStatus": item.get("scheduleStatus"),
+                    "verifiedAt": item.get("verifiedAt"),
                 },
             )
         )
@@ -556,6 +558,7 @@ def _release_from_rows(rows: List[Dict[str, Any]], now: datetime | None = None) 
         "source": row.get("source"),
         "sourceUrl": row.get("sourceUrl"),
         "hoursToEvent": _event_hours_to_release(release_at),
+        "scheduleStatus": metadata.get("scheduleStatus"),
     }
 
 
@@ -586,15 +589,7 @@ def _period_from_release(release: Dict[str, Any]) -> Optional[str]:
     text = str(release.get("referencePeriod") or "").strip()
     if text:
         return text
-    parsed = _parse_datetime(release.get("releaseAt"))
-    if parsed is None:
-        return None
-    month = parsed.month - 1
-    year = parsed.year
-    if month == 0:
-        month = 12
-        year -= 1
-    return f"{year}-{month:02d}"
+    return None
 
 
 def _compose_cpi_release_events(
@@ -673,7 +668,7 @@ def _compose_cpi_release_events(
             "previousCount": previous_count,
             "hoursToEvent": release.get("hoursToEvent"),
             "signal": "CPI RELEASE SCHEDULED" if not is_released else "CPI RELEASED",
-            "sourceLabel": "BLS calendar / Cleveland Fed nowcast / FRED actuals",
+            "sourceLabel": "FRED / NY Fed calendar · BLS via FRASER · Cleveland Fed nowcast · FRED actuals",
         },
     }
 
@@ -935,11 +930,13 @@ def build_cpi_release_command_center_snapshot(
         _inflation_nowcast_seeded_snapshot,
         dependencies,
     )
-    rows = _calendar_rows(calendar) + _nowcast_rows(nowcast)
+    release_items = {item["id"]: item for item in [*(calendar.get("recentReleases") or []), *(calendar.get("items") or [])] if item.get("id")}
+    rows = _calendar_rows({**calendar, "items": list(release_items.values())}) + _nowcast_rows(nowcast)
     sources: Dict[str, str] = {"calendar": _snapshot_status(calendar), "nowcast": _snapshot_status(nowcast)}
     # Only the CPI calendar determines this panel's primary release validity.
     calendar_states = calendar.get("sources") or {}
-    required_calendar = {**calendar, "sources": {key: value for key, value in calendar_states.items() if key == "blsCpi"}}
+    calendar_key = "cpiSchedule" if "cpiSchedule" in calendar_states else "blsCpi"
+    required_calendar = {**calendar, "sources": {key: value for key, value in calendar_states.items() if key == calendar_key}}
     _merge_sources(sources, "calendar", required_calendar if required_calendar["sources"] else calendar)
     payload = _payload(
         dependencies,
@@ -948,7 +945,7 @@ def build_cpi_release_command_center_snapshot(
         sources,
         limit=limit,
     )
-    payload["optionalSources"] = {f"calendar.{key}": value for key, value in calendar_states.items() if key != "blsCpi"}
+    payload["optionalSources"] = {f"calendar.{key}": value for key, value in calendar_states.items() if key != calendar_key}
     return payload
 
 
