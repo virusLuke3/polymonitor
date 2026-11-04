@@ -84,7 +84,8 @@ LOB 特定 token 的上游未就绪继续检查已有 owner 的实际状态；�
 - 一个请求最多尝试两个出口，共用一次请求的超时预算。加密 REST 从 5 秒调整为 12 秒（含备用），
   适配实测约 3–4 秒的跨境 TLS/响应耗时；采集周期不加快。连接错误和可重试 5xx 可以切一次；
   403 不绕过地区/权限限制，429 保留来源 `Retry-After`，不立即换出口放大请求。
-  失败出口短暂冷却后才重新验证。退避复用既有 SQLite `panel_snapshots`，
+  同一进程/来源/出口连续两次连接失败后冷却 120 秒，真实成功清除失败计数。
+  单次慢响应不直接封停该域名的整轮股票请求；不足 8 秒的旧探测只尝试一个出口，避免把 TLS 预算再减半。退避复用既有 SQLite `panel_snapshots`，
   namespace `state:source-transport`，不创建另一份行情或历史缓存。
 - Crypto、Funding、DeFi、Finance external、Tech/Finance watch 与 Market group 复用各自原采集周期、
   SQLite/Redis key 和业务校验。仅成功取得有效字段且正式发布后才算数据恢复。

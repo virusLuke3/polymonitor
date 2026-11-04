@@ -3,6 +3,7 @@ import { installDashboard } from './fixtures/dashboard';
 import { GENERATED_AT } from './fixtures/world-event-map';
 
 test('TV keeps the channel through failed source, buffering and verified playback', async ({ page }) => {
+  await page.clock.install();
   await installDashboard(page, 'en', ['market-tv-wire']);
   const payload = { generatedAt: GENERATED_AT, status: 'ok', items: [{
     id: 'dw-test', displayName: 'DW test', category: 'news', sourceType: 'hls', status: 'ready',
@@ -35,6 +36,9 @@ test('TV keeps the channel through failed source, buffering and verified playbac
   await expect(host).toHaveAttribute('data-playback-state', 'playing');
   await frame!.evaluate(() => (window as any).progress({ state: 1, isLive: false, time: 12 }));
   await expect(host).toHaveAttribute('data-playback-state', 'blocked');
+  await expect(host).toHaveAttribute('data-channel-id', 'dw-test');
+  await page.clock.fastForward(61000);
+  await expect(host).toHaveAttribute('data-playback-attempt', '1');
   await expect(host).toHaveAttribute('data-channel-id', 'dw-test');
   await page.unrouteAll({ behavior: 'ignoreErrors' });
 });

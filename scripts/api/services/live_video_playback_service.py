@@ -12,6 +12,9 @@ LIVE_REFRESH_SECONDS = 6 * 3600
 FAILED_REFRESH_SECONDS = 900
 LAST_GOOD_SECONDS = 36 * 3600
 VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
+# Retired broadcasters have no verified public 24/7 source in the reviewed catalog.
+HIDDEN_TV_CHANNELS = {"trusted-hls-reuters-tv", "trusted-hls-the-guardian"}
+YOUTUBE_ONLY_CHANNELS = {"trusted-hls-abc-news", "trusted-hls-nbc-news"}
 
 # Reviewed broadcaster identities, not matches inferred from similar names.
 # Order follows WorldMonitor 65860c21; existing HLS URLs stay with their owner.
@@ -113,7 +116,7 @@ def attach_playback_sources(items: list[dict[str, Any]], resolved: dict[str, Any
         if channel and info.get("status") != "not-live":
             videos.append({"kind": "youtube-channel", "channelId": channel})
         # ABC/NBC's retired HLS endpoints are not playback fallbacks.
-        if item.get("id") in {"trusted-hls-abc-news", "trusted-hls-nbc-news"}:
+        if item.get("id") in YOUTUBE_ONLY_CHANNELS:
             item["playbackSources"] = videos
         else:
             item["playbackSources"] = videos + [hls] if youtube_first else [hls] + videos
@@ -125,5 +128,5 @@ def tv_channel_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Filter only the TV view; the separate YouTube library keeps its records."""
     present = {item.get("id") for item in items}
     aliases = {alias for identity, spec in CHANNELS.items() if identity in present for alias in spec[3]}
-    return [item for item in items if item.get("id") not in aliases and
+    return [item for item in items if item.get("id") not in aliases | HIDDEN_TV_CHANNELS and
             (item.get("sourceType") == "hls" or bool(item.get("playbackSources")))]

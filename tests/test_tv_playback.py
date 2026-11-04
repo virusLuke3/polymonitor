@@ -61,3 +61,27 @@ def test_known_finished_pinned_source_is_removed_from_candidates():
     tv.attach_playback_sources(items, {"video:pykpO5kQJ98": {"status": "not-live"}})
     assert [source["kind"] for source in items[0]["playbackSources"]] == ["hls"]
     assert tv.parse_current_live(page("owner", isLive=True), "", "wrongID1234")["status"] == "error"
+
+
+def test_failed_catalog_refresh_preserves_station_and_original_fetch_clock(monkeypatch):
+    from api.services import live_video_source_service as source
+    now = [1000000.0]
+    monkeypatch.setattr(source.time, "time", lambda: now[0])
+    values = {}
+    store = SimpleNamespace(get_stale=lambda ns, key: values.get(key), set=lambda ns, key, value, ttl: values.update({key: value}))
+    deps = SimpleNamespace(snapshot_store=store)
+    calls = []
+    def fetch(*args, **kwargs):
+        calls.append(1)
+        if len(calls) > 1:
+            raise TimeoutError("temporary outage")
+        return "#EXTM3U\n#EXTINF:-1,Station\nhttps://tv.example/live.m3u8\n"
+    monkeypatch.setattr(source, "_http_text_get", fetch)
+    first = source._iptv_directory(deps, "news", "https://directory.example", "original")
+    now[0] += 900
+    assert source._iptv_directory(deps, "news", "https://directory.example", "later")["fetchedAt"] == "original"
+    assert len(calls) == 1
+    now[0] += 86400
+    stale = source._iptv_directory(deps, "news", "https://directory.example", "later")
+    assert stale["items"] == first["items"] and stale["fetchedAt"] == "original"
+    assert stale["error"]

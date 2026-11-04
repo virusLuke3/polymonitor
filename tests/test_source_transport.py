@@ -9,6 +9,7 @@ def routes(monkeypatch):
     monkeypatch.setattr(transport, '_routes', lambda: {'source.example': ['socks5h://first:1', 'socks5h://second:2']})
     monkeypatch.delenv('POLYDATA_SNAPSHOT_SQLITE_PATH', raising=False)
     transport._COOLDOWNS.clear()
+    transport._FAILURES.clear()
 
 
 def response(status=200, **headers):
@@ -30,7 +31,8 @@ def test_connection_failure_switches_once_and_cools_failed_route(monkeypatch):
     with transport.SourceSession() as session:
         assert session.get('https://source.example', timeout=10).status_code == 200
         assert session.get('https://source.example', timeout=10).status_code == 200
-    assert len(calls) == 3
+        assert session.get('https://source.example', timeout=10).status_code == 200
+    assert len(calls) == 5
     assert calls[0]['timeout'].total <= 5
     assert calls[-1]['proxies']['https'].endswith('second:2')
 
@@ -65,3 +67,14 @@ def test_no_forbidden_fallback_or_internal_route(monkeypatch, url, method, statu
     assert len(calls) == 1
     if status != 403:
         assert 'proxies' not in calls[0]
+
+
+def test_success_clears_transient_route_failure(monkeypatch):
+    monkeypatch.setattr(requests.Session, 'request', lambda *args, **kwargs: response())
+    with transport.SourceSession() as session:
+        session._route_failed('source.example:0')
+        assert session.get('https://source.example').status_code == 200
+        session._route_failed('source.example:0')
+        assert session._due('source.example:0')
+        session._route_failed('source.example:0')
+        assert not session._due('source.example:0')

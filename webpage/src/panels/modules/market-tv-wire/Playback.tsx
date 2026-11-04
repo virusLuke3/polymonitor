@@ -14,11 +14,33 @@ export function MarketTvPreview({ item }: { item: RuntimeMarketTvWireItem }) {
   const [state, setState] = useState('connecting');
   const videoRef = useRef<HTMLVideoElement>(null);
   const frameRef = useRef<HTMLIFrameElement>(null);
+  const retryRounds = useRef(0);
   const source = sources[attempt];
   const title = item.displayName || item.name || 'Live TV';
   const url = source?.kind === 'hls' ? (source.proxy ? buildRuntimeHlsProxyUrl(source.url!) : source.url!)
     : source ? buildRuntimeYoutubeEmbedUrl(source.videoId || '', { autoplay: true, mute: true })
       + (source.channelId ? `&channelId=${encodeURIComponent(source.channelId)}` : '') : '';
+
+  // Exhausted sources recover automatically with bounded backoff. Hidden pages
+  // do not reopen streams, and healthy playback survives catalog refreshes.
+  useEffect(() => {
+    if (source || !sources.length) return;
+    let timer: number;
+    const retryWhenVisible = () => {
+      if (document.hidden) { timer = window.setTimeout(retryWhenVisible, 60_000); return; }
+      retryRounds.current += 1;
+      setAttempt(0);
+      setRetry((v) => v + 1);
+    };
+    timer = window.setTimeout(retryWhenVisible, Math.min(300_000, 60_000 * 2 ** retryRounds.current));
+    return () => clearTimeout(timer);
+  }, [attempt, identity]);
+  useEffect(() => {
+    if (state === 'playing') retryRounds.current = 0;
+  }, [state]);
+  useEffect(() => {
+    if (!source && sources.length) setAttempt(0);
+  }, [identity]);
 
   // A refreshed directory must not interrupt an already selected channel.
   useEffect(() => { setAttempt(0); }, [item.id]);

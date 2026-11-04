@@ -730,10 +730,11 @@ def _probe_hls_stream_with_dependencies(
     key = hashlib.sha256(str(item.get("hlsUrl") or "").encode()).hexdigest()[:24]
     if store is not None and dependencies.hls_stream_probe is None:
         cached = store.get("probe:tv-hls", key)
-        if isinstance(cached, dict):
+        if isinstance(cached, dict) and (cached.get("ok") or cached.get("timeoutSeconds", 0) >= _hls_probe_timeout_seconds(dependencies)):
             return cached
     result = _probe_hls_uncached(dependencies, item)
     result["checkedAt"] = time.time()
+    result["timeoutSeconds"] = _hls_probe_timeout_seconds(dependencies)
     if store is not None and dependencies.hls_stream_probe is None:
         store.set("probe:tv-hls", key, result, 86400 if result.get("ok") else 900)
     return result
@@ -797,7 +798,8 @@ def _enrich_hls_watchability(
     *,
     generated_at: str,
 ) -> Dict[str, Any]:
-    hls_items = [item for item in items if str(item.get("sourceType") or "").lower() == "hls"]
+    hls_items = [item for item in items if str(item.get("sourceType") or "").lower() == "hls"
+                 and item.get("id") not in live_video_playback_service.HIDDEN_TV_CHANNELS | live_video_playback_service.YOUTUBE_ONLY_CHANNELS]
     if not hls_items:
         return {"status": "skipped", "count": 0, "playableCount": 0, "blockedCount": 0, "lastSuccessAt": None}
     if not _hls_probe_enabled(dependencies):
@@ -1279,6 +1281,32 @@ def _empty_payload(
     }
 
 
+def _iptv_directory(dependencies, category, feed_url, generated_at):
+    store = dependencies.snapshot_store
+    key = hashlib.sha256(feed_url.encode()).hexdigest()[:24]
+    old = store.get_stale("source:tv-directory", key) if store is not None else None
+    old = old or {}
+    now = time.time()
+    if now < old.get("nextAttemptAt", 0):
+        return old
+    try:
+        text = _http_text_get(dependencies, feed_url, timeout=15)
+        parsed = parse_m3u_playlist(text, category=category, source_url=feed_url, generated_at=generated_at)
+        if not parsed:
+            raise ValueError("empty IPTV directory")
+        result = {"items": parsed[:480], "fetchedAt": generated_at, "fetchedEpoch": now,
+                  "nextAttemptAt": now + 86400, "error": None}
+    except Exception as exc:
+        # A failed catalog download must not remove a selected station. Keep
+        # bounded last-good directory data, not its old live/probe health.
+        result = {**old, "nextAttemptAt": now + 900, "error": str(exc)[:260]}
+        if now - old.get("fetchedEpoch", 0) > 7 * 86400:
+            result["items"] = []
+    if store is not None:
+        store.set("source:tv-directory", key, result, 7 * 86400)
+    return result
+
+
 def build_market_tv_wire_payload(
     ctx: Mapping[str, Any],
     *,
@@ -1298,6 +1326,9 @@ def _build_market_tv_wire_payload(
     generated_at = _utc_now_iso(dependencies)
     errors: List[str] = []
     source_states: Dict[str, Any] = {}
+    # Current TV identities get their own maintenance budget before unrelated
+    # library probes; a short legacy probe cannot consume this round's route.
+    resolved = live_video_playback_service.refresh_live_channels(dependencies)
     items: List[Dict[str, Any]] = []
     manifest_items: List[Dict[str, Any]] = []
     try:
@@ -1344,19 +1375,21 @@ def _build_market_tv_wire_payload(
     if include_iptv:
         iptv_count = 0
         iptv_errors = 0
+        directory_times = []
         for category, feed_url in IPTV_CATEGORY_FEEDS:
-            try:
-                text = _http_text_get(dependencies, feed_url)
-                parsed = parse_m3u_playlist(text, category=category, source_url=feed_url, generated_at=generated_at)
-                iptv_count += len(parsed)
-                items.extend(parsed)
-            except Exception as exc:
+            directory = _iptv_directory(dependencies, category, feed_url, generated_at)
+            parsed = directory.get("items") or []
+            iptv_count += len(parsed)
+            items.extend(parsed)
+            if directory.get("fetchedAt") and parsed:
+                directory_times.append(directory["fetchedAt"])
+            if directory.get("error"):
                 iptv_errors += 1
-                errors.append(f"iptv:{category}: {exc}")
+                errors.append(f"iptv:{category}: {directory['error']}")
         source_states["iptvOrg"] = {
             "status": "ok" if iptv_errors == 0 else ("degraded" if iptv_count else "error"),
             "count": iptv_count,
-            "lastSuccessAt": generated_at if iptv_count else None,
+            "lastSuccessAt": min(directory_times) if directory_times else None,
             "error": "; ".join(errors[-iptv_errors:]) if iptv_errors else None,
         }
 
@@ -1383,7 +1416,6 @@ def _build_market_tv_wire_payload(
         source_states["hlsWatchabilityProbe"] = hls_probe_state
 
     items.sort(key=lambda item: (bool(item.get("curated")), item.get("status") == "ready", int(item.get("relevanceScore") or 0)), reverse=True)
-    resolved = live_video_playback_service.refresh_live_channels(dependencies)
     live_video_playback_service.attach_playback_sources(items, resolved)
     source_states["tvLiveChannels"] = {"channels": resolved, "count": len(resolved)}
     status = "ok" if items and not errors else ("degraded" if items else "empty")
