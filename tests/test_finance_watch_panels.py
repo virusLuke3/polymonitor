@@ -91,9 +91,18 @@ def test_news_worker_replaces_old_window_only_after_success(monkeypatch, panel_i
     worker.store_payload = Mock()
     worker.store_seed_meta = Mock()
     monkeypatch.setattr(service, "FINANCE_WATCH_PANEL_IDS", [panel_id])
-    monkeypatch.setattr(service, "build_all_finance_watch_panel_payloads", lambda *a, **k: {panel_id: fresh})
+    monkeypatch.setattr(service, "build_finance_watch_panel_payload", lambda *a, **k: fresh)
     worker.run_once()
-    worker.store_payload.assert_called_once_with(panel_id, previous if failed else fresh)
+    worker.store_payload.assert_called_once()
+    stored_panel, stored = worker.store_payload.call_args.args
+    assert stored_panel == panel_id
+    if failed:
+        assert stored["generatedAt"] == previous["generatedAt"]
+        assert stored["items"] == previous["items"]
+        assert stored["status"] == "stale"
+        assert stored["sources"] == fresh["sources"]
+    else:
+        assert stored == fresh
     assert worker.store_seed_meta.call_args.kwargs.get("preserve_last_success", False) == failed
 
 

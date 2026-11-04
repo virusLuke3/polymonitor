@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import time
+import requests
+from email.utils import parsedate_to_datetime
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -76,13 +79,34 @@ def get_yahoo_market_snapshot(
         cached = ctx["get_cached_runtime_payload"]("yahoo-chart", cache_key)
         if cached is not None:
             return cached
-    payload = http_json_get(
-        ctx,
-        f"{ctx['SETTINGS'].yahoo_chart_base_url.rstrip('/')}/{symbol}",
-        params={"interval": interval, "range": range_name, "includePrePost": "false"},
-        timeout=12,
-        headers={"User-Agent": "polydata-runtime/1.0", "Accept": "application/json"},
-    )
+    source_key = ctx['SETTINGS'].yahoo_chart_base_url.rstrip('/')
+    state = ctx["get_cached_runtime_payload"]("yahoo-source-backoff", source_key) or {}
+    if float(state.get("retryAt") or 0) > time.time():
+        raise RuntimeError("Yahoo source is in bounded failure backoff")
+    try:
+        payload = http_json_get(
+            ctx,
+            f"{ctx['SETTINGS'].yahoo_chart_base_url.rstrip('/')}/{symbol}",
+            params={"interval": interval, "range": range_name, "includePrePost": "false"},
+            timeout=12,
+            headers={"User-Agent": "polydata-runtime/1.0", "Accept": "application/json"},
+        )
+    except requests.RequestException as exc:
+        failures = int(state.get("failures") or 0) + 1
+        retry_after = getattr(getattr(exc, "response", None), "headers", {}).get("Retry-After")
+        try:
+            delay = max(0, float(retry_after))
+        except (TypeError, ValueError):
+            try:
+                delay = max(0, parsedate_to_datetime(retry_after).timestamp() - time.time())
+            except (TypeError, ValueError, OverflowError):
+                delay = 0
+        delay = max(delay, 60 if failures >= 3 else 0)
+        ctx["set_cached_runtime_payload"]("yahoo-source-backoff", source_key,
+            {"failures": failures, "retryAt": time.time() + delay if delay else 0}, ttl_seconds=max(60, int(delay) + 1))
+        raise
+    ctx["set_cached_runtime_payload"]("yahoo-source-backoff", source_key,
+        {"failures": 0, "retryAt": 0}, ttl_seconds=60)
     result = (((payload or {}).get("chart") or {}).get("result") or [None])[0]
     if not isinstance(result, dict):
         return None

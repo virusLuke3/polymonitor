@@ -30,7 +30,7 @@ except ImportError:
 from api.clients.http_client import http_json_get
 from api.config import load_api_settings
 from api.services import polymarket_macro_map_service
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, retained_snapshot
 from runtime.snapshot_store import SnapshotStore
 from runtime.telegram_panel_publish import publish_cached_panel_snapshot
 
@@ -87,7 +87,7 @@ class PolymarketMacroMapWatcher:
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
         self.requests = requests.Session()
-        self.requests.trust_env = False
+        self.requests.trust_env = str(os.environ.get("POLYDATA_RUNTIME_TRUST_ENV", "0")).lower() in {"1", "true", "yes", "on"}
         self.requests.headers.update({"User-Agent": "polydata-macro-map-watcher/1.0"})
 
     def namespace(self) -> str:
@@ -173,7 +173,7 @@ class PolymarketMacroMapWatcher:
             payload = polymarket_macro_map_service.build_polymarket_macro_map_payload(self.service_context())
         except Exception as exc:
             if previous:
-                self.store_payload(previous)
+                self.store_payload(retained_snapshot(previous))
                 self.store_seed_meta(
                     status="preserved",
                     record_count=len(previous.get("items") or []),
@@ -189,7 +189,7 @@ class PolymarketMacroMapWatcher:
 
         record_count = len(payload.get("items") or [])
         if previous and record_count <= 0:
-            self.store_payload(previous)
+            self.store_payload(retained_snapshot(previous))
             self.store_seed_meta(
                 status="preserved",
                 record_count=len(previous.get("items") or []),
@@ -248,6 +248,7 @@ def main() -> int:
 
     interval_seconds = max(60, int(args.interval or DEFAULT_INTERVAL_SECONDS))
     while True:
+        started_at = time.monotonic()
         try:
             print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
         except KeyboardInterrupt:
@@ -261,7 +262,7 @@ def main() -> int:
                 preserve_last_success=True,
             )
             print(f"[macro-map] ERROR watch loop failed: {exc}", file=sys.stderr)
-        time.sleep(interval_seconds)
+        time.sleep(max(30, interval_seconds - (time.monotonic() - started_at)))
 
 
 if __name__ == "__main__":

@@ -19,7 +19,7 @@ import requests
 
 from api.config import load_api_settings
 from api.services import macro_cpi_panels_service
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, retained_snapshot, collection_delay
 from runtime.snapshot_store import SnapshotStore
 
 DEFAULT_INTERVAL_SECONDS = 21600
@@ -61,7 +61,7 @@ class MacroCpiPanelsWatcher:
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
         self.requests = requests.Session()
-        self.requests.trust_env = False
+        self.requests.trust_env = str(os.environ.get("POLYDATA_RUNTIME_TRUST_ENV", "0")).lower() in {"1", "true", "yes", "on"}
         self.requests.headers.update({"User-Agent": "polydata-macro-cpi-panels-watcher/1.0"})
 
     def ttl_seconds(self) -> int:
@@ -149,13 +149,13 @@ class MacroCpiPanelsWatcher:
             payload = macro_cpi_panels_service.build_macro_cpi_panel_payload(self.context(), panel_id, limit=macro_cpi_panels_service.MAX_ITEM_LIMIT)
         except Exception as exc:
             if previous:
-                self.store_payload(panel_id, previous)
+                self.store_payload(panel_id, retained_snapshot(previous))
                 self.store_meta(panel_id, status="preserved", record_count=len(previous.get("items") or []), source_states={"macro": "error"}, error_summary=str(exc), preserve=True)
                 return {"panelId": panel_id, "status": "preserved", "error": str(exc)}
             self.store_meta(panel_id, status="error", record_count=0, source_states={"macro": "error"}, error_summary=str(exc), preserve=True)
             return {"panelId": panel_id, "status": "error", "error": str(exc)}
         if previous and not payload.get("items"):
-            self.store_payload(panel_id, previous)
+            self.store_payload(panel_id, retained_snapshot(previous))
             self.store_meta(panel_id, status="preserved", record_count=len(previous.get("items") or []), source_states=payload.get("sources"), error_summary="Preserved previous snapshot because new macro CPI payload was empty", preserve=True)
             return {"panelId": panel_id, "status": "preserved"}
         payload = {**payload, "cacheMode": "seeded", "expectedIntervalSeconds": self.interval_seconds}
@@ -166,7 +166,7 @@ class MacroCpiPanelsWatcher:
 
     def run_once(self) -> Dict[str, Any]:
         results = [self.run_panel(panel_id) for panel_id in macro_cpi_panels_service.MACRO_CPI_PANEL_IDS]
-        status = "ok" if all(result.get("status") in {"stored", "preserved"} for result in results) else "degraded"
+        status = "ok" if all(result.get("status") == "stored" and result.get("payloadStatus") == "ok" for result in results) else "degraded"
         return {"status": status, "results": results}
 
 
@@ -184,14 +184,20 @@ def main() -> int:
     if not args.watch:
         print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
         return 0
+    failures = 0
     while True:
+        started_at = time.monotonic()
         try:
-            print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
+            result = watcher.run_once()
+            healthy = result.get("status") == "ok" or (result.get("status") == "stored" and result.get("payload", {}).get("status") == "ok")
+            failures = 0 if healthy else failures + 1
+            print(json.dumps(result, ensure_ascii=False), file=sys.stderr)
         except KeyboardInterrupt:
             return 0
         except Exception as exc:
+            failures += 1
             print(f"[macro-cpi] ERROR {exc}", file=sys.stderr)
-        time.sleep(max(1800, args.interval))
+        time.sleep(collection_delay(watcher.interval_seconds, failures, time.monotonic() - started_at))
 
 
 if __name__ == "__main__":

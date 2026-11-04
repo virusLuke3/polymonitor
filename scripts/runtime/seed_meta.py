@@ -20,6 +20,18 @@ def redis_key(prefix: str, namespace: str, cache_key: str) -> str:
     return f"{str(prefix or '')}{namespace}:{cache_key}"
 
 
+def retained_snapshot(previous: Dict[str, Any], *, sources: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    """Retain data clocks, but never republish a failed refresh as healthy."""
+    return {**previous, "status": "stale", "cacheMode": "stale-seed",
+            "lastAttemptAt": utc_now_iso(), "sources": sources or {"refresh": "error"}}
+
+
+def collection_delay(interval: int, failures: int, elapsed: float) -> float:
+    """Normal cadence is start-to-start; failed slow feeds recover with backoff."""
+    target = interval if failures == 0 else min(interval, 1800, 300 * 2 ** min(failures - 1, 3))
+    return max(30.0, target - elapsed)
+
+
 class SeedMetaStore:
     def __init__(self, *, redis_client: Any, redis_prefix: str, snapshot_store: Any) -> None:
         self.redis_client = redis_client

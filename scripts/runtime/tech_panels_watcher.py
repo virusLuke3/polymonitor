@@ -31,7 +31,7 @@ except ImportError:
 from api.clients import market_data_client
 from api.config import load_api_settings
 from api.services import tech_panels_service
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, retained_snapshot
 from runtime.snapshot_store import SnapshotStore
 
 
@@ -192,7 +192,7 @@ class TechPanelsWatcher:
     def store_payload(self, panel_id: str, payload: Dict[str, Any]) -> None:
         ttl_seconds = self.ttl_seconds()
         namespace = tech_panels_service.tech_panel_namespace(panel_id)
-        payload = {**payload, "cacheMode": "seeded"}
+        payload = {**payload, "cacheMode": "stale-seed" if payload.get("status") == "stale" else "seeded"}
         self.snapshot_store.set(namespace, tech_panels_service.TECH_PANEL_CACHE_KEY, payload, ttl_seconds)
         self.redis_client.set(self.redis_key(panel_id), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl_seconds)
 
@@ -222,17 +222,21 @@ class TechPanelsWatcher:
 
     def run_once(self) -> Dict[str, Any]:
         ctx = self.service_context()
-        payloads = tech_panels_service.build_all_tech_panel_payloads(ctx, limit=self.limit)
         result: Dict[str, Any] = {"status": "ok", "panels": {}}
         for panel_id in tech_panels_service.TECH_PANEL_IDS:
-            payload = payloads.get(panel_id) or {}
+            try:
+                payload = tech_panels_service.build_tech_panel_payload(ctx, panel_id, limit=self.limit)
+            except Exception as exc:
+                payload = tech_panels_service._payload(panel_id, title=panel_id.upper(), items=[], status="error", sources={"builder": "error"}, summary={"error": str(exc)})
             previous = self.load_previous_payload(panel_id)
             previous_count = len(previous.get("items") or []) if isinstance(previous, dict) else 0
             previous_status = str(previous.get("status") or "") if isinstance(previous, dict) else ""
             record_count = len(payload.get("items") or []) if isinstance(payload, dict) else 0
             status = str(payload.get("status") or ("ok" if record_count else "empty")) if isinstance(payload, dict) else "error"
-            if previous and previous_count > 0 and previous_status != "error" and (status == "error" or record_count <= 0):
-                self.store_payload(panel_id, previous)
+            sources = payload.get("sources") or {}
+            healthy_empty = status == "empty" and bool(sources) and all(value in {"ok", "empty", "disabled"} for value in sources.values())
+            if previous and previous_count > 0 and previous_status != "error" and (status == "error" or (record_count <= 0 and not healthy_empty)):
+                self.store_payload(panel_id, retained_snapshot(previous, sources=payload.get("sources")))
                 self.store_seed_meta(
                     panel_id,
                     status="preserved",

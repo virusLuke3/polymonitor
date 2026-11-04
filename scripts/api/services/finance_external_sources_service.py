@@ -177,15 +177,12 @@ def _http_get(
     timeout: int = 12,
 ) -> Any:
     if dependencies.http_json_get is not None:
-        try:
-            return dependencies.http_json_get(
-                url,
-                params=params,
-                timeout=timeout,
-                headers={"User-Agent": "polydata-finance-seed/1.0"},
-            )
-        except Exception:
-            pass
+        return dependencies.http_json_get(
+            url,
+            params=params,
+            timeout=timeout,
+            headers={"User-Agent": "polydata-finance-seed/1.0"},
+        )
     if requests is None:
         raise RuntimeError("requests package is required")
     session = requests.Session()
@@ -206,15 +203,12 @@ def _http_post(
     timeout: int = 12,
 ) -> Any:
     if dependencies.http_json_post is not None:
-        try:
-            return dependencies.http_json_post(
-                url,
-                json_payload=json_payload,
-                timeout=timeout,
-                headers={"User-Agent": "polydata-finance-seed/1.0"},
-            )
-        except Exception:
-            pass
+        return dependencies.http_json_post(
+            url,
+            json_payload=json_payload,
+            timeout=timeout,
+            headers={"User-Agent": "polydata-finance-seed/1.0"},
+        )
     if requests is None:
         raise RuntimeError("requests package is required")
     session = requests.Session()
@@ -231,19 +225,16 @@ def _fetch_yahoo_snapshot(
     dependencies: FinanceExternalSourceDependencies,
     symbol: str,
 ) -> Optional[Dict[str, Any]]:
-    try:
-        if dependencies.get_yahoo_market_snapshot is None:
-            raise RuntimeError("get_yahoo_market_snapshot helper missing")
+    if dependencies.get_yahoo_market_snapshot is not None:
         quote = dependencies.get_yahoo_market_snapshot(
             symbol,
             interval="30m",
             range_name="5d",
             ttl_seconds=300,
         )
-    except Exception:
-        quote = None
-    if isinstance(quote, dict) and quote.get("price") is not None:
-        return quote
+        # This client owns source timeouts and backoff. Do not bypass it with
+        # another request to the same provider after a failure or empty result.
+        return quote if isinstance(quote, dict) and quote.get("price") is not None else None
     payload = _http_get(
         dependencies,
         _setting(

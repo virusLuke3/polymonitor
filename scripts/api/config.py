@@ -644,7 +644,7 @@ def load_api_settings() -> ApiSettings:
         ),
         natural_hazards_gdacs_url=_get_str(
             "POLYDATA_NATURAL_HAZARDS_GDACS_URL",
-            "https://www.gdacs.org/xml/gdacs.geojson",
+            "https://www.gdacs.org/gdacsapi/api/events/geteventlist/events4app",
         ),
         natural_hazards_nws_url=_get_str(
             "POLYDATA_NATURAL_HAZARDS_NWS_URL",

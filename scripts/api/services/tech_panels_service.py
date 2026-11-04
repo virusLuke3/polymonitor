@@ -30,7 +30,6 @@ TECH_PANEL_IDS = (
 )
 OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 OPENROUTER_RANKINGS_URL = "https://openrouter.ai/rankings?view=week"
-OPENROUTER_MODEL_RANKINGS_ACTION = "40824635c5eb77626bdf6795ffbf382c0862b321e1"
 OPENROUTER_USAGE_LIMIT = 20
 
 AI_ENTITIES = (
@@ -299,8 +298,8 @@ def _payload(
     status: Optional[str] = None,
 ) -> Dict[str, Any]:
     source_states = dict(sources or {})
-    has_ok_source = any(str(value).lower() == "ok" for value in source_states.values())
-    resolved_status = status or ("ok" if items and has_ok_source else "partial" if items else "empty")
+    all_sources_ok = bool(source_states) and all(str(value).lower() in {"ok", "empty", "disabled"} for value in source_states.values())
+    resolved_status = status or ("ok" if items and all_sources_ok else "partial" if items else "empty" if all_sources_ok else "error")
     return {
         "generatedAt": utc_now_iso(),
         "status": resolved_status,
@@ -557,24 +556,51 @@ def _row_category(rows: List[Dict[str, Any]], category: str, tag: str, metric_la
     return rows
 
 
-def _parse_openrouter_rsc_json(text: str) -> Any:
-    decoder = json.JSONDecoder()
-    for line in str(text or "").splitlines():
-        if ":" not in line:
+def _parse_openrouter_rankings_page(text: str) -> tuple[list, str]:
+    """Read the public weekly query, never an unrelated hydration list/action."""
+    chunks = []
+    for raw in re.findall(r"<script>self\.__next_f\.push\((.*?)\)</script>", str(text), re.S):
+        try:
+            chunk = json.loads(raw)
+        except (ValueError, TypeError):
             continue
-        prefix, payload = line.split(":", 1)
-        if not prefix.isdigit():
-            continue
-        payload = payload.strip()
-        if not payload or payload[0] not in "[{":
+        if isinstance(chunk, list) and len(chunk) == 2 and chunk[0] == 1 and isinstance(chunk[1], str):
+            chunks.append(chunk[1])
+
+    def find_query(node):
+        if isinstance(node, dict):
+            if node.get("queryKey") == ["rankings", "models", {"view": "week"}]:
+                state = node.get("state") or {}
+                rows = state.get("data")
+                stamp = _safe_float(state.get("dataUpdatedAt"))
+                if state.get("status") != "success" or not isinstance(rows, list) or not stamp:
+                    raise ValueError("OpenRouter weekly rankings unavailable")
+                if not all(isinstance(row, dict) and (row.get("variant_permaslug") or row.get("model_permaslug")) for row in rows):
+                    raise ValueError("OpenRouter weekly rankings schema mismatch")
+                return rows, datetime.fromtimestamp(stamp / 1000, timezone.utc).isoformat().replace("+00:00", "Z")
+            values = node.values()
+        elif isinstance(node, list):
+            values = node
+        else:
+            return None
+        for child in values:
+            found = find_query(child)
+            if found is not None:
+                return found
+        return None
+
+    for line in "".join(chunks).splitlines():
+        prefix, sep, value = line.partition(":")
+        if not sep or not re.fullmatch(r"[0-9a-f]+", prefix):
             continue
         try:
-            value, _offset = decoder.raw_decode(payload)
-        except json.JSONDecodeError:
+            node = json.loads(value)
+        except (ValueError, TypeError):
             continue
-        if isinstance(value, list):
-            return value
-    return []
+        found = find_query(node)
+        if found is not None:
+            return found
+    raise ValueError("OpenRouter public weekly rankings query missing")
 
 
 def _openrouter_models(ctx: dict) -> List[Dict[str, Any]]:
@@ -620,19 +646,11 @@ def _openrouter_latest_model_rows(models: List[Dict[str, Any]], limit: int) -> L
 
 
 def _openrouter_usage_rows(ctx: dict, models: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
-    response = _http_text_post(
-        ctx,
-        OPENROUTER_RANKINGS_URL,
-        data=json.dumps(["week"]),
-        timeout=16,
-        headers={
-            "User-Agent": "polydata-tech-panels/1.0",
-            "Accept": "text/x-component",
-            "Content-Type": "text/plain;charset=UTF-8",
-            "Next-Action": OPENROUTER_MODEL_RANKINGS_ACTION,
-        },
+    response = _http_text_get(
+        ctx, OPENROUTER_RANKINGS_URL, timeout=20,
+        headers={"User-Agent": "polydata-tech-panels/1.0", "Accept": "text/html"},
     )
-    raw_rows = _parse_openrouter_rsc_json(response)
+    raw_rows, source_time = _parse_openrouter_rankings_page(response)
     model_lookup = {
         str(model.get("canonical_slug") or model.get("id") or "").lower(): model
         for model in models
@@ -668,6 +686,9 @@ def _openrouter_usage_rows(ctx: dict, models: List[Dict[str, Any]], limit: int) 
                 "title": f"#{rank} {title}",
                 "summary": f"{_format_compact_number(aggregate.get('count'))} requests on OpenRouter weekly leaderboard",
                 "source": "OpenRouter Usage",
+                "publishedAt": source_time,
+                "sourceUpdatedAt": source_time,
+                "window": "week",
                 "url": _openrouter_model_url(base_slug),
                 "metric": aggregate["tokens"],
                 "metricLabel": f"{_format_compact_number(aggregate['tokens'])} TOK",
@@ -732,11 +753,13 @@ def build_ai_model_race_payload(ctx: dict, limit: int) -> Dict[str, Any]:
     usage_rows: List[Dict[str, Any]] = []
     product_rows: List[Dict[str, Any]] = []
     price_rows: List[Dict[str, Any]] = []
+    models_failed = False
     try:
         models = _openrouter_models(ctx)
     except Exception as exc:
         error_summary = str(exc)
         models = []
+        models_failed = True
     try:
         usage_rows = _row_category(_openrouter_usage_rows(ctx, models, OPENROUTER_USAGE_LIMIT), "USAGE", "USAGE")
         sources["openRouterUsage"] = "ok" if usage_rows else "empty"
@@ -761,16 +784,39 @@ def build_ai_model_race_payload(ctx: dict, limit: int) -> Dict[str, Any]:
             "PRODUCT",
         )
         product_rows = product_news_rows + latest_model_rows
-        sources["productSignal"] = "ok" if product_rows else "empty"
+        sources["productSignal"] = "partial" if models_failed and product_rows else "ok" if product_rows else "empty"
     except Exception as exc:
         error_summary = str(exc)
         sources["productSignal"] = "error"
     try:
         price_rows = _openrouter_price_rows(models, 10)
-        sources["apiPrice"] = "ok" if price_rows else "empty"
+        sources["apiPrice"] = "error" if models_failed else "ok" if price_rows else "empty"
     except Exception as exc:
         error_summary = str(exc)
         sources["apiPrice"] = "error"
+    # A successful sibling must not erase a recently successful failed tab.
+    # Keep each tab's fetch clock, so repeated partial publications cannot renew it.
+    dependencies = _dependencies(ctx)
+    try:
+        previous = dependencies.get_cached_json(tech_panel_namespace("ai-model-race"), TECH_PANEL_CACHE_KEY) if dependencies.get_cached_json else None
+        if not previous and dependencies.snapshot_store is not None:
+            previous = dependencies.snapshot_store.get_stale(tech_panel_namespace("ai-model-race"), TECH_PANEL_CACHE_KEY)
+    except Exception:
+        previous = None
+    previous = previous or {}
+    now = utc_now_iso()
+    def tab_rows(rows, category, source):
+        if sources[source] == "error":
+            return [{**row, "retained": True, "sourceStatus": "error",
+                     "sourceFetchedAt": row.get("sourceFetchedAt") or previous.get("generatedAt")}
+                    for row in previous.get("items", [])
+                    if row.get("category") == category and
+                    seed_recovery.age_seconds(row.get("sourceFetchedAt") or previous.get("generatedAt"), now) < 1800]
+        return [{**row, "sourceFetchedAt": now} for row in rows]
+    news_rows = tab_rows(news_rows, "NEWS", "news")
+    usage_rows = tab_rows(usage_rows, "USAGE", "openRouterUsage")
+    product_rows = tab_rows(product_rows, "PRODUCT SIGNAL", "productSignal")
+    price_rows = tab_rows(price_rows, "API PRICE", "apiPrice")
     rows = (news_rows[:4] + usage_rows[:OPENROUTER_USAGE_LIMIT] + product_rows[:6] + price_rows[:6])[:limit]
     watchlist_rows = [
         {"label": "News", "symbol": "NEWS", "count": len(news_rows), "tone": "watch"},
@@ -864,7 +910,7 @@ def build_big_tech_market_cap_payload(ctx: dict, limit: int) -> Dict[str, Any]:
         title="BIG TECH CAP",
         items=rows[:limit],
         summary={"avgChange": avg, "rankBy": "marketCap", "tracked": len(BIG_TECH_SYMBOLS)},
-        sources={"yahoo": "ok" if rows else "empty"},
+        sources={"yahoo": "ok" if len(rows) == len(BIG_TECH_SYMBOLS) else "partial" if rows else "error"},
     )
 
 

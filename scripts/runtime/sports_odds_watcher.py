@@ -30,7 +30,7 @@ except ImportError:
 from api.config import load_api_settings
 from api.services import sports_odds_service
 from runtime.market_search import build_market_search
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, retained_snapshot
 from runtime.snapshot_store import SnapshotStore
 
 
@@ -200,7 +200,7 @@ class SportsOddsWatcher:
             payload = sports_odds_service.fetch_live_sports_odds_payload(self.service_context(), limit=self.limit)
         except Exception as exc:
             if previous:
-                self.store_payload(previous)
+                self.store_payload(retained_snapshot(previous))
                 self.store_seed_meta(status="preserved", record_count=len(previous.get("items") or []), source_states={"theOddsApi": "error"}, error_summary=str(exc), preserve_last_success=True)
                 return {"status": "preserved", "payload": previous}
             self.store_seed_meta(status="error", record_count=0, source_states={"theOddsApi": "error"}, error_summary=str(exc), preserve_last_success=True)
@@ -210,7 +210,7 @@ class SportsOddsWatcher:
         healthy_empty = (payload.get("status") == "empty"
                          and (payload.get("sources") or {}).get("theOddsApi") == "ok")
         if previous and record_count <= 0 and not healthy_empty:
-            self.store_payload(previous)
+            self.store_payload(retained_snapshot(previous))
             self.store_seed_meta(
                 status="preserved",
                 record_count=len(previous.get("items") or []),

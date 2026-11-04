@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from api.context import resolve_optional_service_callable, resolve_service_callable
+from api.services.seed_recovery import age_seconds
 
 
 FOOD_BASKET_SNAPSHOT_NAMESPACE = "snapshot:macro:food-retail-basket-pressure"
@@ -131,7 +132,7 @@ def _fetch_series(
     text = dependencies.http_text_get(
         url,
         timeout=15,
-        headers={"User-Agent": "polydata-food-basket/1.0"},
+        headers={"User-Agent": "Polymonitor/1.0 (+https://www.polymonitor.club/)"},
     )
     rows: List[Dict[str, Any]] = []
     reader = csv.DictReader(io.StringIO(str(text or "")))
@@ -163,6 +164,7 @@ def _fetch_series(
         "threeMonthPct": round(three_month, 2),
         "source": "FRED / BLS CPI",
         "sourceUrl": url,
+        "fetchedAt": _utc_now_iso(dependencies),
     }
 
 
@@ -190,16 +192,26 @@ def build_food_retail_basket_payload(
     dependencies = _dependencies(ctx)
     items: List[Dict[str, Any]] = []
     sources: Dict[str, str] = {}
+    prior = _read_seeded(dependencies) or {}
+    prior_items = {item.get("key"): item for item in prior.get("items", [])}
     for spec in SERIES:
+        previous = prior_items.get(spec["key"]) or {}
+        age = age_seconds(previous.get("fetchedAt"), _utc_now_iso(dependencies))
+        if previous.get("seriesId") == spec["seriesId"] and age < 21600:
+            items.append({**previous, "retained": False, "sourceStatus": "ok"})
+            sources[spec["key"]] = "ok"
+            continue
         try:
             items.append(_fetch_series(ctx, spec))
             sources[spec["key"]] = "ok"
         except Exception as exc:
             sources[spec["key"]] = "error"
+            if previous and age < 64800:
+                items.append({**previous, "retained": True, "sourceStatus": "error"})
             logger = getattr(dependencies.application, "logger", None)
             if logger is not None:
                 logger.exception("food basket source failed source=%s error=%s", spec["key"], exc)
-    status = "ok" if len(items) >= 5 else ("degraded" if items else "warming")
+    status = "ok" if all(value == "ok" for value in sources.values()) else ("degraded" if items else "warming")
     return {
         "generatedAt": _utc_now_iso(dependencies),
         "source": "FRED CSV / BLS CPI food components",

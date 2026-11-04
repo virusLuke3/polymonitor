@@ -6,6 +6,8 @@ import json
 import os
 import sys
 import time
+from datetime import datetime, timezone
+from urllib.parse import urlsplit
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -86,11 +88,27 @@ class BreakingEventRadarWatcher:
         )
 
     def http_json_get(self, url: str, params: Optional[Dict[str, Any]] = None, timeout: int = 12, headers: Optional[Dict[str, str]] = None) -> Any:
+        from api.services.free_content.collector import retry_delay
+        is_gdelt = urlsplit(url).hostname == "api.gdeltproject.org"
+        state = self.snapshot_store.get_stale("state:content", "gdelt-backoff") or {} if is_gdelt else {}
+        remaining = float(state.get("nextAttemptAt") or 0) - time.time()
+        if is_gdelt and remaining > 0:
+            response = requests.Response()
+            response.status_code = 429
+            response.headers["Retry-After"] = str(int(remaining) + 1)
+            raise requests.HTTPError("GDELT retry backoff active", response=response)
         response = self.requests.get(url, params=params, timeout=timeout, headers=headers)
+        if is_gdelt and response.status_code == 429:
+            failures = int(state.get("failures") or 0) + 1
+            delay = max(retry_delay(response.headers.get("Retry-After"), datetime.now(timezone.utc)), min(21600, 900 * 2 ** min(failures - 1, 5)))
+            self.snapshot_store.set("state:content", "gdelt-backoff", {"nextAttemptAt": time.time() + delay, "failures": failures}, max(86400, delay))
         response.raise_for_status()
         if not response.content:
             return {}
-        return response.json()
+        result = response.json()
+        if is_gdelt:
+            self.snapshot_store.set("state:content", "gdelt-backoff", {"nextAttemptAt": 0, "failures": 0}, 86400)
+        return result
 
     def service_context(self) -> Dict[str, Any]:
         context: Dict[str, Any] = {

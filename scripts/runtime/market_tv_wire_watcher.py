@@ -18,7 +18,7 @@ import requests
 
 from api.config import load_api_settings
 from api.services import live_video_source_service
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, utc_now_iso
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, retained_snapshot, utc_now_iso
 from runtime.snapshot_store import SnapshotStore
 
 
@@ -75,6 +75,11 @@ class MarketTvWireWatcher:
         response.raise_for_status()
         return response.text
 
+    def _http_json_get(self, url: str, *, params: Dict[str, Any] | None = None, timeout: int = 10, headers: Dict[str, str] | None = None) -> Any:
+        response = self.requests.get(url, params=params, timeout=max(3, min(15, int(timeout or 10))), headers=headers)
+        response.raise_for_status()
+        return response.json()
+
     def _get_cached_json(self, namespace: str, cache_key: str) -> Dict[str, Any] | None:
         raw = self.redis_client.get(_redis_key(self.redis_prefix, namespace, cache_key))
         if not raw:
@@ -106,6 +111,7 @@ class MarketTvWireWatcher:
             "SETTINGS": self.settings,
             "app": _App(),
             "http_text_get": self._http_text_get,
+            "http_json_get": self._http_json_get,
             "SNAPSHOT_STORE": self.snapshot_store,
             "get_cached_json": self._get_cached_json,
             "set_cached_json": self._set_cached_json,
@@ -179,7 +185,7 @@ class MarketTvWireWatcher:
             )
         except Exception as exc:
             if previous:
-                self.store_payload(previous)
+                self.store_payload(retained_snapshot(previous))
                 self.store_meta(
                     status="preserved",
                     record_count=len(previous.get("items") or []),
@@ -192,7 +198,7 @@ class MarketTvWireWatcher:
             return {"status": "error", "error": str(exc)}
 
         if previous and not payload.get("items"):
-            self.store_payload(previous)
+            self.store_payload(retained_snapshot(previous))
             self.store_meta(
                 status="preserved",
                 record_count=len(previous.get("items") or []),

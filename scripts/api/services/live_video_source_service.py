@@ -1339,14 +1339,6 @@ def _build_market_tv_wire_payload(
             "error": "; ".join(errors[-iptv_errors:]) if iptv_errors else None,
         }
 
-    hls_probe_state = _enrich_hls_watchability(
-        dependencies,
-        items,
-        generated_at=generated_at,
-    )
-    if hls_probe_state.get("status") not in {"skipped"}:
-        source_states["hlsWatchabilityProbe"] = hls_probe_state
-
     items = _dedupe(items)
     items.sort(
         key=lambda item: (
@@ -1356,11 +1348,20 @@ def _build_market_tv_wire_payload(
         ),
         reverse=True,
     )
-    seed_limit = max(24, int(os.environ.get("POLYDATA_MARKET_TV_WIRE_SEED_LIMIT", MARKET_TV_WIRE_SEED_ITEM_LIMIT)))
+    seed_limit = max(24, min(480, int(os.environ.get("POLYDATA_MARKET_TV_WIRE_SEED_LIMIT", MARKET_TV_WIRE_SEED_ITEM_LIMIT))))
     curated_items = [item for item in items if item.get("curated")]
     discovered_items = [item for item in items if not item.get("curated")]
     discovered_limit = max(0, seed_limit - len(curated_items))
     items = curated_items + discovered_items[:discovered_limit]
+    hls_probe_state = _enrich_hls_watchability(
+        dependencies,
+        items,
+        generated_at=generated_at,
+    )
+    if hls_probe_state.get("status") not in {"skipped"}:
+        source_states["hlsWatchabilityProbe"] = hls_probe_state
+
+    items.sort(key=lambda item: (bool(item.get("curated")), item.get("status") == "ready", int(item.get("relevanceScore") or 0)), reverse=True)
     status = "ok" if items and not errors else ("degraded" if items else "empty")
     return {
         "generatedAt": generated_at,

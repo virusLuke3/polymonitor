@@ -83,7 +83,7 @@ class GridEsportsWatcher:
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
         self.requests = requests.Session()
-        self.requests.trust_env = False
+        self.requests.trust_env = str(os.environ.get("POLYDATA_RUNTIME_TRUST_ENV", "0")).lower() in {"1", "true", "yes", "on"}
 
     def ttl_seconds(self) -> int:
         configured = int(os.environ.get("POLYDATA_GRID_ESPORTS_SEED_TTL_SECONDS", "0") or 0)

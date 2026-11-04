@@ -31,7 +31,7 @@ except ImportError:
 from api.clients import market_data_client
 from api.config import load_api_settings
 from api.services import finance_watch_panels_service
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, retained_snapshot
 from runtime.snapshot_store import SnapshotStore
 
 
@@ -198,7 +198,7 @@ class FinanceWatchPanelsWatcher:
     def store_payload(self, panel_id: str, payload: Dict[str, Any]) -> None:
         ttl_seconds = self.ttl_seconds()
         namespace = finance_watch_panels_service.finance_watch_namespace(panel_id)
-        payload = {**payload, "cacheMode": "seeded"}
+        payload = {**payload, "cacheMode": "stale-seed" if payload.get("status") == "stale" else "seeded"}
         self.snapshot_store.set(namespace, finance_watch_panels_service.FINANCE_WATCH_CACHE_KEY, payload, ttl_seconds)
         self.redis_client.set(self.redis_key(panel_id), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl_seconds)
 
@@ -228,10 +228,12 @@ class FinanceWatchPanelsWatcher:
 
     def run_once(self) -> Dict[str, Any]:
         ctx = self.service_context()
-        payloads = finance_watch_panels_service.build_all_finance_watch_panel_payloads(ctx, limit=self.limit)
         result: Dict[str, Any] = {"status": "ok", "panels": {}}
         for panel_id in finance_watch_panels_service.FINANCE_WATCH_PANEL_IDS:
-            payload = payloads.get(panel_id) or {}
+            try:
+                payload = finance_watch_panels_service.build_finance_watch_panel_payload(ctx, panel_id, limit=self.limit)
+            except Exception as exc:
+                payload = {"status": "error", "items": [], "sources": {"builder": "error"}, "summary": {"error": str(exc)}}
             previous = self.load_previous_payload(panel_id)
             record_count = len(payload.get("items") or []) if isinstance(payload, dict) else 0
             status = str(payload.get("status") or ("ok" if record_count else "empty")) if isinstance(payload, dict) else "error"
@@ -240,7 +242,7 @@ class FinanceWatchPanelsWatcher:
                     and status == "empty" and (payload.get("sources") or {}).get("googleNewsRss") == "empty"):
                 replace_with_empty = True
             if previous and (status == "error" or record_count <= 0) and not replace_with_empty:
-                self.store_payload(panel_id, previous)
+                self.store_payload(panel_id, retained_snapshot(previous, sources=payload.get("sources")))
                 self.store_seed_meta(
                     panel_id,
                     status="preserved",

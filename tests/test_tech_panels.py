@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import pytest
 from types import SimpleNamespace
 
 
@@ -51,20 +53,27 @@ OPENROUTER_MODELS = {
     ]
 }
 
-OPENROUTER_RANKINGS_RSC = """0:{"a":"$@1","f":"","q":"","i":false}
-1:[{"date":"2026-05-23 00:00:00","variant_permaslug":"qwen/qwen3.7-max-20260520","total_completion_tokens":1000000000,"total_prompt_tokens":2000000000,"count":120000,"change":0.22},{"date":"2026-05-23 00:00:00","variant_permaslug":"x-ai/grok-build-0.1-20260520","total_completion_tokens":400000000,"total_prompt_tokens":600000000,"count":42000,"change":null}]
-"""
+OPENROUTER_RANKINGS_ROWS = [
+    {"variant_permaslug": "qwen/qwen3.7-max-20260520", "total_completion_tokens": 1000000000, "total_prompt_tokens": 2000000000, "count": 120000, "change": 0.22},
+    {"variant_permaslug": "x-ai/grok-build-0.1-20260520", "total_completion_tokens": 400000000, "total_prompt_tokens": 600000000, "count": 42000},
+]
+
+
+def rankings_html(view="week", rows=None):
+    query = {"queryKey": ["rankings", "models", {"view": view}], "state": {
+        "status": "success", "dataUpdatedAt": 1779580800000,
+        "data": OPENROUTER_RANKINGS_ROWS if rows is None else rows}}
+    rsc = "7a:" + json.dumps(["$", "component", None, {"state": {"queries": [query]}}])
+    # Real RSC records may span multiple script chunks.
+    return "".join("<script>self.__next_f.push(" + json.dumps([1, piece]) + ")</script>" for piece in [rsc[:50], rsc[50:]])
 
 
 def _ctx():
     def http_text_get(url, timeout=12, headers=None):
+        if "openrouter.ai/rankings" in url:
+            return rankings_html()
         assert "news.google.com" in url
         return RSS_XML
-
-    def http_text_post(url, data="", timeout=12, headers=None):
-        assert "openrouter.ai/rankings" in url
-        assert "Next-Action" in (headers or {})
-        return OPENROUTER_RANKINGS_RSC
 
     def http_json_get(url, params=None, timeout=12, headers=None):
         if "openrouter.ai/api/v1/models" in url:
@@ -121,7 +130,6 @@ def _ctx():
             tech_app_store_top_free_url="https://rss.applemarketingtools.com/api/v2/us/apps/top-free/25/apps.json",
         ),
         "http_text_get": http_text_get,
-        "http_text_post": http_text_post,
         "http_json_get": http_json_get,
         "get_yahoo_market_snapshot": yahoo,
         "utc_now_iso": lambda: "2026-05-24T00:00:00Z",
@@ -194,3 +202,47 @@ def test_consumer_app_pulse_combines_app_store_and_news():
     assert categories.count("GAMES") == 10
     assert categories.count("NEWS") == 10
     assert categories.count("GROSSING") == 10
+
+
+@pytest.mark.parametrize("html", ["<html>Server Action unavailable</html>", rankings_html("day"), rankings_html(rows=[{"wrong": 1}])])
+def test_openrouter_rejects_missing_or_wrong_weekly_query(html):
+    with pytest.raises(ValueError):
+        tech_panels_service._parse_openrouter_rankings_page(html)
+
+
+def test_openrouter_source_clock_and_partial_status():
+    payload = tech_panels_service.build_ai_model_race_payload(_ctx(), 24)
+    row = next(item for item in payload["items"] if item.get("symbol") == "USAGE")
+    assert row["sourceUpdatedAt"] == "2026-05-24T00:00:00Z"
+    assert tech_panels_service._payload("test", title="test", items=[row], sources={"models": "ok", "usage": "error"})["status"] == "partial"
+
+
+def test_failed_quote_universe_is_not_authoritative_empty():
+    ctx = _ctx()
+    ctx["get_yahoo_market_snapshot"] = lambda *args, **kwargs: None
+    result = tech_panels_service.build_big_tech_market_cap_payload(ctx, 24)
+    assert result["status"] == "error"
+    assert result["sources"]["yahoo"] == "error"
+
+
+def test_ai_partial_source_retention_expires_from_original_fetch(monkeypatch):
+    monkeypatch.setattr(tech_panels_service, "utc_now_iso", lambda: "2026-05-24T00:00:00Z")
+    previous = tech_panels_service.build_ai_model_race_payload(_ctx(), 36)
+    ctx = _ctx()
+    ctx["get_cached_json"] = lambda *a: previous
+    getter = ctx["http_text_get"]
+    def failed_rankings(url, **kwargs):
+        if "openrouter.ai/rankings" in url:
+            raise TimeoutError("source timeout")
+        return getter(url, **kwargs)
+    ctx["http_text_get"] = failed_rankings
+    monkeypatch.setattr(tech_panels_service, "utc_now_iso", lambda: "2026-05-24T00:10:00Z")
+    partial = tech_panels_service.build_ai_model_race_payload(ctx, 36)
+    rows = [row for row in partial["items"] if row.get("category") == "USAGE"]
+    assert rows and rows[0]["retained"]
+    assert rows[0]["sourceFetchedAt"] == "2026-05-24T00:00:00Z"
+    assert partial["sources"]["openRouterUsage"] == "error"
+    previous = partial
+    monkeypatch.setattr(tech_panels_service, "utc_now_iso", lambda: "2026-05-24T00:31:00Z")
+    expired = tech_panels_service.build_ai_model_race_payload(ctx, 36)
+    assert not [row for row in expired["items"] if row.get("category") == "USAGE"]

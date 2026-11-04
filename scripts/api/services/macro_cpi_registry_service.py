@@ -11,6 +11,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from api.services.macro_data_contract import month_key, monthly_metric, shift_month, value_label, number
 from api.context import resolve_optional_service_callable
+from api.services.seed_recovery import age_seconds
 from api.services import cpi_release_calendar_service, energy_gasoline_shock_service, food_retail_basket_service, macro_cpi_panels_service, runtime_service
 
 
@@ -483,10 +484,15 @@ def _fetch_cpi_series_stats(dependencies: MacroCpiRegistryDependencies) -> Dict[
     if dependencies.http_text_get is None:
         return {}
     stats = {}
+    prior = (dependencies.source.get("previousRegistry") or {}).get("actualSeries", {})
     for series_id in sorted({str(spec["seriesId"]) for spec in CPI_EVENT_SPECS}):
+        previous = prior.get(series_id) or {}
+        if not previous.get("retained") and age_seconds(previous.get("fetchedAt"), _utc_now_iso(dependencies)) < 1800:
+            stats[series_id] = previous
+            continue
         try:
             url = _fred_url(dependencies, series_id)
-            text = dependencies.http_text_get(url, timeout=12, headers={"User-Agent": "polydata-cpi-release-command/2.0"})
+            text = dependencies.http_text_get(url, timeout=12, headers={"User-Agent": "Polymonitor/1.0 (+https://www.polymonitor.club/)"})
             rows = []
             for row in csv.DictReader(io.StringIO(str(text or ""))):
                 value, date = _float(row.get(series_id)), _fred_row_date(row)

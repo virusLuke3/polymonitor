@@ -19,7 +19,7 @@ import requests
 
 from api.config import load_api_settings
 from api.services import food_retail_basket_service
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, retained_snapshot, collection_delay
 from runtime.snapshot_store import SnapshotStore
 
 DEFAULT_INTERVAL_SECONDS = 21600
@@ -56,7 +56,7 @@ class FoodRetailBasketWatcher:
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
         self.requests = requests.Session()
-        self.requests.trust_env = False
+        self.requests.trust_env = str(os.environ.get("POLYDATA_RUNTIME_TRUST_ENV", "0")).lower() in {"1", "true", "yes", "on"}
 
     def namespace(self) -> str:
         return food_retail_basket_service.FOOD_BASKET_SNAPSHOT_NAMESPACE
@@ -108,8 +108,9 @@ class FoodRetailBasketWatcher:
     def store_meta(self, *, status: str, record_count: int, source_states: Dict[str, Any] | None = None, error_summary: str | None = None, preserve: bool = False, cache_mode: str | None = None, payload_status: str | None = None) -> None:
         prev = self.seed_meta_store.load(SEED_META_NAMESPACE, SEED_META_CACHE_KEY) or {}
         attempt = utc_now_iso()
-        success = prev.get("lastSuccessAt") if preserve else attempt
+        success = prev.get("lastSuccessAt") if preserve or status != "ok" else attempt
         payload = build_seed_meta_payload(panel_id=SEED_META_CACHE_KEY, namespace=SEED_META_NAMESPACE, cache_key=SEED_META_CACHE_KEY, service_name=SEED_META_SERVICE_NAME, expected_interval_seconds=self.interval_seconds, status=status, last_attempt_at=attempt, last_success_at=success or attempt, record_count=record_count, source_states=source_states, error_summary=error_summary, cache_mode=cache_mode, payload_status=payload_status, metadata={"result": status})
+        payload["lastSuccessAt"] = success
         self.seed_meta_store.store(SEED_META_NAMESPACE, SEED_META_CACHE_KEY, payload)
 
     def run_once(self) -> Dict[str, Any]:
@@ -118,13 +119,13 @@ class FoodRetailBasketWatcher:
             payload = food_retail_basket_service.build_food_retail_basket_payload(self.context())
         except Exception as exc:
             if previous:
-                self.store_payload(previous)
+                self.store_payload(retained_snapshot(previous))
                 self.store_meta(status="preserved", record_count=len(previous.get("items") or []), source_states={"fred": "error"}, error_summary=str(exc), preserve=True)
                 return {"status": "preserved", "payload": previous, "error": str(exc)}
             self.store_meta(status="error", record_count=0, source_states={"fred": "error"}, error_summary=str(exc), preserve=True)
             return {"status": "error", "error": str(exc)}
         if previous and not payload.get("items"):
-            self.store_payload(previous)
+            self.store_payload(retained_snapshot(previous))
             self.store_meta(status="preserved", record_count=len(previous.get("items") or []), source_states=payload.get("sources"), error_summary="Preserved previous snapshot because new food basket payload was empty", preserve=True)
             return {"status": "preserved", "payload": previous}
         payload = {**payload, "cacheMode": "seeded"}
@@ -148,15 +149,21 @@ def main() -> int:
     if not args.watch:
         print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
         return 0
+    failures = 0
     while True:
+        started_at = time.monotonic()
         try:
-            print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
+            result = watcher.run_once()
+            healthy = result.get("status") == "ok" or (result.get("status") == "stored" and result.get("payload", {}).get("status") == "ok")
+            failures = 0 if healthy else failures + 1
+            print(json.dumps(result, ensure_ascii=False), file=sys.stderr)
         except KeyboardInterrupt:
             return 0
         except Exception as exc:
+            failures += 1
             watcher.store_meta(status="error", record_count=0, source_states={"fred": "error"}, error_summary=str(exc), preserve=True)
             print(f"[food-basket] ERROR {exc}", file=sys.stderr)
-        time.sleep(max(1800, args.interval))
+        time.sleep(collection_delay(watcher.interval_seconds, failures, time.monotonic() - started_at))
 
 
 if __name__ == "__main__":

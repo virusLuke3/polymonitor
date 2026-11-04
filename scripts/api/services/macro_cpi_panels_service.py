@@ -11,6 +11,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from api.context import resolve_optional_service_callable, resolve_service_callable
 from api.services.macro_data_contract import describe_series, month_key
+from api.services.seed_recovery import age_seconds
 
 
 SNAPSHOT_NAMESPACE_PREFIX = "snapshot:macro:"
@@ -260,7 +261,7 @@ def _fetch_fred_series(
     text = dependencies.http_text_get(
         url,
         timeout=15,
-        headers={"User-Agent": "polydata-macro-cpi-panels/1.0"},
+        headers={"User-Agent": "Polymonitor/1.0 (+https://www.polymonitor.club/)"},
     )
     rows: List[Dict[str, Any]] = []
     reader = csv.DictReader(io.StringIO(str(text or "")))
@@ -319,7 +320,7 @@ def _fetch_federal_register_items(
         url,
         params={"conditions[term]": query, "order": "newest", "per_page": min(5, max(1, limit))},
         timeout=12,
-        headers={"Accept": "application/json", "User-Agent": "polydata-macro-cpi-panels/1.0"},
+        headers={"Accept": "application/json", "User-Agent": "Polymonitor/1.0 (+https://www.polymonitor.club/)"},
     )
     docs = (payload or {}).get("results") if isinstance(payload, dict) else []
     items: List[Dict[str, Any]] = []
@@ -397,12 +398,17 @@ def build_macro_cpi_panel_payload(
     prior_items = {item.get("key"): item for item in prior.get("items", [])}
     for spec in config.get("series") or []:
         key = str(spec.get("key") or spec.get("seriesId"))
+        previous = prior_items.get(key) or {}
+        if previous.get("seriesId") == spec["seriesId"] and age_seconds(previous.get("fetchedAt"), _utc_now_iso(dependencies)) < DEFAULT_TTL_SECONDS:
+            items.append({**previous, "retained": False, "sourceStatus": "ok"})
+            sources[key] = "ok"
+            continue
         try:
             items.append(_fetch_fred_series(ctx, spec))
             sources[key] = "ok"
         except Exception as exc:
             sources[key] = "error"
-            if key in prior_items:
+            if key in prior_items and age_seconds(previous.get("fetchedAt"), _utc_now_iso(dependencies)) < DEFAULT_TTL_SECONDS * 3:
                 items.append({**prior_items[key], "retained": True, "sourceStatus": "error"})
             logger = getattr(dependencies.application, "logger", None)
             if logger is not None:

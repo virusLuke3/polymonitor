@@ -19,7 +19,7 @@ import requests
 
 from api.config import load_api_settings
 from api.services import macro_cpi_registry_service
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, retained_snapshot, collection_delay
 from runtime.snapshot_store import SnapshotStore
 from runtime.telegram_panel_publish import publish_cached_panel_snapshot
 
@@ -46,7 +46,7 @@ class MacroCpiRegistryWatcher:
         self.interval_seconds = max(300, int(interval_seconds or DEFAULT_INTERVAL_SECONDS))
         self.redis_client = redis.from_url(redis_url, decode_responses=True)
         self.requests = requests.Session()
-        self.requests.trust_env = False
+        self.requests.trust_env = str(os.environ.get("POLYDATA_RUNTIME_TRUST_ENV", "0")).lower() in {"1", "true", "yes", "on"}
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
 
@@ -128,13 +128,13 @@ class MacroCpiRegistryWatcher:
             payload = macro_cpi_registry_service.build_macro_cpi_registry_payload({**self.context(), "previousRegistry": previous}, panel_id, limit=macro_cpi_registry_service.MAX_ITEM_LIMIT)
         except Exception as exc:
             if previous:
-                self.store_payload(panel_id, previous)
+                self.store_payload(panel_id, retained_snapshot(previous))
                 self.store_meta(panel_id, status="preserved", record_count=len(previous.get("items") or []), source_states={"registry": "error"}, error_summary=str(exc), preserve=True)
                 return {"panelId": panel_id, "status": "preserved", "error": str(exc)}
             self.store_meta(panel_id, status="error", record_count=0, source_states={"registry": "error"}, error_summary=str(exc), preserve=True)
             return {"panelId": panel_id, "status": "error", "error": str(exc)}
         if previous and not payload.get("items"):
-            self.store_payload(panel_id, previous)
+            self.store_payload(panel_id, retained_snapshot(previous))
             self.store_meta(panel_id, status="preserved", record_count=len(previous.get("items") or []), source_states=payload.get("sources"), error_summary="Preserved previous registry snapshot because new payload was empty", preserve=True)
             return {"panelId": panel_id, "status": "preserved"}
         payload = {**payload, "cacheMode": "redis-seed", "expectedIntervalSeconds": self.interval_seconds}
@@ -146,7 +146,7 @@ class MacroCpiRegistryWatcher:
 
     def run_once(self) -> Dict[str, Any]:
         results = [self.run_panel(panel_id) for panel_id in macro_cpi_registry_service.MACRO_CPI_REGISTRY_PANEL_IDS]
-        status = "ok" if all(result.get("status") in {"stored", "preserved"} for result in results) else "degraded"
+        status = "ok" if all(result.get("status") == "stored" and result.get("payloadStatus") == "ok" for result in results) else "degraded"
         return {"status": status, "results": results}
 
 
@@ -164,14 +164,19 @@ def main() -> int:
     if not args.watch:
         print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
         return 0
+    failures = 0
     while True:
+        started_at = time.monotonic()
         try:
-            print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
+            result = watcher.run_once()
+            failures = 0 if result.get("status") == "ok" else failures + 1
+            print(json.dumps(result, ensure_ascii=False), file=sys.stderr)
         except KeyboardInterrupt:
             return 0
         except Exception as exc:
+            failures += 1
             print(f"[macro-cpi-registry] ERROR {exc}", file=sys.stderr)
-        time.sleep(max(300, args.interval))
+        time.sleep(collection_delay(watcher.interval_seconds, failures, time.monotonic() - started_at))
 
 
 if __name__ == "__main__":

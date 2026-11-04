@@ -8,7 +8,7 @@ from ..normalize import compact_text, iso_timestamp, valid_point
 
 
 PROVIDER_KEY = "gdacs"
-DEFAULT_URL = "https://www.gdacs.org/xml/gdacs.geojson"
+DEFAULT_URL = "https://www.gdacs.org/gdacsapi/api/events/geteventlist/events4app"
 SOURCE_URL = "https://www.gdacs.org/"
 
 HAZARD_KINDS = {
@@ -62,7 +62,7 @@ def _metric(hazard_kind: str, properties: Dict[str, Any]) -> Dict[str, Any]:
 def fetch(http_json_get, *, url: str = DEFAULT_URL, limit: int = 160) -> ProviderResult:
     payload = http_json_get(
         url,
-        timeout=8,
+        timeout=18,
         headers={
             "Accept": "*/*",
             "User-Agent": "polymonitor-world-event-map/1.0 (https://polymonitor.club)",
@@ -91,7 +91,7 @@ def fetch(http_json_get, *, url: str = DEFAULT_URL, limit: int = 160) -> Provide
         raw_level = properties.get("alertlevel")
         if str(raw_level or "").strip().lower() == "green":
             continue
-        updated_at = _gdacs_timestamp(properties.get("todate") or properties.get("fromdate"))
+        updated_at = _gdacs_timestamp(properties.get("datemodified") or properties.get("todate") or properties.get("fromdate"))
         occurred_at = _gdacs_timestamp(properties.get("fromdate")) or updated_at
         if updated_at and (newest is None or updated_at > newest):
             newest = updated_at

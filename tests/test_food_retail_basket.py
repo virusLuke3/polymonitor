@@ -71,7 +71,8 @@ def test_food_retail_basket_builds_official_component_snapshot():
     ctx = make_ctx()
     payload = food_retail_basket_service.get_food_retail_basket_snapshot(ctx, limit=4)
 
-    assert payload["status"] == "ok"
+    assert payload["status"] == "degraded"
+    assert "error" in payload["sources"].values()
     assert payload["cacheMode"] == "live-build"
     assert payload["summary"]["coverage"] == 5
     assert payload["summary"]["signal"] in {"FOOD PRESSURE RISING", "FOOD STABLE", "FOOD DISINFLATION"}

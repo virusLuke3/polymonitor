@@ -379,10 +379,10 @@ def _series_state(
         _raise_graphql_errors(payload)
         state = (payload.get("data") or {}).get("seriesState") if isinstance(payload.get("data"), dict) else None
         return state if isinstance(state, dict) else None, "ok" if isinstance(state, dict) else "empty"
-    except Exception:
+    except Exception as exc:
         logger = getattr(dependencies.application, "logger", None)
         if logger is not None:
-            logger.exception("GRID series state fetch failed series_id=%s", series_id)
+            logger.exception("GRID series state fetch failed series_id=%s error_type=%s http_status=%s", series_id, type(exc).__name__, getattr(getattr(exc, "response", None), "status_code", None))
         return None, "error"
 
 

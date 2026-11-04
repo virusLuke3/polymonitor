@@ -30,7 +30,7 @@ except ImportError:
 from api.config import load_api_settings
 from api.clients import market_data_client
 from api.services import finance_external_sources_service
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, retained_snapshot
 from runtime.snapshot_store import SnapshotStore
 
 
@@ -101,7 +101,7 @@ class FinanceExternalSourcesWatcher:
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
         self.requests = requests.Session()
-        self.requests.trust_env = False
+        self.requests.trust_env = str(os.environ.get("POLYDATA_RUNTIME_TRUST_ENV", "0")).lower() in {"1", "true", "yes", "on"}
 
     def namespace(self) -> str:
         return finance_external_sources_service.FINANCE_EXTERNAL_NAMESPACE
@@ -140,18 +140,30 @@ class FinanceExternalSourcesWatcher:
     def service_context(self) -> Dict[str, Any]:
         return {
             "SETTINGS": self.settings,
+            "requests": self.requests,
             "FINANCE_RUNTIME_TTL_SECONDS": self.settings.finance_runtime_ttl_seconds,
             "_safe_float": _safe_float,
             "_clob_price_cache": {},
             "_clob_price_cache_lock": __import__("threading").Lock(),
             "app": _AppAdapter(),
-            "get_cached_runtime_payload": lambda namespace, cache_key: None,
-            "set_cached_runtime_payload": lambda namespace, cache_key, payload, ttl_seconds=300: payload,
+            "get_cached_runtime_payload": self.get_cached_runtime_payload,
+            "set_cached_runtime_payload": self.set_cached_runtime_payload,
             "http_json_get": self.http_json_get,
             "http_json_post": self.http_json_post,
             "get_yahoo_market_snapshot": self.get_yahoo_market_snapshot,
             "utc_now_iso": utc_now_iso,
         }
+
+    def get_cached_runtime_payload(self, namespace: str, cache_key: str) -> Optional[Dict[str, Any]]:
+        if namespace == "yahoo-source-backoff":
+            return self.snapshot_store.get("state:finance-external:yahoo-source-backoff", cache_key)
+        return None
+
+    def set_cached_runtime_payload(self, namespace: str, cache_key: str, payload: Dict[str, Any], ttl_seconds: int = 300) -> Dict[str, Any]:
+        # Source failure budgets must survive calls; quote collection still follows this worker's cadence.
+        if namespace == "yahoo-source-backoff":
+            self.snapshot_store.set("state:finance-external:yahoo-source-backoff", cache_key, payload, ttl_seconds)
+        return payload
 
     def load_previous_payload(self) -> Dict[str, Any]:
         try:
@@ -200,7 +212,7 @@ class FinanceExternalSourcesWatcher:
             payload = finance_external_sources_service.build_finance_external_sources_payload(self.service_context())
         except Exception as exc:
             if previous:
-                self.store_payload(previous)
+                self.store_payload(retained_snapshot(previous))
                 self.store_seed_meta(
                     status="preserved",
                     record_count=len(_items(previous)),
@@ -214,7 +226,7 @@ class FinanceExternalSourcesWatcher:
 
         record_count = len(_items(payload))
         if previous and record_count <= 0:
-            self.store_payload(previous)
+            self.store_payload(retained_snapshot(previous))
             self.store_seed_meta(
                 status="preserved",
                 record_count=len(_items(previous)),
@@ -261,13 +273,14 @@ def main() -> int:
         print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
         return 0
     while True:
+        started_at = time.monotonic()
         try:
             print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
         except KeyboardInterrupt:
             return 0
         except Exception as exc:
             print(f"[finance-external] ERROR watch loop failed: {exc}", file=sys.stderr)
-        time.sleep(watcher.interval_seconds)
+        time.sleep(max(30, watcher.interval_seconds - (time.monotonic() - started_at)))
 
 
 if __name__ == "__main__":
