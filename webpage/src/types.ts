@@ -1922,8 +1922,19 @@ export type RuntimeMarketTvWireSummary = {
   embedReady?: number | null;
 };
 
+export type TvPlaybackSource = {
+  kind: 'hls' | 'youtube' | 'youtube-channel';
+  url?: string;
+  videoId?: string;
+  channelId?: string;
+  proxy?: boolean;
+  proxyFallback?: boolean;
+  resolvedAt?: number;
+};
+
 export type RuntimeMarketTvWireItem = {
   id: string;
+  playbackSources?: TvPlaybackSource[];
   name?: string | null;
   displayName?: string | null;
   category?: 'macro' | 'geo' | 'weather' | 'sports' | 'crypto' | 'news' | 'other' | string | null;

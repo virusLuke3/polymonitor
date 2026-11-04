@@ -506,13 +506,11 @@ def _get_onchain_tradfi_perp_radar_snapshot(
     limit: int = DEFAULT_TRADFI_PERP_LIMIT,
 ) -> Dict[str, Any]:
     limit = max(4, min(24, int(limit or DEFAULT_TRADFI_PERP_LIMIT)))
+    # Reuse the equity owner; the composed view has no independent refresh slot.
+    equity_payload = _get_equity_event_command_snapshot(dependencies, limit=limit)
 
     def _builder() -> Dict[str, Any]:
         external = _external_sources(dependencies)
-        equity_payload = _get_equity_event_command_snapshot(
-            dependencies,
-            limit=limit,
-        )
         rows: List[Dict[str, Any]] = []
         try:
             if dependencies.get_crypto_funding_watch_snapshot is None:
@@ -623,13 +621,9 @@ def _get_onchain_tradfi_perp_radar_snapshot(
             "items": unique_rows[:limit],
         }
 
-    return _cached(
-        dependencies,
-        "runtime:finance:onchain-tradfi-perp-radar",
-        f"v3:{limit}",
-        _builder,
-        ttl_seconds=45,
-    )
+    # This is a cheap composition of existing owners. A second cache admission
+    # would compete with their stale refreshes and can starve a cold view forever.
+    return _builder()
 
 
 def get_finance_liquidity_regime_snapshot(
@@ -648,17 +642,12 @@ def _get_finance_liquidity_regime_snapshot(
     limit: int = DEFAULT_LIQUIDITY_REGIME_LIMIT,
 ) -> Dict[str, Any]:
     limit = max(4, min(24, int(limit or DEFAULT_LIQUIDITY_REGIME_LIMIT)))
+    # A cold composed view must not hold a refresh permit while acquiring another.
+    atlas = _get_finance_market_atlas_snapshot(dependencies, limit=max(limit, 16))
+    perp = _get_onchain_tradfi_perp_radar_snapshot(dependencies, limit=limit)
 
     def _builder() -> Dict[str, Any]:
         external = _external_sources(dependencies)
-        atlas = _get_finance_market_atlas_snapshot(
-            dependencies,
-            limit=max(limit, 16),
-        )
-        perp = _get_onchain_tradfi_perp_radar_snapshot(
-            dependencies,
-            limit=limit,
-        )
         markets = [item for item in (atlas.get("items") or []) if isinstance(item, dict)]
         cot_items = [item for item in (((external.get("cot") or {}).get("items")) or []) if isinstance(item, dict)]
         etf_items = [item for item in (((external.get("etfFlow") or {}).get("items")) or []) if isinstance(item, dict)]
@@ -767,10 +756,6 @@ def _get_finance_liquidity_regime_snapshot(
             "items": rows[:limit],
         }
 
-    return _cached(
-        dependencies,
-        "runtime:finance:liquidity-regime",
-        f"v3:{limit}",
-        _builder,
-        ttl_seconds=45,
-    )
+    # This is a cheap composition of existing owners. A second cache admission
+    # would compete with their stale refreshes and can starve a cold view forever.
+    return _builder()

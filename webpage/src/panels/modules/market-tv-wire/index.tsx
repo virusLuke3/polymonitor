@@ -1,24 +1,20 @@
 import { scoreLabel } from '../../shared/formatters';
-import { openExternal } from '../../shared/renderers';
 import {
-  youtubeVideoId,
   panelStatus,
   categoryToneClass,
   sourceLocation,
   categoryLabel,
-  useStaggeredLoad,
-  youtubeBridgeMessageMatches,
 } from '../../shared/videoPlayback';
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { useEffect, useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
-import { buildRuntimeHlsProxyUrl, buildRuntimeYoutubeEmbedUrl, fetchRuntimeMarketTvWire } from '@/services/api';
+import { fetchRuntimeMarketTvWire } from '@/services/api';
 import type { RuntimeMarketTvWireItem, RuntimeMarketTvWirePayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '@/panels/definePanel';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
-type PlaybackState = 'connecting' | 'playing' | 'waiting' | 'blocked' | 'external';
-const HLS_FAILURE_COOLDOWN_MS = 5 * 60 * 1000;
+import { MarketTvPreview } from './Playback';
+import { playbackCandidates } from './playback';
 
 function badgeLabel(payload?: RuntimeMarketTvWirePayload | null) {
   const status = String(payload?.status || '').toLowerCase();
@@ -55,322 +51,21 @@ function statusLabel(value?: string | null) {
   return status.toUpperCase();
 }
 
-function isHlsPreviewable(item?: RuntimeMarketTvWireItem | null) {
-  const probeStatus = String(item?.hlsProbeStatus || '').toLowerCase();
-  const status = String(item?.status || '').toLowerCase();
-  const hasHlsUrl = Boolean(String(item?.hlsUrl || '').trim());
-  if (String(item?.sourceType || '').toLowerCase() !== 'hls' || !hasHlsUrl) return false;
-  if (probeStatus) return probeStatus === 'playable' || probeStatus === 'unverified';
-  return status === 'ready' || status === 'not_24_7';
-}
-
-function hlsPlaybackUrl(item?: RuntimeMarketTvWireItem | null) {
-  const hlsUrl = String(item?.hlsUrl || '').trim();
-  if (!hlsUrl) return '';
-  const strategy = String(item?.playbackStrategy || '').toLowerCase();
-  if (item?.hlsProxyRequired || strategy === 'proxied-hls') return buildRuntimeHlsProxyUrl(hlsUrl);
-  return hlsUrl;
-}
-
-function isInPlaybackCooldown(item: RuntimeMarketTvWireItem | null | undefined, cooldowns: Record<string, number>) {
-  if (!item?.id) return false;
-  return Number(cooldowns[item.id] || 0) > Date.now();
-}
-
-function youtubeEmbedUrl(item?: RuntimeMarketTvWireItem | null) {
-  const mode = String(item?.youtubeEmbedMode || '').toLowerCase();
-  if (mode && mode !== 'live-video' && mode !== 'video') return '';
-  const videoId = youtubeVideoId(item);
-  if (videoId) return buildRuntimeYoutubeEmbedUrl(videoId, { autoplay: true, mute: true, quality: 'hd720' });
-  const embedded = String(item?.youtubeEmbedUrl || '').trim();
-  return embedded;
-}
-
-function isYoutubePreviewable(item?: RuntimeMarketTvWireItem | null) {
-  return String(item?.sourceType || '').toLowerCase() === 'youtube' && Boolean(youtubeEmbedUrl(item) || youtubeVideoId(item));
-}
-
-function isEmbeddedPreviewable(item?: RuntimeMarketTvWireItem | null, cooldowns: Record<string, number> = {}) {
-  if (isInPlaybackCooldown(item, cooldowns)) return false;
-  return isHlsPreviewable(item) || isYoutubePreviewable(item);
-}
-
-function youtubeProbeLabel(item?: RuntimeMarketTvWireItem | null) {
-  const probeStatus = String(item?.youtubeProbeStatus || '').toLowerCase();
-  if (probeStatus === 'live') return 'YOUTUBE LIVE';
-  if (probeStatus === 'offline') return 'YT VERIFIED';
-  if (probeStatus === 'error') return 'YT FALLBACK';
-  return 'YOUTUBE';
-}
-
-function MarketTvPreview({
-  item,
-  onPlaybackBlocked,
-}: {
-  item: RuntimeMarketTvWireItem;
-  onPlaybackBlocked?: (item: RuntimeMarketTvWireItem) => void;
-}) {
-  const { copy, shared } = useSpecialistCopy('market-tv-wire');
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
-  const sourceType = String(item.sourceType || '').toLowerCase();
-  const rawHlsUrl = String(item.hlsUrl || '').trim();
-  const initialHlsUrl = hlsPlaybackUrl(item);
-  const youtubeId = youtubeVideoId(item);
-  const youtubeUrl = youtubeEmbedUrl(item);
-  const canProxyFallback = Boolean(rawHlsUrl && initialHlsUrl === rawHlsUrl && item.playbackTier === 'trusted-hls');
-  const blockedReportedRef = useRef(false);
-  const [activeHlsUrl, setActiveHlsUrl] = useState(initialHlsUrl);
-  const [playbackState, setPlaybackState] = useState<PlaybackState>(initialHlsUrl ? 'connecting' : 'external');
-  const [youtubeFrameState, setYoutubeFrameState] = useState<PlaybackState>(youtubeUrl ? 'connecting' : 'external');
-  const shouldLoad = useStaggeredLoad(Boolean(initialHlsUrl || youtubeUrl), 200);
-
-  useEffect(() => {
-    setActiveHlsUrl(initialHlsUrl);
-  }, [initialHlsUrl, item.id]);
-
-  useEffect(() => {
-    const video = videoRef.current;
-    let cancelled = false;
-    let destroyHls: (() => void) | null = null;
-    let recoveries = 0;
-
-    blockedReportedRef.current = false;
-    setPlaybackState(activeHlsUrl ? (shouldLoad ? 'connecting' : 'waiting') : 'external');
-    if (!video || !activeHlsUrl || !shouldLoad) {
-      return undefined;
-    }
-
-    const markPlaying = () => setPlaybackState('playing');
-    const markWaiting = () => setPlaybackState('waiting');
-    const reportBlocked = () => {
-      if (blockedReportedRef.current) return;
-      blockedReportedRef.current = true;
-      onPlaybackBlocked?.(item);
-    };
-    const tryProxyFallback = () => {
-      if (!canProxyFallback || activeHlsUrl !== rawHlsUrl) return false;
-      setPlaybackState('waiting');
-      setActiveHlsUrl(buildRuntimeHlsProxyUrl(rawHlsUrl));
-      return true;
-    };
-    const markBlocked = () => {
-      if (recoveries < 2) {
-        recoveries += 1;
-        setPlaybackState('waiting');
-        window.setTimeout(() => {
-          if (!cancelled) video.play().catch(() => setPlaybackState('waiting'));
-        }, 800);
-        return;
-      }
-      if (tryProxyFallback()) return;
-      setPlaybackState('blocked');
-      reportBlocked();
-    };
-    video.addEventListener('playing', markPlaying);
-    video.addEventListener('waiting', markWaiting);
-    video.addEventListener('error', markBlocked);
-
-    const startNative = () => {
-      video.src = activeHlsUrl;
-      video.load();
-      video.play().catch(() => setPlaybackState('waiting'));
-    };
-
-    if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      startNative();
-    } else {
-      import('hls.js')
-        .then(({ default: Hls }) => {
-          if (cancelled) return;
-          if (!Hls.isSupported()) {
-            setPlaybackState('blocked');
-            return;
-          }
-          const hls = new Hls({
-            enableWorker: true,
-            lowLatencyMode: true,
-            liveSyncDurationCount: 3,
-          });
-          destroyHls = () => hls.destroy();
-          hls.loadSource(activeHlsUrl);
-          hls.attachMedia(video);
-          hls.on(Hls.Events.MANIFEST_PARSED, () => {
-            video.play().catch(() => setPlaybackState('waiting'));
-          });
-          hls.on(Hls.Events.ERROR, (_event, data) => {
-            if (!data?.fatal) return;
-            if (recoveries < 2 && data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-              recoveries += 1;
-              setPlaybackState('waiting');
-              hls.startLoad();
-              return;
-            }
-            if (recoveries < 2 && data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-              recoveries += 1;
-              setPlaybackState('waiting');
-              hls.recoverMediaError();
-              return;
-            }
-            if (tryProxyFallback()) return;
-            setPlaybackState('blocked');
-            reportBlocked();
-          });
-        })
-        .catch(() => {
-          setPlaybackState('blocked');
-          reportBlocked();
-        });
-    }
-
-    return () => {
-      cancelled = true;
-      video.removeEventListener('playing', markPlaying);
-      video.removeEventListener('waiting', markWaiting);
-      video.removeEventListener('error', markBlocked);
-      destroyHls?.();
-      video.pause();
-      video.removeAttribute('src');
-      video.load();
-    };
-  }, [activeHlsUrl, canProxyFallback, item.id, rawHlsUrl, shouldLoad]);
-
-  useEffect(() => {
-    if (!youtubeUrl || !shouldLoad) {
-      setYoutubeFrameState('external');
-      return undefined;
-    }
-    setYoutubeFrameState('connecting');
-    const timer = window.setTimeout(() => setYoutubeFrameState((state) => (state === 'playing' || state === 'blocked' ? state : 'waiting')), 12000);
-    return () => window.clearTimeout(timer);
-  }, [youtubeUrl, shouldLoad]);
-
-  useEffect(() => {
-    const iframe = iframeRef.current;
-    if (!youtubeUrl || !iframe) return undefined;
-    const handleMessage = (event: MessageEvent) => {
-      if (!youtubeBridgeMessageMatches(event, iframe, youtubeId)) return;
-      const data = event.data as { type?: string; state?: number | string };
-      const type = String(data.type || '');
-      if (type === 'yt-ready') setYoutubeFrameState('waiting');
-      if (type === 'yt-state') {
-        const state = Number(data.state);
-        if (state === 1 || state === 3) setYoutubeFrameState('playing');
-        else if (state === 2 || state === 0 || state === 5) setYoutubeFrameState('waiting');
-      }
-      if (type === 'yt-error') setYoutubeFrameState('blocked');
-      if (type === 'yt-timeout' || type === 'yt-autoplay-failed') setYoutubeFrameState('waiting');
-    };
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, [youtubeUrl, youtubeId]);
-
-  useEffect(() => {
-    const iframe = iframeRef.current;
-    if (!iframe?.contentWindow || !youtubeUrl || !shouldLoad) return;
-    iframe.contentWindow.postMessage({ type: 'play' }, '*');
-  }, [shouldLoad, youtubeUrl]);
-
-  if (youtubeUrl && (sourceType === 'youtube' || !rawHlsUrl)) {
-    return (
-      <div className="wm-market-tv-preview youtube">
-        <div className="wm-market-tv-preview-head">
-          <div>
-            <strong>{item.youtubeLiveTitle || itemTitle(item)}</strong>
-            <span>{categoryLabel(item.category)} / {sourceLocation(item)} / {youtubeProbeLabel(item)}</span>
-          </div>
-          <em className={`wm-market-tv-playback ${youtubeFrameState === 'blocked' ? 'blocked' : 'playing'}`}>
-            {youtubeFrameState === 'blocked' ? shared('blocked', 'BLOCKED') : youtubeProbeLabel(item)}
-          </em>
-          <button type="button" onClick={() => openExternal(item.externalUrl || item.sourceUrl || `https://www.youtube.com/watch?v=${youtubeId}`)}>
-            {shared('open', 'OPEN')}
-          </button>
-        </div>
-        <div className="wm-market-tv-stage">
-          {shouldLoad ? (
-            <iframe
-              ref={iframeRef}
-              className="wm-market-tv-youtube-frame"
-              src={youtubeUrl}
-              title={item.youtubeLiveTitle || itemTitle(item)}
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-              allowFullScreen
-              referrerPolicy="strict-origin-when-cross-origin"
-              onLoad={() => setYoutubeFrameState('waiting')}
-            />
-          ) : (
-            <div className="wm-market-tv-fallback passive">{copy('streamStandby', 'STREAM PAUSED · STANDBY')}</div>
-          )}
-          {youtubeFrameState === 'blocked' ? (
-            <button
-              type="button"
-              className="wm-market-tv-fallback"
-              onClick={() => openExternal(item.externalUrl || item.sourceUrl || `https://www.youtube.com/watch?v=${youtubeId}`)}
-            >
-              {copy('youtubeBlockedOpen', 'YOUTUBE EMBED BLOCKED · OPEN')}
-            </button>
-          ) : null}
-        </div>
-      </div>
-    );
-  }
-
-  if (!activeHlsUrl) {
-    return (
-      <div className="wm-market-tv-preview external">
-        <div>
-          <span>{sourceTypeLabel(item.sourceType)}</span>
-          <strong>{itemTitle(item)}</strong>
-          <em>{item.marketUseCase || item.sourceName || copy('openOfficialSource', 'Open official live source.')}</em>
-        </div>
-        <button type="button" onClick={() => openExternal(item.externalUrl || item.sourceUrl)}>
-          {shared('open', 'OPEN')}
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="wm-market-tv-preview">
-      <div className="wm-market-tv-preview-head">
-        <div>
-          <strong>{itemTitle(item)}</strong>
-          <span>{categoryLabel(item.category)} / {sourceLocation(item)} / {sourceTypeLabel(item.sourceType)}</span>
-        </div>
-        <em className={`wm-market-tv-playback ${playbackState}`}>{playbackState.toUpperCase()}</em>
-        <button type="button" onClick={() => openExternal(item.externalUrl || item.sourceUrl || rawHlsUrl)}>
-          {shared('open', 'OPEN')}
-        </button>
-      </div>
-      <div className="wm-market-tv-stage">
-        <video ref={videoRef} className="wm-market-tv-video" controls muted playsInline />
-        {playbackState === 'blocked' ? (
-          <button
-            type="button"
-            className="wm-market-tv-fallback"
-            onClick={() => openExternal(item.externalUrl || item.sourceUrl || rawHlsUrl)}
-          >
-            {copy('streamBlockedOpen', 'STREAM BLOCKED · OPEN SOURCE')}
-          </button>
-        ) : null}
-      </div>
-    </div>
-  );
+function isEmbeddedPreviewable(item?: RuntimeMarketTvWireItem | null) {
+  return !!item && playbackCandidates(item).length > 0;
 }
 
 function MarketTvRow({
   item,
   active,
   onPreview,
-  cooldowns,
 }: {
   item: RuntimeMarketTvWireItem;
   active: boolean;
   onPreview: () => void;
-  cooldowns?: Record<string, number>;
 }) {
   const { copy, shared, formatRelativeTime } = useSpecialistCopy('market-tv-wire');
-  const previewReady = isEmbeddedPreviewable(item, cooldowns || {});
+  const previewReady = isEmbeddedPreviewable(item);
   const tags = (item.matchedTerms?.length ? item.matchedTerms : item.marketTags || []).slice(0, 3);
   return (
     <article className={`wm-market-tv-row ${active ? 'active' : ''}`}>
@@ -409,7 +104,6 @@ function MarketTvWirePanel({ payload }: { payload?: RuntimeMarketTvWirePayload |
   const [categoryPayload, setCategoryPayload] = useState<{ category: string; payload: RuntimeMarketTvWirePayload } | null>(null);
   const [categoryLoading, setCategoryLoading] = useState(false);
   const [categoryError, setCategoryError] = useState<string | null>(null);
-  const [hlsCooldowns, setHlsCooldowns] = useState<Record<string, number>>({});
   const selectedPayload = activeCategory === 'all'
     ? payload
     : (categoryPayload?.category === activeCategory ? categoryPayload.payload : null);
@@ -419,15 +113,7 @@ function MarketTvWirePanel({ payload }: { payload?: RuntimeMarketTvWirePayload |
   const totalCount = Number(summary.total ?? payload?.selection?.total ?? items.length);
   const visibleItems = useMemo(() => items, [items]);
   const activeItem = visibleItems.find((item) => item.id === activeId) || null;
-  const usableActiveItem = activeItem && !isInPlaybackCooldown(activeItem, hlsCooldowns) ? activeItem : null;
-  const previewItem = usableActiveItem || visibleItems.find((item) => isEmbeddedPreviewable(item, hlsCooldowns)) || visibleItems[0] || null;
-
-  useEffect(() => {
-    const now = Date.now();
-    if (!Object.values(hlsCooldowns).some((expiresAt) => expiresAt <= now)) return undefined;
-    setHlsCooldowns((current) => Object.fromEntries(Object.entries(current).filter(([, expiresAt]) => expiresAt > now)));
-    return undefined;
-  }, [hlsCooldowns]);
+  const previewItem = activeItem || visibleItems.find((item) => isEmbeddedPreviewable(item)) || visibleItems[0] || null;
 
   useEffect(() => {
     let cancelled = false;
@@ -462,17 +148,9 @@ function MarketTvWirePanel({ payload }: { payload?: RuntimeMarketTvWirePayload |
       return;
     }
     if (!activeId || !visibleItems.some((item) => item.id === activeId)) {
-      setActiveId((visibleItems.find((item) => isEmbeddedPreviewable(item, hlsCooldowns)) || visibleItems[0])?.id || null);
+      setActiveId((visibleItems.find((item) => isEmbeddedPreviewable(item)) || visibleItems[0])?.id || null);
     }
-  }, [activeId, visibleItems, hlsCooldowns]);
-
-  const handlePlaybackBlocked = (item: RuntimeMarketTvWireItem) => {
-    setHlsCooldowns((current) => ({
-      ...current,
-      [item.id]: Date.now() + HLS_FAILURE_COOLDOWN_MS,
-    }));
-    setActiveId((current) => (current === item.id ? null : current));
-  };
+  }, [activeId, visibleItems]);
 
   return (
     <Panel
@@ -534,17 +212,16 @@ function MarketTvWirePanel({ payload }: { payload?: RuntimeMarketTvWirePayload |
                   key={item.id}
                   item={item}
                   active={(activeId || previewItem?.id) === item.id}
-                  cooldowns={hlsCooldowns}
                   onPreview={() => setActiveId(item.id)}
                 />
               ))}
             </div>
           ) : null}
         </div>
-        {previewItem ? <MarketTvPreview item={previewItem} onPlaybackBlocked={handlePlaybackBlocked} /> : (
+        {previewItem ? <MarketTvPreview key={previewItem.id} item={previewItem} /> : (
           <div className="wm-empty-state">
             <strong>{categoryLoading ? copy('loading', 'Market TV Wire loading.') : copy('warming', 'Market TV Wire warming.')}</strong>
-            <em>{categoryError || copy('notReady', 'GCP seed snapshot or selected channel category is not ready yet.')}</em>
+            <em>{categoryError || copy('notReady', 'The selected channel category is not ready yet.')}</em>
           </div>
         )}
       </div>
@@ -565,7 +242,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   id: 'market-tv-wire',
   title: 'Market TV Wire',
   eyebrow: 'content',
-  description: 'GCP-seeded live video sources ranked for market context.',
+  description: 'Live video sources ranked for market context.',
   size: 'wide',
   defaultEnabled: true,
 }, {

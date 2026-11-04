@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -18,8 +19,9 @@ from urllib.request import Request, urlopen
 from xml.etree import ElementTree as ET
 
 from api.config import PROJECT_ROOT
+from api.clients.source_transport import source_session
 from api.context import resolve_optional_service_callable
-from api.services import trusted_hls_sources, youtube_live_probe_service
+from api.services import live_video_playback_service, trusted_hls_sources, youtube_live_probe_service
 
 
 PANEL_ID = "market-tv-wire"
@@ -629,11 +631,16 @@ def _hls_http_fetch(url: str, *, timeout: int, max_bytes: int, binary: bool = Fa
         url,
         headers=headers,
     )
-    with urlopen(request, timeout=timeout) as response:
-        status = int(getattr(response, "status", 200) or 200)
-        if status >= 400:
-            raise RuntimeError(f"http {status}")
-        data = response.read(max_bytes)
+    if os.environ.get("POLYMONITOR_SOURCE_ROUTES_FILE"):
+        with source_session() as session, session.get(url, headers=headers, timeout=timeout, stream=True) as response:
+            response.raise_for_status()
+            data = response.raw.read(max_bytes, decode_content=True)
+    else:
+        with urlopen(request, timeout=timeout) as response:
+            status = int(getattr(response, "status", 200) or 200)
+            if status >= 400:
+                raise RuntimeError(f"http {status}")
+            data = response.read(max_bytes)
     if binary:
         return data
     return data.decode("utf-8", errors="replace")
@@ -719,6 +726,20 @@ def _probe_hls_stream_with_dependencies(
     dependencies: LiveVideoSourceDependencies,
     item: Dict[str, Any],
 ) -> Dict[str, Any]:
+    store = dependencies.snapshot_store
+    key = hashlib.sha256(str(item.get("hlsUrl") or "").encode()).hexdigest()[:24]
+    if store is not None and dependencies.hls_stream_probe is None:
+        cached = store.get("probe:tv-hls", key)
+        if isinstance(cached, dict):
+            return cached
+    result = _probe_hls_uncached(dependencies, item)
+    result["checkedAt"] = time.time()
+    if store is not None and dependencies.hls_stream_probe is None:
+        store.set("probe:tv-hls", key, result, 86400 if result.get("ok") else 900)
+    return result
+
+
+def _probe_hls_uncached(dependencies: LiveVideoSourceDependencies, item: Dict[str, Any]) -> Dict[str, Any]:
     if dependencies.hls_stream_probe is not None:
         result = dependencies.hls_stream_probe(item)
         if isinstance(result, dict):
@@ -729,7 +750,7 @@ def _probe_hls_stream_with_dependencies(
         return _hls_probe_result(False, "missing", error="missing hlsUrl")
     referer = _string(item.get("hlsProxyReferer"))
     ffprobe = shutil.which(str(dependencies.ffprobe_path or "ffprobe"))
-    if not ffprobe:
+    if not ffprobe or os.environ.get("POLYMONITOR_SOURCE_ROUTES_FILE"):
         return _probe_hls_stream_http(dependencies, item)
     timeout_seconds = _hls_probe_timeout_seconds(dependencies)
     cmd = [
@@ -791,7 +812,7 @@ def _enrich_hls_watchability(
         item["hlsProbeStatus"] = probe["status"]
         item["hlsProbeError"] = probe.get("error")
         item["hlsProbeStreams"] = probe.get("streams") or []
-        item["lastCheckedAt"] = generated_at
+        item["lastCheckedAt"] = datetime.fromtimestamp(probe["checkedAt"], timezone.utc).isoformat() if probe.get("checkedAt") else generated_at
         if probe["ok"]:
             playable_count += 1
             item["status"] = "ready"
@@ -1362,6 +1383,9 @@ def _build_market_tv_wire_payload(
         source_states["hlsWatchabilityProbe"] = hls_probe_state
 
     items.sort(key=lambda item: (bool(item.get("curated")), item.get("status") == "ready", int(item.get("relevanceScore") or 0)), reverse=True)
+    resolved = live_video_playback_service.refresh_live_channels(dependencies)
+    live_video_playback_service.attach_playback_sources(items, resolved)
+    source_states["tvLiveChannels"] = {"channels": resolved, "count": len(resolved)}
     status = "ok" if items and not errors else ("degraded" if items else "empty")
     return {
         "generatedAt": generated_at,
@@ -1419,12 +1443,10 @@ def _normalize_market_tv_wire_payload(
         )
     result = json.loads(json.dumps(payload, ensure_ascii=True, default=str))
     raw_items = result.get("items") if isinstance(result.get("items"), list) else []
-    items = [
-        item for item in raw_items
-        if isinstance(item, dict) and str(item.get("sourceType") or "").lower() == "hls"
-    ]
+    items = live_video_playback_service.tv_channel_items([item for item in raw_items if isinstance(item, dict)])
     items.sort(
         key=lambda item: (
+            1 if item.get("curated") else 0,
             1 if item.get("status") == "ready" else 0,
             int(item.get("relevanceScore") or 0),
             1 if item.get("curated") else 0,

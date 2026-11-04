@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import re
+import os
 from dataclasses import dataclass
 from urllib.parse import quote, urljoin, urlparse
 from urllib.request import Request, urlopen
 
 from api.services.trusted_hls_sources import TRUSTED_HLS_SOURCES, trusted_hls_urls
+from api.clients.source_transport import source_session
 
 
 DEFAULT_TIMEOUT_SECONDS = 12
@@ -123,13 +125,23 @@ def fetch_hls_resource(url: str, *, timeout: int = DEFAULT_TIMEOUT_SECONDS) -> t
         raise HlsProxyError("HLS URL is not in the trusted playback allowlist", 403)
 
     request = Request(target, headers=_headers_for(rule))
-    with urlopen(request, timeout=timeout) as response:
-        status = int(getattr(response, "status", 200) or 200)
-        content_type = str(response.headers.get("Content-Type") or "")
-        if status >= 400:
-            raise HlsProxyError(f"upstream returned HTTP {status}", 502)
-        max_bytes = MAX_MANIFEST_BYTES if _is_manifest_url(target, content_type) else MAX_SEGMENT_BYTES
-        data = response.read(max_bytes + 1)
+    if os.environ.get("POLYMONITOR_SOURCE_ROUTES_FILE"):
+        with source_session() as session, session.get(target, headers=_headers_for(rule), timeout=timeout,
+                                                     stream=True, allow_redirects=False) as response:
+            status = response.status_code
+            if status != 200:
+                raise HlsProxyError(f"upstream returned HTTP {status}", 502)
+            content_type = str(response.headers.get("Content-Type") or "")
+            max_bytes = MAX_MANIFEST_BYTES if _is_manifest_url(target, content_type) else MAX_SEGMENT_BYTES
+            data = response.raw.read(max_bytes + 1, decode_content=True)
+    else:
+        with urlopen(request, timeout=timeout) as response:
+            status = int(getattr(response, "status", 200) or 200)
+            content_type = str(response.headers.get("Content-Type") or "")
+            if status >= 400:
+                raise HlsProxyError(f"upstream returned HTTP {status}", 502)
+            max_bytes = MAX_MANIFEST_BYTES if _is_manifest_url(target, content_type) else MAX_SEGMENT_BYTES
+            data = response.read(max_bytes + 1)
     if len(data) > max_bytes:
         raise HlsProxyError("upstream HLS resource is larger than the proxy limit", 502)
     if _is_manifest_url(target, content_type):

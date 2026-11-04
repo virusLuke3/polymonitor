@@ -89,7 +89,7 @@ def get_yahoo_market_snapshot(
             f"{ctx['SETTINGS'].yahoo_chart_base_url.rstrip('/')}/{symbol}",
             params={"interval": interval, "range": range_name, "includePrePost": "false"},
             timeout=12,
-            headers={"User-Agent": "polydata-runtime/1.0", "Accept": "application/json"},
+            headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
         )
     except requests.RequestException as exc:
         failures = int(state.get("failures") or 0) + 1

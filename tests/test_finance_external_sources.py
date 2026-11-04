@@ -133,3 +133,20 @@ def test_liquidity_regime_uses_external_seed_components():
     assert sources["cot"] == "ok"
     assert sources["etf"] == "ok"
     assert sources["stablecoin"] == "ok"
+
+
+def test_cold_liquidity_composition_never_nests_snapshot_refresh_permits():
+    active = []
+    def snapshot(namespace, key, builder, **kwargs):
+        assert not active, f"nested admission: {active} -> {namespace}"
+        assert namespace not in {"runtime:finance:liquidity-regime", "runtime:finance:onchain-tradfi-perp-radar"}
+        active.append(namespace)
+        try:
+            return builder()
+        finally:
+            active.pop()
+    ctx = {"get_snapshot_payload": snapshot, "get_market_groups_payload": lambda **kwargs: {"groups": []},
+           "get_yahoo_market_snapshot": lambda *args, **kwargs: None,
+           "utc_now_iso": lambda: "2026-11-04T08:00:00Z"}
+    payload = finance_panels_service.get_finance_liquidity_regime_snapshot(ctx)
+    assert "components" in payload

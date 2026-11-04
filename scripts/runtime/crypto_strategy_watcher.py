@@ -25,7 +25,7 @@ from api.services.crypto_strategy.store import Store, database_path
 def get(url, params=None):
     if params:
         url += "?" + urlencode(params)
-    with urlopen(Request(url, headers={"Accept": "application/json", "User-Agent": "polymonitor-crypto-strategy/1"}), timeout=5) as response:
+    with urlopen(Request(url, headers={"Accept": "application/json", "User-Agent": "polymonitor-crypto-strategy/1"}), timeout=12) as response:
         raw = response.read(8000001)
         if len(raw) > 8000000:
             raise ValueError("SOURCE_RESPONSE_TOO_LARGE")

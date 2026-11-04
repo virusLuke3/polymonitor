@@ -28,12 +28,13 @@ def build_youtube_embed_html(
     *,
     video_id: str,
     request_origin: str,
+    channel_id: str = "",
     parent_origin: str = "",
     autoplay: str | None = None,
     mute: str | None = None,
     quality: str | None = None,
 ) -> str:
-    if not VIDEO_ID_RE.match(video_id or ""):
+    if not VIDEO_ID_RE.fullmatch(video_id or "") and not re.fullmatch(r"UC[A-Za-z0-9_-]{22}", channel_id):
         raise ValueError("invalid YouTube videoId")
     origin = str(request_origin or "").rstrip("/") or "https://www.youtube.com"
     parent = _parent_origin(parent_origin)
@@ -41,6 +42,7 @@ def build_youtube_embed_html(
     mute_value = _bool_param(mute, default="1")
     quality_value = quality if quality in QUALITY_VALUES else ""
     safe_video_id = json.dumps(video_id)
+    safe_channel_id = json.dumps(channel_id)
     safe_origin = json.dumps(origin)
     safe_parent = json.dumps(parent)
     safe_quality = json.dumps(quality_value)
@@ -66,6 +68,7 @@ def build_youtube_embed_html(
     (function () {{
       var parentOrigin = {safe_parent};
       var videoId = {safe_video_id};
+      var channelId = {safe_channel_id};
       var origin = {safe_origin};
       var quality = {safe_quality};
       var started = false;
@@ -91,6 +94,11 @@ def build_youtube_embed_html(
         var last = readMuted();
         if (last !== null) post({{ type: 'yt-mute-state', muted: last, videoId: videoId }});
         muteSyncId = window.setInterval(function () {{
+          try {{
+            var details = player.getVideoData ? player.getVideoData() : {{}};
+            post({{ type: 'yt-progress', videoId: videoId, actualVideoId: details.video_id,
+              state: player.getPlayerState(), time: player.getCurrentTime(), isLive: details.isLive }});
+          }} catch (err) {{}}
           var next = readMuted();
           if (next !== null && next !== last) {{
             last = next;
@@ -112,6 +120,15 @@ def build_youtube_embed_html(
         document.head.appendChild(tag);
       }}
       window.onYouTubeIframeAPIReady = function () {{
+        if (channelId) {{
+          var frame = document.createElement('iframe');
+          frame.id = 'player';
+          frame.src = 'https://www.youtube.com/embed/live_stream?channel=' + encodeURIComponent(channelId)
+            + '&enablejsapi=1&autoplay={autoplay_value}&mute={mute_value}&origin=' + encodeURIComponent(origin);
+          frame.allow = 'autoplay; encrypted-media; picture-in-picture';
+          frame.style.border = '0';
+          document.getElementById('player').replaceWith(frame);
+        }}
         player = new YT.Player('player', {{
           videoId: videoId,
           host: 'https://www.youtube.com',
@@ -146,7 +163,7 @@ def build_youtube_embed_html(
             }},
             onStateChange: function (event) {{
               post({{ type: 'yt-state', state: event && event.data, videoId: videoId }});
-              if (event && (event.data === 1 || event.data === 3)) {{
+              if (event && event.data === 1) {{
                 started = true;
                 hideOverlay();
                 retryTimers.forEach(window.clearTimeout);
@@ -157,6 +174,7 @@ def build_youtube_embed_html(
         }});
       }};
       window.addEventListener('message', function (event) {{
+        if (event.source !== window.parent || (parentOrigin !== '*' && event.origin !== parentOrigin)) return;
         if (!player || !event.data || !event.data.type) return;
         switch (event.data.type) {{
           case 'play': if (player.playVideo) player.playVideo(); break;

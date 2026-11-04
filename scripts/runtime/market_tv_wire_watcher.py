@@ -16,6 +16,7 @@ if str(_scripts_root) not in sys.path:
 import redis
 import requests
 
+from api.clients.source_transport import source_session
 from api.config import load_api_settings
 from api.services import live_video_source_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, retained_snapshot, utc_now_iso
@@ -57,7 +58,7 @@ class MarketTvWireWatcher:
         self.redis_client = redis.from_url(redis_url, decode_responses=True)
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
-        self.requests = requests.Session()
+        self.requests = source_session()
         trust_env = str(os.environ.get("POLYDATA_RUNTIME_TRUST_ENV", "0")).strip().lower() in {"1", "true", "yes", "on"}
         self.requests.trust_env = trust_env
 

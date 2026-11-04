@@ -30,6 +30,7 @@ except ImportError:
 from api.clients import market_data_client
 from api.commodity_symbols import COMMODITY_SYMBOLS
 from api.clients.http_client import http_json_get
+from api.clients.source_transport import source_session
 from api.config import load_api_settings
 from api.services import runtime_service
 from api.services import commodities_service, crypto_service
@@ -123,7 +124,7 @@ class MarketGroupWatcher:
         self.redis_client = redis.from_url(redis_url, decode_responses=True)
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
-        self.requests = requests.Session()
+        self.requests = source_session()
         self.requests.trust_env = False
         self._runtime_cache: Dict[str, Dict[str, Any]] = {}
 

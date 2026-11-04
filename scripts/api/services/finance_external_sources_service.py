@@ -176,19 +176,20 @@ def _http_get(
     params: Optional[Dict[str, Any]] = None,
     timeout: int = 12,
 ) -> Any:
+    user_agent = "Mozilla/5.0" if "finance.yahoo.com/" in url else "polydata-finance-seed/1.0"
     if dependencies.http_json_get is not None:
         return dependencies.http_json_get(
             url,
             params=params,
             timeout=timeout,
-            headers={"User-Agent": "polydata-finance-seed/1.0"},
+            headers={"User-Agent": user_agent},
         )
     if requests is None:
         raise RuntimeError("requests package is required")
     session = requests.Session()
     session.trust_env = True
     try:
-        response = session.get(url, params=params, timeout=timeout, headers={"User-Agent": "polydata-finance-seed/1.0"})
+        response = session.get(url, params=params, timeout=timeout, headers={"User-Agent": user_agent})
         response.raise_for_status()
         return response.json() if response.content else None
     finally:

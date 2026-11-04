@@ -1,0 +1,19 @@
+[Unit]
+Description=Polymonitor isolated external-source SSH route (%i)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/polymonitor/egress-%i.env
+ExecStart=/usr/bin/ssh -N -T -i %h/.ssh/polymonitor_sources_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o ProxyCommand=none -o ProxyJump=none -D ${POLYMONITOR_EGRESS_LISTEN} ${POLYMONITOR_EGRESS_TARGET}
+Restart=always
+RestartSec=5
+TimeoutStopSec=10
+NoNewPrivileges=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

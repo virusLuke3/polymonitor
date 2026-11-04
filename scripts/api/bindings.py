@@ -258,6 +258,8 @@ def bind_services(runtime: ServiceRuntime) -> None:
     runtime.finance_panels_context = {
         "_resources": runtime.resources,
         "app": runtime.app,
+        "SNAPSHOT_STORE": runtime.SNAPSHOT_STORE,
+        "get_cached_json": get_cached_json,
         "get_crypto_funding_watch_snapshot": get_crypto_funding_watch_snapshot,
         "get_market_groups_payload": get_market_groups_payload,
         "get_snapshot_payload": get_snapshot_payload,

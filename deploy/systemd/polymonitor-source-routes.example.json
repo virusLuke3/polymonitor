@@ -1,0 +1,170 @@
+{
+  "query1.finance.yahoo.com": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "query2.finance.yahoo.com": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "www.deribit.com": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "api.coinbase.com": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "api.kraken.com": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "api.coingecko.com": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "openrouter.ai": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "news.google.com": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "feeds.feedburner.com": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "www.youtube.com": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "youtube.com": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "iptv-org.github.io": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "www.theverge.com": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "techcrunch.com": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "www.ft.com": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "feeds.a.dj.com": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "huggingface.co": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "www.anthropic.com": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "api.bybit.com": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18992"
+  ],
+  "stablecoins.llama.fi": [
+    "",
+    "socks5h://127.0.0.1:18993"
+  ],
+  "api.llama.fi": [
+    "",
+    "socks5h://127.0.0.1:18993"
+  ],
+  "coins.llama.fi": [
+    "",
+    "socks5h://127.0.0.1:18993"
+  ],
+  "bloomberg.com": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "cdn-ca2-na.lncnetworks.host": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "linear901-oo-hls0-prd-gtm.delivery.skycdp.com": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "dash4.antik.sk": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "dwamdstream103.akamaized.net": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "amg00106-france24-france24-samsunguk-qvpp8.amagi.tv": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "live-hls-apps-aje-fa.getaj.net": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "live.alarabiya.net": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "lnc-abc-news.tubi.video": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "cbsn-us.cbsnstream.cbsnews.com": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "dai2.xumo.com": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "news.cgtn.com": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "nhkwlive-ojp.akamaized.net": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "tv-trtworld.medya.trt.com.tr": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "live-stream.skynewsarabia.com": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "av.alarabiya.net": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "reuters-reutersnow-1-eu.rakuten.wurl.tv": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "rakuten-guardian-1-ie.samsung.wurl.tv": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "amdlive-ch01-ctnd-com.akamaized.net": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ],
+  "fox-foxweathernow-samsungus.amagi.tv": [
+    "socks5h://127.0.0.1:18993",
+    "socks5h://127.0.0.1:18994"
+  ]
+}

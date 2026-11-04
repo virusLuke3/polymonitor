@@ -159,6 +159,7 @@ def create_runtime_panels_blueprint(dependencies: RuntimePanelRouteDependencies)
             html = youtube_embed_service.build_youtube_embed_html(
                 video_id=video_id,
                 request_origin=origin,
+                channel_id=request.args.get("channelId") or "",
                 parent_origin=request.args.get("parentOrigin") or "",
                 autoplay=request.args.get("autoplay"),
                 mute=request.args.get("mute"),

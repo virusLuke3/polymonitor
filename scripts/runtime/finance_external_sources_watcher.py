@@ -27,6 +27,7 @@ try:
 except ImportError:
     requests = None
 
+from api.clients.source_transport import source_session
 from api.config import load_api_settings
 from api.clients import market_data_client
 from api.services import finance_external_sources_service
@@ -100,7 +101,7 @@ class FinanceExternalSourcesWatcher:
         self.redis_client = redis.from_url(redis_url, decode_responses=True)
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
-        self.requests = requests.Session()
+        self.requests = source_session()
         self.requests.trust_env = str(os.environ.get("POLYDATA_RUNTIME_TRUST_ENV", "0")).lower() in {"1", "true", "yes", "on"}
 
     def namespace(self) -> str:

@@ -29,6 +29,7 @@ except ImportError:
     requests = None
 
 from api.clients import market_data_client
+from api.clients.source_transport import source_session
 from api.config import load_api_settings
 from api.services import tech_panels_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, retained_snapshot
@@ -85,7 +86,7 @@ class TechPanelsWatcher:
         self.redis_client = redis.from_url(redis_url, decode_responses=True)
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
-        self.requests = requests.Session()
+        self.requests = source_session()
         trust_env_proxy = str(os.environ.get("POLYDATA_TECH_PANELS_TRUST_ENV_PROXY") or "").strip().lower()
         self.requests.trust_env = trust_env_proxy in {"1", "true", "yes", "on"}
         self._runtime_cache: Dict[str, Dict[str, Any]] = {}

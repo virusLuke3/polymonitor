@@ -4,6 +4,7 @@ import os
 from typing import Any, Dict, Optional
 
 
+from api.clients.source_transport import source_session
 from api.context import runtime_resources
 
 
@@ -21,7 +22,7 @@ def _thread_session(ctx, requests_lib: Any):
             raise RuntimeError("service runtime is closed")
         session = getattr(resources.http_local, "session", None)
         if session is None:
-            session = requests_lib.Session()
+            session = source_session(requests_lib)
             resources.http_local.session = session
             resources.http_sessions.append(session)
         return session

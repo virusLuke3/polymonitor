@@ -29,7 +29,7 @@ LOB 特定 token 的上游未就绪继续检查已有 owner 的实际状态；�
 
 ### 实际安装与运行配置
 
-- 安装目录：`/home/jiahuaiyu/.local/share/polymonitor/backend`。23 个本次修改的 Python 文件与运行目录逐文件一致；另补装已提交但运行目录遗漏的 Sports Odds 响应校验和 Finance 新闻过滤。
+- 安装目录：`~/.local/share/polymonitor/backend`。23 个本次修改的 Python 文件与运行目录逐文件一致；另补装已提交但运行目录遗漏的 Sports Odds 响应校验和 Finance 新闻过滤。
 - 配置模板：[polymonitor-panel-data-recovery.env.example](../deploy/systemd/polymonitor-panel-data-recovery.env.example)。实际文件为 `~/.config/polymonitor/panel-data-recovery.env`，由受影响服务的 `96-data-recovery.conf` 在迁移环境文件之后加载。只配置使用已有腾讯云出口，不改变隧道或主 Clash。
 - 作用于 Food、Macro CPI、CPI registry、Tech、Finance watch、Finance external、Natural Hazards、Radar、Macro Map、TV、NBA、GRID、Content topic refresh 共 13 个 worker。FRED 已实测直连成功，加入 `NO_PROXY`；其余受影响外部来源使用已授权的 `127.0.0.1:18992`。
 - API 已重新加载受影响模块，消费者继续读取原快照身份。没有前端样式、布局或轮询频率变更。
@@ -49,7 +49,7 @@ LOB 特定 token 的上游未就绪继续检查已有 owner 的实际状态；�
 
 ### 存储身份与失败恢复
 
-- 展示快照仍在 `/home/jiahuaiyu/.local/share/polymonitor/backend/data/panel_snapshots.sqlite3`，复用各领域现有 namespace/key；原有 Redis 同步链路保持不变。
+- 展示快照仍在 `~/.local/share/polymonitor/backend/data/panel_snapshots.sqlite3`，复用各领域现有 namespace/key；原有 Redis 同步链路保持不变。
 - GDELT 429 状态使用同一 SQLite 的 `state:content / gdelt-backoff`；Finance external 的 Yahoo 失败预算使用 `state:finance-external:yahoo-source-backoff / <Yahoo base URL>`。其他 Yahoo 消费者复用原 Runtime 缓存。前两项是调度状态，不是新增展示数据拥有者。
 - Food / Macro 的六小时成功窗口、CPI actual 的三十分钟窗口通过逐来源 `fetchedAt` 复用；失败恢复按 5、10、20、30 分钟退避。正常周期没有改成高频重抓。
 - 来源失败保留值时写 `stale` / `stale-seed` 和本次尝试状态，保留原始 `generatedAt`。AI 混合分类保留额外使用逐项 `sourceFetchedAt`，后续发布不能无限延长旧分类。
@@ -68,3 +68,30 @@ LOB 特定 token 的上游未就绪继续检查已有 owner 的实际状态；�
 本机证据位于 `document/开发/核验数据/2026-11-04-panel-overnight/` 下的 `repair-deployment.json`、`repair-verification.json` 和 `repair-public-verification.json`；这些带时间的记录只证明对应窗口。
 
 来源接口依据：[GDACS 官方 API 说明](https://www.gdacs.org/Documents/2025/GDACS_API_quickstart_v1.pdf)、[OpenRouter 公开周榜](https://openrouter.ai/rankings?view=week)。OpenRouter 当前适配读取公开页面的周榜查询数据及更新时间；没有使用需要密钥的数据集 API。
+
+## 下午追加：TV 播放与非 LOB 外源恢复契约
+
+用户已授权增加 Rabisu 爱尔兰、洛杉矶作为 Polymonitor 独立出口。前文腾讯单出口是上午的运行记录。
+不变更主 Clash、market-data、LOB 密钥/连接预算或纽约节点。生产采集和持久层继续使用已有 owner。
+
+- TV 契约与功能入口见 [TV 索引](../webpage/src/panels/modules/market-tv-wire/README.md)：
+  同频道有序主备源、真实播放进度、当前直播 ID 更新、后台探测与浏览器播放分离。
+- 独立 SSH key 仅允许受维护的外部来源域名，使用 `restrict`、明确 `permitopen` 与禁用命令。
+  systemd 保活/重启负责 SSH 恢复；应用层检查真实请求，不能以 SSH 存活替代来源健康。
+- `POLYMONITOR_SOURCE_ROUTES_FILE` 为显式域名路由文件，只有指定 worker 和 HLS 转发读取。
+  Bybit 仅腾讯/爱尔兰；Yahoo 爱尔兰/洛杉矶；DeFiLlama 可用直连优先。
+  不将洛杉矶用于已确认存在地区限制的 Bybit。
+- 一个请求最多尝试两个出口，共用一次请求的超时预算。加密 REST 从 5 秒调整为 12 秒（含备用），
+  适配实测约 3–4 秒的跨境 TLS/响应耗时；采集周期不加快。连接错误和可重试 5xx 可以切一次；
+  403 不绕过地区/权限限制，429 保留来源 `Retry-After`，不立即换出口放大请求。
+  失败出口短暂冷却后才重新验证。退避复用既有 SQLite `panel_snapshots`，
+  namespace `state:source-transport`，不创建另一份行情或历史缓存。
+- Crypto、Funding、DeFi、Finance external、Tech/Finance watch 与 Market group 复用各自原采集周期、
+  SQLite/Redis key 和业务校验。仅成功取得有效字段且正式发布后才算数据恢复。
+- Liquidity Regime / Onchain TradFi Perp 是已有 owner 的轻量合成视图，不再申请一层快照刷新名额。
+  Equity / Atlas 的过期刷新会占用共享预算，原有三层嵌套及随后合成竞争会让冷视图持续 503。
+  同时补齐 finance context 的 `SNAPSHOT_STORE` / `get_cached_json`：原来外源已经写入，
+  视图却没有注入读取依赖，导致稳定币、COT、ETF 均被误报为 seed-miss。
+  仍复用 Finance external 的 SQLite/Redis `runtime:finance:external-sources / v1`，不建第二个采集器。
+- 验收包括同频道主备切换、禁用回放/缓冲冒充直播、原始时间保留、真实来源与正式写入、
+  独立 SSH 进程中断后 systemd 重连及再次真实请求。短观察窗口不宣称整夜或全部频道稳定。

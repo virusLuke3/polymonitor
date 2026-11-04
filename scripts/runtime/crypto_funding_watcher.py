@@ -29,6 +29,7 @@ try:
 except ImportError:
     requests = None
 
+from api.clients.source_transport import source_session
 from api.config import load_api_settings
 from api.services import crypto_funding_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
@@ -108,7 +109,7 @@ class CryptoFundingWatcher:
     def http_json_get(self, url: str, params: Optional[Dict[str, Any]] = None, timeout: int = 12, headers: Optional[Dict[str, str]] = None) -> Any:
         session = getattr(self.http_local, "session", None)
         if session is None:
-            session = requests.Session()
+            session = source_session()
             session.trust_env = False
             self.http_local.session = session
             with self.http_lock:
