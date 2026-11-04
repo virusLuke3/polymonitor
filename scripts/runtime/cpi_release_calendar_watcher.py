@@ -91,7 +91,7 @@ class CpiReleaseCalendarWatcher:
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
         self.requests = requests.Session()
         self.requests.trust_env = False
-        self.requests.headers.update({"User-Agent": "polydata-cpi-calendar-watcher/1.0"})
+        self.requests.headers.update({"User-Agent": "Polymonitor/1.0 (+https://www.polymonitor.club/)"})
 
     def namespace(self) -> str:
         return cpi_release_calendar_service.CPI_CALENDAR_SNAPSHOT_NAMESPACE

@@ -117,8 +117,12 @@ def test_archive_transport_ingestion_restart_and_news_window(storage, tmp_path, 
         return b"%PDF-fixture-original", meta
     monkeypatch.setattr(fraser, "fetch", fetch)
     monkeypatch.setattr(fraser, "extract_text", lambda *args, **kwargs: TEXT)
+    legacy = {"title": "Previous official RSS title", "url": "https://www.bls.gov/news.release/archives/cpi_10142026.htm",
+              "published_at": "2026-10-14T11:50:31.200000Z", "summary": "Old feed excerpt",
+              "source_kind": "official_release", "topics": ["cpi"]}
+    store.persist(storage, source, [legacy], "2026-10-14T12:00:00Z")
     first = collector.collect_one(storage, snapshots, source, {})
-    assert first["status"] == "ok" and first["new"] == 1 and first["public"] == 1
+    assert first["status"] == "ok" and first["updated"] == 1 and first["new"] == 0 and first["public"] == 1
     assert first["proxy_mode"] == "direct"
     record = archive.read_latest(snapshots, "cpi")
     assert (archive.archive_root(snapshots) / "cpi" / record["pdfFile"]).read_bytes() == b"%PDF-fixture-original"
@@ -127,8 +131,10 @@ def test_archive_transport_ingestion_restart_and_news_window(storage, tmp_path, 
     assert second["updated"] == 0
     assert datetime.fromisoformat(second["next_check_at"].replace("Z", "+00:00")) - datetime.fromisoformat(second["checked_at"].replace("Z", "+00:00")) == timedelta(hours=6)
     rows = storage.query_all("SELECT raw_payload FROM content_items")
+    assert len(rows) == 1
     item = json.loads(rows[0]["raw_payload"])
     assert item["published_at"] == "2026-10-14T12:30:00Z"
+    assert item["first_seen_at"] == "2026-10-14T12:00:00Z"
     assert public.eligible_item(rows[0]["raw_payload"], source_map(), "2026-10-28T00:00:00Z", datetime(2026, 11, 4, tzinfo=timezone.utc))[1] == "window"
     assert archive.read_latest(snapshots, "cpi")["receivedAt"] == record["receivedAt"]
     # A news-retention cleanup cannot remove the formal original-document archive.
