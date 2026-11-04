@@ -225,6 +225,26 @@ def test_failed_quote_universe_is_not_authoritative_empty():
     assert result["sources"]["yahoo"] == "error"
 
 
+def test_partial_big_tech_keeps_original_quote_clock(monkeypatch):
+    from types import SimpleNamespace
+    ctx = _ctx()
+    quote = ctx['get_yahoo_market_snapshot']
+    ctx['get_yahoo_market_snapshot'] = lambda symbol, **kw: None if symbol == 'NVDA' else quote(symbol, **kw)
+    previous = {'generatedAt': '2026-11-04T08:50:00Z', 'items': [{
+        'id': 'NVDA', 'label': 'Nvidia', 'symbol': 'NVDA', 'marketCap': 9e12,
+        'fetchedAt': '2026-11-04T08:40:00Z', 'quoteAt': '2026-11-03T21:00:00Z', 'tags': ['CHIPS'],
+    }]}
+    ctx['SNAPSHOT_STORE'] = SimpleNamespace(get_stale=lambda *a: previous)
+    monkeypatch.setattr(tech_panels_service, 'utc_now_iso', lambda: '2026-11-04T09:00:00Z')
+    result = tech_panels_service.build_big_tech_market_cap_payload(ctx, 24)
+    assert result['status'] == 'partial'
+    assert result['summary']['retainedCount'] == 1
+    assert result['summary']['failedSymbols'] == ['NVDA']
+    row = next(row for row in result['items'] if row['id'] == 'NVDA')
+    assert row['fetchedAt'] == '2026-11-04T08:40:00Z' and row['retained']
+    assert row['quoteAt'] == '2026-11-03T21:00:00Z'
+
+
 def test_ai_partial_source_retention_expires_from_original_fetch(monkeypatch):
     monkeypatch.setattr(tech_panels_service, "utc_now_iso", lambda: "2026-05-24T00:00:00Z")
     previous = tech_panels_service.build_ai_model_race_payload(_ctx(), 36)

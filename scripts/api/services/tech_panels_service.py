@@ -873,9 +873,11 @@ def _market_cap_from_quote(symbol: str, quote: Dict[str, Any]) -> tuple[Optional
 
 def build_big_tech_market_cap_payload(ctx: dict, limit: int) -> Dict[str, Any]:
     rows: List[Dict[str, Any]] = []
+    failed = []
     for label, symbol, group in BIG_TECH_SYMBOLS:
         quote = _fetch_quote(ctx, symbol)
         if not isinstance(quote, dict):
+            failed.append(symbol)
             continue
         change = _safe_float(quote.get("changePercent"))
         market_cap, estimated_cap = _market_cap_from_quote(symbol, quote)
@@ -898,19 +900,30 @@ def build_big_tech_market_cap_payload(ctx: dict, limit: int) -> Dict[str, Any]:
                 "marketCap": market_cap,
                 "marketCapEstimated": estimated_cap,
                 "price": quote.get("price"),
+                "quoteAt": quote.get("quoteAt"),
+                "fetchedAt": quote.get("fetchedAt") or utc_now_iso(),
             }
         )
+    fetched_count = len(rows)
+    avg = sum(_safe_float(row.get("change")) or 0.0 for row in rows) / len(rows) if rows else None
+    dependencies = _dependencies(ctx)
+    previous = {}
+    if failed and dependencies.snapshot_store is not None:
+        previous = dependencies.snapshot_store.get_stale(tech_panel_namespace("big-tech-market-cap"), TECH_PANEL_CACHE_KEY) or {}
+    retained = seed_recovery.retain_failed_rows(previous, failed, utc_now_iso())
+    rows.extend(retained)
     rows.sort(key=lambda item: (_safe_float(item.get("marketCap")) is not None, _safe_float(item.get("marketCap")) or 0), reverse=True)
     for index, row in enumerate(rows, start=1):
         row["rank"] = index
         row["title"] = f"#{index} {row['label']} mega-cap watch"
-    avg = sum(_safe_float(row.get("change")) or 0.0 for row in rows) / len(rows) if rows else None
     return _payload(
         "big-tech-market-cap",
         title="BIG TECH CAP",
         items=rows[:limit],
-        summary={"avgChange": avg, "rankBy": "marketCap", "tracked": len(BIG_TECH_SYMBOLS)},
-        sources={"yahoo": "ok" if len(rows) == len(BIG_TECH_SYMBOLS) else "partial" if rows else "error"},
+        summary={"avgChange": avg, "rankBy": "marketCap", "tracked": len(BIG_TECH_SYMBOLS),
+                 "fetchedCount": fetched_count, "retainedCount": len(retained), "failedSymbols": failed},
+        sources={"yahoo": "ok" if not failed else "partial" if fetched_count else "error"},
+        status="error" if not fetched_count and failed else "partial" if failed else None,
     )
 
 

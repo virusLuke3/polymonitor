@@ -27,6 +27,21 @@ def age_seconds(timestamp: Any, now: str) -> float:
         return float("inf")
 
 
+def retain_failed_rows(previous: dict, failed_ids: list[str], now: str) -> list[dict]:
+    """Retain only failed identities for 30m, never renew their acquisition clock."""
+    failed = set(failed_ids)
+    rows = []
+    for row in previous.get("items", []):
+        if not isinstance(row, dict) or row.get("id") not in failed:
+            continue
+        fetched_at = row.get("fetchedAt") or previous.get("generatedAt")
+        if age_seconds(fetched_at, now) >= 1800:
+            continue
+        rows.append({**row, "fetchedAt": fetched_at, "retained": True, "sourceStatus": "stale",
+                     "tags": [tag for tag in row.get("tags", []) if tag != "STALE"][:2] + ["STALE"]})
+    return rows
+
+
 def recover_seed(key: str, callback: Callable[[], None]) -> bool:
     """At most four running recoveries and one attempt/key/30s per process."""
     app = current_app._get_current_object() if has_app_context() else None

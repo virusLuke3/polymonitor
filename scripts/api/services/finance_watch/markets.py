@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, List
 
-from api.services import crypto_funding_service
+from api.services import crypto_funding_service, seed_recovery
 from api.services.finance_watch.common import (
     FinanceWatchContext,
     _dependencies,
@@ -15,6 +15,7 @@ from api.services.finance_watch.common import (
     _safe_float,
     _setting,
     _tone,
+    utc_now_iso,
 )
 
 GLOBAL_INDEX_SYMBOLS = (
@@ -245,6 +246,7 @@ def build_global_indices_payload(
             failed.append(symbol)
             continue
         if not isinstance(snapshot, dict):
+            failed.append(symbol)
             continue
         change = _safe_float(snapshot.get("changePercent"))
         rows.append(
@@ -256,7 +258,7 @@ def build_global_indices_payload(
                 "metricLabel": _format_price(snapshot.get("price")),
                 "metricUnit": "IDX",
                 "quoteAt": snapshot.get("quoteAt"),
-                "fetchedAt": snapshot.get("fetchedAt"),
+                "fetchedAt": snapshot.get("fetchedAt") or utc_now_iso(),
                 "change": change,
                 "changeLabel": f"{change:+.2f}%" if change is not None else "--",
                 "points": snapshot.get("points") or [],
@@ -265,8 +267,18 @@ def build_global_indices_payload(
             }
         )
     avg = sum(_safe_float(row.get("change")) or 0.0 for row in rows) / len(rows) if rows else None
-    return _payload("global-index-monitor", title="GLOBAL INDICES", items=rows, summary={"riskTone": "RISK ON" if avg and avg > 0 else "RISK OFF" if avg and avg < 0 else "MIXED", "avgChange": avg, "expectedCount": len(GLOBAL_INDEX_SYMBOLS[:limit]), "fetchedCount": len(rows), "failedSymbols": failed}, sources={"yahoo": "partial" if rows and failed else "error" if failed else "ok" if rows else "empty"},
-                    status="partial" if rows and failed else "error" if failed else None)
+    fetched_count = len(rows)
+    dependencies = _dependencies(ctx)
+    previous = {}
+    if failed and dependencies.snapshot_store is not None:
+        previous = dependencies.snapshot_store.get_stale("runtime:finance:global-index-monitor", "v1") or {}
+    retained = seed_recovery.retain_failed_rows(previous, failed, utc_now_iso())
+    rows.extend(retained)
+    order = {symbol: i for i, (_, symbol, _) in enumerate(GLOBAL_INDEX_SYMBOLS)}
+    rows.sort(key=lambda row: order.get(row["id"], len(order)))
+    source_status = "partial" if fetched_count and failed else "error" if failed else "ok" if rows else "empty"
+    return _payload("global-index-monitor", title="GLOBAL INDICES", items=rows, summary={"riskTone": "RISK ON" if avg and avg > 0 else "RISK OFF" if avg and avg < 0 else "MIXED", "avgChange": avg, "expectedCount": len(GLOBAL_INDEX_SYMBOLS[:limit]), "fetchedCount": fetched_count, "retainedCount": len(retained), "failedSymbols": failed}, sources={"yahoo": source_status},
+                    status=source_status if failed else None)
 
 
 def build_crypto_etf_payload(

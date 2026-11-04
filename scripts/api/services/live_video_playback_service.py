@@ -47,7 +47,10 @@ def parse_current_live(html: str, channel_id: str, video_id: str = "") -> dict[s
     if (channel_id and details.get("channelId") != channel_id) or (video_id and details.get("videoId") != video_id):
         return {"status": "error", "error": "channel identity mismatch or unavailable"}
     availability = player.get("playabilityStatus") or {}
-    if availability.get("status") not in {None, "OK"} or availability.get("playableInEmbed") is False:
+    if availability.get("status") not in {None, "OK"}:
+        # Login/bot/consent failures are not evidence that a broadcast ended.
+        return {"status": "error", "error": "player unavailable: " + str(availability.get("status"))}
+    if availability.get("playableInEmbed") is False:
         return {"status": "not-live", "error": "broadcast unavailable or embedding disabled"}
     broadcast = (player.get("microformat") or {}).get("playerMicroformatRenderer", {}).get("liveBroadcastDetails", {})
     live = details.get("isLive") is True or broadcast.get("isLiveNow") is True
@@ -77,8 +80,11 @@ def refresh_live_channels(dependencies: Any) -> dict[str, Any]:
         try:
             pinned = channel.removeprefix("video:") if channel.startswith("video:") else ""
             url = f"https://www.youtube.com/watch?v={pinned}" if pinned else f"https://www.youtube.com/channel/{channel}/live"
-            html = fetch(url, timeout=15,
-                         headers={"User-Agent": "Mozilla/5.0", "Accept-Language": "en-US,en;q=0.8"})
+            # Anonymous crawler consent, as used by yt-dlp; no user/account cookies.
+            # Otherwise European exits redirect to a consent page without video data.
+            html = fetch(url, timeout=30,
+                         headers={"User-Agent": "Mozilla/5.0", "Accept-Language": "en-US,en;q=0.8",
+                                  "Cookie": "SOCS=CAI"})
             result = parse_current_live(html, "" if pinned else channel, pinned)
         except Exception as exc:
             result = {"status": "error", "error": type(exc).__name__}

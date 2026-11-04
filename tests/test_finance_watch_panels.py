@@ -7,6 +7,33 @@ from api.services import finance_watch_panels_service as service
 from api.services.finance_watch import news, sentiment
 
 
+def test_partial_index_collection_keeps_failed_row_without_renewing_clock(context, monkeypatch):
+    from api.services.finance_watch import markets
+    from api.services import seed_recovery
+    now = '2026-11-04T09:00:00Z'
+    old = {'generatedAt': '2026-11-04T08:50:00Z', 'items': [
+        {'id': '^IXIC', 'metric': 20000, 'change': 90, 'tags': ['US'], 'fetchedAt': '2026-11-04T08:40:00Z'},
+        {'id': 'removed', 'metric': 5},
+    ]}
+    context['SNAPSHOT_STORE'] = SimpleNamespace(get_stale=lambda *a: old)
+    def quote(symbol, **kwargs):
+        if symbol == '^IXIC':
+            raise TimeoutError('source')
+        return {'price': 6000, 'changePercent': 1, 'fetchedAt': now}
+    context['get_yahoo_market_snapshot'] = quote
+    monkeypatch.setattr(markets, 'utc_now_iso', lambda: now)
+    result = markets.build_global_indices_payload(context, 2)
+    assert result['status'] == 'partial'
+    assert result['summary']['fetchedCount'] == 1
+    assert result['summary']['avgChange'] == 1  # Old rows do not enter current breadth.
+    assert [row['id'] for row in result['items']] == ['^GSPC', '^IXIC']
+    retained = result['items'][1]
+    assert retained['fetchedAt'] == '2026-11-04T08:40:00Z'
+    assert retained['retained'] and 'STALE' in retained['tags']
+    assert old['items'][0]['tags'] == ['US']
+    assert not seed_recovery.retain_failed_rows(result, ['^IXIC'], '2026-11-04T09:11:00Z')
+
+
 @pytest.fixture
 def context(monkeypatch):
     monkeypatch.setattr(sentiment, "requests", None)
@@ -25,7 +52,7 @@ def test_empty_sources_remain_explicit_for_every_finance_panel(context, panel_id
         context, panel_id, external={"fixture": True}
     )
     assert payload["panelId"] == panel_id
-    assert payload["status"] == "empty"
+    assert payload["status"] == ("error" if panel_id == "global-index-monitor" else "empty")
     if panel_id == "crypto-fear-greed":
         assert payload["summary"]["score"] is None
         assert all(row["metricLabel"] == "--" for row in payload["items"])

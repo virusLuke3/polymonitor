@@ -166,3 +166,39 @@ still follows each source's 3–15 minute schedule. Larger data pages use bounde
 progressive rendering instead of adding a second scheduler or virtualization
 system. High-frequency event publisher quotas scale from four at a 20-item
 preview to twenty at a 100-item page, retaining publisher-balanced ordering.
+
+## External-source routing and recovery
+
+An existing acquisition owner may opt into `api.clients.source_transport` through
+`POLYMONITOR_SOURCE_ROUTES_FILE`. Reuse its existing scheduler, validation,
+SQLite/Redis namespace and API; routing is transport configuration, not another
+collector or data cache. Pure views continue reading the original owner.
+
+- Configure exact hostnames and approved exits. Only public GET/HEAD requests
+  use this routing; local APIs, Polymarket/LOB and writes are excluded.
+- Keep independent restricted SSH keys and systemd services. Do not reuse LOB
+  keys, weaken their `permitopen` rules, or change the user's main Clash route.
+  See the [unit](../deploy/systemd/polymonitor-source-egress@.service),
+  [environment example](../deploy/systemd/polymonitor-source-egress@.env.example)
+  and [host route example](../deploy/systemd/polymonitor-source-routes.example.json).
+- A read tries at most two eligible exits within the caller's connection/read
+  budget; budgets below eight seconds use one exit. Two consecutive connection
+  failures cool that host/exit for 120 seconds. A successful response resets its
+  failure count. Retry-After from 429 applies to the source without an immediate
+  alternate-exit retry; 403 does not trigger a bypass. Preserve domain-specific
+  failure limits. State reuses `panel_snapshots / state:source-transport`; it
+  contains cooldown clocks, not market data. Streaming body handling remains
+  bounded by the consumer's existing byte/time limits.
+- SSH keepalive/restart recovers broken tunnels. Acceptance also requires a real
+  source request, valid business fields, a formal write and an API consumer;
+  an active SSH unit or HTTP 200 alone is insufficient.
+- Keep collection, publication, cache expiry, source observation and browser
+  refresh clocks separate. Do not speed up acquisition to mask an outage.
+  Partial index/equity refreshes may retain failed identities for 30 minutes from
+  their original fetchedAt, mark them STALE, and exclude them from current
+  breadth calculations. Successful siblings never renew that clock.
+
+TV adds browser media-progress validation and same-channel fallback; its source
+maintenance and playback budgets are in the [TV module contract](../webpage/src/panels/modules/market-tv-wire/README.md).
+Dated recovery notes are evidence for their observation window, not deployment
+defaults or proof that every source remains healthy.

@@ -37,6 +37,8 @@ def test_resolution_cadence_failure_does_not_renew_live_time(monkeypatch):
     values, calls = {}, []
     store = SimpleNamespace(get_stale=lambda ns, key: values.get(key), set=lambda ns, key, value, ttl: values.update({key: value}))
     def fetch(*args, **kwargs):
+        assert kwargs['headers']['Cookie'] == 'SOCS=CAI'
+        assert kwargs['timeout'] == 30
         calls.append(args[0])
         if len(calls) > 1:
             raise TimeoutError()
@@ -54,6 +56,11 @@ def test_resolution_cadence_failure_does_not_renew_live_time(monkeypatch):
     now[0] += 36 * 3600
     tv.refresh_live_channels(deps)
     assert 'videoId' not in values[channel]
+
+
+def test_player_access_challenge_is_not_a_confirmed_end():
+    html = page('owner', isLive=True).replace('"status": "OK"', '"status": "LOGIN_REQUIRED"')
+    assert tv.parse_current_live(html, 'owner')['status'] == 'error'
 
 
 def test_known_finished_pinned_source_is_removed_from_candidates():
