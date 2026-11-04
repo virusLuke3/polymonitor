@@ -394,6 +394,12 @@ def test_hls_proxy_rewrites_manifest_to_same_proxy_route() -> None:
     assert 'URI="hls-proxy?url=https%3A%2F%2Fexample.com%2Flive%2Fkey.bin"' in rewritten
 
 
+def test_hls_proxy_accepts_reviewed_dw_backup_without_opening_other_paths():
+    assert hls_proxy_service.is_allowed_hls_url('https://dwamdstream103.akamaized.net/hls/live/2015526-b/dwstream103/stream02/playlist.m3u8')
+    assert not hls_proxy_service.is_allowed_hls_url('https://dwamdstream103.akamaized.net/hls/live/other/playlist.m3u8')
+    assert not hls_proxy_service.is_allowed_hls_url('https://unknown.example/hls/live/2015526-b/dwstream103/playlist.m3u8')
+
+
 def test_market_youtube_channels_payload_filters_curated_youtube_sources() -> None:
     payload = {
         "generatedAt": "2026-06-15T00:00:00Z",

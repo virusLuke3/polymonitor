@@ -64,6 +64,7 @@ TRUSTED_HLS_SOURCES: tuple[Dict[str, Any], ...] = (
         "country": "DE",
         "language": "en",
         "hlsUrl": "https://dwamdstream103.akamaized.net/hls/live/2015526/dwstream103/master.m3u8",
+        "hlsProxyAdditionalPaths": ["/hls/live/2015526-b/dwstream103/"],
         "externalUrl": "https://www.dw.com/en/media-center/live-tv/s-100825",
         "fallbackVideoId": "LuKwFajn37U",
         "marketTags": ["germany", "europe", "geopolitics", "war", "policy"],

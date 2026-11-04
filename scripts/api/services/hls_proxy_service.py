@@ -26,6 +26,7 @@ URI_ATTR_RE = re.compile(r'URI="([^"]+)"')
 class TrustedHlsRule:
     url: str
     referer: str | None = None
+    additional_paths: tuple[str, ...] = ()
 
     @property
     def parsed(self):
@@ -44,7 +45,8 @@ def _rules() -> list[TrustedHlsRule]:
         url = str(source.get("hlsUrl") or "").strip()
         if not url:
             continue
-        rules.append(TrustedHlsRule(url=url, referer=str(source.get("hlsProxyReferer") or "").strip() or None))
+        rules.append(TrustedHlsRule(url=url, referer=str(source.get("hlsProxyReferer") or "").strip() or None,
+                                   additional_paths=tuple(source.get("hlsProxyAdditionalPaths") or ())))
     return rules
 
 
@@ -67,6 +69,8 @@ def select_rule(url: str) -> TrustedHlsRule | None:
             continue
         base_path = base.path.rsplit("/", 1)[0].rstrip("/") + "/"
         if normalized_path == base.path or normalized_path.startswith(base_path):
+            return rule
+        if any(normalized_path.startswith(path) for path in rule.additional_paths):
             return rule
     raise HlsProxyError("HLS URL is not in the trusted playback allowlist", 403)
 
