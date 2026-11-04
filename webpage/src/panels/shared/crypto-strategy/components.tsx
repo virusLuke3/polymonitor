@@ -27,7 +27,7 @@ export function Frame({ id, title, badge, children, assets = true, filters, reso
       {filters}
     </div>}
     {feed.loading && <PanelLoading/>}
-    {(feed.error || feed.status.phase === 'stale') && <p className="wm-cstrategy-notice">{t('数据延迟或读取失败，保留原始时间。','Delayed or unavailable data; original timestamps retained.')}</p>}
+    {(feed.error || feed.status.phase === 'stale' || feed.data?.status === 'stale') && <p className="wm-cstrategy-notice">{t('数据延迟或读取失败，保留原始时间。','Delayed or unavailable data; original timestamps retained.')}</p>}
     {children}
   </Panel>;
 }

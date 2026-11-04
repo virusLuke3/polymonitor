@@ -87,6 +87,14 @@ for (const width of [1440,390]) test(`crypto strategy source states and controls
   await expect.poll(()=>requests).toBeGreaterThan(before);
   await expect(page.locator('.wm-panel-slot')).toContainText('Delayed or unavailable');
   await expect(page.locator('.wm-cstrategy-stats').first()).toContainText('500');
+  // A fresh API envelope can contain retained source quotes after an outage.
+  offline=false; fixture.status='stale';
+  await page.evaluate(()=>window.panelHarness.mount('options-implied-probability'));
+  await page.getByRole('button',{name:'BTC',exact:true}).click();
+  await page.getByRole('button',{name:'Refresh',exact:true}).click();
+  await expect(page.locator('.wm-panel')).toContainText('Delayed or unavailable data');
+  await expect(page.locator('.wm-cstrategy-chart svg')).toBeVisible();
+  await expect(page.locator('.wm-panel')).toContainText('77,500');
   expect(errors).toEqual([]);
 });
 
