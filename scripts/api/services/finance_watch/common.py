@@ -7,7 +7,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from html import unescape
 from typing import Any, Callable, Dict, List, Optional
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
+from api.clients.source_transport import source_session
 
 from api.context import resolve_optional_service_callable
 
@@ -154,25 +155,15 @@ def _http_json_get(
     timeout: int = 12,
 ) -> Any:
     dependencies = _dependencies(ctx)
+    request_headers = {"User-Agent": "Mozilla/5.0" if (urlsplit(url).hostname or "").endswith("finance.yahoo.com") else "polydata-finance-watch/1.0", "Accept": "application/json"}
     if dependencies.http_json_get is not None:
-        try:
-            return dependencies.http_json_get(
-                url,
-                params=params,
-                timeout=timeout,
-                headers={
-                    "User-Agent": "polydata-finance-watch/1.0",
-                    "Accept": "application/json",
-                },
-            )
-        except Exception:
-            pass
+        return dependencies.http_json_get(url, params=params, timeout=timeout, headers=request_headers)
     if requests is None:
         raise RuntimeError("requests package is required")
-    session = requests.Session()
+    session = source_session()
     session.trust_env = True
     try:
-        response = session.get(url, params=params, timeout=timeout, headers={"User-Agent": "polydata-finance-watch/1.0", "Accept": "application/json"})
+        response = session.get(url, params=params, timeout=timeout, headers=request_headers)
         response.raise_for_status()
         return response.json() if response.content else None
     finally:
@@ -191,17 +182,10 @@ def _http_text_get(
     if headers:
         request_headers.update(headers)
     if dependencies.http_text_get is not None:
-        try:
-            return dependencies.http_text_get(
-                url,
-                timeout=timeout,
-                headers=request_headers,
-            )
-        except Exception:
-            pass
+        return dependencies.http_text_get(url, timeout=timeout, headers=request_headers)
     if requests is None:
         raise RuntimeError("requests package is required")
-    session = requests.Session()
+    session = source_session()
     session.trust_env = True
     try:
         response = session.get(url, timeout=timeout, headers=request_headers)
@@ -224,19 +208,12 @@ def _fetch_yahoo_snapshot(
     range_name: str = "5d",
 ) -> Optional[Dict[str, Any]]:
     dependencies = _dependencies(ctx)
-    try:
-        if dependencies.get_yahoo_market_snapshot is None:
-            raise RuntimeError("get_yahoo_market_snapshot helper missing")
-        quote = dependencies.get_yahoo_market_snapshot(
-            symbol,
-            interval=interval,
-            range_name=range_name,
-            ttl_seconds=300,
-        )
-    except Exception:
-        quote = None
-    if isinstance(quote, dict) and quote.get("price") is not None:
-        return quote
+    if dependencies.get_yahoo_market_snapshot is not None:
+        # The existing transport owns retries/backoff. Do not swallow a failure
+        # and issue extra requests through an inherited, unrelated proxy.
+        quote = dependencies.get_yahoo_market_snapshot(symbol, interval=interval,
+                                                       range_name=range_name, ttl_seconds=300)
+        return quote if isinstance(quote, dict) and quote.get("price") is not None else None
     payload = _http_json_get(
         ctx,
         _setting(ctx, "finance_yahoo_chart_url_template").format(symbol=symbol),

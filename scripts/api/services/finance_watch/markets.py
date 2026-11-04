@@ -237,8 +237,13 @@ def build_global_indices_payload(
     limit: int,
 ) -> Dict[str, Any]:
     rows: List[Dict[str, Any]] = []
+    failed = []
     for label, symbol, region in GLOBAL_INDEX_SYMBOLS[:limit]:
-        snapshot = _fetch_yahoo_snapshot(ctx, symbol, interval="30m", range_name="5d")
+        try:
+            snapshot = _fetch_yahoo_snapshot(ctx, symbol, interval="30m", range_name="5d")
+        except Exception:
+            failed.append(symbol)
+            continue
         if not isinstance(snapshot, dict):
             continue
         change = _safe_float(snapshot.get("changePercent"))
@@ -250,6 +255,8 @@ def build_global_indices_payload(
                 "metric": snapshot.get("price"),
                 "metricLabel": _format_price(snapshot.get("price")),
                 "metricUnit": "IDX",
+                "quoteAt": snapshot.get("quoteAt"),
+                "fetchedAt": snapshot.get("fetchedAt"),
                 "change": change,
                 "changeLabel": f"{change:+.2f}%" if change is not None else "--",
                 "points": snapshot.get("points") or [],
@@ -258,7 +265,8 @@ def build_global_indices_payload(
             }
         )
     avg = sum(_safe_float(row.get("change")) or 0.0 for row in rows) / len(rows) if rows else None
-    return _payload("global-index-monitor", title="GLOBAL INDICES", items=rows, summary={"riskTone": "RISK ON" if avg and avg > 0 else "RISK OFF" if avg and avg < 0 else "MIXED", "avgChange": avg}, sources={"yahoo": "ok" if rows else "empty"})
+    return _payload("global-index-monitor", title="GLOBAL INDICES", items=rows, summary={"riskTone": "RISK ON" if avg and avg > 0 else "RISK OFF" if avg and avg < 0 else "MIXED", "avgChange": avg, "expectedCount": len(GLOBAL_INDEX_SYMBOLS[:limit]), "fetchedCount": len(rows), "failedSymbols": failed}, sources={"yahoo": "partial" if rows and failed else "error" if failed else "ok" if rows else "empty"},
+                    status="partial" if rows and failed else "error" if failed else None)
 
 
 def build_crypto_etf_payload(

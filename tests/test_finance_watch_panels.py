@@ -144,3 +144,24 @@ def test_stale_snapshot_retains_evidence_and_trims_without_mutating_cache(contex
 def test_unknown_finance_panel_is_rejected(context):
     with pytest.raises(KeyError, match="unknown finance watch panel"):
         service.build_finance_watch_panel_payload(context, "unregistered")
+
+
+def test_index_failure_is_isolated_and_does_not_bypass_owner_transport(context, monkeypatch):
+    from api.services.finance_watch import common, markets
+    monkeypatch.setattr(markets, 'GLOBAL_INDEX_SYMBOLS', [('First', 'A', 'US'), ('Second', 'B', 'EU')])
+    def quote(symbol, **kwargs):
+        if symbol == 'A':
+            raise TimeoutError('route temporarily down')
+        return {'price': 100, 'changePercent': 1, 'fetchedAt': 'observed'}
+    context['get_yahoo_market_snapshot'] = quote
+    context['http_json_get'] = lambda *a, **k: pytest.fail('must not retry outside the owner transport')
+    result = markets.build_global_indices_payload(context, 2)
+    assert result['status'] == 'partial'
+    assert [item['id'] for item in result['items']] == ['B']
+    assert result['summary']['failedSymbols'] == ['A']
+    def unavailable(*args, **kwargs):
+        raise TimeoutError('failure')
+    context['http_text_get'] = unavailable
+    monkeypatch.setattr(common.requests, 'Session', lambda: pytest.fail('must not use inherited proxy after failure'))
+    with pytest.raises(TimeoutError):
+        common._http_text_get(context, 'https://source.example/rss')

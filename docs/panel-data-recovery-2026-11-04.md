@@ -96,3 +96,14 @@ LOB 特定 token 的上游未就绪继续检查已有 owner 的实际状态；�
   仍复用 Finance external 的 SQLite/Redis `runtime:finance:external-sources / v1`，不建第二个采集器。
 - 验收包括同频道主备切换、禁用回放/缓冲冒充直播、原始时间保留、真实来源与正式写入、
   独立 SSH 进程中断后 systemd 重连及再次真实请求。短观察窗口不宣称整夜或全部频道稳定。
+
+### 本次运行验证与补充修正
+
+- Finance Watch 的旧 helper 会吞掉已注入客户端的异常，再用 `requests.Session(trust_env=True)` 请求一次，绕开来源退避并回落到旧出口；已取消这条异常旁路。指数逐行隔离来源失败，不能因首个指数失败而使其余指数全部停止更新。
+- 16:16–16:20（北京时间）Liquidity 从持续 503 恢复 200，正式读取 5 条 COT、7 条稳定币和 ETF 代理指标；这些指标的原始含义不变。
+- 16:25 正式 `crypto_strategy.sqlite3`：四币现货/永续/基差、成交与深度恢复；BTC/ETH 各有 3 个期权到期日，Coinbase/Kraken 两种稳定币均有价格。
+- 爱尔兰专用 SSH 主进程中断后，systemd 自动恢复；12.69 秒内重新获得 Bybit 有效行情。洛杉矶独立通道已取得 Yahoo 和 Deribit 实际响应；纽约未加入候选。
+- 16:35 TV 正式发布 240 条候选；172 项 HLS 探测中 106 项取得媒体列表/片段，66 项未通过（7 项超时）。这不是 106 项浏览器播放验收；候选目录中的 HTTP 成功与真实视频推进分开判断。
+- 16:40 Finance external 的 Hyperliquid、OKX、Yahoo 传统资产参考、ETF、COT、稳定币均有正式快照，来源状态为 ok；Tradexyz 仍明确为代理来源。
+- 生产前端 `4e6474fc` 已从推送提交的干净导出构建发布，真实主页 DW 的视频时钟推进。随后增加同频道自动退避重试，需以最终发布版本的复测为准。
+- 本轮针对性 Python、前端类型检查与同频道切源/缓冲/录像/自动重试 E2E 通过。全工作区测试在未归本任务修改的 AlphaSignal / ClickHouse 测试中遇到 5 项失败；没有替换这些工作区改动。`npm audit` 仍报告现有 Vite 开发依赖的 1 个 high 与 Vitest 的 2 个 moderate；干净静态构建通过，未把开发服务器部署到生产。
