@@ -49,7 +49,7 @@ const api = {
   },
   mountFocus(data: Partial<PanelRenderContext>) {
     render(null, root);
-    render(<FocusFixture data={data} />, root);
+    render(<PanelResourceProvider><FocusFixture data={data} /></PanelResourceProvider>, root);
   },
   mountMany(visible: boolean[], data: Partial<PanelRenderContext> = {}) {
     render(null, root);

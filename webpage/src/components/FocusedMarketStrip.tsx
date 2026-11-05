@@ -1,6 +1,7 @@
 import { useFocusedOrderBook } from '@/features/market-focus/useFocusedOrderBook';
 import {
   liveBookStatus,
+  marketLifecycleIsClosed,
   lobMatchesTokens,
   timestampMillis,
   hasBookLevels,
@@ -200,15 +201,7 @@ export function compactTimeLabel(value: number, index: number, total: number, la
   });
 }
 
-export function marketLifecycleIsClosed(...signals: Array<string | boolean | null | undefined>) {
-  return signals.some((signal) => {
-    if (signal === true) return true;
-    if (typeof signal !== 'string') return false;
-    const normalized = signal.trim().toLowerCase().replace(/[_-]+/g, ' ');
-    return /\b(closed|settled|resolved|final|cancelled|expired)\b/.test(normalized)
-      || normalized.includes('awaiting oracle');
-  });
-}
+export { marketLifecycleIsClosed } from '@/features/market-focus/orderBook';
 
 function marketLifecycleIsFinal(...signals: Array<string | boolean | null | undefined>) {
   return signals.some((signal) => {
@@ -951,8 +944,6 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const [bookSide, setBookSide] = useState<BookSide>('yes');
   const { tokenLobState, selectedTokenKey } = useFocusedOrderBook({
     marketId: ctx.selectedMarketId, selectedTokenId, selectedNoTokenId, marketIsClosed, bookSide,
-    bundledLob: bundleMatchesSelected ? ctx.bundle?.lob || null : null,
-    outcomeLabel: selectedOutcome?.label, groupTitle: detail?.title,
   });
   const tokenLob = !marketIsClosed && tokenLobState.key === selectedTokenKey ? tokenLobState.lob : null;
   const tokenLobLoading = !marketIsClosed && tokenLobState.key === selectedTokenKey && tokenLobState.loading;

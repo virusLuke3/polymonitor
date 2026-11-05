@@ -470,6 +470,34 @@ test('focused book pauses and cancels while hidden, then resumes with one reques
   await page.evaluate(() => window.frontendHarness.unmount());
 });
 
+test('focused book shares sibling demand, survives one consumer and isolates selection changes', async ({ page }) => {
+  const pending: Array<{ id: number; finish: () => Promise<void> }> = [];
+  await page.route('**/wm-api/runtime/lob/token/**', route => {
+    const id = Number(new URL(route.request().url()).searchParams.get('marketId'));
+    pending.push({ id, finish: () => route.fulfill({ json: fixtureBundle(id).lob }).catch(() => {}) });
+  });
+  await harness(page, 'book-pair');
+  await expect.poll(() => pending.length).toBe(1);
+  await pending[0]!.finish();
+  await expect.poll(() => page.evaluate(() => window.frontendHarness.secondBook?.tokenLobState.lob?.yes?.tokenId)).toBe('yes-1');
+  expect(await page.evaluate(() => window.frontendHarness.book!.tokenLobState.lob === window.frontendHarness.secondBook!.tokenLobState.lob)).toBe(true);
+  await page.evaluate(() => window.frontendHarness.setBookConsumers(['summary']));
+  await page.clock.runFor(3000);
+  await expect.poll(() => pending.length).toBe(2);
+  await page.evaluate(() => window.frontendHarness.selectBook(2));
+  await page.clock.runFor(200);
+  await expect.poll(() => pending.length).toBe(3);
+  expect(pending[2]!.id).toBe(2);
+  await pending[1]!.finish();
+  expect(await page.evaluate(() => window.frontendHarness.secondBook!.tokenLobState.lob)).toBeNull();
+  await pending[2]!.finish();
+  await expect.poll(() => page.evaluate(() => window.frontendHarness.secondBook!.tokenLobState.lob?.yes?.tokenId)).toBe('yes-2');
+  await page.evaluate(() => window.frontendHarness.setBookConsumers([]));
+  await page.clock.runFor(10_000);
+  expect(pending).toHaveLength(3);
+  await page.evaluate(() => window.frontendHarness.unmount());
+});
+
 async function trackRequests(page: Page, ignoreAbortFor = '') {
   await page.addInitScript((ignoreAbortFor) => {
     const calls: Array<{ url: string; signal?: AbortSignal | null }> = [];

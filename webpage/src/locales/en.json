@@ -1,4 +1,11 @@
 {
+  "atlasMarket.quoteLive": "CLOB midpoint",
+  "atlasMarket.quoteSnapshot": "Book snapshot midpoint",
+  "atlasMarket.quoteCatalog": "Gamma quote",
+  "atlasMarket.quoteMissing": "Current quote unavailable",
+  "atlasMarket.quoteClosed": "Trading closed · no current quote",
+  "atlasMarket.volumeMissing": "Volume unavailable",
+  "atlasMarket.tradesMissing": "Full-day count unavailable",
   "atlasMarket.catalog.quote": "Gamma quote · {time}",
   "atlasOracle.stale": "Stale",
   "atlasOracle.sourceUnavailableHint": "No verified current Oracle state is available for this market.",

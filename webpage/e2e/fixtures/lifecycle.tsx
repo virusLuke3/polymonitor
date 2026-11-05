@@ -22,7 +22,7 @@ import { fixtureMarkets } from './dashboard';
 import { GENERATED_AT } from './world-event-map';
 
 const root = document.getElementById('root')!;
-type HarnessKind = 'runtime-defaults' | 'runtime' | 'runtime-policy' | 'runtime-batch-policy' | 'observed-runtime' | 'registered-runtime' | 'dashboard' | 'focus' | 'book' | 'workspace' | 'hazards' | 'dossier' | 'geometry' | 'aviation' | 'map-signals' | 'map-infrastructure';
+type HarnessKind = 'runtime-defaults' | 'runtime' | 'runtime-policy' | 'runtime-batch-policy' | 'observed-runtime' | 'registered-runtime' | 'dashboard' | 'focus' | 'book' | 'book-pair' | 'workspace' | 'hazards' | 'dossier' | 'geometry' | 'aviation' | 'map-signals' | 'map-infrastructure';
 type HazardView = { layers: string[]; zoom: number; center: [number, number]; active: boolean };
 const noPanels: PanelModule[] = [];
 const translate = (key: string) => key;
@@ -66,6 +66,8 @@ const api = {
   hazards: null as ReturnType<typeof useNaturalHazards> | null,
   geometry: null as ReturnType<typeof useCountryGeometry> | null,
   book: null as ReturnType<typeof useFocusedOrderBook> | null,
+  secondBook: null as ReturnType<typeof useFocusedOrderBook> | null,
+  setBookConsumers: (_ids: string[]) => {},
   workspace: null as ReturnType<typeof useWorkspacePreferences> | null,
   sync: null as ReturnType<typeof useWorkspaceSync> | null,
   camera: null as { region: WorldEventRegion; mapZoom: number } | null,
@@ -75,7 +77,7 @@ const api = {
   setHazardView: (_patch: Partial<HazardView>) => {},
   setGeometryEnabled: (_enabled: boolean) => {},
   mount: (kind: HarnessKind) => {
-    render(kind === 'runtime-defaults' ? <Runtime defaults /> : kind === 'map-signals' ? <Signals /> : kind === 'map-infrastructure' ? <Infrastructure /> : kind === 'dashboard' ? <PanelResourceProvider><Dashboard /></PanelResourceProvider> : kind === 'observed-runtime' ? <Runtime observed /> : kind === 'registered-runtime' ? <Runtime registered /> : kind === 'runtime-batch-policy' ? <Runtime policy batch /> : kind === 'runtime-policy' ? <Runtime policy /> : kind === 'runtime' ? <Runtime /> : kind === 'focus' ? <Focus /> : kind === 'book' ? <Book />
+    render(kind === 'runtime-defaults' ? <Runtime defaults /> : kind === 'map-signals' ? <Signals /> : kind === 'map-infrastructure' ? <Infrastructure /> : kind === 'dashboard' ? <PanelResourceProvider><Dashboard /></PanelResourceProvider> : kind === 'observed-runtime' ? <Runtime observed /> : kind === 'registered-runtime' ? <Runtime registered /> : kind === 'runtime-batch-policy' ? <Runtime policy batch /> : kind === 'runtime-policy' ? <Runtime policy /> : kind === 'runtime' ? <Runtime /> : kind === 'focus' ? <Focus /> : kind === 'book' || kind === 'book-pair' ? <PanelResourceProvider><Book pair={kind === 'book-pair'} /></PanelResourceProvider>
       : kind === 'aviation' ? <Aviation /> : kind === 'hazards' ? <Hazards /> : kind === 'dossier' ? <Dossier /> : kind === 'geometry' ? <Geometry /> : <Workspace />, root);
   },
   unmount: () => render(null, root),
@@ -108,13 +110,21 @@ function Focus() {
   api.focus = useMarketFocus({ bootstrap, markets: fixtureMarkets as MarketListItem[], marketGroups: [], catalogLoaded: true });
   return <output>{api.focus.selectedMarketId}</output>;
 }
-function Book() {
+function Book({ pair = false }: { pair?: boolean }) {
   const [id, setId] = useState(1);
+  const [consumers, setConsumers] = useState(pair ? ['detail', 'summary'] : ['detail']);
   api.selectBook = setId;
-  api.book = useFocusedOrderBook({ marketId: id, selectedTokenId: `yes-${id}`, selectedNoTokenId: `no-${id}`,
-    marketIsClosed: false, bookSide: 'yes', bundledLob: null, outcomeLabel: 'YES' });
+  api.setBookConsumers = setConsumers;
+  return <>{consumers.map(name => <BookConsumer key={name} id={id} name={name} />)}</>;
+}
+function BookConsumer({ id, name }: { id: number; name: string }) {
+  const book = useFocusedOrderBook({ marketId: id, selectedTokenId: `yes-${id}`, selectedNoTokenId: `no-${id}`,
+    marketIsClosed: false, bookSide: 'yes' });
+  if (name === 'detail') api.book = book;
+  else api.secondBook = book;
   return <output>{id}</output>;
 }
+
 function Dossier() {
   const [id, setId] = useState(1);
   api.selectDossier = setId;

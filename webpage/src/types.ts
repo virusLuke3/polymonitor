@@ -12,6 +12,10 @@ export type MarketSummary = {
   latestPrice?: string | number | null;
   latestYesPrice?: string | number | null;
   latestNoPrice?: string | number | null;
+  volume24h?: string | number | null;
+  tradeCount24h?: string | number | null;
+  quoteUpdatedAt?: string | null;
+  observedAt?: string | null;
   enableNegRisk?: boolean;
   endDate?: string | null;
   createdAt?: string | null;

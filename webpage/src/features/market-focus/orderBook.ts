@@ -2,6 +2,16 @@ import type { LobPayload, L2Level } from '@/types';
 export type BookSide = 'yes' | 'no';
 export type RefreshDirection = 'up' | 'down' | 'flat';
 
+export function marketLifecycleIsClosed(...signals: Array<string | boolean | null | undefined>) {
+  return signals.some(signal => {
+    if (signal === true) return true;
+    if (typeof signal !== 'string') return false;
+    const normalized = signal.trim().toLowerCase().replace(/[_-]+/g, ' ');
+    return /\b(closed|settled|resolved|final|cancelled|expired)\b/.test(normalized)
+      || normalized.includes('awaiting oracle');
+  });
+}
+
 export function liveBookStatus(lob: LobPayload | null | undefined, side: 'yes' | 'no', now = Date.now()) {
   const book = lob?.[side];
   if (!book) return 'unavailable';

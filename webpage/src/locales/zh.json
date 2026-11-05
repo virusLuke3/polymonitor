@@ -1,4 +1,11 @@
 {
+  "atlasMarket.quoteLive": "CLOB 盘口中间价",
+  "atlasMarket.quoteSnapshot": "盘口快照中间价",
+  "atlasMarket.quoteCatalog": "Gamma 报价",
+  "atlasMarket.quoteMissing": "当前报价不可用",
+  "atlasMarket.quoteClosed": "交易已关闭 · 无当前报价",
+  "atlasMarket.volumeMissing": "成交量暂缺",
+  "atlasMarket.tradesMissing": "全天成交笔数暂缺",
   "atlasMarket.catalog.quote": "Gamma 报价 · {time}",
   "atlasOracle.stale": "数据已过期",
   "atlasOracle.sourceUnavailableHint": "尚未取得此市场可核实的当前Oracle状态。",
