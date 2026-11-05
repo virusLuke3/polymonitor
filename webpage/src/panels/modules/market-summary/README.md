@@ -49,3 +49,20 @@ view sharing, independent consumers, switch cancellation, automatic updates and
 hidden-page behavior. Production acceptance uses the ordinary homepage with
 real APIs and desktop/mobile screenshots; local fixtures do not prove source
 coverage or uptime.
+
+### Acceptance observation — 2026-11-05
+
+Frontend change `10a7c2a2` passed 389 unit tests (one skipped), the targeted
+shared-book/lifecycle browser checks and both Summary visual sizes. Its clean
+archive build was deployed and verified; the subsequent production release
+`696061ed` includes the unchanged fix. The ordinary `https://polymonitor.club`
+homepage was checked at 1440px and 390px using real APIs and persisted selection.
+The mobile document stayed within 390px and no JavaScript page errors occurred
+in the checked desktop session.
+
+For market `550186`, a 25-second production observation captured seven successful
+scheduled book responses with at most one request in flight. Both quote views
+withheld the current price because every response had `upstreamReady=false`;
+the last source event remained `2026-11-05T05:25:57.755Z`. Missing full-day metrics
+were explicit. This verifies shared reads and unavailable-source behavior,
+not recovery of this market's upstream feed or complete 24-hour coverage.
