@@ -54,3 +54,31 @@ Verification: `tests/test_agent_llm_client.py`, `tests/test_market_wide_agent_gr
 `tests/test_market_wide_node_budget.py`, and `webpage/e2e/panel-discovery.spec.ts`.
 Production acceptance additionally checks the actual model identity, stored
 snapshots, public API and desktop/mobile panels; tests alone do not establish it.
+
+### Acceptance observed on 2026-11-05
+
+- Frontend release `696061ed3ea1727c309518a872e78f68137a6912` was built from the
+  pushed commit's clean `git archive` using Node 22.23.3. The current serving host
+  is Tencent; the API/seed and model gateway run on the existing local backend
+  host. The old GCP units are not the serving path.
+- All three persisted snapshots matched the serving API: `status=live`,
+  `generationMode=ai`, `model=qwen3.5-9b`, with five successful model calls each.
+  Generation times were 13:42:04, 13:43:12 and 13:44:19 Asia/Shanghai. A second seed
+  execution reused these snapshots without model calls or timestamp renewal.
+- The real `https://polymonitor.club` homepage, reached through the existing TLS
+  tunnel without substituted APIs/tiles, passed 1440px and 390px checks: all three
+  AI badges and timestamps, old-layout discovery, order/size preservation,
+  persistence of a later saved hide, and no document horizontal overflow or page
+  JavaScript errors. Public release identity matched the commit above.
+- Local checks: 25 backend tests, seven frontend contract tests, five browser
+  discovery tests, scoped Ruff, and both workspace/clean-release builds passed.
+  Whole-worktree `make quality` stopped at an unrelated personal-path finding in
+  `docs/crypto-strategy-panels.md`; it is not recorded as passing.
+- Coverage remains sampled: 80 markets/60 groups; this run had no content-feed
+  items or cached whale signals, some trade reads failed, and some bid/ask and
+  historical-change inputs were missing. Other page regions still showed a book
+  timeout/map fallback during inspection. Model recovery does not repair those
+  sources. The six-hour automatic regeneration interval has not yet been observed.
+- PolySignal's running client also uses the local 9B endpoint; its existing daily
+  budget was exhausted during verification, so its observed explanation remained
+  a template. Its budget was not reset or increased.
