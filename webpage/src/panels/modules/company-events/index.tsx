@@ -36,7 +36,7 @@ function CompanyEvents({ data }: { data?: CompanyPayload }) {
   </Panel>;
 }
 export const panel = runtimePanelFromRenderer({ 'company-events': { render: ctx => <CompanyEvents data={ctx.runtimeData['company-events'] as CompanyPayload | undefined}/> } }, {
-  id: 'company-events', dataSourceId: 'company-events', title: 'Company Events', eyebrow: 'tech', description: 'Official company reports and disclosures.', defaultEnabled: true,
+  id: 'company-events', title: 'Company Events', eyebrow: 'tech', description: 'Official company reports and disclosures.', defaultEnabled: true,
   snapshot: contract('company-events', validCompanyPayload),
 }, { tier: 'slow', intervalMs: 600000, staleAfterMs: 86400000, requestTimeoutMs: 15000, retry: { attempts: 1, baseDelayMs: 5000, maxDelayMs: 5000 },
   fetchData: context => fetchOfficialDisclosures('company-events', context?.signal) });

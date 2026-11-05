@@ -35,7 +35,7 @@ function PolicyProgress({ data }: { data?: PolicyPayload }) {
   </Panel>;
 }
 export const panel = runtimePanelFromRenderer({ 'policy-progress': { render: ctx => <PolicyProgress data={ctx.runtimeData['policy-progress'] as PolicyPayload | undefined}/> } }, {
-  id: 'policy-progress', dataSourceId: 'policy-progress', title: 'Policy Progress', eyebrow: 'macro', description: 'US regulatory documents, comment deadlines and effective dates.', defaultEnabled: true,
+  id: 'policy-progress', title: 'Policy Progress', eyebrow: 'macro', description: 'US regulatory documents, comment deadlines and effective dates.', defaultEnabled: true,
   snapshot: contract('policy-progress', validPolicyPayload),
 }, { tier: 'slow', intervalMs: 600000, staleAfterMs: 86400000, requestTimeoutMs: 15000, retry: { attempts: 1, baseDelayMs: 5000, maxDelayMs: 5000 },
   fetchData: context => fetchOfficialDisclosures('policy-progress', context?.signal) });
