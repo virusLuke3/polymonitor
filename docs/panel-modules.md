@@ -126,3 +126,9 @@ For a new backend runtime panel:
 ## 公司公告与政策进程（首批）
 
 开发与验收遵循 [首批数据/视觉契约](official-disclosures-panels.md)。共用领域采集拥有者，SEC submissions / Federal Register 30 分钟，SEC companyfacts 6 小时，浏览器 10 分钟只读快照。失败逐来源退避并保留原始成功时间；新 Panel 默认合并进旧布局。
+
+### 新来源与正文差异的共同规则
+
+候选目录不等于已接入：先验证实体、字段、时间、覆盖和真实响应，再画视图；预测和官方实际值分开。失败保留实体级最后成功值与时间。拥有 `fetchData` 的模块直接使用自身 `id`；只有纯视图才设置 `dataSourceId` 引用另一拥有者。必须运行真实 registry 启动测试。
+
+共享外框/标题/五列槽位，正文按业务使用不同布局：20–28px 主指标或日期、13–16px 重要实体、12px 正文、9–10px 元信息；共用字体资源。分类可使用 design-system 的 cyan/purple/orange 角色和对应浅背景/侧边色条，必须带文字标签，不能把类别伪装为涨跌。先截图观察 WorldMonitor 的不同正文层级，再在实际槽位验收；不再统一套用三指标框或灰白列表。

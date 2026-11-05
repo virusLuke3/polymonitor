@@ -1,9 +1,10 @@
-.wm-company-body { display: grid; gap: 10px; }
-.wm-company-body .wm-panel-tabs { flex-wrap: wrap; }
+.wm-company-body { display: grid; gap: 6px; }
+.wm-company-body .wm-panel-tabs { flex-wrap: nowrap; overflow-x: auto; gap: 10px; }
+.wm-company-body .wm-panel-tabs button { flex: 0 0 auto; }
 .wm-company-identity { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
-.wm-company-identity strong { font-size: 20px; color: var(--ds-color-category-cyan); }
+.wm-company-identity strong { font-size: 18px; color: var(--ds-color-category-cyan); }
 .wm-company-identity span { font-size: 10px; color: var(--ds-color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wm-company-facts { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; padding: 10px 8px; background: color-mix(in srgb,var(--ds-color-category-cyan) 7%,transparent); border-left: 2px solid var(--ds-color-category-cyan); }
+.wm-company-facts { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; padding: 6px 8px; background: color-mix(in srgb,var(--ds-color-category-cyan) 7%,transparent); border-left: 2px solid var(--ds-color-category-cyan); }
 .wm-company-facts div { display: grid; gap: 3px; }
 .wm-company-facts strong { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .wm-company-facts small { font-size: 9px; color: var(--ds-color-category-cyan); }
@@ -18,3 +19,6 @@
 .wm-company-event p { margin: 3px 0; font-size: 10px; color: var(--ds-color-text-secondary); }
 .wm-company-event small { font-size: 9px; color: var(--ds-color-text-muted); }
 .wm-company-body details { font-size: 10px; overflow-wrap: anywhere; color: var(--ds-color-text-secondary); }
+
+.wm-company-identity button { margin-left: auto; flex: 0 0 auto; padding: 2px 0; font: inherit; font-size: 9px; border: 0; border-bottom: 1px solid var(--ds-color-border); background: transparent; color: var(--ds-color-text-secondary); cursor: pointer; }
+.wm-company-identity button[aria-pressed="true"] { color: var(--ds-color-category-purple); border-color: currentColor; }

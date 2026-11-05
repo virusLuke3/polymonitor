@@ -17,13 +17,12 @@ function CompanyEvents({ data }: { data?: CompanyPayload }) {
   </DisclosureControls>}>
     <div className="wm-company-body">
       <div className="wm-panel-tabs" aria-label={t('公司', 'Company')}>{(data?.companies || []).map(c => <button aria-pressed={symbol === c.symbol} onClick={() => setSymbol(c.symbol)} key={c.symbol}>{c.symbol}</button>)}</div>
-      {company && <><div className="wm-company-identity"><strong>{company.symbol}</strong><span>{company.filings[0]?.company || company.symbol}</span></div>
+      {company && <><div className="wm-company-identity"><strong>{company.symbol}</strong><span>{company.filings[0]?.company || company.symbol}</span><button type="button" aria-pressed={mode === 'reports'} onClick={() => setMode(mode === 'reports' ? 'all' : 'reports')}>{t('定期报告', 'Reports only')}</button></div>
         {(eps || revenue) && <div className="wm-company-facts">
           {eps && <div><small>{t('摊薄 EPS · 美元/股', 'DILUTED EPS · USD/SHARE')}</small><strong>{eps.value.toFixed(2)}</strong><span>{eps.start} — {eps.end}</span></div>}
           {revenue && <div><small>{t('营业收入 · 美元', 'REVENUE · USD')}</small><strong>{new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 2 }).format(revenue.value)}</strong><span>{revenue.start} — {revenue.end}</span></div>}
         </div>}
         <SourceNotice source={company.sources.facts}/>
-        <div className="wm-panel-tabs"><button aria-pressed={mode === 'all'} onClick={() => setMode('all')}>{t('全部公告', 'All filings')}</button><button aria-pressed={mode === 'reports'} onClick={() => setMode('reports')}>{t('定期报告', 'Reports')}</button></div>
         <SourceNotice source={company.sources.filings}/>
       </>}
       {rows.map(row => <a className={`wm-company-event ${row.form.startsWith('8') ? 'is-current' : 'is-report'}`} key={row.id} href={row.url} target="_blank" rel="noreferrer">
