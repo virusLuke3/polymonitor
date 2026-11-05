@@ -3,7 +3,8 @@ import { installDashboard, knownPanelIds } from './fixtures/dashboard';
 
 test.use({ baseURL: `http://127.0.0.1:${process.env.POLYMONITOR_E2E_PORT || 4174}` });
 const oldPanels = ['crypto-watch', 'commodities-watch', 'crypto-funding-watch'];
-const newPanels = ['crypto-order-flow', 'crypto-oracle-reference', 'options-implied-probability', 'crypto-exchange-inflow'];
+const newPanels = ['crypto-order-flow', 'crypto-oracle-reference', 'options-implied-probability', 'crypto-exchange-inflow',
+  'price-implications', 'sample-chain-trades', 'oracle-timeline'];
 const focusedStripIds = new Set(['active-markets', 'price-chart', 'lob-depth', 'global-orderfilled', 'oracle-feed']);
 const inGrid = (ids: string[]) => ids.filter(id => !focusedStripIds.has(id));
 const storageKey = 'polydata:workspace-panels:v4';
@@ -53,7 +54,7 @@ for (const width of [1440, 390]) {
     const catalog: string[] = await page.evaluate(key => JSON.parse(localStorage.getItem(key)!), catalogKey);
     const expected = inGrid([...oldPanels, ...catalog.filter(id => !oldPanels.includes(id))]);
     await expect.poll(() => gridIds(page)).toEqual(expected);
-    expect(expected).not.toContain('sample-chain-trades');
+    expect(expected).toEqual(expect.arrayContaining(newPanels));
     await expect(page.getByRole('link', { name: '加密策略', exact: true })).toHaveCount(0);
     expect(await page.locator('.wm-panels-grid').evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length)).toBe(width === 1440 ? 5 : 1);
     await rememberForReload(page);

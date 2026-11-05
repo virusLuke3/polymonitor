@@ -39,7 +39,7 @@
 | NBA／Jin10／BWE／Esports | 60 秒／60 秒／3 分钟／2 分钟 | 保持对应既有周期 | 减少重复读取 |
 | New Market Signals | 5 分钟 | 配置尝试间隔 5 分钟；长扫描另加执行耗时 | 不宣称每 20 秒完成全扫描 |
 | Sports Odds | 15 分钟 | 既有 2 小时及配额退避 | 不增加付费来源消耗 |
-| 默认关闭的 Agent Panel | 启用后 15 分钟 | 已停止的 Agent 生产者保持停止 | 降频不代表缺失产物恢复 |
+| AI Insights／Special Radar／Trend Watch | 默认启用，15 分钟只读快照 | 既有 Agent seed 定时器检查三种 lens，成功生成最短间隔 6 小时 | 本地 Qwen 9B；快照 12 小时过期，失败保留原始时间；链路见 [Agent](../agent/README.md) |
 | Trade Policy／World Clock | 静态／本地秒钟 | 不新增采集器 | 时钟动画不是网络请求 |
 | 全站健康摘要 | 5 分钟 | 只读健康检查 | 与交易数据分开 |
 

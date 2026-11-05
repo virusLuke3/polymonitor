@@ -22,7 +22,7 @@ const renderers: PanelRenderMap = {
 export const panel = runtimePanelFromRenderer(renderers, {
   id: 'price-implications', title: 'AI Insights', eyebrow: 'agent',
   description: 'AI Insights from a saved market sample, with generation and freshness status.',
-  defaultEnabled: false,
+  defaultEnabled: true,
 }, {
   tier: 'bootstrap', intervalMs: 15 * 60_000, staleAfterMs: 12 * 60 * 60_000, batch: false,
   fetchData: (context) => fetchInsightSnapshot('overview', context?.signal),

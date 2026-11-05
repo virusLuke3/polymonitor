@@ -165,11 +165,11 @@ else:
 class OpenAICompatibleClient:
     def __init__(self) -> None:
         self.api_key = _configured_api_key()
-        self.api_base = get_env("POLYDATA_AGENT_API_BASE", "http://127.0.0.1:8317/v1/chat/completions")
-        self.model = get_env("POLYDATA_AGENT_MODEL", "gpt-5.3-chat")
+        self.api_base = get_env("POLYDATA_AGENT_API_BASE", "http://127.0.0.1:18003/v1")
+        self.model = get_env("POLYDATA_AGENT_MODEL", "qwen3.5-9b")
         self.timeout = get_float_env("POLYDATA_AGENT_TIMEOUT_SECONDS", 45.0)
         self.verify_ssl = get_bool_env("POLYDATA_AGENT_SSL_VERIFY", False)
-        self.runtime = get_env("POLYDATA_AGENT_RUNTIME", "agents").strip().lower() or "agents"
+        self.runtime = get_env("POLYDATA_AGENT_RUNTIME", "chat").strip().lower() or "chat"
         self.last_usage = CompletionUsage(model=self.model)
         if not self.verify_ssl:
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -204,7 +204,7 @@ class OpenAICompatibleClient:
             "messages": messages,
             token_key: max_tokens,
         }
-        if "qwen3.8" in self.model.lower():
+        if any(name in self.model.lower() for name in ("qwen3.5", "qwen3.8")):
             body["chat_template_kwargs"] = {"enable_thinking": False}
         if "gpt-5.3" not in self.model.lower():
             body["temperature"] = 0.2
@@ -328,7 +328,7 @@ class OpenAICompatibleClient:
                 max_tokens=None,
                 extra_body={"max_completion_tokens": max_tokens},
             )
-        if "qwen3.8" in self.model.lower():
+        if any(name in self.model.lower() for name in ("qwen3.5", "qwen3.8")):
             return ModelSettings(
                 temperature=0.2,
                 max_tokens=max_tokens,
