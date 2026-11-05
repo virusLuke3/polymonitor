@@ -46,3 +46,9 @@ WorldMonitor 实际截图观察：Earnings Calendar 的日期分组、Strategic 
 实际定时器是本机 `polymonitor-backend-official-disclosures.timer`，五分钟检查各来源是否到期；自动唤醒日志与正式快照核对一致，未到期时原 lastSuccessAt 保持不变。SEC 经既有腾讯 SOCKS 18992，Federal Register 直连；主 Clash、LOB 和旧 GCP 隧道未修改。长周期 30 分钟 / 6 小时尚未完整观察，不据此宣称整夜稳定。
 
 后端解析/失败保留/恢复/存储/只读/registry 相关 11 项测试通过；前端解析、筛选逻辑、默认布局合并以及真实 registry 启动有测试。真实浏览器发现并修复了同一模块同时声明 fetchData/dataSourceId 的启动冲突。所有发布从已推送提交的 git archive 构建，Node 22.23.3 / npm 10；临时构建和上传目录完成后清理。
+
+### 生产 UI 验收
+
+前端发布 `2227e0423b280205832bb2188522fb2463fcef57`，`polymonitor.club` 与 `www.polymonitor.club` 的 release-sha 均核对一致。通过普通 www 首页恢复旧布局（Crypto、Big Tech、Order Flow），两个新 Panel 自动追加；原有顺序及测试尺寸保留。1440px 实测五列约 283px，2518px 五列约 499px，390px 单列 382px，无页面横向溢出。
+
+真实数据下 MSFT 切换、定期报告过滤、5 条政策提案过滤、标题刷新、显式隐藏后再加载均通过，浏览器无 JS 异常。截图位于本机 `document/开发/核验数据/2026-11-05-official-disclosures/`；未替换 API 或地图瓦片。公网浏览器测试有网络中断/超时后重试，不能据这次验收宣称链路长期稳定。全仓 quality 的现有阻塞仍是另一个腾讯出口 systemd 单元缺少 StandardOutput/StandardError=journal；未覆盖其他任务的该文件。
