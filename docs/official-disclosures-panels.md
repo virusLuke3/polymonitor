@@ -13,7 +13,7 @@
 | Company Events | SEC submissions 的 10-K、10-Q、8-K 及修订；companyfacts 的 diluted EPS / revenue。首批 AAPL、MSFT、NVDA、AMZN、GOOGL、META、TSLA、AVGO。只展示实际披露，不推测分析师共识或下一次财报时间 | CIK + accession；submissions 30 分钟，XBRL 6 小时；单独标注报告起止期、单位和提交日，不混合季度与年报 |
 | Policy Progress | Federal Register 已公布的 Rule、Proposed Rule、Notice、Presidential Document；使用源提供的 effective_on/comments_close_on | document_number；最近 30 天最多 100 项，30 分钟；美国联邦监管公告，不宣称覆盖 Congress 立法、各国政策或所有历史文件 |
 
-SEC API 不需要密钥；配置真实项目身份 `POLYMONITOR_SEC_USER_AGENT`；当前使用项目官网 URL 标识，联系邮箱收到后补入，禁止编造邮箱。Federal Register 不需要密钥，正文网页链接与 GovInfo 正式 PDF 分开保留。可见网页不是法律正式版本。来源依据：[SEC API](https://www.sec.gov/search-filings/edgar-application-programming-interfaces)、[公平访问](https://www.sec.gov/about/developer-resources)、[Federal Register API](https://www.federalregister.gov/developers/documentation/api/v1)。
+SEC API 不需要密钥；使用真实项目身份与经用户确认的联系邮箱配置 `POLYMONITOR_SEC_USER_AGENT`，仅存放在权限为 0600 的私有运行配置 `~/.config/polymonitor/official-disclosures.env`。联系信息只发送到精确匹配的 `data.sec.gov`；其他来源使用通用项目标识，自动重定向关闭，避免将邮箱转发给其他站点。Federal Register 不需要密钥，正文网页链接与 GovInfo 正式 PDF 分开保留。可见网页不是法律正式版本。来源依据：[SEC API](https://www.sec.gov/search-filings/edgar-application-programming-interfaces)、[公平访问](https://www.sec.gov/about/developer-resources)、[Federal Register API](https://www.federalregister.gov/developers/documentation/api/v1)。
 
 ## 存储、时钟和预算
 

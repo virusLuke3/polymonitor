@@ -5,7 +5,7 @@ import os
 import json
 import time
 from datetime import datetime, timedelta, timezone
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import requests
 from api.clients.source_transport import source_session
@@ -20,19 +20,24 @@ def run():
     user_agent = os.environ.get("POLYMONITOR_SEC_USER_AGENT", "")
     deadline = time.monotonic() + 1100
     def fetch(url):
-        if "data.sec.gov" in url and not user_agent:
+        is_sec = urlsplit(url).hostname == "data.sec.gov"
+        if is_sec and not user_agent:
             raise ValueError("SEC contact User-Agent is not configured")
         request_deadline = min(deadline, time.monotonic() + 100)
-        proxy = os.environ.get("POLYMONITOR_DISCLOSURES_SEC_PROXY_URL", "") if "data.sec.gov" in url else ""
+        proxy = os.environ.get("POLYMONITOR_DISCLOSURES_SEC_PROXY_URL", "") if is_sec else ""
+        request_user_agent = user_agent if is_sec else "Polymonitor https://polymonitor.club"
         for attempt in range(2):
             try:
                 remaining = request_deadline - time.monotonic()
                 if remaining <= 0:
                     raise TimeoutError("Disclosure acquisition deadline")
                 with session.get(url, timeout=(min(15, remaining), min(45, remaining)), stream=True,
+                                 allow_redirects=False,
                                  proxies={"http": proxy, "https": proxy},
-                                 headers={"User-Agent": user_agent or "Polymonitor https://polymonitor.club", "Accept": "application/json"}) as response:
+                                 headers={"User-Agent": request_user_agent, "Accept": "application/json"}) as response:
                     response.raise_for_status()
+                    if 300 <= response.status_code < 400:
+                        raise ValueError("Disclosure endpoint redirected; source URL requires review")
                     chunks, size = [], 0
                     for chunk in response.iter_content(65536):
                         size += len(chunk)
