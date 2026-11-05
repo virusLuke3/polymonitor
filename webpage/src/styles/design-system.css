@@ -15,6 +15,9 @@
   --ds-color-warning: #f6b61f;
   --ds-color-critical: #ff5c5c;
   --ds-color-info: #64a4ff;
+  --ds-color-category-cyan: #61cbe3;
+  --ds-color-category-purple: #b69df4;
+  --ds-color-category-orange: #f3a35c;
   --ds-color-neutral: #89948c;
   --ds-shadow-panel: none;
   --ds-shadow-elevated: 0 18px 48px rgba(0, 0, 0, 0.48);

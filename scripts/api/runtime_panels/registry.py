@@ -4,6 +4,8 @@ from types import ModuleType
 from typing import Dict, Iterable, List, Optional
 
 from .modules import (
+    company_events,
+    policy_progress,
     crypto_order_flow,
     crypto_oracle_reference,
     options_implied_probability,
@@ -74,6 +76,8 @@ from .types import RuntimePanelModule
 
 
 _MODULES: List[ModuleType] = [
+    company_events,
+    policy_progress,
     crypto_order_flow,
     crypto_oracle_reference,
     options_implied_probability,
@@ -156,6 +160,8 @@ def _coerce_module(module: ModuleType) -> RuntimePanelModule:
 RUNTIME_PANEL_MODULES: List[RuntimePanelModule] = [_coerce_module(module) for module in _MODULES]
 
 DEFAULT_WORKSPACE_PANEL_IDS: List[str] = [
+    "company-events",
+    "policy-progress",
     "active-markets",
     "global-orderfilled",
     "oracle-feed",

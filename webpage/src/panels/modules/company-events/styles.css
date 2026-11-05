@@ -1,0 +1,20 @@
+.wm-company-body { display: grid; gap: 10px; }
+.wm-company-body .wm-panel-tabs { flex-wrap: wrap; }
+.wm-company-identity { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
+.wm-company-identity strong { font-size: 20px; color: var(--ds-color-category-cyan); }
+.wm-company-identity span { font-size: 10px; color: var(--ds-color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wm-company-facts { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; padding: 10px 8px; background: color-mix(in srgb,var(--ds-color-category-cyan) 7%,transparent); border-left: 2px solid var(--ds-color-category-cyan); }
+.wm-company-facts div { display: grid; gap: 3px; }
+.wm-company-facts strong { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.wm-company-facts small { font-size: 9px; color: var(--ds-color-category-cyan); }
+.wm-company-facts span { font-size: 9px; color: var(--ds-color-text-secondary); }
+.wm-company-event { --filing-color: var(--ds-color-category-purple); display: grid; grid-template-columns: 46px minmax(0,1fr); gap: 10px; color: inherit; text-decoration: none; padding: 8px 0; border-bottom: 1px solid var(--ds-color-border-soft); }
+.wm-company-event.is-current { --filing-color: var(--ds-color-category-orange); }
+.wm-company-event time { display: grid; align-content: center; justify-items: center; background: color-mix(in srgb,var(--filing-color) 10%,transparent); color: var(--filing-color); border-radius: var(--ds-radius-xs); }
+.wm-company-event time b { font-size: 22px; line-height: 1.1; }
+.wm-company-event time span { font-size: 8px; }
+.wm-company-event strong { font-size: 13px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.wm-company-event em { font-size: 9px; font-style: normal; color: var(--filing-color); }
+.wm-company-event p { margin: 3px 0; font-size: 10px; color: var(--ds-color-text-secondary); }
+.wm-company-event small { font-size: 9px; color: var(--ds-color-text-muted); }
+.wm-company-body details { font-size: 10px; overflow-wrap: anywhere; color: var(--ds-color-text-secondary); }

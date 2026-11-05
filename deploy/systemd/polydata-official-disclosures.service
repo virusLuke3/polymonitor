@@ -1,0 +1,13 @@
+[Unit]
+Description=Polymonitor official company and policy disclosures
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/__POLYDATA_REPO_ROOT__
+EnvironmentFile=%h/.config/polydata/polydata.env
+Environment=PYTHONPATH=/__POLYDATA_REPO_ROOT__/scripts
+ExecStart=/__POLYDATA_VENV__/bin/python -m runtime.official_disclosures_watcher
+TimeoutStartSec=1200
+StandardOutput=journal
+StandardError=journal

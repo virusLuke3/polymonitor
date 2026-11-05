@@ -115,3 +115,7 @@ GDELT 的 HTTP 429 退避保存在既有 SnapshotStore 的 `state:content / gdel
 - 30 分钟／6 小时策略以已发布配置、文件身份和调度测试为证据；这次数分钟观察没有覆盖其完整周期。历史流入仍是历史资料。
 
 完整日志、运行参数、哈希、真实页面截图和请求记录保存在 [本次核验目录](../webpage/artifacts/panel-cadence-20261103/)；历史的修改前周期 CSV 保持原样。
+
+## 公司公告与政策进程（首批）
+
+开发与验收遵循 [首批数据/视觉契约](official-disclosures-panels.md)。共用领域采集拥有者，SEC submissions / Federal Register 30 分钟，SEC companyfacts 6 小时，浏览器 10 分钟只读快照。失败逐来源退避并保留原始成功时间；新 Panel 默认合并进旧布局。

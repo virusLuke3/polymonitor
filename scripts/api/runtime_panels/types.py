@@ -196,6 +196,7 @@ class RuntimePanelContext:
     sports: SportsRuntimePanelDependencies
     technology: TechnologyRuntimePanelDependencies
     world: WorldRuntimePanelDependencies
+    get_official_disclosures_snapshot: Callable[..., PanelPayload] | None = None
     get_crypto_strategy_snapshot: Callable[..., PanelPayload] | None = None
 
     @classmethod
@@ -226,6 +227,7 @@ class RuntimePanelContext:
             sports=SportsRuntimePanelDependencies.from_context(context),
             technology=TechnologyRuntimePanelDependencies.from_context(context),
             world=WorldRuntimePanelDependencies.from_context(context),
+            get_official_disclosures_snapshot=context.get("get_official_disclosures_snapshot"),
             get_crypto_strategy_snapshot=context.get("get_crypto_strategy_snapshot"),
         )
 

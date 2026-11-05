@@ -1,0 +1,40 @@
+# 公司财报与公告 / 政策进程
+
+本轮仅交付这两个独立 Panel。入口是原工作台，默认启用并复用旧布局合并机制。
+
+## 数据获取先于视图
+
+候选来源包是调研目录，不是可用数据证明。先验证响应、实体身份、覆盖范围和来源时间，再实现字段。不能把样例中的预期 EPS、BMO/AMC、投票进度或未来日期写成真实数据。来源失败保留实体级最后成功值及时间；合法空结果和失败分开。
+
+两个 Panel 共用 `official_disclosures_service` 与一个定时任务，API 只读 `SnapshotStore`，不会因用户刷新再抓上游。不修改现有 Market、OrderFilled、LOB、Oracle、AI Agent 或链上分析。
+
+| 消费者 | 来源与边界 | 身份与周期 |
+| --- | --- | --- |
+| Company Events | SEC submissions 的 10-K、10-Q、8-K 及修订；companyfacts 的 diluted EPS / revenue。首批 AAPL、MSFT、NVDA、AMZN、GOOGL、META、TSLA、AVGO。只展示实际披露，不推测分析师共识或下一次财报时间 | CIK + accession；submissions 30 分钟，XBRL 6 小时；单独标注报告起止期、单位和提交日，不混合季度与年报 |
+| Policy Progress | Federal Register 已公布的 Rule、Proposed Rule、Notice、Presidential Document；使用源提供的 effective_on/comments_close_on | document_number；最近 30 天最多 100 项，30 分钟；美国联邦监管公告，不宣称覆盖 Congress 立法、各国政策或所有历史文件 |
+
+SEC API 不需要密钥；配置真实项目身份 `POLYMONITOR_SEC_USER_AGENT`；当前使用项目官网 URL 标识，联系邮箱收到后补入，禁止编造邮箱。Federal Register 不需要密钥，正文网页链接与 GovInfo 正式 PDF 分开保留。可见网页不是法律正式版本。来源依据：[SEC API](https://www.sec.gov/search-filings/edgar-application-programming-interfaces)、[公平访问](https://www.sec.gov/about/developer-resources)、[Federal Register API](https://www.federalregister.gov/developers/documentation/api/v1)。
+
+## 存储、时钟和预算
+
+- 正式快照：现有 `POLYDATA_SNAPSHOT_SQLITE_PATH`，namespace `snapshot:official-disclosures`，key `company-events` / `policy-progress`。不假设 Upstash、R2 或 Redis 是必须的新基础设施。
+- 来源状态：同一库 `source:official-disclosures`，key `sec:<CIK>:submissions|facts` / `federal-register`。成功数据、lastSuccessAt、lastAttemptAt、nextAttemptAt、错误各自保存。失败不改 lastSuccessAt。
+- 原始响应版本：相邻 `official_disclosures.sqlite3`，压缩 JSON 按来源与 SHA256 去重，保留 90 天，记录首次见到与最近见到。是接入后观测档案，不能倒推成历史当时可知。
+- 公告 publication/acceptance 时间、报告 period、采集成功、尝试、快照生成分开。GET 会重新判断来源是否超过有效期，进程停止后也不会永久显示为新鲜。
+- 串行采集，单来源 15 秒连接 / 45 秒读取、至多两次、100 秒响应检查预算；429 遵守 Retry-After；无全局高频补抓。失败 5/10/20/30 分钟退避，成功来源按原周期复用。单响应上限 24 MB；单任务周期最多 20 分钟，systemd 禁止任务重叠。
+- 浏览器通过共享 Runtime 每 10 分钟读一次快照，15 秒 API 截止，最多一次重试。30 分钟采集不能被手动刷新或浏览器轮询加速。
+- 24 小时后旧值继续作为已披露历史，明确提示更新中断；超过 7 天不再进入当前列表，原始档案保留。当前政策状态按日期计算；没有日期不能补造节点。
+
+## 视觉与单独调整
+
+共享 Panel 外壳、标题工具、字体资源和五列槽位不变；各 Panel 自己拥有目录、模型、CSS、交互。共用请求/契约放在 `panels/shared/official-disclosures`，无相互实现导入。
+
+WorldMonitor 实际截图观察：Earnings Calendar 的日期分组、Strategic Posture 的分类侧边色条、Macro Signals 的强调条、AAII 的大号分组值。统一视觉语言允许不同正文结构、字号和有意义的类别色。
+
+- Company Events：青色公司代码、醒目的报告实际值、紫色定期报告/橙色临时公告，日期块和紧凑事件列表；公司切换与报告/公告筛选真正过滤；财报期和原始文件可展开。没有预测共识时不显示“超预期”。
+- Policy Progress：橙色下一截止日、紫色提案/青色规则/中性通知；带侧边色条的文件标题、机构与发布日期；有源日期才显示“公布 → 截止/生效”的进程。标题和颜色不能把“发布”误当“已生效”。
+- 不显示 Check/Source 周期、PARTIAL 或重复刷新行。数据详情和刷新位于公共标题栏；短提示说明具体缺失。红绿只用于有意义的方向，分类不使用好坏判断。
+
+## 验收
+
+解析、报告期/修订去重、合法空结果、失败保留/恢复、重启后退避、来源时间过期和 API 只读必须有测试。真实采集核验实体、日期、字段、正式存储与 API；长周期未观察完整轮次要明示。普通首页旧布局发现、隐藏后重开仍隐藏、桌面五列与移动单列、筛选/展开/原文链接须在真实生产 URL 验收。生产版本与提交一致才算发布。

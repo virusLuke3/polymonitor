@@ -122,3 +122,7 @@ For a new backend runtime panel:
 `shared/market-insights` validates the lens and response cards and supplies common presentation. It contains no local market-ranking algorithm. AI results, rules summaries, expired snapshots, unknown timestamps and unavailable data remain distinct. Empty server arrays are authoritative. Snapshot generation and sample-scoped deterministic observations live in `agent/market_wide`, with rules in `rules.py`. Absolute volume cannot imply a spike; category counts cannot imply rotation. Failed generation remains observable even when a usable rules snapshot is saved.
 
 `featured-market` consumes only selected-market identity, metadata and the matching bundle. It never substitutes a bootstrap market or another market's oracle/reference rule.
+
+## 公司公告与政策进程（首批）
+
+开发与验收遵循 [首批数据/视觉契约](official-disclosures-panels.md)。共用领域采集拥有者，SEC submissions / Federal Register 30 分钟，SEC companyfacts 6 小时，浏览器 10 分钟只读快照。失败逐来源退避并保留原始成功时间；新 Panel 默认合并进旧布局。

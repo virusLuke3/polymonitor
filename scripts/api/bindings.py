@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from api.services.official_disclosures_service import get_snapshot as get_official_disclosures_snapshot
+
 from api.services import map_infrastructure_service
 from api.services.crypto_strategy.store import database_path as _crypto_strategy_path, get_snapshot as _crypto_strategy_snapshot
 
@@ -867,6 +869,7 @@ def build_blueprints(runtime: ServiceRuntime):
         runtime_panels_routes.create_runtime_panels_blueprint(
             runtime_panels_routes.RuntimePanelRouteDependencies(
                 panel_context=runtime_panel_types.RuntimePanelContext(
+                    get_official_disclosures_snapshot=lambda panel_id, limit=100: get_official_disclosures_snapshot(runtime.SNAPSHOT_STORE, panel_id, limit=limit),
                     get_crypto_strategy_snapshot=lambda reference_only=False: _crypto_strategy_snapshot(_crypto_strategy_path(runtime.SETTINGS.snapshot_sqlite_path), reference_only=reference_only),
                     get_alpha_signal_snapshot=lambda limit=8: signal_service.get_alpha_signal_snapshot(
                         runtime.signal_context, limit=limit

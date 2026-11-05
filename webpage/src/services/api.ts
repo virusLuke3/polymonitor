@@ -822,3 +822,7 @@ export function fetchMapInfrastructure(bbox: number[], signal: AbortSignal) {
 export function fetchMapSignalSource(source: string, signal?: AbortSignal) {
   return apiGetWithTimeout<{status: string; events: unknown[]; message?: string; updatedAt?: string}>(`/runtime/world/signals?source=${encodeURIComponent(source)}`, 18000, signal);
 }
+
+export function fetchOfficialDisclosures(panelId: "company-events" | "policy-progress", signal?: AbortSignal) {
+  return apiGet<unknown>(`/runtime/disclosures/${panelId}`, signal);
+}

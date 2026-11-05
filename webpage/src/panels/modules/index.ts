@@ -75,6 +75,8 @@ import { panel as jin10Flash } from './jin10-flash';
 import { panel as newMarketSignals } from './new-market-signals';
 import { panel as lobDepth } from './lob-depth';
 import { panel as f1Trackside } from './f1-trackside';
+import { panel as companyEvents } from './company-events';
+import { panel as policyProgress } from './policy-progress';
 export const PANEL_MODULES: PanelModule[] = [
   activeMarkets,
   globalOrderfilled,
@@ -152,4 +154,6 @@ export const PANEL_MODULES: PanelModule[] = [
   newMarketSignals,
   lobDepth,
   f1Trackside,
+  companyEvents,
+  policyProgress,
 ];
