@@ -100,6 +100,47 @@ snapshots, public API and desktop/mobile panels; tests alone do not establish it
 through seed input and model context for all three lenses, including an empty
 feed, bounded input and unchanged publication timestamps.
 
+### Trade-input repair observed on 2026-11-06
+
+- Changes `7d8ffbc1` and `b9b2def3` repair the whale reader and propagate source
+  health, including regeneration after recovery. Only their owned backend hunks
+  were installed; the gateway was restarted. All 26 focused tests passed in a
+  clean archive of the pushed commit, and scoped Ruff passed.
+- At 10:55 Asia/Shanghai, all three public API responses matched persisted and
+  local API snapshots: Qwen3.5-9B generated them at 10:48:26, 10:49:42 and
+  10:51:03, with no graph-node errors. They explicitly reported failed recent
+  trade reads and seven stale whale items excluded from analysis. Counts remain
+  zero for those two inputs until source recovery; this is not acceptance of
+  real-time trade or whale coverage. The frontend release was unchanged; no new
+  desktop/mobile UI acceptance is claimed by this backend repair.
+- The self-hosted Polygon RPC returned head 96787899 with an approximately
+  12.5-hour-old block. PublicNode and Tenderly returned current Polygon 137
+  heads directly. The configured Chainstack fallback returned HTTP 401.
+  Rabisu was also checked: Tenderly worked, PublicNode returned HTTP 403.
+  The three existing chain units now load the scoped
+  `~/.config/market-data/panel-chain-rpc.env` after their other environment files;
+  direct bypass is limited to the verified RPC hostnames. The main proxy was
+  unchanged, and the stale self-hosted node itself was not repaired.
+- Block-time batches of 100 hit HTTP 429 under catch-up load. The existing
+  timestamp worker now uses batches of ten with four workers, preserving
+  sequential progress and confirmation depth. It reached block 96818819 with
+  time 10:54:45 and completed successive 30-second live cycles. The trade
+  collector uses its normal bounded 200-block windows and
+  `POLYDATA_RPC_HEADER_BATCH_SIZE=10`; the owner module
+  `market-data/src/common/rpc.py` caps header batches without dropping blocks.
+  Its focused and existing RPC/timestamp tests passed (123 tests). Those narrow
+  changes remain in the market-data working checkout because its source module
+  is part of a pre-existing uncommitted reorganization, not this repo's release.
+- Actual OrderFilled recovery remains incomplete: nine contiguous audited
+  windows, blocks 96788380–96789579, contained 86,563 chain/stored events and
+  zero missing keys. Raw/fact cursors reached 96789579, whose block time is still
+  November 5 22:43:45. Exact event-index admission remains slow; no financial
+  identity/readback guards, cursor ranges or historical gaps were bypassed.
+  The original collector continues catch-up, the original whale worker retries,
+  and the existing hourly Agent timer checks for source recovery. PolySignal
+  remains disabled/inactive. These observations do not claim the backlog or
+  historical coverage is complete.
+
 ### Acceptance observed on 2026-11-05
 
 - Frontend release `696061ed3ea1727c309518a872e78f68137a6912` was built from the
