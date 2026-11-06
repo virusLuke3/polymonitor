@@ -1,4 +1,7 @@
 import json
+import ast
+import re
+from pathlib import Path
 
 import pytest
 
@@ -49,3 +52,27 @@ def test_youtube_missing_source_is_explicit(monkeypatch):
     monkeypatch.delenv("POLYMONITOR_URL_WWW_YOUTUBE_COM_D9331A", raising=False)
     with pytest.raises(ValueError, match="not configured"):
         build_youtube_embed_html(video_id="abcdefghijk", request_origin="https://site.example.invalid")
+
+
+def test_production_sources_have_no_literal_endpoint_defaults():
+    root = Path(__file__).resolve().parents[1]
+    namespaces = ("http://www.w3.org/", "http://www.youtube.com/xml/", "http://purl.org/", "http://www.opengis.net/")
+    findings = []
+    for directory in ("scripts/api", "scripts/runtime", "agent/common"):
+        for path in (root / directory).rglob("*.py"):
+            for node in ast.walk(ast.parse(path.read_text())):
+                if not isinstance(node, ast.Constant) or not isinstance(node.value, str):
+                    continue
+                if re.match(r"^(?:https?|socks5h?|wss?)://[^\s]+", node.value) and not node.value.startswith(namespaces):
+                    findings.append(f"{path.relative_to(root)}:{node.lineno}")
+    assert not findings, "Move source/proxy defaults into private .env: " + ", ".join(findings)
+
+
+def test_registered_panels_and_source_variables_are_documented():
+    root = Path(__file__).resolve().parents[1]
+    registered = set(re.findall(r"from './([^']+)'", (root / "webpage/src/panels/modules/index.ts").read_text()))
+    audited = set(re.findall(r"\[([^\]]+)\]\(../webpage/src/panels/modules/", (root / "docs/panel-env-audit.md").read_text()))
+    assert audited == registered
+    declarations = set(re.findall(r"(?m)^\s*#?\s*(\w+)=", (root / ".env.example").read_text()))
+    bindings = json.loads((root / "docs/panel-env-source-bindings.json").read_text())
+    assert not set(bindings) - declarations
