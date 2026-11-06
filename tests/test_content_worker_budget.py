@@ -1,6 +1,7 @@
 """Real process termination, without network or production database access."""
 import multiprocessing
 import time
+from datetime import datetime
 from types import SimpleNamespace
 
 from runtime import content_topic_refresh as worker
@@ -43,6 +44,20 @@ def test_completed_sources_are_not_marked_failed(monkeypatch):
     assert worker.run_bounded_cycle(SimpleNamespace(), SimpleNamespace(), budget=2) is None
     assert not writes
     assert len(seeds) >= 2
+    assert not multiprocessing.active_children()
+
+
+def test_killed_six_hour_source_retries_without_waiting_for_normal_poll(monkeypatch):
+    writes, _ = prepare(monkeypatch, blocked_cycle)
+    monkeypatch.setattr(collector, "due_sources", lambda *a, **k:
+        [{"source_id": "fixture", "poll_interval_seconds": 21600}])
+    assert worker.run_bounded_cycle(SimpleNamespace(), SimpleNamespace(), budget=0.15) == "cycle-budget-exhausted"
+    state = writes[0]
+    checked = datetime.fromisoformat(state["checked_at"].replace("Z", "+00:00"))
+    due = datetime.fromisoformat(state["next_check_at"].replace("Z", "+00:00"))
+    assert (due - checked).total_seconds() == 60
+    assert state["failure_count"] == 1
+    assert state["last_success_at"] == "2026-10-01T00:00:00Z"
     assert not multiprocessing.active_children()
 
 

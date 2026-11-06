@@ -17,9 +17,9 @@
 |source_id / 用途|具体入口|官方目录|展示政策 / 限制|
 |---|---|---|---|
 |global-voices / news_report|[feed](https://globalvoices.org/feed/)|[目录](https://globalvoices.org/feeds/)|[政策](https://globalvoices.org/about/global-voices-attribution-policy/)；text-only；no-media；no-logo；no-endorsement；exclude-special-rights|
-|bls-cpi / official_release|[feed](https://www.bls.gov/feed/cpi.rss)|[目录](https://www.bls.gov/feed/)|[政策](https://www.bls.gov/bls/linksite.htm)；text-only；no-media；no-logo；no-endorsement；exclude-special-rights|
-|bls-empsit / official_release|[feed](https://www.bls.gov/feed/empsit.rss)|[目录](https://www.bls.gov/feed/)|[政策](https://www.bls.gov/bls/linksite.htm)；text-only；no-media；no-logo；no-endorsement；exclude-special-rights|
-|bls-ppi / official_release|[feed](https://www.bls.gov/feed/ppi.rss)|[目录](https://www.bls.gov/feed/)|[政策](https://www.bls.gov/bls/linksite.htm)；text-only；no-media；no-logo；no-endorsement；exclude-special-rights|
+|bls-cpi / official_release|[FRASER 原件目录](https://fraser.stlouisfed.org/title/consumer-price-index-6838?browse=2020s)|[BLS 目录](https://www.bls.gov/feed/)|[政策](https://www.bls.gov/bls/linksite.htm)；text-only；no-media；no-logo；no-endorsement；exclude-special-rights|
+|bls-empsit / official_release|[FRASER 原件目录](https://fraser.stlouisfed.org/title/employment-situation-144?browse=2020s)|[BLS 目录](https://www.bls.gov/feed/)|[政策](https://www.bls.gov/bls/linksite.htm)；text-only；no-media；no-logo；no-endorsement；exclude-special-rights|
+|bls-ppi / official_release|[FRASER 原件目录](https://fraser.stlouisfed.org/title/producer-price-indexes-6837?browse=2020s)|[BLS 目录](https://www.bls.gov/feed/)|[政策](https://www.bls.gov/bls/linksite.htm)；text-only；no-media；no-logo；no-endorsement；exclude-special-rights|
 |fed-monetary / official_release|[feed](https://www.federalreserve.gov/feeds/press_monetary.xml)|[目录](https://www.federalreserve.gov/feeds/feeds.htm)|[政策](https://www.federalreserve.gov/disclaimer.htm)；text-only；no-media；no-logo；no-endorsement；exclude-special-rights|
 |fed-all / official_release|[feed](https://www.federalreserve.gov/feeds/press_all.xml)|[目录](https://www.federalreserve.gov/feeds/feeds.htm)|[政策](https://www.federalreserve.gov/disclaimer.htm)；text-only；no-media；no-logo；no-endorsement；exclude-special-rights|
 |ecb-press / official_release|[feed](https://www.ecb.europa.eu/rss/press.html)|[目录](https://www.ecb.europa.eu/home/html/rss.en.html)|[政策](https://www.ecb.europa.eu/services/using-our-site/disclaimer/html/index.en.html)；text-only；no-media；no-logo；no-endorsement；exclude-special-rights|
@@ -174,3 +174,24 @@ RSS 实体检查只检查 XML 标记，不把 CDATA/注释内的 HTML DOCTYPE �
 浏览器的 5 分钟新鲜响应门槛与 30 分钟最大故障回放期分开：仅此面板 opt-in `staleAgeMs`，较旧内容明确标记 STALE 并保留原始快照时间，30 分钟后移除。警报按原 expiry 移除，不延长许可或条目时间。新鲜有效的 PARTIAL 结果可以更新已有 READY 缓存，避免来源部分失败时缓存永久停留在旧版本。未知数据数量显示 — 而非 0；实际请求错误即使没有列表也可见。
 
 watch 父进程启动时完成 schema 初始化，周期子进程不再重复执行 ALTER TABLE，避免与父进程 seed 查询争夺表锁；独立 collector 默认仍初始化。SQLite 有界回放不先等待 Redis，300 秒上限保持不变。
+
+## 来源连接与失败恢复
+
+部署使用既有 `POLYMONITOR_SOURCE_ROUTES_FILE`，示例见
+`deploy/systemd/polymonitor-source-routes.example.json`。Global Voices 的 feed 和文章许可检查
+共用用户指定的 Rabisu 独立接口 `http://127.0.0.1:17890`；ECB 明确直连。
+该配置复用已部署的 `source_session` 路由能力。Rabisu 接口由现有
+`polydata-clob-profile12-proxy.service` 提供；内容 worker 不管理代理进程或主 Clash。
+FRASER 保持既有直连策略；Fed、NASA、NHC 保留既有路径；USGS/NWS 继续只复用地图快照。
+
+正常采集时钟不变：Global Voices/ECB 每 15 分钟，FRASER 三类各每 6 小时。
+非限流失败的恢复时钟独立为 60、120、240、480、960、1920、3600 秒，之后上限 1 小时；
+`Retry-After` 可以延长等待。HTTP 429 至少等待正常来源周期及服务器指定时间，
+`--force` 也不能跳过限流。90 秒整轮超时使用相同恢复时钟并累计失败次数。
+成功解析与入库后清零失败计数，回到正常周期；失败不会推进 `last_success_at`。
+
+复用原内容 owner、三线程采集、45 秒源预算、90 秒整轮预算、既有正式内容表及
+`snapshot:content:free-public / candidates-v4`，不新增采集器或公共 GET 外部请求。
+BLS PDF、正文和版本继续保存在既有 `data/bls-release-archive/{cpi,nfp,ppi}`；
+FRASER 收录时间不能代替原公告发布时间。连接恢复不代表 FRASER 与原站实时同步，
+也不代表候选配额截断或其他来源异常消失。

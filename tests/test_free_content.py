@@ -201,6 +201,46 @@ def test_single_source_failure_does_not_stop_others(storage, source, error):
     assert healthy["status"] == "healthy_empty"
 
 
+@pytest.mark.parametrize("failures,seconds", [(0, 60), (1, 120), (5, 1920), (6, 3600), (30, 3600)])
+def test_bls_transient_failure_uses_recovery_clock(storage, failures, seconds):
+    from api.services.free_content import fraser
+
+    source = source_map()["bls-cpi"]
+    old = {"last_success_at": "2026-10-01T00:00:00Z", "failure_count": failures}
+    with patch.object(fraser, "collect", side_effect=TimeoutError("directory timeout")):
+        state = collector.collect_one(storage, None, source, old)
+    checked = datetime.fromisoformat(state["checked_at"].replace("Z", "+00:00"))
+    due = datetime.fromisoformat(state["next_check_at"].replace("Z", "+00:00"))
+    assert (due - checked).total_seconds() == seconds
+    assert state["failure_count"] == failures + 1
+    assert state["last_success_at"] == old["last_success_at"]
+    assert state["status"] == "error"
+    # Recovery does not turn normal six-hour polling into minute polling.
+    with patch.object(fraser, "collect", return_value=([], {"http_status": 200})):
+        recovered = collector.collect_one(storage, None, source, state)
+    checked = datetime.fromisoformat(recovered["checked_at"].replace("Z", "+00:00"))
+    due = datetime.fromisoformat(recovered["next_check_at"].replace("Z", "+00:00"))
+    assert (due - checked).total_seconds() == 21600
+    assert recovered["failure_count"] == 0
+
+
+@pytest.mark.parametrize("status,retry_after,seconds", [(429, "120", 21600), (429, "43200", 43200), (503, "600", 600)])
+def test_archive_recovery_honors_server_backoff(storage, status, retry_after, seconds):
+    from api.services.free_content import fraser
+    from api.services.free_content.http import SourceHTTPError
+
+    source = source_map()["bls-cpi"]
+    error = SourceHTTPError({"http_status": status, "retry_after": retry_after})
+    with patch.object(fraser, "collect", side_effect=error):
+        state = collector.collect_one(storage, None, source, {})
+    checked = datetime.fromisoformat(state["checked_at"].replace("Z", "+00:00"))
+    due = datetime.fromisoformat(state["next_check_at"].replace("Z", "+00:00"))
+    assert (due - checked).total_seconds() == seconds
+    if status == 429:
+        assert not collector.due_sources({source["source_id"]: state}, force=True,
+            selected={source["source_id"]}, stamp=state["checked_at"])
+
+
 def test_metric_month_year_and_specific_entity_boundaries(source):
     item = article(source, title="Headline CPI year-over-year August 2026", topics=["cpi"])
     assert matching.relate({"title": "Core CPI month-over-month August 2026"}, item)[0] == "unmatched"

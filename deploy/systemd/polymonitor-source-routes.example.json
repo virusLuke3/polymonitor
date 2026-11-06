@@ -1,4 +1,10 @@
 {
+  "globalvoices.org": [
+    "http://127.0.0.1:17890"
+  ],
+  "www.ecb.europa.eu": [
+    ""
+  ],
   "query1.finance.yahoo.com": [
     "socks5h://127.0.0.1:18993",
     "socks5h://127.0.0.1:18994"

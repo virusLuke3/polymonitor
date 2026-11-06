@@ -91,7 +91,7 @@ def _cycle_process(events, options):
 
 def run_bounded_cycle(runtime, storage, *, probe=False, force=False, selected=None, interval=60,
                       budget=CYCLE_BUDGET_SECONDS):
-    from api.services.free_content.collector import due_sources
+    from api.services.free_content.collector import due_sources, failure_retry_seconds
     from api.services.free_content.store import source_states, save_state
     old = source_states(storage)
     pending = due_sources(old, probe=probe, force=force, selected=selected)
@@ -147,9 +147,12 @@ def run_bounded_cycle(runtime, storage, *, probe=False, force=False, selected=No
                 if sid in completed:
                     continue
                 try:
+                    failures = int(old.get(sid, {}).get("failure_count", 0)) + 1
+                    delay = failure_retry_seconds(source, failures, now=now)
                     save_state(storage, sid, {**old.get(sid, {}), "source_id": sid, "status": "error",
                         "checked_at": now.isoformat().replace("+00:00", "Z"), "error": error,
-                        "next_check_at": (now + timedelta(seconds=source["poll_interval_seconds"])).isoformat().replace("+00:00", "Z")})
+                        "failure_count": failures,
+                        "next_check_at": (now + timedelta(seconds=delay)).isoformat().replace("+00:00", "Z")})
                 except Exception as exc:
                     print(json.dumps({"source_id": sid, "error": "state-write-failed:" + type(exc).__name__}), flush=True)
     finally:

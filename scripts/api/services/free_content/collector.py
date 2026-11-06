@@ -64,6 +64,15 @@ def retry_delay(value, now):
             return 0
 
 
+def failure_retry_seconds(source, failures, *, now, meta=None):
+    """Recovery has its own clock; a monthly release need not wait six hours."""
+    meta = meta or {}
+    backoff = min(3600, 60 * 2 ** min(max(failures - 1, 0), 6))
+    if meta.get("http_status") == 429:
+        backoff = max(backoff, source["poll_interval_seconds"])
+    return max(backoff, retry_delay(meta.get("retry_after"), now))
+
+
 def collect_one(storage, snapshot_store, source, old, *, probe=False, conditional=True):
     now = datetime.now(timezone.utc)
     deadline = time.monotonic() + 45
@@ -226,11 +235,7 @@ def collect_one(storage, snapshot_store, source, old, *, probe=False, conditiona
             next_check_at=(
                 now
                 + timedelta(
-                    seconds=max(
-                        source["poll_interval_seconds"],
-                        min(3600, 60 * 2 ** min(failures, 6)),
-                        retry_delay(meta.get("retry_after"), now),
-                    )
+                    seconds=failure_retry_seconds(source, failures, now=now, meta=meta)
                 )
             )
             .isoformat()
