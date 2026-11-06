@@ -1,6 +1,8 @@
 """Strict, source-specific adapters. Missing facts remain absent, never guessed."""
 from __future__ import annotations
 
+from data_sources import source_value
+
 import csv
 import hashlib
 import html
@@ -113,7 +115,7 @@ def finance(body):
                      "transfersIn": number(values[6]), "transfersOut": number(values[8]),
                      "cash": number(values[10]), "debt": number(values[16]),
                      "periodEnd": datetime.strptime(values[27], "%m/%d/%Y").date().isoformat() if values[27] else None,
-                     "url": "https://www.fec.gov/data/candidate/" + values[0] + "/"})
+                     "url": source_value('POLYMONITOR_URL_WWW_FEC_GOV_DATA_CANDIDATE_507A0C') + values[0] + "/"})
     if not rows:
         raise ValueError("Empty FEC summary")
     return {"items": sorted(rows, key=lambda r: r["receipts"] or 0, reverse=True), "availableCount": len(rows)}
@@ -135,13 +137,13 @@ def house(body):
         seats.append({"id": district, "name": info.findtext("official-name") or info.findtext("namelist"),
                       "party": info.findtext("party") or "Vacant", "caucus": info.findtext("caucus"),
                       "bioguide": info.findtext("bioguideID"), "sworn": info.findtext("sworn-date"),
-                      "url": "https://clerk.house.gov/members/" + (info.findtext("bioguideID") or "")})
+                      "url": source_value('POLYMONITOR_URL_CLERK_HOUSE_GOV_MEMBERS_2DAD42') + (info.findtext("bioguideID") or "")})
     if not 400 <= len(seats) <= 435 or len({r["id"] for r in seats}) != len(seats):
         raise ValueError("Unexpected House seat coverage")
     return {"items": seats, "counts": dict(Counter(s["party"] for s in seats)),
             "congress": root.findtext("title-info/congress-num"), "publishedAt": root.get("publish-date"),
             "majority": root.findtext("title-info/majority"), "totalSeats": 435,
-            "basis": "current-membership", "url": "https://clerk.house.gov/Members"}
+            "basis": "current-membership", "url": source_value('POLYMONITOR_URL_CLERK_HOUSE_GOV_MEMBERS_552C04')}
 
 
 def bill_feed(body, congress):
@@ -158,7 +160,7 @@ def bill_feed(body, congress):
         title = " ".join(html.unescape(item.findtext("title", "")).split())
         rows[key] = {"id": key, "congress": congress, "type": match[2], "number": match[3],
                      "title": title, "version": match[4], "publishedAt": item.findtext("pubDate"),
-                     "url": item.findtext("link"), "statusUrl": f"https://www.govinfo.gov/bulkdata/BILLSTATUS/{congress}/{match[2]}/BILLSTATUS-{key}.xml"}
+                     "url": item.findtext("link"), "statusUrl": f"{source_value('POLYMONITOR_URL_WWW_GOVINFO_GOV_BULKDATA_BILLSTATUS_D7E568')}{congress}/{match[2]}/BILLSTATUS-{key}.xml"}
     return {"items": list(rows.values()), "availableCount": len(rows), "coverage": "recent-publications"}
 
 
@@ -229,4 +231,4 @@ def funding_law(body):
     return {"id": "PLAW-119publ103", "billId": "119hr6500", "fiscalYear": 2027,
             "expirationDate": date, "expirationTime": None, "currentCoverageVerified": False,
             "expirationClause": match[1].strip(), "coverage": [{"id": i, "text": t.strip()} for i, t in clauses],
-            "url": "https://www.govinfo.gov/content/pkg/PLAW-119publ103/html/PLAW-119publ103.htm"}
+            "url": source_value('POLYMONITOR_URL_WWW_GOVINFO_GOV_CONTENT_PKG_PLAW_119PUBL103_HTML_PLAW_119PUBL103_HTM_9E9799')}

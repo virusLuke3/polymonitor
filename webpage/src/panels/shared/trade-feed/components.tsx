@@ -1,3 +1,4 @@
+import { publicSource } from '@/config/publicSources';
 import { Component, type ComponentChildren } from 'preact';
 import { Panel, PanelLoading } from '@/components/Panel';
 import type { usePanelResource } from '@/panels/usePanelResource';
@@ -35,7 +36,7 @@ export function TradeCard({ item, onSelect, showType = false }: { item: TradeObs
     <dl className="wm-trade-watch-metrics"><div><dt>{copy('Token fill price', 'Token 成交价')}</dt><dd>{item.price == null ? '—' : `${(item.price*100).toFixed(1)}¢`}</dd></div><div><dt>{copy('Size tier', '成交额分级')}</dt><dd>{item.severity.toUpperCase()}</dd></div></dl>
     <p className="wm-trade-watch-time">{copy('Trade', '成交')} <time dateTime={item.timestamp || undefined}>{item.timestamp ? i18n.formatDateTime(item.timestamp) : copy('Time unknown', '时间未知')}</time></p>
     {item.eventTime && <p className="wm-trade-watch-time">Oracle <time dateTime={item.eventTime}>{i18n.formatDateTime(item.eventTime)}</time></p>}
-    <div className="wm-trade-watch-identities">{(['maker', 'taker'] as const).map(role => <span key={role}>{role === 'maker' ? copy('Maker', 'Maker') : copy('Taker', 'Taker')} {item[role] ? <a href={`https://polygonscan.com/address/${item[role]}`} target="_blank" rel="noopener noreferrer" title={item[role]!}>{shortIdentity(item[role]!)}</a> : copy('Unknown', '未知')}</span>)}<span>Tx <a href={`https://polygonscan.com/tx/0x${item.txHash}`} target="_blank" rel="noopener noreferrer" title={`0x${item.txHash}`}>{shortIdentity(item.txHash)}</a></span><span title={item.tokenId}>Token {shortIdentity(item.tokenId)}</span></div>
+    <div className="wm-trade-watch-identities">{(['maker', 'taker'] as const).map(role => <span key={role}>{role === 'maker' ? copy('Maker', 'Maker') : copy('Taker', 'Taker')} {item[role] ? <a href={`${publicSource('VITE_PUBLIC_EXPLORER_ADDRESS_URL')}${item[role]}`} target="_blank" rel="noopener noreferrer" title={item[role]!}>{shortIdentity(item[role]!)}</a> : copy('Unknown', '未知')}</span>)}<span>Tx <a href={`${publicSource('VITE_PUBLIC_EXPLORER_TX_URL')}0x${item.txHash}`} target="_blank" rel="noopener noreferrer" title={`0x${item.txHash}`}>{shortIdentity(item.txHash)}</a></span><span title={item.tokenId}>Token {shortIdentity(item.tokenId)}</span></div>
   </article>;
 }
 export class TradeFeedBoundary extends Component<{ title: string; children: ComponentChildren }, { failed: boolean }> {

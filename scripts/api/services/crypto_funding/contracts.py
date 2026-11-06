@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from data_sources import source_value
+
 import math
 from datetime import datetime, timezone
 from typing import Any
@@ -93,8 +95,8 @@ def normalize_quote(raw: dict, instrument: dict, *, exchange: str, response_at: 
         "updatedAt": clock, "fetchedAt": fetched_at, "acquisitionState": "ok",
         "nextFundingTime": next_at,
         "markPrice": number(raw.get("markPrice")), "indexPrice": number(raw.get("indexPrice")),
-        "sourceUrl": ("https://www.binance.com/en/futures/funding-history" if exchange == "Binance"
-                      else "https://www.bybit.com/en/announcement-info/fund-rate/"),
+        "sourceUrl": (source_value('POLYMONITOR_URL_WWW_BINANCE_COM_EN_FUTURES_FUNDING_HISTORY_AFB12C') if exchange == "Binance"
+                      else source_value('POLYMONITOR_URL_WWW_BYBIT_COM_EN_ANNOUNCEMENT_INFO_FUND_RATE_233ECE')),
     }
 
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from data_sources import source_value
+
 import json
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -15,7 +17,7 @@ from api.services.worldcup.common import (
 )
 from api.services.worldcup.odds.probability import ordered_outcomes, snapshot_outcomes_from_probabilities
 
-POLYMARKET_GAMMA_API_BASE = "https://gamma-api.polymarket.com"
+POLYMARKET_GAMMA_API_BASE = source_value('POLYMONITOR_URL_GAMMA_API_POLYMARKET_COM_A8F548')
 
 
 def new_market_linker_stats(*, scan_limit: int, scheduled_count: int) -> Dict[str, Any]:
@@ -99,11 +101,11 @@ def _polymarket_url(row: Dict[str, Any]) -> str:
     event_slug = str(row.get("eventSlug") or "").strip()
     slug = str(row.get("slug") or row.get("eventSlug") or "").strip()
     if event_slug and slug and slug != event_slug:
-        return f"https://polymarket.com/event/{event_slug}/{slug}"
+        return f"{source_value('POLYMONITOR_URL_POLYMARKET_COM_EVENT_E8B690')}{event_slug}/{slug}"
     if slug:
-        return f"https://polymarket.com/event/{slug}"
+        return f"{source_value('POLYMONITOR_URL_POLYMARKET_COM_EVENT_E8B690')}{slug}"
     title = str(row.get("title") or row.get("question") or "").strip()
-    return f"https://polymarket.com/search?query={quote_plus(title)}" if title else ""
+    return f"{source_value('POLYMONITOR_URL_POLYMARKET_COM_SEARCH_336858')}{quote_plus(title)}" if title else ""
 
 
 def _serving_market_candidate(row: Dict[str, Any]) -> Dict[str, Any]:
@@ -907,7 +909,7 @@ def link_worldcup_markets(
         snapshot_outcomes = ordered_outcomes(match, snapshot_outcomes_from_probabilities(probabilities))
         market_url = _polymarket_url(best)
         if len(probabilities) > 1 and str(best.get("eventSlug") or "").strip():
-            market_url = f"https://polymarket.com/event/{str(best.get('eventSlug')).strip()}"
+            market_url = f"{source_value('POLYMONITOR_URL_POLYMARKET_COM_EVENT_E8B690')}{str(best.get('eventSlug')).strip()}"
         rows.append(
             {
                 "id": f"{match.get('id')}:polymarket",

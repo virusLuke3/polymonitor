@@ -1,6 +1,8 @@
 """Direct-access Fed calendars, bound to BLS reference periods from the archive."""
 from __future__ import annotations
 
+from data_sources import source_value
+
 import re
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -9,8 +11,8 @@ from bs4 import BeautifulSoup
 
 from .bls_release_archive import MONTH, TITLES, read_latest
 
-NYFED_URL = "https://www.newyorkfed.org/research/calendars/nationalecon_cal"
-FRED_URL = "https://fred.stlouisfed.org/releases/calendar?rid={rid}&y={year}"
+NYFED_URL = source_value('POLYMONITOR_URL_WWW_NEWYORKFED_ORG_RESEARCH_CALENDARS_NATIONALECON_CAL_6C6183')
+FRED_URL = source_value('POLYMONITOR_URL_FRED_STLOUISFED_ORG_RELEASES_CALENDAR_1285C6')
 RELEASE_IDS = {"cpi": 10, "nfp": 50, "ppi": 46}
 SOURCE_KEYS = {"cpi": "fredCpi", "nfp": "fredEmployment", "ppi": "fredPpi"}
 UTC = timezone.utc

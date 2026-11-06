@@ -1,6 +1,8 @@
 """Official filings and regulatory documents: one scheduled owner, read-only views."""
 from __future__ import annotations
 
+from data_sources import source_value
+
 import hashlib
 import json
 import math
@@ -45,7 +47,7 @@ def filings(raw, cik, symbol):
                        "company": raw.get("name", symbol), "form": field("form"),
                        "publishedAt": field("acceptanceDateTime") or field("filingDate"),
                        "filed": field("filingDate"), "period": field("reportDate"),
-                       "url": f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{accession.replace('-', '')}/{quote(doc, safe='')}",
+                       "url": f"{source_value('POLYMONITOR_URL_WWW_SEC_GOV_ARCHIVES_EDGAR_DATA_69AE63')}{int(cik)}/{accession.replace('-', '')}/{quote(doc, safe='')}",
                        "amendment": field("form").endswith("/A")})
     return sorted(result, key=lambda row: row["publishedAt"], reverse=True)[:24]
 

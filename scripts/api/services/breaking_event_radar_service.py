@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from data_sources import source_value
+
 from api.context import RuntimeResources, runtime_resources
 
 import hashlib
@@ -21,8 +23,8 @@ BREAKING_EVENT_RADAR_SNAPSHOT_NAMESPACE = "snapshot:evidence:breaking-event-rada
 BREAKING_EVENT_RADAR_CACHE_KEY = "panel-v1"
 DEFAULT_LIMIT = 12
 DEFAULT_TTL_SECONDS = 300
-GDELT_DOC_API_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
-WIKIMEDIA_PAGEVIEWS_BASE_URL = "https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/en.wikipedia.org/all-access/user"
+GDELT_DOC_API_URL = source_value('POLYDATA_GEO_SHOCK_GDELT_DOC_API_URL')
+WIKIMEDIA_PAGEVIEWS_BASE_URL = source_value('POLYMONITOR_URL_WIKIMEDIA_ORG_API_REST_V1_METRICS_PAGEVIEWS_PER_ARTICLE_EN_WIKIPEDIA_ORG_ALL_ACC_3EE62C')
 
 
 DEFAULT_TOPIC_SEEDS: List[Dict[str, Any]] = [

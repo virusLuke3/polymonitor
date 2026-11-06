@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from data_sources import source_value
+
 import csv
 import io
 import json
@@ -101,7 +103,7 @@ def _fred_url(
     template = getattr(
         dependencies.settings,
         "food_basket_fred_csv_url_template",
-        "https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}",
+        source_value('POLYDATA_FINANCE_FRED_CSV_URL_TEMPLATE'),
     )
     url = str(template).format(series_id=series_id)
     lookback_years = int(
@@ -132,7 +134,7 @@ def _fetch_series(
     text = dependencies.http_text_get(
         url,
         timeout=15,
-        headers={"User-Agent": "Polymonitor/1.0 (+https://www.polymonitor.club/)"},
+        headers={"User-Agent": "Polymonitor/1.0"},
     )
     rows: List[Dict[str, Any]] = []
     reader = csv.DictReader(io.StringIO(str(text or "")))

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from data_sources import source_value
+
 import html
 import json
 import re
@@ -36,7 +38,7 @@ def build_youtube_embed_html(
 ) -> str:
     if not VIDEO_ID_RE.fullmatch(video_id or "") and not re.fullmatch(r"UC[A-Za-z0-9_-]{22}", channel_id):
         raise ValueError("invalid YouTube videoId")
-    origin = str(request_origin or "").rstrip("/") or "https://www.youtube.com"
+    origin = str(request_origin or "").rstrip("/") or source_value('POLYMONITOR_URL_WWW_YOUTUBE_COM_D9331A')
     parent = _parent_origin(parent_origin)
     autoplay_value = _bool_param(autoplay, default="1")
     mute_value = _bool_param(mute, default="1")
@@ -47,6 +49,10 @@ def build_youtube_embed_html(
     safe_parent = json.dumps(parent)
     safe_quality = json.dumps(quality_value)
     safe_title = html.escape(video_id)
+    youtube_host = source_value('POLYMONITOR_URL_WWW_YOUTUBE_COM_D9331A')
+    if not youtube_host:
+        raise ValueError('YouTube source is not configured')
+    safe_youtube_host = json.dumps(youtube_host).replace('<', '\\u003c')
     return f"""<!doctype html>
 <html>
 <head>
@@ -115,7 +121,7 @@ def build_youtube_embed_html(
       }}
       function loadApi() {{
         var tag = document.createElement('script');
-        tag.src = 'https://www.youtube.com/iframe_api';
+        tag.src = {json.dumps(youtube_host + '/iframe_api').replace('<', chr(92) + 'u003c')};
         tag.onerror = function () {{ post({{ type: 'yt-error', code: 'api-load', videoId: videoId }}); }};
         document.head.appendChild(tag);
       }}
@@ -123,7 +129,7 @@ def build_youtube_embed_html(
         if (channelId) {{
           var frame = document.createElement('iframe');
           frame.id = 'player';
-          frame.src = 'https://www.youtube.com/embed/live_stream?channel=' + encodeURIComponent(channelId)
+          frame.src = {safe_youtube_host} + '/embed/live_stream?channel=' + encodeURIComponent(channelId)
             + '&enablejsapi=1&autoplay={autoplay_value}&mute={mute_value}&origin=' + encodeURIComponent(origin);
           frame.allow = 'autoplay; encrypted-media; picture-in-picture';
           frame.style.border = '0';
@@ -131,7 +137,7 @@ def build_youtube_embed_html(
         }}
         player = new YT.Player('player', {{
           videoId: videoId,
-          host: 'https://www.youtube.com',
+          host: {safe_youtube_host},
           playerVars: {{
             autoplay: {autoplay_value},
             mute: {mute_value},
@@ -204,6 +210,6 @@ def youtube_embed_headers() -> dict[str, str]:
     return {
         "Content-Type": "text/html; charset=utf-8",
         "Cache-Control": "no-store",
-        "Permissions-Policy": 'autoplay=*, encrypted-media=*, storage-access=(self "https://www.youtube.com")',
+        "Permissions-Policy": 'autoplay=*, encrypted-media=*, storage-access=(self ' + json.dumps(source_value('POLYMONITOR_URL_WWW_YOUTUBE_COM_D9331A')) + ')' ,
         "X-Content-Type-Options": "nosniff",
     }

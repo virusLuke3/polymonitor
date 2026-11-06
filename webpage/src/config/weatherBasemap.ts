@@ -121,8 +121,11 @@ export async function getWeatherMapStyle(
     ]);
     return style;
   }
-  if (resolvedProvider === 'carto') return theme === 'positron' ? CARTO_LIGHT_STYLE : CARTO_DARK_STYLE;
-  return theme === 'positron' ? OPENFREEMAP_LIGHT_STYLE : OPENFREEMAP_DARK_STYLE;
+  const url = resolvedProvider === 'carto'
+    ? (theme === 'positron' ? CARTO_LIGHT_STYLE : CARTO_DARK_STYLE)
+    : (theme === 'positron' ? OPENFREEMAP_LIGHT_STYLE : OPENFREEMAP_DARK_STYLE);
+  if (!url) throw new Error(`Basemap source is not configured: ${resolvedProvider}`);
+  return url;
 }
 
 

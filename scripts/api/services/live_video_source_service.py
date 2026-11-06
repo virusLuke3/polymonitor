@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from data_sources import source_value, resolve_source_references
+
 import hashlib
 import json
 import os
@@ -110,10 +112,10 @@ YOUTUBE_TOPIC_ALIASES = {
     "news": {"news", "breaking", "world", "politics", "elections", "weather", "policy"},
 }
 IPTV_CATEGORY_FEEDS = (
-    ("news", "https://iptv-org.github.io/iptv/categories/news.m3u"),
-    ("macro", "https://iptv-org.github.io/iptv/categories/business.m3u"),
-    ("sports", "https://iptv-org.github.io/iptv/categories/sports.m3u"),
-    ("weather", "https://iptv-org.github.io/iptv/categories/weather.m3u"),
+    ("news", source_value('POLYMONITOR_URL_IPTV_ORG_GITHUB_IO_IPTV_CATEGORIES_NEWS_M3U_A16655')),
+    ("macro", source_value('POLYMONITOR_URL_IPTV_ORG_GITHUB_IO_IPTV_CATEGORIES_BUSINESS_M3U_C332B4')),
+    ("sports", source_value('POLYMONITOR_URL_IPTV_ORG_GITHUB_IO_IPTV_CATEGORIES_SPORTS_M3U_C1DF06')),
+    ("weather", source_value('POLYMONITOR_URL_IPTV_ORG_GITHUB_IO_IPTV_CATEGORIES_WEATHER_M3U_7EAD05')),
 )
 ALLOWED_CATEGORIES = set(CATEGORY_ORDER)
 ALLOWED_SOURCE_TYPES = {"hls", "youtube", "external", "timelapse"}
@@ -385,7 +387,7 @@ def _manifest_path() -> Path:
 
 def load_manifest_items(path: Path | None = None) -> List[Dict[str, Any]]:
     manifest_path = path or _manifest_path()
-    raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+    raw = resolve_source_references(json.loads(manifest_path.read_text(encoding="utf-8")))
     if not isinstance(raw, list):
         raise ValueError("live video source manifest must be a list")
     return [item for item in raw if isinstance(item, dict)]
@@ -521,9 +523,9 @@ def _trusted_youtube_fallback_items(existing_items: List[Dict[str, Any]], *, gen
             "language": source.get("language"),
             "youtubeProbeEnabled": False,
             "fallbackVideoId": fallback_video_id,
-            "externalUrl": f"https://www.youtube.com/watch?v={fallback_video_id}",
+            "externalUrl": f"{source_value('POLYMONITOR_URL_WWW_YOUTUBE_COM_WATCH_53792E')}{fallback_video_id}",
             "sourceName": "worldmonitor-trusted-youtube",
-            "sourceUrl": f"https://www.youtube.com/watch?v={fallback_video_id}",
+            "sourceUrl": f"{source_value('POLYMONITOR_URL_WWW_YOUTUBE_COM_WATCH_53792E')}{fallback_video_id}",
             "marketTags": list(source.get("marketTags") or []),
             "matchedTerms": list(source.get("matchedTerms") or source.get("marketTags") or [])[:4],
             "marketUseCase": f"YouTube fallback for {source.get('marketUseCase') or 'trusted live market video.'}",
@@ -856,13 +858,13 @@ def _enrich_hls_watchability(
 
 def _external_url_for_youtube(item: Dict[str, Any], video_id: str | None = None) -> str | None:
     if video_id:
-        return f"https://www.youtube.com/watch?v={video_id}"
+        return f"{source_value('POLYMONITOR_URL_WWW_YOUTUBE_COM_WATCH_53792E')}{video_id}"
     existing = _string(item.get("externalUrl") or item.get("sourceUrl"))
     if existing:
         return existing
     handle = _string(item.get("youtubeHandle"))
     if handle:
-        return f"https://www.youtube.com/{handle if handle.startswith('@') else '@' + handle}/live"
+        return f"{source_value('POLYMONITOR_URL_WWW_YOUTUBE_COM_DBAE2D')}{(handle if handle.startswith('@') else '@' + handle)}/live"
     return None
 
 
@@ -870,7 +872,7 @@ def _youtube_embed_url(video_id: str | None = None, channel_id: str | None = Non
     clean_video_id = _string(video_id)
     if clean_video_id and youtube_live_probe_service.VIDEO_ID_RE.match(clean_video_id):
         return (
-            f"https://www.youtube-nocookie.com/embed/{clean_video_id}?autoplay=1&mute=1&playsinline=1&rel=0&modestbranding=1",
+            f"{source_value('POLYMONITOR_URL_WWW_YOUTUBE_NOCOOKIE_COM_EMBED_5E3873')}{clean_video_id}?autoplay=1&mute=1&playsinline=1&rel=0&modestbranding=1",
             "video",
         )
     return None, None
@@ -885,7 +887,7 @@ def _youtube_rss_latest_video(
         return None
     text = _http_text_get(
         dependencies,
-        f"https://www.youtube.com/feeds/videos.xml?channel_id={clean_channel_id}",
+        f"{source_value('POLYMONITOR_URL_WWW_YOUTUBE_COM_FEEDS_VIDEOS_XML_A2693A')}{clean_channel_id}",
         timeout=5,
     )
     root = ET.fromstring(text.encode("utf-8") if isinstance(text, str) else text)

@@ -13,7 +13,7 @@ class SourceHTTPError(RuntimeError):
 
 
 MAX_BYTES = 2_500_000
-USER_AGENT = "Polymonitor/1.0 (+https://www.polymonitor.club/)"
+USER_AGENT = "Polymonitor/1.0"
 
 
 def validate_url(url, hosts):

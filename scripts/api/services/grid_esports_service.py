@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from data_sources import source_value
+
 import hashlib
 import json
 import re
@@ -549,7 +551,7 @@ def normalize_grid_esports_payload(payload: Any, *, settings: Any, limit: int = 
         **payload,
         "generatedAt": str(payload.get("generatedAt") or generated_at or ""),
         "source": str(payload.get("source") or "GRID Open Access"),
-        "sourceUrl": str(payload.get("sourceUrl") or getattr(settings, "grid_source_url", "") or "https://grid.gg/open-access/"),
+        "sourceUrl": str(payload.get("sourceUrl") or getattr(settings, "grid_source_url", "") or source_value('POLYDATA_GRID_SOURCE_URL')),
         "status": str(payload.get("status") or ("ok" if items else "empty")),
         "cacheMode": str(payload.get("cacheMode") or ""),
         "sources": payload.get("sources") if isinstance(payload.get("sources"), dict) else {},

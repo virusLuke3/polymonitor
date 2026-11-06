@@ -16,6 +16,7 @@ from typing import Any, Dict, Optional
 _scripts_root = Path(__file__).resolve().parents[1]
 if str(_scripts_root) not in sys.path:
     sys.path.insert(0, str(_scripts_root))
+from data_sources import source_value
 _repo_root = Path(__file__).resolve().parents[2]
 if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
@@ -52,7 +53,7 @@ DEFAULT_INTERVAL_SECONDS = 300
 SEED_META_NAMESPACE = "seed-meta:sports"
 SEED_META_CACHE_KEY = "worldcup-dashboard"
 SEED_META_SERVICE_NAME = "polydata-worldcup-dashboard-seed.service"
-WORLDCUP_WORKSPACE_URL = "https://www.polymonitor.club/?workspace=worldcup"
+WORLDCUP_WORKSPACE_URL = source_value('POLYMONITOR_URL_WWW_POLYMONITOR_CLUB_7640AA')
 
 
 class _LoggerAdapter:
@@ -132,7 +133,7 @@ def _odds_alert_candidate(row: Dict[str, Any]) -> MessageCandidate:
         link_preview=bool(market_url or WORLDCUP_WORKSPACE_URL),
         reply_markup={
             "inline_keyboard": [
-                [{"text": "Odds", "url": "https://t.me/PolyMonitorQuery_bot?start=odds"}, {"text": "Match", "url": "https://t.me/PolyMonitorQuery_bot?start=worldcup"}],
+                [{"text": "Odds", "url": source_value('POLYMONITOR_URL_T_ME_POLYMONITORQUERY_BOT_4EA9C6')}, {"text": "Match", "url": source_value('POLYMONITOR_URL_T_ME_POLYMONITORQUERY_BOT_3A5B92')}],
                 [{"text": "Open Workspace", "url": WORLDCUP_WORKSPACE_URL}],
             ]
         },

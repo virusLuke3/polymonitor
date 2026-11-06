@@ -1,3 +1,4 @@
+import { publicSource } from '@/config/publicSources';
 import type { ContentItem, OracleEvent, TradeRow } from '@/types';
 import { formatCompact, formatDate, formatPercent, formatRelative, shortHash } from './formatters';
 
@@ -84,7 +85,7 @@ function polyscanTxUrl(txHash?: string | null) {
   const clean = String(txHash || '').trim();
   if (!clean) return null;
   const normalized = clean.startsWith('0x') ? clean : `0x${clean}`;
-  return /^0x[a-fA-F0-9]{64}$/.test(normalized) ? `https://polygonscan.com/tx/${normalized}` : null;
+  return publicSource('VITE_PUBLIC_EXPLORER_TX_URL') && /^0x[a-fA-F0-9]{64}$/.test(normalized) ? `${publicSource('VITE_PUBLIC_EXPLORER_TX_URL')}${normalized}` : null;
 }
 
 function normalizedTxHash(txHash?: string | null) {

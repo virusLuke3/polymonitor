@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from data_sources import source_value
+
 import json
 import os
 import re
@@ -313,7 +315,7 @@ def _try_channel_scrape(
         return None
     html = _http_text_get(
         dependencies,
-        f"https://www.youtube.com/@{normalized_channel}/live",
+        f"{source_value('POLYMONITOR_URL_WWW_YOUTUBE_COM_9F1660')}{normalized_channel}/live",
         timeout=10,
     )
     return parse_channel_html(html)
@@ -327,7 +329,7 @@ def _try_oembed(
         return None
     payload = _http_json_get(
         dependencies,
-        f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={quote_plus(video_id)}&format=json",
+        f"{source_value('POLYMONITOR_URL_WWW_YOUTUBE_COM_OEMBED_0E7B25')}{quote_plus(video_id)}&format=json",
         timeout=5,
     )
     return {

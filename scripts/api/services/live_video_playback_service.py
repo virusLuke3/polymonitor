@@ -1,6 +1,8 @@
 """Same-channel playback candidates; the TV watcher owns live-ID resolution."""
 from __future__ import annotations
 
+from data_sources import source_value
+
 import json
 import re
 import time
@@ -79,7 +81,7 @@ def refresh_live_channels(dependencies: Any) -> dict[str, Any]:
             return channel, old
         try:
             pinned = channel.removeprefix("video:") if channel.startswith("video:") else ""
-            url = f"https://www.youtube.com/watch?v={pinned}" if pinned else f"https://www.youtube.com/channel/{channel}/live"
+            url = f"{source_value('POLYMONITOR_URL_WWW_YOUTUBE_COM_WATCH_53792E')}{pinned}" if pinned else f"{source_value('POLYMONITOR_URL_WWW_YOUTUBE_COM_CHANNEL_98A40C')}{channel}/live"
             # Anonymous crawler consent, as used by yt-dlp; no user/account cookies.
             # Otherwise European exits redirect to a consent page without video data.
             html = fetch(url, timeout=30,

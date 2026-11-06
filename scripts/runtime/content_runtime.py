@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+from data_sources import source_value
+
 import threading
 import time
 import xml.etree.ElementTree as ET
@@ -23,12 +25,12 @@ from data_sources import CONTENT_TOPIC_REGISTRY, env_str, rss_feeds, non_empty_f
 
 DEFAULT_CACHE_TTL_SECONDS = 900
 DEFAULT_TIMEOUT_SECONDS = 10
-DEFAULT_GDELT_DOC_API_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
+DEFAULT_GDELT_DOC_API_URL = source_value('POLYDATA_GEO_SHOCK_GDELT_DOC_API_URL')
 MAX_FEED_WORKERS = 10
 MAX_ITEMS_PER_FEED = 25
 MAX_DYNAMIC_ITEMS_PER_FEED = 20
 ATOM_NS = "{http://www.w3.org/2005/Atom}"
-GOOGLE_NEWS_RSS_TEMPLATE = "https://news.google.com/rss/search?q={query}&hl=en-US&gl=US&ceid=US:en"
+GOOGLE_NEWS_RSS_TEMPLATE = source_value('POLYMONITOR_URL_NEWS_GOOGLE_COM_RSS_SEARCH_A2AC64')
 SOURCE_TIER_BONUS = {
     "Reuters": 20,
     "AP News": 18,
@@ -411,7 +413,7 @@ class RuntimeContentProvider:
     def _fetch_arxiv_research_items(self, *, query: str, category: str) -> List[RuntimeContentItem]:
         try:
             response = self._session.get(
-                "https://export.arxiv.org/api/query",
+                source_value('POLYMONITOR_URL_EXPORT_ARXIV_ORG_API_QUERY_BBD545'),
                 params={
                     "search_query": f"all:{query}",
                     "start": 0,
@@ -441,7 +443,7 @@ class RuntimeContentProvider:
     def _fetch_semantic_scholar_items(self, *, query: str, category: str) -> List[RuntimeContentItem]:
         try:
             response = self._session.get(
-                "https://api.semanticscholar.org/graph/v1/paper/search",
+                source_value('POLYMONITOR_URL_API_SEMANTICSCHOLAR_ORG_GRAPH_V1_PAPER_SEARCH_607054'),
                 params={
                     "query": query,
                     "limit": 8,
@@ -460,7 +462,7 @@ class RuntimeContentProvider:
                 continue
             title = str(row.get("title") or "").strip()
             paper_id = str(row.get("paperId") or "").strip()
-            url = str(row.get("url") or "").strip() or (f"https://www.semanticscholar.org/paper/{paper_id}" if paper_id else "")
+            url = str(row.get("url") or "").strip() or (f"{source_value('POLYMONITOR_URL_WWW_SEMANTICSCHOLAR_ORG_PAPER_029B7F')}{paper_id}" if paper_id else "")
             if not title or not url:
                 continue
             summary = self._clean_summary(str(row.get("abstract") or ""))
@@ -635,7 +637,7 @@ class RuntimeContentProvider:
             return []
         try:
             response = self._session.post(
-                "https://api.tavily.com/search",
+                source_value('POLYDATA_TAVILY_SEARCH_URL'),
                 json={
                     "api_key": key,
                     "query": query,
@@ -676,7 +678,7 @@ class RuntimeContentProvider:
             return []
         try:
             response = self._session.get(
-                "https://api.search.brave.com/res/v1/web/search",
+                source_value('POLYMONITOR_URL_API_SEARCH_BRAVE_COM_RES_V1_WEB_SEARCH_350668'),
                 params={"q": query, "count": 8, "freshness": "pd"},
                 timeout=self.timeout_seconds,
                 headers={"Accept": "application/json", "X-Subscription-Token": key},
@@ -710,7 +712,7 @@ class RuntimeContentProvider:
             return []
         try:
             response = self._session.get(
-                "https://serpapi.com/search.json",
+                source_value('POLYMONITOR_URL_SERPAPI_COM_SEARCH_JSON_8D6975'),
                 params={"engine": "google_news", "q": query, "api_key": key, "num": 8},
                 timeout=self.timeout_seconds,
                 headers={"Accept": "application/json"},

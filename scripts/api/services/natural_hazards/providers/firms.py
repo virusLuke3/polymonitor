@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from data_sources import source_value
+
 import csv
 import io
 import math
@@ -16,9 +18,9 @@ from ..normalize import finite_number
 
 
 PROVIDER_KEY = "firms"
-DEFAULT_BASE_URL = "https://firms.modaps.eosdis.nasa.gov/api/area/csv"
+DEFAULT_BASE_URL = source_value('POLYDATA_NATURAL_HAZARDS_FIRMS_BASE_URL')
 DEFAULT_SOURCE = "VIIRS_NOAA20_NRT"
-SOURCE_URL = "https://firms.modaps.eosdis.nasa.gov/api/area/"
+SOURCE_URL = source_value('POLYMONITOR_URL_FIRMS_MODAPS_EOSDIS_NASA_GOV_API_AREA_24DB88')
 GRID_DEGREES = 0.5
 MAX_AGGREGATES = 250
 MAX_VIEWPORT_DETECTIONS = 1_200
@@ -180,7 +182,7 @@ def _cluster_rows(rows: Iterable[Mapping[str, str]], source: str, limit: int) ->
 
 # NASA's documented public 24-hour download is the same NOAA-20 product.
 # Keep one download in the existing snapshot store for both map scales.
-PUBLIC_NOAA20_URL = "https://firms.modaps.eosdis.nasa.gov/data/active_fire/noaa-20-viirs-c2/csv/J1_VIIRS_C2_Global_24h.csv"
+PUBLIC_NOAA20_URL = source_value('POLYMONITOR_URL_FIRMS_MODAPS_EOSDIS_NASA_GOV_DATA_ACTIVE_FIRE_NOAA_20_VIIRS_C2_CSV_J1_VIIRS_C2_G_9C90BB')
 
 
 def _rows(http_text_get, *, map_key, base_url, source, area, snapshot_store=None, resources=None):
@@ -196,7 +198,7 @@ def _rows(http_text_get, *, map_key, base_url, source, area, snapshot_store=None
                if map_key else PUBLIC_NOAA20_URL)
         text = str(http_text_get(url, timeout=12, headers={
             "Accept": "text/csv",
-            "User-Agent": "polymonitor-world-event-map/1.0 (https://polymonitor.club)",
+            "User-Agent": "polymonitor-world-event-map/1.0",
         }) or "")
         reader = csv.DictReader(io.StringIO(text))
         if not reader.fieldnames or not {"latitude", "longitude", "acq_date", "acq_time"}.issubset(reader.fieldnames):

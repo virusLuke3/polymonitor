@@ -1,6 +1,8 @@
 """Read-only projections. Never contact a provider or advance a success clock."""
 from __future__ import annotations
 
+from data_sources import source_value
+
 import json
 import os
 import time
@@ -50,7 +52,7 @@ def get_snapshot(store, panel_id, *, limit=200):
         from api.services.official_disclosures_service import SOURCES, source_meta
         state = store.get_stale(SOURCES, "federal-register:presidential") or {}
         meta = source_meta(state, time.time())
-        sources.append({**meta, "id": "federal-register:presidential", "url": "https://www.federalregister.gov/presidential-documents"})
+        sources.append({**meta, "id": "federal-register:presidential", "url": source_value('POLYMONITOR_URL_WWW_FEDERALREGISTER_GOV_PRESIDENTIAL_DOCUMENTS_F56EA4')})
         payload = {**state.get("data", {}), "items": state.get("data", {}).get("items", [])[:limit]}
     elif panel_id == "politics-appointments":
         payload = {**read("presidential-nominations"), "confirmations": [], "hearings": []}
@@ -60,7 +62,7 @@ def get_snapshot(store, panel_id, *, limit=200):
         index = store.get_stale(SOURCE_NS, "bill-index") or {}
         details = []
         for identity in index.get("ids", [])[-100:]:
-            data, meta = source(store, "bill:" + identity, "https://www.govinfo.gov/bulkdata/BILLSTATUS")
+            data, meta = source(store, "bill:" + identity, source_value('POLYMONITOR_URL_WWW_GOVINFO_GOV_BULKDATA_BILLSTATUS_643E59'))
             if data:
                 details.append({**data, "source": meta})
         details.sort(key=lambda r: r.get("updatedAt") or "", reverse=True)

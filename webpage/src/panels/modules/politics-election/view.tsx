@@ -1,3 +1,4 @@
+import { publicSource } from '@/config/publicSources';
 import { useState } from 'preact/hooks';
 import { Bar, Empty, Evidence, Link, Note, Row, Scope, Shell, Stat, Tabs, useCopy } from '../../shared/politics/ui';
 import { num, partyTone } from '../../shared/politics/model';
@@ -20,7 +21,7 @@ export function View({ data }: { data?: Payload }) {
       <div className="pol-stats">{race.choices.slice(0,2).map(c=><Stat key={c.name} label={c.name} value={num(c.votes)} tone={partyTone(c.party)}/>)}</div>
       {race.choices.map(c=><Bar key={c.name} label={c.name} value={`${num(c.votes)} · ${total ? num(c.votes/total*100,2)+'%':'—'}`} percent={total ? c.votes/total*100:null} tone={partyTone(c.party)}/>)}
       <Note>{t('已发布分区统计；认证状态与剩余票数尚未核实。','Published precinct tabulation; certification and remaining votes are unverified.')}</Note><Row label={t('文件中覆盖县数','Counties in file')} value={race.counties}/>
-      <Evidence><Link href="https://www.ncsbe.gov/results-data/election-results/historical-election-results-data">NCSBE</Link><p>{t('分区重分配文件不作为官方结果认证证据；不由报告比例推算剩余票，不宣布获胜者。','Precinct-sorted files are not certification evidence. No remaining-vote estimate or winner is inferred.')}</p></Evidence>
+      <Evidence><Link href={publicSource('VITE_PUBLIC_ELECTION_RESULTS_SOURCE_URL') || undefined}>NCSBE</Link><p>{t('分区重分配文件不作为官方结果认证证据；不由报告比例推算剩余票，不宣布获胜者。','Precinct-sorted files are not certification evidence. No remaining-vote estimate or winner is inferred.')}</p></Evidence>
     </> : <Empty>{t('所选范围尚无票数记录。','No vote records for this scope.')}</Empty> : <Empty>{t('尚未接入当前竞选的认证、重计票与法院事件。已有票数不会自动标为认证。','Certification, recount and court events are not yet connected. Vote totals do not imply certification.')}</Empty>}
   </Shell>;
 }

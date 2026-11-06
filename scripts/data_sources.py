@@ -3,14 +3,34 @@
 import os
 from typing import Dict, List
 from urllib.parse import urlparse
+from runtime.environment import configured_value
 
 
 def env_str(name: str, default: str = "") -> str:
-    value = os.environ.get(name)
+    value = configured_value(name, default)
     if value is None:
         return default
     text = str(value).strip().strip('"').strip("'")
     return text or default
+
+
+def source_value(name: str) -> str:
+    """An absent source has no hidden endpoint/proxy fallback."""
+    return configured_value(name).strip()
+
+
+def resolve_source_references(value):
+    """Resolve catalog ${NAME} leaves, never expose the complete environment."""
+    if isinstance(value, str) and value.startswith("${") and value.endswith("}"):
+        name = value[2:-1]
+        if not name.replace("_", "").isalnum() or name != name.upper():
+            raise ValueError("Invalid source configuration reference")
+        return source_value(name)
+    if isinstance(value, list):
+        return [resolve_source_references(item) for item in value]
+    if isinstance(value, dict):
+        return {key: resolve_source_references(item) for key, item in value.items()}
+    return value
 
 
 def require_self_hosted_polygon_rpc_url(value: str) -> str:
@@ -33,422 +53,422 @@ def rss_feeds() -> List[Dict[str, str]]:
     return [
         {
             "source": "BBC World",
-            "url": env_str("POLYDATA_RSS_BBC_WORLD_URL", "https://feeds.bbci.co.uk/news/world/rss.xml"),
+            "url": source_value('POLYDATA_RSS_BBC_WORLD_URL'),
             "category": "World",
         },
         {
             "source": "BBC Politics",
-            "url": env_str("POLYDATA_RSS_BBC_POLITICS_URL", "https://feeds.bbci.co.uk/news/politics/rss.xml"),
+            "url": source_value('POLYDATA_RSS_BBC_POLITICS_URL'),
             "category": "Politics",
         },
         {
             "source": "Guardian World",
-            "url": env_str("POLYDATA_RSS_GUARDIAN_WORLD_URL", "https://www.theguardian.com/world/rss"),
+            "url": source_value('POLYDATA_RSS_GUARDIAN_WORLD_URL'),
             "category": "World",
         },
         {
             "source": "NPR News",
-            "url": env_str("POLYDATA_RSS_NPR_NEWS_URL", "https://feeds.npr.org/1001/rss.xml"),
+            "url": source_value('POLYDATA_RSS_NPR_NEWS_URL'),
             "category": "US",
         },
         {
             "source": "PBS NewsHour",
-            "url": env_str("POLYDATA_RSS_PBS_NEWSHOUR_URL", "https://www.pbs.org/newshour/feeds/rss/headlines"),
+            "url": source_value('POLYDATA_RSS_PBS_NEWSHOUR_URL'),
             "category": "US",
         },
         {
             "source": "ABC News",
-            "url": env_str("POLYDATA_RSS_ABC_NEWS_URL", "https://feeds.abcnews.com/abcnews/topstories"),
+            "url": source_value('POLYDATA_RSS_ABC_NEWS_URL'),
             "category": "US",
         },
         {
             "source": "CBS News",
-            "url": env_str("POLYDATA_RSS_CBS_NEWS_URL", "https://www.cbsnews.com/latest/rss/main"),
+            "url": source_value('POLYDATA_RSS_CBS_NEWS_URL'),
             "category": "US",
         },
         {
             "source": "NBC News",
-            "url": env_str("POLYDATA_RSS_NBC_NEWS_URL", "https://feeds.nbcnews.com/nbcnews/public/news"),
+            "url": source_value('POLYDATA_RSS_NBC_NEWS_URL'),
             "category": "US",
         },
         {
             "source": "Axios",
-            "url": env_str("POLYDATA_RSS_AXIOS_URL", "https://api.axios.com/feed/"),
+            "url": source_value('POLYDATA_RSS_AXIOS_URL'),
             "category": "US",
         },
         {
             "source": "AP News",
-            "url": env_str("POLYDATA_RSS_AP_NEWS_URL", "https://news.google.com/rss/search?q=site:apnews.com+when:3d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_AP_NEWS_URL'),
             "category": "World",
         },
         {
             "source": "CNN World",
-            "url": env_str("POLYDATA_RSS_CNN_WORLD_URL", "https://news.google.com/rss/search?q=site:cnn.com+world+news+when:2d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_CNN_WORLD_URL'),
             "category": "World",
         },
         {
             "source": "France 24",
-            "url": env_str("POLYDATA_RSS_FRANCE24_URL", "https://www.france24.com/en/rss"),
+            "url": source_value('POLYDATA_RSS_FRANCE24_URL'),
             "category": "World",
         },
         {
             "source": "Euronews",
-            "url": env_str("POLYDATA_RSS_EURONEWS_URL", "https://www.euronews.com/rss?format=xml"),
+            "url": source_value('POLYDATA_RSS_EURONEWS_URL'),
             "category": "World",
         },
         {
             "source": "DW News",
-            "url": env_str("POLYDATA_RSS_DW_NEWS_URL", "https://rss.dw.com/xml/rss-en-all"),
+            "url": source_value('POLYDATA_RSS_DW_NEWS_URL'),
             "category": "World",
         },
         {
             "source": "Reuters World",
-            "url": env_str("POLYDATA_RSS_REUTERS_WORLD_URL", "https://news.google.com/rss/search?q=site:reuters.com+world+when:3d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_REUTERS_WORLD_URL'),
             "category": "World",
         },
         {
             "source": "Reuters Business",
-            "url": env_str("POLYDATA_RSS_REUTERS_BUSINESS_URL", "https://news.google.com/rss/search?q=site:reuters.com+business+markets+when:3d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_REUTERS_BUSINESS_URL'),
             "category": "Finance",
         },
         {
             "source": "Politico",
-            "url": env_str("POLYDATA_RSS_POLITICO_URL", "https://rss.politico.com/politics-news.xml"),
+            "url": source_value('POLYDATA_RSS_POLITICO_URL'),
             "category": "Politics",
         },
         {
             "source": "The Hill",
-            "url": env_str("POLYDATA_RSS_THE_HILL_URL", "https://thehill.com/news/feed/"),
+            "url": source_value('POLYDATA_RSS_THE_HILL_URL'),
             "category": "Politics",
         },
         {
             "source": "White House",
-            "url": env_str("POLYDATA_RSS_WHITE_HOUSE_URL", "https://www.whitehouse.gov/briefings-statements/feed/"),
+            "url": source_value('POLYDATA_RSS_WHITE_HOUSE_URL'),
             "category": "Government",
         },
         {
             "source": "Federal Reserve",
-            "url": env_str("POLYDATA_RSS_FEDERAL_RESERVE_URL", "https://www.federalreserve.gov/feeds/press_all.xml"),
+            "url": source_value('POLYDATA_RSS_FEDERAL_RESERVE_URL'),
             "category": "Government",
         },
         {
             "source": "SEC",
-            "url": env_str("POLYDATA_RSS_SEC_URL", "https://www.sec.gov/news/pressreleases.rss"),
+            "url": source_value('POLYDATA_RSS_SEC_URL'),
             "category": "Government",
         },
         {
             "source": "UN News",
-            "url": env_str("POLYDATA_RSS_UN_NEWS_URL", "https://news.un.org/feed/subscribe/en/news/all/rss.xml"),
+            "url": source_value('POLYDATA_RSS_UN_NEWS_URL'),
             "category": "Government",
         },
         {
             "source": "CISA",
-            "url": env_str("POLYDATA_RSS_CISA_URL", "https://www.cisa.gov/cybersecurity-advisories/all.xml"),
+            "url": source_value('POLYDATA_RSS_CISA_URL'),
             "category": "Government",
         },
         {
             "source": "Al Jazeera",
-            "url": env_str("POLYDATA_RSS_AL_JAZEERA_URL", "https://www.aljazeera.com/xml/rss/all.xml"),
+            "url": source_value('POLYDATA_RSS_AL_JAZEERA_URL'),
             "category": "World",
         },
         {
             "source": "CNBC",
-            "url": env_str("POLYDATA_RSS_CNBC_URL", "https://www.cnbc.com/id/100003114/device/rss/rss.html"),
+            "url": source_value('POLYDATA_RSS_CNBC_URL'),
             "category": "Finance",
         },
         {
             "source": "Yahoo Finance",
-            "url": env_str("POLYDATA_RSS_YAHOO_FINANCE_URL", "https://finance.yahoo.com/news/rssindex"),
+            "url": source_value('POLYDATA_RSS_YAHOO_FINANCE_URL'),
             "category": "Finance",
         },
         {
             "source": "Financial Times",
-            "url": env_str("POLYDATA_RSS_FINANCIAL_TIMES_URL", "https://www.ft.com/rss/home"),
+            "url": source_value('POLYDATA_RSS_FINANCIAL_TIMES_URL'),
             "category": "Finance",
         },
         {
             "source": "Seeking Alpha",
-            "url": env_str("POLYDATA_RSS_SEEKING_ALPHA_URL", "https://seekingalpha.com/market_currents.xml"),
+            "url": source_value('POLYDATA_RSS_SEEKING_ALPHA_URL'),
             "category": "Finance",
         },
         {
             "source": "MarketWatch",
-            "url": env_str("POLYDATA_RSS_MARKETWATCH_URL", "https://news.google.com/rss/search?q=site:marketwatch.com+markets+when:2d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_MARKETWATCH_URL'),
             "category": "Finance",
         },
         {
             "source": "Bond Market",
-            "url": env_str("POLYDATA_RSS_BOND_MARKET_URL", "https://news.google.com/rss/search?q=(%22bond+market%22+OR+%22treasury+yield%22+OR+%22fixed+income%22)+when:2d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_BOND_MARKET_URL'),
             "category": "Finance",
         },
         {
             "source": "Options Market",
-            "url": env_str("POLYDATA_RSS_OPTIONS_MARKET_URL", "https://news.google.com/rss/search?q=(%22options+market%22+OR+VIX+OR+%22market+volatility%22)+when:2d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_OPTIONS_MARKET_URL'),
             "category": "Finance",
         },
         {
             "source": "Economic Data",
-            "url": env_str("POLYDATA_RSS_ECONOMIC_DATA_URL", "https://news.google.com/rss/search?q=(CPI+OR+inflation+OR+GDP+OR+%22jobs+report%22+OR+unemployment)+when:2d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_ECONOMIC_DATA_URL'),
             "category": "Macro",
         },
         {
             "source": "Oil & Gas",
-            "url": env_str("POLYDATA_RSS_OIL_GAS_URL", "https://news.google.com/rss/search?q=(oil+price+OR+OPEC+OR+%22natural+gas%22+OR+pipeline+OR+LNG+OR+WTI+OR+Brent)+when:2d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_OIL_GAS_URL'),
             "category": "Energy",
         },
         {
             "source": "Reuters Energy",
-            "url": env_str("POLYDATA_RSS_REUTERS_ENERGY_URL", "https://news.google.com/rss/search?q=site:reuters.com+energy+oil+OPEC+when:2d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_REUTERS_ENERGY_URL'),
             "category": "Energy",
         },
         {
             "source": "Gold & Metals",
-            "url": env_str("POLYDATA_RSS_GOLD_METALS_URL", "https://news.google.com/rss/search?q=(%22gold+price%22+OR+%22silver+price%22+OR+%22copper+price%22+OR+%22precious+metals%22)+when:2d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_GOLD_METALS_URL'),
             "category": "Commodities",
         },
         {
             "source": "CoinDesk",
-            "url": env_str("POLYDATA_RSS_COINDESK_URL", "https://www.coindesk.com/arc/outboundfeeds/rss/"),
+            "url": source_value('POLYDATA_RSS_COINDESK_URL'),
             "category": "Crypto",
         },
         {
             "source": "Cointelegraph",
-            "url": env_str("POLYDATA_RSS_COINTELEGRAPH_URL", "https://cointelegraph.com/rss"),
+            "url": source_value('POLYDATA_RSS_COINTELEGRAPH_URL'),
             "category": "Crypto",
         },
         {
             "source": "Decrypt",
-            "url": env_str("POLYDATA_RSS_DECRYPT_URL", "https://decrypt.co/feed"),
+            "url": source_value('POLYDATA_RSS_DECRYPT_URL'),
             "category": "Crypto",
         },
         {
             "source": "The Block",
-            "url": env_str("POLYDATA_RSS_THE_BLOCK_URL", "https://news.google.com/rss/search?q=site:theblock.co+when:1d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_THE_BLOCK_URL'),
             "category": "Crypto",
         },
         {
             "source": "Blockworks",
-            "url": env_str("POLYDATA_RSS_BLOCKWORKS_URL", "https://blockworks.co/feed"),
+            "url": source_value('POLYDATA_RSS_BLOCKWORKS_URL'),
             "category": "Crypto",
         },
         {
             "source": "The Defiant",
-            "url": env_str("POLYDATA_RSS_THE_DEFIANT_URL", "https://thedefiant.io/feed"),
+            "url": source_value('POLYDATA_RSS_THE_DEFIANT_URL'),
             "category": "Crypto",
         },
         {
             "source": "Bitcoin Magazine",
-            "url": env_str("POLYDATA_RSS_BITCOIN_MAGAZINE_URL", "https://bitcoinmagazine.com/feed"),
+            "url": source_value('POLYDATA_RSS_BITCOIN_MAGAZINE_URL'),
             "category": "Crypto",
         },
         {
             "source": "Stablecoin Policy",
-            "url": env_str("POLYDATA_RSS_STABLECOIN_POLICY_URL", "https://news.google.com/rss/search?q=(stablecoin+regulation+OR+%22stablecoin+bill%22+OR+USDT+OR+USDC)+when:7d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_STABLECOIN_POLICY_URL'),
             "category": "Crypto",
         },
         {
             "source": "Polymarket News",
-            "url": env_str("POLYDATA_RSS_POLYMARKET_NEWS_URL", "https://news.google.com/rss/search?q=(Polymarket+OR+%22prediction+market%22+OR+%22prediction+markets%22)+when:7d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_POLYMARKET_NEWS_URL'),
             "category": "Prediction Markets",
         },
         {
             "source": "Election Markets",
-            "url": env_str("POLYDATA_RSS_ELECTION_MARKETS_URL", "https://news.google.com/rss/search?q=(election+polls+OR+presidential+election+OR+nominee+OR+campaign)+when:3d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_ELECTION_MARKETS_URL'),
             "category": "Elections",
         },
         {
             "source": "Geopolitics Markets",
-            "url": env_str("POLYDATA_RSS_GEOPOLITICS_MARKETS_URL", "https://news.google.com/rss/search?q=(war+ceasefire+sanctions+Iran+Ukraine+China+Taiwan)+when:2d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_GEOPOLITICS_MARKETS_URL'),
             "category": "Geopolitics",
         },
         {
             "source": "Macro Markets",
-            "url": env_str("POLYDATA_RSS_MACRO_MARKETS_URL", "https://news.google.com/rss/search?q=(Fed+inflation+CPI+rates+jobs+oil+markets)+when:2d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_MACRO_MARKETS_URL'),
             "category": "Macro",
         },
         {
             "source": "Tech Markets",
-            "url": env_str("POLYDATA_RSS_TECH_MARKETS_URL", "https://news.google.com/rss/search?q=(AI+OpenAI+Nvidia+Tesla+Elon+technology)+when:3d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_TECH_MARKETS_URL'),
             "category": "Tech",
         },
         {
             "source": "TechCrunch",
-            "url": env_str("POLYDATA_RSS_TECHCRUNCH_URL", "https://techcrunch.com/feed/"),
+            "url": source_value('POLYDATA_RSS_TECHCRUNCH_URL'),
             "category": "Tech",
         },
         {
             "source": "The Verge",
-            "url": env_str("POLYDATA_RSS_THE_VERGE_URL", "https://www.theverge.com/rss/index.xml"),
+            "url": source_value('POLYDATA_RSS_THE_VERGE_URL'),
             "category": "Tech",
         },
         {
             "source": "MIT Tech Review",
-            "url": env_str("POLYDATA_RSS_MIT_TECH_REVIEW_URL", "https://www.technologyreview.com/feed/"),
+            "url": source_value('POLYDATA_RSS_MIT_TECH_REVIEW_URL'),
             "category": "Tech",
         },
         {
             "source": "VentureBeat AI",
-            "url": env_str("POLYDATA_RSS_VENTUREBEAT_AI_URL", "https://venturebeat.com/category/ai/feed/"),
+            "url": source_value('POLYDATA_RSS_VENTUREBEAT_AI_URL'),
             "category": "Tech",
         },
         {
             "source": "ArXiv AI",
-            "url": env_str("POLYDATA_RSS_ARXIV_AI_URL", "https://export.arxiv.org/rss/cs.AI"),
+            "url": source_value('POLYDATA_RSS_ARXIV_AI_URL'),
             "category": "Research",
         },
         {
             "source": "Semiconductor News",
-            "url": env_str("POLYDATA_RSS_SEMICONDUCTOR_NEWS_URL", "https://news.google.com/rss/search?q=(semiconductor+OR+chip+OR+TSMC+OR+NVIDIA+OR+Intel)+when:3d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_SEMICONDUCTOR_NEWS_URL'),
             "category": "Tech",
         },
         {
             "source": "ESPN",
-            "url": env_str("POLYDATA_RSS_ESPN_NEWS_URL", "https://www.espn.com/espn/rss/news"),
+            "url": source_value('POLYDATA_RSS_ESPN_NEWS_URL'),
             "category": "Sports",
         },
         {
             "source": "Cricket Markets",
-            "url": env_str("POLYDATA_RSS_CRICKET_MARKETS_URL", "https://news.google.com/rss/search?q=(%22Indian+Premier+League%22+OR+IPL+OR+cricket+OR+Rajasthan+Royals+OR+Lucknow+Super+Giants)+when:7d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_CRICKET_MARKETS_URL'),
             "category": "Sports",
         },
         {
             "source": "Esports Markets",
-            "url": env_str("POLYDATA_RSS_ESPORTS_MARKETS_URL", "https://news.google.com/rss/search?q=(esports+OR+Valorant+OR+%22Counter-Strike%22+OR+%22League+of+Legends%22+OR+Dota+OR+KR%C3%9C+OR+KRU)+when:7d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_ESPORTS_MARKETS_URL'),
             "category": "Esports",
         },
         {
             "source": "HLTV Counter-Strike",
-            "url": env_str("POLYDATA_RSS_HLTV_COUNTER_STRIKE_URL", "https://news.google.com/rss/search?q=site:hltv.org+Counter-Strike+CS2+esports+when:7d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_HLTV_COUNTER_STRIKE_URL'),
             "category": "Esports",
         },
         {
             "source": "Valorant Esports",
-            "url": env_str("POLYDATA_RSS_VALORANT_ESPORTS_URL", "https://news.google.com/rss/search?q=(Valorant+VCT+esports+match+roster)+when:7d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_VALORANT_ESPORTS_URL'),
             "category": "Esports",
         },
         {
             "source": "LoL Esports",
-            "url": env_str("POLYDATA_RSS_LOL_ESPORTS_URL", "https://news.google.com/rss/search?q=(%22League+of+Legends%22+LCK+LPL+LEC+esports+match)+when:7d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_LOL_ESPORTS_URL'),
             "category": "Esports",
         },
         {
             "source": "Dot Esports",
-            "url": env_str("POLYDATA_RSS_DOT_ESPORTS_URL", "https://dotesports.com/feed"),
+            "url": source_value('POLYDATA_RSS_DOT_ESPORTS_URL'),
             "category": "Esports",
         },
         {
             "source": "Sports Markets",
-            "url": env_str("POLYDATA_RSS_SPORTS_MARKETS_URL", "https://news.google.com/rss/search?q=(NBA+NFL+MLB+NHL+UFC+esports+injury+odds)+when:2d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_SPORTS_MARKETS_URL'),
             "category": "Sports",
         },
         {
             "source": "NBA Markets",
-            "url": env_str("POLYDATA_RSS_NBA_MARKETS_URL", "https://news.google.com/rss/search?q=(NBA+injury+lineup+odds+Knicks+Celtics+Thunder+Finals)+when:2d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_NBA_MARKETS_URL'),
             "category": "Sports",
         },
         {
             "source": "Tennis Markets",
-            "url": env_str("POLYDATA_RSS_TENNIS_MARKETS_URL", "https://news.google.com/rss/search?q=(tennis+ATP+WTA+injury+odds+tournament)+when:2d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_TENNIS_MARKETS_URL'),
             "category": "Sports",
         },
         {
             "source": "MLB Markets",
-            "url": env_str("POLYDATA_RSS_MLB_MARKETS_URL", "https://news.google.com/rss/search?q=(MLB+pitcher+lineup+injury+odds)+when:2d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_MLB_MARKETS_URL'),
             "category": "Sports",
         },
         {
             "source": "UFC Markets",
-            "url": env_str("POLYDATA_RSS_UFC_MARKETS_URL", "https://news.google.com/rss/search?q=(UFC+fight+injury+weigh-in+odds)+when:7d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_UFC_MARKETS_URL'),
             "category": "Sports",
         },
         {
             "source": "NBA Official",
-            "url": env_str("POLYDATA_RSS_NBA_OFFICIAL_NEWS_URL", "https://news.google.com/rss/search?q=site:nba.com+NBA+injury+lineup+finals+when:2d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_NBA_OFFICIAL_NEWS_URL'),
             "category": "Sports",
         },
         {
             "source": "ESPN NBA",
-            "url": env_str("POLYDATA_RSS_ESPN_NBA_NEWS_URL", "https://news.google.com/rss/search?q=site:espn.com/nba+NBA+injury+lineup+when:2d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_ESPN_NBA_NEWS_URL'),
             "category": "Sports",
         },
         {
             "source": "The Athletic NBA",
-            "url": env_str("POLYDATA_RSS_ATHLETIC_NBA_NEWS_URL", "https://news.google.com/rss/search?q=site:nytimes.com/athletic+NBA+injury+lineup+when:2d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_ATHLETIC_NBA_NEWS_URL'),
             "category": "Sports",
         },
         {
             "source": "Reuters Politics",
-            "url": env_str("POLYDATA_RSS_REUTERS_POLITICS_URL", "https://news.google.com/rss/search?q=site:reuters.com+US+politics+election+campaign+when:3d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_REUTERS_POLITICS_URL'),
             "category": "Politics",
         },
         {
             "source": "AP Politics",
-            "url": env_str("POLYDATA_RSS_AP_POLITICS_URL", "https://news.google.com/rss/search?q=site:apnews.com+politics+election+campaign+when:3d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_AP_POLITICS_URL'),
             "category": "Politics",
         },
         {
             "source": "Election Polling",
-            "url": env_str("POLYDATA_RSS_ELECTION_POLLING_URL", "https://news.google.com/rss/search?q=(election+polling+OR+%22presidential+poll%22+OR+%22senate+poll%22+OR+FiveThirtyEight)+when:3d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_ELECTION_POLLING_URL'),
             "category": "Elections",
         },
         {
             "source": "Campaign Finance",
-            "url": env_str("POLYDATA_RSS_CAMPAIGN_FINANCE_URL", "https://news.google.com/rss/search?q=(campaign+fundraising+OR+FEC+OR+super+PAC+OR+election+spending)+when:7d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_CAMPAIGN_FINANCE_URL'),
             "category": "Elections",
         },
         {
             "source": "Crypto Regulation",
-            "url": env_str("POLYDATA_RSS_CRYPTO_REGULATION_URL", "https://news.google.com/rss/search?q=(crypto+regulation+OR+SEC+bitcoin+ETF+OR+stablecoin+bill)+when:3d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_CRYPTO_REGULATION_URL'),
             "category": "Crypto",
         },
         {
             "source": "Crypto Markets",
-            "url": env_str("POLYDATA_RSS_CRYPTO_MARKETS_URL", "https://news.google.com/rss/search?q=(bitcoin+ethereum+solana+crypto+market+ETF+flows)+when:1d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_CRYPTO_MARKETS_URL'),
             "category": "Crypto",
         },
         {
             "source": "Coinbase Blog",
-            "url": env_str("POLYDATA_RSS_COINBASE_BLOG_URL", "https://www.coinbase.com/blog/rss"),
+            "url": source_value('POLYDATA_RSS_COINBASE_BLOG_URL'),
             "category": "Crypto",
         },
         {
             "source": "OpenAI News",
-            "url": env_str("POLYDATA_RSS_OPENAI_NEWS_URL", "https://openai.com/news/rss.xml"),
+            "url": source_value('POLYDATA_RSS_OPENAI_NEWS_URL'),
             "category": "Tech",
         },
         {
             "source": "Google AI",
-            "url": env_str("POLYDATA_RSS_GOOGLE_AI_NEWS_URL", "https://news.google.com/rss/search?q=site:blog.google/technology/ai+Google+AI+Gemini+when:7d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_GOOGLE_AI_NEWS_URL'),
             "category": "Tech",
         },
         {
             "source": "Anthropic News",
-            "url": env_str("POLYDATA_RSS_ANTHROPIC_NEWS_URL", "https://news.google.com/rss/search?q=site:anthropic.com/news+Claude+Anthropic+when:7d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_ANTHROPIC_NEWS_URL'),
             "category": "Tech",
         },
         {
             "source": "AI Markets",
-            "url": env_str("POLYDATA_RSS_AI_MARKETS_URL", "https://news.google.com/rss/search?q=(OpenAI+Anthropic+Gemini+Nvidia+AI+model+LLM)+when:2d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_AI_MARKETS_URL'),
             "category": "Research",
         },
         {
             "source": "Big Tech Markets",
-            "url": env_str("POLYDATA_RSS_BIG_TECH_MARKETS_URL", "https://news.google.com/rss/search?q=(Apple+Microsoft+Google+Amazon+Meta+Tesla+Nvidia)+earnings+when:3d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_BIG_TECH_MARKETS_URL'),
             "category": "Tech",
         },
         {
             "source": "NHC Advisories",
-            "url": env_str("POLYDATA_RSS_NHC_ADVISORIES_URL", "https://www.nhc.noaa.gov/index-at.xml"),
+            "url": source_value('POLYDATA_RSS_NHC_ADVISORIES_URL'),
             "category": "Weather",
         },
         {
             "source": "NOAA Weather",
-            "url": env_str("POLYDATA_RSS_NOAA_WEATHER_URL", "https://news.google.com/rss/search?q=site:noaa.gov+weather+hurricane+storm+temperature+when:3d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_NOAA_WEATHER_URL'),
             "category": "Weather",
         },
         {
             "source": "Weather Markets",
-            "url": env_str("POLYDATA_RSS_WEATHER_MARKETS_URL", "https://news.google.com/rss/search?q=(hurricane+storm+heat+wave+temperature+rainfall+snowfall)+when:2d&hl=en-US&gl=US&ceid=US:en"),
+            "url": source_value('POLYDATA_RSS_WEATHER_MARKETS_URL'),
             "category": "Weather",
         },
     ]

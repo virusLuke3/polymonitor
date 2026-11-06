@@ -1,10 +1,12 @@
 """Canadian official alerts, native GeoMet geometry and validity (no centroids)."""
+
+from data_sources import source_value
 from datetime import datetime, timezone
 from ..contracts import SEVERITY_MAPPING_VERSION
 from ..normalize import compact_text, iso_timestamp
 from ..source_health import SOURCE_COVERAGE
 
-URL = "https://api.weather.gc.ca/collections/weather-alerts/items"
+URL = source_value('POLYMONITOR_URL_API_WEATHER_GC_CA_COLLECTIONS_WEATHER_ALERTS_ITEMS_32F47F')
 
 
 def fetch(http_json_get, *, now=None):

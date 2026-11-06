@@ -9,8 +9,8 @@
       "source_id": "global-voices",
       "publisher_id": "global-voices",
       "publisher_name": "Global Voices",
-      "feed_url": "https://globalvoices.org/feed/",
-      "discovery_url": "https://globalvoices.org/feeds/",
+      "feed_url": "${POLYMONITOR_URL_GLOBALVOICES_ORG_FEED_FAA292}",
+      "discovery_url": "${POLYMONITOR_URL_GLOBALVOICES_ORG_FEEDS_174F1D}",
       "transport": "rss-atom",
       "source_kind": "news_report",
       "topics": [
@@ -18,7 +18,7 @@
       ],
       "poll_interval_seconds": 900,
       "enabled": true,
-      "policy_url": "https://globalvoices.org/about/global-voices-attribution-policy/",
+      "policy_url": "${POLYMONITOR_URL_GLOBALVOICES_ORG_ABOUT_GLOBAL_VOICES_ATTRIBUTION_POLICY_235ADE}",
       "permission_basis": "CC BY 3.0; original Global Voices text only",
       "attribution_requirements": [
         "publisher",
@@ -38,16 +38,16 @@
       "probe_status": "passed",
       "probe": {
         "source_id": "global-voices",
-        "configured_url": "https://globalvoices.org/feed/",
+        "configured_url": "${POLYMONITOR_URL_GLOBALVOICES_ORG_FEED_FAA292}",
         "checked_at": "2026-10-01T02:37:38.686544+00:00",
         "http_status": 200,
-        "final_url": "https://globalvoices.org/feed/",
+        "final_url": "${POLYMONITOR_URL_GLOBALVOICES_ORG_FEED_FAA292}",
         "bytes": 252117,
         "items": 15,
         "sample": [
           {
             "title": "In Brazil’s capital, residents grow their own heat-fighting solutions",
-            "link": "https://globalvoices.org/2026/09/30/in-brazils-capital-residents-grow-their-own-heat-fighting-solutions/",
+            "link": "${POLYMONITOR_URL_GLOBALVOICES_ORG_2026_09_30_IN_BRAZILS_CAPITAL_RESIDENTS_GROW_THEIR_OWN_HEAT_FIG_BF89F6}",
             "creator": "Dialogue Earth",
             "pubDate": "Wed, 30 Sep 2026 14:09:26 +0000"
           }
@@ -59,15 +59,15 @@
       "allowed_hosts": [
         "globalvoices.org"
       ],
-      "license_url": "https://creativecommons.org/licenses/by/3.0/",
+      "license_url": "${POLYMONITOR_URL_CREATIVECOMMONS_ORG_LICENSES_BY_3_0_BF2449}",
       "language": "en"
     },
     {
       "source_id": "bls-cpi",
       "publisher_id": "bls",
       "publisher_name": "U.S. Bureau of Labor Statistics",
-      "feed_url": "https://fraser.stlouisfed.org/title/consumer-price-index-6838?browse=2020s",
-      "discovery_url": "https://fraser.stlouisfed.org/title/consumer-price-index-6838?browse=2020s",
+      "feed_url": "${POLYMONITOR_URL_FRASER_STLOUISFED_ORG_TITLE_CONSUMER_PRICE_INDEX_6838_BB1647}",
+      "discovery_url": "${POLYMONITOR_URL_FRASER_STLOUISFED_ORG_TITLE_CONSUMER_PRICE_INDEX_6838_BB1647}",
       "transport": "fraser-pdf",
       "source_kind": "official_release",
       "topics": [
@@ -75,7 +75,7 @@
       ],
       "poll_interval_seconds": 21600,
       "enabled": true,
-      "policy_url": "https://www.bls.gov/bls/linksite.htm",
+      "policy_url": "${POLYMONITOR_URL_WWW_BLS_GOV_BLS_LINKSITE_HTM_0FE15F}",
       "permission_basis": "BLS public-domain text",
       "attribution_requirements": [
         "publisher",
@@ -109,15 +109,15 @@
       ],
       "license_url": null,
       "language": "en",
-      "legacy_feed_url": "https://www.bls.gov/feed/cpi.rss",
+      "legacy_feed_url": "${POLYMONITOR_URL_WWW_BLS_GOV_FEED_CPI_RSS_B70E65}",
       "release_kind": "cpi"
     },
     {
       "source_id": "bls-empsit",
       "publisher_id": "bls",
       "publisher_name": "U.S. Bureau of Labor Statistics",
-      "feed_url": "https://fraser.stlouisfed.org/title/employment-situation-144?browse=2020s",
-      "discovery_url": "https://fraser.stlouisfed.org/title/employment-situation-144?browse=2020s",
+      "feed_url": "${POLYMONITOR_URL_FRASER_STLOUISFED_ORG_TITLE_EMPLOYMENT_SITUATION_144_56099E}",
+      "discovery_url": "${POLYMONITOR_URL_FRASER_STLOUISFED_ORG_TITLE_EMPLOYMENT_SITUATION_144_56099E}",
       "transport": "fraser-pdf",
       "source_kind": "official_release",
       "topics": [
@@ -125,7 +125,7 @@
       ],
       "poll_interval_seconds": 21600,
       "enabled": true,
-      "policy_url": "https://www.bls.gov/bls/linksite.htm",
+      "policy_url": "${POLYMONITOR_URL_WWW_BLS_GOV_BLS_LINKSITE_HTM_0FE15F}",
       "permission_basis": "BLS public-domain text",
       "attribution_requirements": [
         "publisher",
@@ -159,15 +159,15 @@
       ],
       "license_url": null,
       "language": "en",
-      "legacy_feed_url": "https://www.bls.gov/feed/empsit.rss",
+      "legacy_feed_url": "${POLYMONITOR_URL_WWW_BLS_GOV_FEED_EMPSIT_RSS_BBF6EA}",
       "release_kind": "nfp"
     },
     {
       "source_id": "bls-ppi",
       "publisher_id": "bls",
       "publisher_name": "U.S. Bureau of Labor Statistics",
-      "feed_url": "https://fraser.stlouisfed.org/title/producer-price-indexes-6837?browse=2020s",
-      "discovery_url": "https://fraser.stlouisfed.org/title/producer-price-indexes-6837?browse=2020s",
+      "feed_url": "${POLYMONITOR_URL_FRASER_STLOUISFED_ORG_TITLE_PRODUCER_PRICE_INDEXES_6837_54173D}",
+      "discovery_url": "${POLYMONITOR_URL_FRASER_STLOUISFED_ORG_TITLE_PRODUCER_PRICE_INDEXES_6837_54173D}",
       "transport": "fraser-pdf",
       "source_kind": "official_release",
       "topics": [
@@ -175,7 +175,7 @@
       ],
       "poll_interval_seconds": 21600,
       "enabled": true,
-      "policy_url": "https://www.bls.gov/bls/linksite.htm",
+      "policy_url": "${POLYMONITOR_URL_WWW_BLS_GOV_BLS_LINKSITE_HTM_0FE15F}",
       "permission_basis": "BLS public-domain text",
       "attribution_requirements": [
         "publisher",
@@ -209,15 +209,15 @@
       ],
       "license_url": null,
       "language": "en",
-      "legacy_feed_url": "https://www.bls.gov/feed/ppi.rss",
+      "legacy_feed_url": "${POLYMONITOR_URL_WWW_BLS_GOV_FEED_PPI_RSS_37712F}",
       "release_kind": "ppi"
     },
     {
       "source_id": "fed-monetary",
       "publisher_id": "fed",
       "publisher_name": "Federal Reserve Board",
-      "feed_url": "https://www.federalreserve.gov/feeds/press_monetary.xml",
-      "discovery_url": "https://www.federalreserve.gov/feeds/feeds.htm",
+      "feed_url": "${POLYMONITOR_URL_WWW_FEDERALRESERVE_GOV_FEEDS_PRESS_MONETARY_XML_A12CD4}",
+      "discovery_url": "${POLYMONITOR_URL_WWW_FEDERALRESERVE_GOV_FEEDS_FEEDS_HTM_BF181B}",
       "transport": "rss-atom",
       "source_kind": "official_release",
       "topics": [
@@ -225,7 +225,7 @@
       ],
       "poll_interval_seconds": 600,
       "enabled": true,
-      "policy_url": "https://www.federalreserve.gov/disclaimer.htm",
+      "policy_url": "${POLYMONITOR_URL_WWW_FEDERALRESERVE_GOV_DISCLAIMER_HTM_7BF00C}",
       "permission_basis": "Board public-domain information; attributed",
       "attribution_requirements": [
         "publisher",
@@ -243,16 +243,16 @@
       "probe_status": "passed",
       "probe": {
         "source_id": "fed-monetary",
-        "configured_url": "https://www.federalreserve.gov/feeds/press_monetary.xml",
+        "configured_url": "${POLYMONITOR_URL_WWW_FEDERALRESERVE_GOV_FEEDS_PRESS_MONETARY_XML_A12CD4}",
         "checked_at": "2026-10-01T02:37:39.381805+00:00",
         "http_status": 200,
-        "final_url": "https://www.federalreserve.gov/feeds/press_monetary.xml",
+        "final_url": "${POLYMONITOR_URL_WWW_FEDERALRESERVE_GOV_FEEDS_PRESS_MONETARY_XML_A12CD4}",
         "bytes": 9645,
         "items": 15,
         "sample": [
           {
             "title": "Federal Reserve issues FOMC statement",
-            "link": "https://www.federalreserve.gov/newsevents/pressreleases/monetary20260916a.htm",
+            "link": "${POLYMONITOR_URL_WWW_FEDERALRESERVE_GOV_NEWSEVENTS_PRESSRELEASES_MONETARY20260916A_HTM_DA3BCB}",
             "pubDate": "Wed, 16 Sep 2026 18:00:00 GMT"
           }
         ]
@@ -270,8 +270,8 @@
       "source_id": "fed-all",
       "publisher_id": "fed",
       "publisher_name": "Federal Reserve Board",
-      "feed_url": "https://www.federalreserve.gov/feeds/press_all.xml",
-      "discovery_url": "https://www.federalreserve.gov/feeds/feeds.htm",
+      "feed_url": "${POLYDATA_RSS_FEDERAL_RESERVE_URL}",
+      "discovery_url": "${POLYMONITOR_URL_WWW_FEDERALRESERVE_GOV_FEEDS_FEEDS_HTM_BF181B}",
       "transport": "rss-atom",
       "source_kind": "official_release",
       "topics": [
@@ -279,7 +279,7 @@
       ],
       "poll_interval_seconds": 600,
       "enabled": true,
-      "policy_url": "https://www.federalreserve.gov/disclaimer.htm",
+      "policy_url": "${POLYMONITOR_URL_WWW_FEDERALRESERVE_GOV_DISCLAIMER_HTM_7BF00C}",
       "permission_basis": "Board public-domain information; attributed",
       "attribution_requirements": [
         "publisher",
@@ -297,16 +297,16 @@
       "probe_status": "passed",
       "probe": {
         "source_id": "fed-all",
-        "configured_url": "https://www.federalreserve.gov/feeds/press_all.xml",
+        "configured_url": "${POLYDATA_RSS_FEDERAL_RESERVE_URL}",
         "checked_at": "2026-10-01T02:37:39.387461+00:00",
         "http_status": 200,
-        "final_url": "https://www.federalreserve.gov/feeds/press_all.xml",
+        "final_url": "${POLYDATA_RSS_FEDERAL_RESERVE_URL}",
         "bytes": 14678,
         "items": 20,
         "sample": [
           {
             "title": "Federal Reserve Board finalizes changes to enhance the transparency and public accountability of its stress test and reduce volatility in its stress test-related capital requirements",
-            "link": "https://www.federalreserve.gov/newsevents/pressreleases/bcreg20260930a.htm",
+            "link": "${POLYMONITOR_URL_WWW_FEDERALRESERVE_GOV_NEWSEVENTS_PRESSRELEASES_BCREG20260930A_HTM_2D126D}",
             "pubDate": "Wed, 30 Sep 2026 13:00:00 GMT"
           }
         ]
@@ -324,8 +324,8 @@
       "source_id": "ecb-press",
       "publisher_id": "ecb",
       "publisher_name": "European Central Bank",
-      "feed_url": "https://www.ecb.europa.eu/rss/press.html",
-      "discovery_url": "https://www.ecb.europa.eu/home/html/rss.en.html",
+      "feed_url": "${POLYMONITOR_URL_WWW_ECB_EUROPA_EU_RSS_PRESS_HTML_991C11}",
+      "discovery_url": "${POLYMONITOR_URL_WWW_ECB_EUROPA_EU_HOME_HTML_RSS_EN_HTML_5EB18C}",
       "transport": "rss-atom",
       "source_kind": "official_release",
       "topics": [
@@ -333,7 +333,7 @@
       ],
       "poll_interval_seconds": 900,
       "enabled": true,
-      "policy_url": "https://www.ecb.europa.eu/services/using-our-site/disclaimer/html/index.en.html",
+      "policy_url": "${POLYMONITOR_URL_WWW_ECB_EUROPA_EU_SERVICES_USING_OUR_SITE_DISCLAIMER_HTML_INDEX_EN_HTML_A855BC}",
       "permission_basis": "ECB free accurate reproduction of institutional press releases; excludes author-named documents",
       "attribution_requirements": [
         "publisher",
@@ -351,16 +351,16 @@
       "probe_status": "passed",
       "probe": {
         "source_id": "ecb-press",
-        "configured_url": "https://www.ecb.europa.eu/rss/press.html",
+        "configured_url": "${POLYMONITOR_URL_WWW_ECB_EUROPA_EU_RSS_PRESS_HTML_991C11}",
         "checked_at": "2026-10-01T02:37:39.423026+00:00",
         "http_status": 200,
-        "final_url": "https://www.ecb.europa.eu/rss/press.html",
+        "final_url": "${POLYMONITOR_URL_WWW_ECB_EUROPA_EU_RSS_PRESS_HTML_991C11}",
         "bytes": 5677,
         "items": 15,
         "sample": [
           {
             "title": " Christine Lagarde: Interview with La Croix",
-            "link": "https://www.ecb.europa.eu//press/inter/date/2026/html/ecb.in260930~10084a5f3d.en.html",
+            "link": "${POLYMONITOR_URL_WWW_ECB_EUROPA_EU_PRESS_INTER_DATE_2026_HTML_ECB_IN260930_10084A5F3D_EN_HTML_C4FEF6}",
             "pubDate": "Wed, 30 Sep 2026 19:00:00 +0200"
           }
         ]
@@ -378,8 +378,8 @@
       "source_id": "nasa-release",
       "publisher_id": "nasa",
       "publisher_name": "NASA",
-      "feed_url": "https://www.nasa.gov/news-release/feed/",
-      "discovery_url": "https://www.nasa.gov/rss-feeds/",
+      "feed_url": "${POLYMONITOR_URL_WWW_NASA_GOV_NEWS_RELEASE_FEED_A634BC}",
+      "discovery_url": "${POLYMONITOR_URL_WWW_NASA_GOV_RSS_FEEDS_FE1955}",
       "transport": "rss-atom",
       "source_kind": "official_release",
       "topics": [
@@ -387,7 +387,7 @@
       ],
       "poll_interval_seconds": 900,
       "enabled": true,
-      "policy_url": "https://www.nasa.gov/nasa-brand-center/images-and-media/",
+      "policy_url": "${POLYMONITOR_URL_WWW_NASA_GOV_NASA_BRAND_CENTER_IMAGES_AND_MEDIA_3AA18B}",
       "permission_basis": "NASA factual informational use with attribution; own news-release text only",
       "attribution_requirements": [
         "publisher",
@@ -405,16 +405,16 @@
       "probe_status": "passed",
       "probe": {
         "source_id": "nasa-release",
-        "configured_url": "https://www.nasa.gov/news-release/feed/",
+        "configured_url": "${POLYMONITOR_URL_WWW_NASA_GOV_NEWS_RELEASE_FEED_A634BC}",
         "checked_at": "2026-10-01T02:37:40.073673+00:00",
         "http_status": 200,
-        "final_url": "https://www.nasa.gov/news-release/feed/",
+        "final_url": "${POLYMONITOR_URL_WWW_NASA_GOV_NEWS_RELEASE_FEED_A634BC}",
         "bytes": 234361,
         "items": 10,
         "sample": [
           {
             "title": "Curiosity Blog, Sols 5016–5021: Fantastic Minerals and How To Detect Them",
-            "link": "https://science.nasa.gov/blog/curiosity-blog-sols-5016-5021-fantastic-minerals-and-how-to-detect-them/",
+            "link": "${POLYMONITOR_URL_SCIENCE_NASA_GOV_BLOG_CURIOSITY_BLOG_SOLS_5016_5021_FANTASTIC_MINERALS_AND_HOW_T_6DA7D2}",
             "creator": "",
             "pubDate": "Wed, 30 Sep 2026 23:37:47 +0000"
           }
@@ -434,8 +434,8 @@
       "source_id": "nhc-at",
       "publisher_id": "nhc",
       "publisher_name": "NOAA National Hurricane Center",
-      "feed_url": "https://www.nhc.noaa.gov/index-at.xml",
-      "discovery_url": "https://www.nhc.noaa.gov/aboutrss.shtml",
+      "feed_url": "${POLYDATA_RSS_NHC_ADVISORIES_URL}",
+      "discovery_url": "${POLYMONITOR_URL_WWW_NHC_NOAA_GOV_ABOUTRSS_SHTML_A9F161}",
       "transport": "rss-atom",
       "source_kind": "official_release",
       "topics": [
@@ -443,7 +443,7 @@
       ],
       "poll_interval_seconds": 600,
       "enabled": true,
-      "policy_url": "https://www.weather.gov/disclaimer",
+      "policy_url": "${POLYMONITOR_URL_WWW_WEATHER_GOV_DISCLAIMER_710845}",
       "permission_basis": "NOAA/NWS public-domain products; attributed excerpts",
       "attribution_requirements": [
         "publisher",
@@ -461,17 +461,17 @@
       "probe_status": "passed",
       "probe": {
         "source_id": "nhc-at",
-        "configured_url": "https://www.nhc.noaa.gov/index-at.xml",
+        "configured_url": "${POLYDATA_RSS_NHC_ADVISORIES_URL}",
         "checked_at": "2026-10-01T02:37:40.092618+00:00",
         "http_status": 200,
-        "final_url": "https://www.nhc.noaa.gov/index-at.xml",
+        "final_url": "${POLYDATA_RSS_NHC_ADVISORIES_URL}",
         "bytes": 2090,
         "items": 2,
         "sample": [
           {
             "title": "Atlantic Tropical Weather Outlook",
             "pubDate": "Wed, 30 Sep 2026 23:09:31 GMT",
-            "link": "https://www.nhc.noaa.gov/gtwo.php?basin=atlc",
+            "link": "${POLYMONITOR_URL_WWW_NHC_NOAA_GOV_GTWO_PHP_B5AD93}",
             "author": "nhcwebmaster@noaa.gov (NHC Webmaster)"
           }
         ]
@@ -490,8 +490,8 @@
       "source_id": "nhc-ep",
       "publisher_id": "nhc",
       "publisher_name": "NOAA National Hurricane Center",
-      "feed_url": "https://www.nhc.noaa.gov/index-ep.xml",
-      "discovery_url": "https://www.nhc.noaa.gov/aboutrss.shtml",
+      "feed_url": "${POLYMONITOR_URL_WWW_NHC_NOAA_GOV_INDEX_EP_XML_5C7186}",
+      "discovery_url": "${POLYMONITOR_URL_WWW_NHC_NOAA_GOV_ABOUTRSS_SHTML_A9F161}",
       "transport": "rss-atom",
       "source_kind": "official_release",
       "topics": [
@@ -499,7 +499,7 @@
       ],
       "poll_interval_seconds": 600,
       "enabled": true,
-      "policy_url": "https://www.weather.gov/disclaimer",
+      "policy_url": "${POLYMONITOR_URL_WWW_WEATHER_GOV_DISCLAIMER_710845}",
       "permission_basis": "NOAA/NWS public-domain products; attributed excerpts",
       "attribution_requirements": [
         "publisher",
@@ -517,17 +517,17 @@
       "probe_status": "passed",
       "probe": {
         "source_id": "nhc-ep",
-        "configured_url": "https://www.nhc.noaa.gov/index-ep.xml",
+        "configured_url": "${POLYMONITOR_URL_WWW_NHC_NOAA_GOV_INDEX_EP_XML_5C7186}",
         "checked_at": "2026-10-01T02:37:40.538226+00:00",
         "http_status": 200,
-        "final_url": "https://www.nhc.noaa.gov/index-ep.xml",
+        "final_url": "${POLYMONITOR_URL_WWW_NHC_NOAA_GOV_INDEX_EP_XML_5C7186}",
         "bytes": 30902,
         "items": 13,
         "sample": [
           {
             "title": "Eastern North Pacific Tropical Weather Outlook",
             "pubDate": "Wed, 30 Sep 2026 23:07:02 GMT",
-            "link": "https://www.nhc.noaa.gov/gtwo.php?basin=epac",
+            "link": "${POLYMONITOR_URL_WWW_NHC_NOAA_GOV_GTWO_PHP_EE8E39}",
             "author": "nhcwebmaster@noaa.gov (NHC Webmaster)"
           }
         ]
@@ -546,8 +546,8 @@
       "source_id": "usgs",
       "publisher_id": "usgs",
       "publisher_name": "U.S. Geological Survey",
-      "feed_url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson",
-      "discovery_url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/geojson.php",
+      "feed_url": "${POLYMONITOR_URL_EARTHQUAKE_USGS_GOV_EARTHQUAKES_FEED_V1_0_SUMMARY_ALL_DAY_GEOJSON_64E171}",
+      "discovery_url": "${POLYMONITOR_URL_EARTHQUAKE_USGS_GOV_EARTHQUAKES_FEED_V1_0_GEOJSON_PHP_0B7517}",
       "transport": "snapshot",
       "source_kind": "observation",
       "topics": [
@@ -555,7 +555,7 @@
       ],
       "poll_interval_seconds": 180,
       "enabled": true,
-      "policy_url": "https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits",
+      "policy_url": "${POLYMONITOR_URL_WWW_USGS_GOV_INFORMATION_POLICIES_AND_INSTRUCTIONS_COPYRIGHTS_AND_CREDITS_39F753}",
       "permission_basis": "USGS-produced public-domain observations",
       "attribution_requirements": [
         "publisher",
@@ -573,10 +573,10 @@
       "probe_status": "passed",
       "probe": {
         "source_id": "usgs",
-        "configured_url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson",
+        "configured_url": "${POLYMONITOR_URL_EARTHQUAKE_USGS_GOV_EARTHQUAKES_FEED_V1_0_SUMMARY_ALL_DAY_GEOJSON_64E171}",
         "checked_at": "2026-10-01T02:37:40.856002+00:00",
         "http_status": 200,
-        "final_url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson",
+        "final_url": "${POLYMONITOR_URL_EARTHQUAKE_USGS_GOV_EARTHQUAKES_FEED_V1_0_SUMMARY_ALL_DAY_GEOJSON_64E171}",
         "bytes": 167378,
         "items": 234,
         "sample": [
@@ -587,7 +587,7 @@
             "sent": null,
             "time": 1790821808430,
             "updated": 1790822009845,
-            "url": "https://earthquake.usgs.gov/earthquakes/eventpage/ci41341391"
+            "url": "${POLYMONITOR_URL_EARTHQUAKE_USGS_GOV_EARTHQUAKES_EVENTPAGE_CI41341391_1F4D00}"
           }
         ]
       },
@@ -605,8 +605,8 @@
       "source_id": "nws",
       "publisher_id": "nws",
       "publisher_name": "National Weather Service",
-      "feed_url": "https://api.weather.gov/alerts/active",
-      "discovery_url": "https://www.weather.gov/documentation/services-web-api",
+      "feed_url": "${POLYDATA_NATURAL_HAZARDS_NWS_URL}",
+      "discovery_url": "${POLYMONITOR_URL_WWW_WEATHER_GOV_DOCUMENTATION_SERVICES_WEB_API_61ECA8}",
       "transport": "snapshot",
       "source_kind": "alert",
       "topics": [
@@ -614,7 +614,7 @@
       ],
       "poll_interval_seconds": 300,
       "enabled": true,
-      "policy_url": "https://www.weather.gov/disclaimer",
+      "policy_url": "${POLYMONITOR_URL_WWW_WEATHER_GOV_DISCLAIMER_710845}",
       "permission_basis": "NOAA/NWS public-domain products; attributed excerpts",
       "attribution_requirements": [
         "publisher",
@@ -632,10 +632,10 @@
       "probe_status": "passed",
       "probe": {
         "source_id": "nws",
-        "configured_url": "https://api.weather.gov/alerts/active",
+        "configured_url": "${POLYDATA_NATURAL_HAZARDS_NWS_URL}",
         "checked_at": "2026-10-01T02:37:40.960302+00:00",
         "http_status": 200,
-        "final_url": "https://api.weather.gov/alerts/active",
+        "final_url": "${POLYDATA_NATURAL_HAZARDS_NWS_URL}",
         "bytes": 1462503,
         "items": 293,
         "sample": [

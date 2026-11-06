@@ -1,3 +1,4 @@
+import { publicSource } from '@/config/publicSources';
 import type { PanelRuntimeStatus } from '@/panels/types';
 import { RuntimeResponseError } from '@/panels/runtime-store';
 
@@ -47,8 +48,8 @@ function parseQuote(value: unknown, asset: string, now: number): FundingQuote | 
     annualizedPercent: period ? percent * 24 / period * 365 : null,
     updatedAt, fetchedAt, eligibilityCheckedAt, quoteObservedAt, sourceResponseAt,
     nextFundingTime: date(raw.nextFundingTime),
-    sourceUrl: raw.exchange === 'Binance' ? `https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${symbol}`
-      : `https://api.bybit.com/v5/market/tickers?category=linear&symbol=${symbol}`,
+    sourceUrl: raw.exchange === 'Binance' ? `${publicSource('VITE_PUBLIC_BINANCE_FUNDING_URL')}${symbol}`
+      : `${publicSource('VITE_PUBLIC_BYBIT_FUNDING_URL')}${symbol}`,
     acquisitionState: raw.acquisitionState === 'retained' ? 'retained' : 'ok',
   };
 }

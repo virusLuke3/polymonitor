@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from data_sources import source_value
+
 import html
 import json
 import re
@@ -14,11 +16,11 @@ WORLDCUP_INTEL_CACHE_KEY = "worldcup-v2-live-intel-v2"
 DEFAULT_LIMIT = 96
 DEFAULT_TTL_SECONDS = 900
 
-ESPN_NEWS_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/news"
-ESPN_SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard"
-GOOGLE_NEWS_RSS_URL = "https://news.google.com/rss/search"
-OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
-WTTR_URL = "https://wttr.in"
+ESPN_NEWS_URL = source_value('POLYMONITOR_URL_SITE_API_ESPN_COM_APIS_SITE_V2_SPORTS_SOCCER_FIFA_WORLD_NEWS_61E677')
+ESPN_SCOREBOARD_URL = source_value('POLYMONITOR_URL_SITE_API_ESPN_COM_APIS_SITE_V2_SPORTS_SOCCER_FIFA_WORLD_SCOREBOARD_436904')
+GOOGLE_NEWS_RSS_URL = source_value('POLYDATA_GOOGLE_NEWS_RSS_URL')
+OPEN_METEO_URL = source_value('POLYDATA_OPEN_METEO_API_URL')
+WTTR_URL = source_value('POLYMONITOR_URL_WTTR_IN_AB1DA8')
 
 HOST_CITIES = [
     {"id": "atlanta", "city": "Atlanta", "latitude": 33.7554, "longitude": -84.4008},
@@ -47,7 +49,7 @@ def _utc_now_iso() -> str:
 def _headers(accept: str = "application/json") -> Dict[str, str]:
     return {
         "Accept": accept,
-        "User-Agent": "polydata-worldcup-intel/1.0 (+https://www.polymonitor.club)",
+        "User-Agent": "polydata-worldcup-intel/1.0",
     }
 
 
@@ -390,7 +392,7 @@ def _build_live_payload(ctx: dict, *, limit: int) -> Dict[str, Any]:
                 category="refVenue",
                 tags=["WEATHER"],
                 age=generated_at,
-                url="https://open-meteo.com/" if item.get("source") != "wttr.in" else "https://wttr.in/",
+                url=source_value('POLYDATA_WEATHER_SOURCE_URL') if item.get("source") != "wttr.in" else source_value('POLYMONITOR_URL_WTTR_IN_475010'),
                 accent="blue",
                 provider=str(item.get("source") or "weather"),
                 city_id=str(item.get("cityId") or ""),
@@ -416,7 +418,7 @@ def _build_live_payload(ctx: dict, *, limit: int) -> Dict[str, Any]:
         "status": "ok" if signals or news or weather else "empty",
         "cacheMode": "live",
         "source": f"ESPN public API / Google News / {weather_source}",
-        "sourceUrl": "https://site.api.espn.com/",
+        "sourceUrl": source_value('POLYMONITOR_URL_SITE_API_ESPN_COM_FC98CE'),
         "providerStates": provider_states,
         "news": news[:limit],
         "weather": weather,

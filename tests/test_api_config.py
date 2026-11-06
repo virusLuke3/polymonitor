@@ -129,7 +129,9 @@ def test_environment_precedence_and_opt_out(tmp_path, monkeypatch):
     with patch.dict(os.environ, {}, clear=True):
         load_environment(tmp_path)
         assert os.environ["CONFIG_SHARED"] == "root"
-        assert all(os.environ[key] == "yes" for key in ("CONFIG_ROOT", "CONFIG_LOCAL", "CONFIG_SCRIPTS"))
+        assert os.environ["CONFIG_ROOT"] == "yes"
+        assert "CONFIG_LOCAL" not in os.environ
+        assert "CONFIG_SCRIPTS" not in os.environ
     with patch.dict(os.environ, {"CONFIG_SHARED": "process"}, clear=True):
         load_environment(tmp_path)
         assert os.environ["CONFIG_SHARED"] == "process"

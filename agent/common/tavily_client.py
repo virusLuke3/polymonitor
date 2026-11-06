@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .env import get_env as source_value
+
 from typing import Any
 
 import requests
@@ -11,7 +13,7 @@ from .json_utils import compact_text
 class TavilySearchClient:
     def __init__(self) -> None:
         self.api_key = get_env("TAVILY_API_KEY")
-        self.search_url = get_env("POLYDATA_TAVILY_SEARCH_URL", "https://api.tavily.com/search")
+        self.search_url = source_value('POLYDATA_TAVILY_SEARCH_URL')
         self.timeout = get_float_env("POLYDATA_TAVILY_TIMEOUT_SECONDS", 10.0)
         self.max_results = get_int_env("POLYDATA_TAVILY_MAX_RESULTS", 3)
 

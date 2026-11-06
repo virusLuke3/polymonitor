@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+from data_sources import source_value
+
 import os
 import math
 from dataclasses import dataclass, field
@@ -340,92 +342,51 @@ def load_api_settings() -> ApiSettings:
         polymarket_macro_map_ttl_seconds=_get_int("POLYDATA_MACRO_MARKET_MAP_TTL_SECONDS", 180),
         polymarket_macro_map_search_terms=_get_csv("POLYDATA_MACRO_MARKET_MAP_SEARCH_TERMS", ()),
         finance_runtime_ttl_seconds=_get_int("POLYDATA_FINANCE_RUNTIME_TTL_SECONDS", 300),
-        finance_defillama_yields_url=_get_str("POLYDATA_FINANCE_DEFILLAMA_YIELDS_URL", "https://yields.llama.fi/pools"),
-        finance_alternative_fng_url=_get_str("POLYDATA_FINANCE_ALTERNATIVE_FNG_URL", "https://api.alternative.me/fng/"),
+        finance_defillama_yields_url=source_value('POLYDATA_FINANCE_DEFILLAMA_YIELDS_URL'),
+        finance_alternative_fng_url=source_value('POLYDATA_FINANCE_ALTERNATIVE_FNG_URL'),
         finance_google_news_rss_url=_get_str(
             "POLYDATA_FINANCE_GOOGLE_NEWS_RSS_URL",
-            env_str("POLYDATA_GOOGLE_NEWS_RSS_URL") or "https://news.google.com/rss/search",
+            env_str("POLYDATA_GOOGLE_NEWS_RSS_URL") or source_value('POLYDATA_GOOGLE_NEWS_RSS_URL'),
         ),
-        finance_yahoo_chart_url_template=_get_str(
-            "POLYDATA_FINANCE_YAHOO_CHART_URL_TEMPLATE",
-            "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
-        ),
-        finance_fred_csv_url_template=_get_str(
-            "POLYDATA_FINANCE_FRED_CSV_URL_TEMPLATE",
-            "https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}",
-        ),
+        finance_yahoo_chart_url_template=source_value('POLYDATA_FINANCE_YAHOO_CHART_URL_TEMPLATE'),
+        finance_fred_csv_url_template=source_value('POLYDATA_FINANCE_FRED_CSV_URL_TEMPLATE'),
         fred_csv_lookback_years=max(1, _get_int("POLYDATA_FRED_CSV_LOOKBACK_YEARS", 4)),
-        finance_barchart_quote_url_template=_get_str(
-            "POLYDATA_FINANCE_BARCHART_QUOTE_URL_TEMPLATE",
-            "https://www.barchart.com/stocks/quotes/{symbol}",
-        ),
-        finance_cnn_fng_url=_get_str(
-            "POLYDATA_FINANCE_CNN_FNG_URL", "https://production.dataviz.cnn.io/index/fearandgreed/current"
-        ),
-        finance_cnn_fng_referer_url=_get_str(
-            "POLYDATA_FINANCE_CNN_FNG_REFERER_URL", "https://www.cnn.com/markets/fear-and-greed"
-        ),
-        finance_aaii_sentiment_url=_get_str(
-            "POLYDATA_FINANCE_AAII_SENTIMENT_URL", "https://www.aaii.com/sentimentsurvey/sent_results"
-        ),
+        finance_barchart_quote_url_template=source_value('POLYDATA_FINANCE_BARCHART_QUOTE_URL_TEMPLATE'),
+        finance_cnn_fng_url=source_value('POLYDATA_FINANCE_CNN_FNG_URL'),
+        finance_cnn_fng_referer_url=source_value('POLYDATA_FINANCE_CNN_FNG_REFERER_URL'),
+        finance_aaii_sentiment_url=source_value('POLYDATA_FINANCE_AAII_SENTIMENT_URL'),
         finance_broker_research_feed_urls=_get_csv("POLYDATA_FINANCE_BROKER_RESEARCH_FEED_URLS", ()),
         finance_broker_research_news_fallback=_get_bool("POLYDATA_FINANCE_BROKER_RESEARCH_NEWS_FALLBACK", False),
-        finance_broker_research_edison_url=_get_str(
-            "POLYDATA_FINANCE_BROKER_RESEARCH_EDISON_URL", "https://www.edisongroup.com/equity-research/"
-        ),
-        finance_broker_research_zacks_url=_get_str(
-            "POLYDATA_FINANCE_BROKER_RESEARCH_ZACKS_URL", "https://scr.zacks.com/rss/pressrelease.aspx"
-        ),
-        finance_broker_research_water_tower_url=_get_str(
-            "POLYDATA_FINANCE_BROKER_RESEARCH_WATER_TOWER_URL", "https://www.watertowerresearch.com/research"
-        ),
+        finance_broker_research_edison_url=source_value('POLYDATA_FINANCE_BROKER_RESEARCH_EDISON_URL'),
+        finance_broker_research_zacks_url=source_value('POLYDATA_FINANCE_BROKER_RESEARCH_ZACKS_URL'),
+        finance_broker_research_water_tower_url=source_value('POLYDATA_FINANCE_BROKER_RESEARCH_WATER_TOWER_URL'),
         finance_broker_research_eastmoney_url=_get_str("POLYDATA_FINANCE_BROKER_RESEARCH_EASTMONEY_URL", ("")),
         finance_broker_research_choice_url=_get_str("POLYDATA_FINANCE_BROKER_RESEARCH_CHOICE_URL", ("")),
-        finance_hyperliquid_info_url=_get_str(
-            "POLYDATA_FINANCE_HYPERLIQUID_INFO_URL", "https://api.hyperliquid.xyz/info"
-        ),
-        finance_okx_market_ticker_url=_get_str(
-            "POLYDATA_FINANCE_OKX_MARKET_TICKER_URL", "https://www.okx.com/api/v5/market/ticker"
-        ),
-        finance_defillama_stablecoins_url=_get_str(
-            "POLYDATA_FINANCE_DEFILLAMA_STABLECOINS_URL", "https://stablecoins.llama.fi/stablecoins"
-        ),
-        finance_cftc_legacy_cot_url=_get_str(
-            "POLYDATA_FINANCE_CFTC_LEGACY_COT_URL", "https://publicreporting.cftc.gov/resource/6dca-aqww.json"
-        ),
+        finance_hyperliquid_info_url=source_value('POLYDATA_FINANCE_HYPERLIQUID_INFO_URL'),
+        finance_okx_market_ticker_url=source_value('POLYDATA_FINANCE_OKX_MARKET_TICKER_URL'),
+        finance_defillama_stablecoins_url=source_value('POLYDATA_FINANCE_DEFILLAMA_STABLECOINS_URL'),
+        finance_cftc_legacy_cot_url=source_value('POLYDATA_FINANCE_CFTC_LEGACY_COT_URL'),
         tech_runtime_ttl_seconds=_get_int("POLYDATA_TECH_RUNTIME_TTL_SECONDS", 600),
         tech_google_news_rss_url=_get_str(
             "POLYDATA_TECH_GOOGLE_NEWS_RSS_URL",
             env_str("POLYDATA_GOOGLE_NEWS_RSS_URL")
             or env_str("POLYDATA_FINANCE_GOOGLE_NEWS_RSS_URL")
-            or "https://news.google.com/rss/search",
+            or source_value('POLYDATA_GOOGLE_NEWS_RSS_URL'),
         ),
-        tech_app_store_top_free_url=_get_str(
-            "POLYDATA_TECH_APP_STORE_TOP_FREE_URL",
-            "https://rss.applemarketingtools.com/api/v2/us/apps/top-free/25/apps.json",
-        ),
+        tech_app_store_top_free_url=source_value('POLYDATA_TECH_APP_STORE_TOP_FREE_URL'),
         sports_runtime_ttl_seconds=_get_int("POLYDATA_SPORTS_RUNTIME_TTL_SECONDS", 60),
         signal_refresh_interval_seconds=signal_interval,
         signal_runtime_ttl_seconds=max(signal_interval + 60, _get_int("POLYDATA_SIGNAL_RUNTIME_TTL_SECONDS", 2 * signal_interval + 60)),
-        grid_open_access_base_url=_get_str(
-            "POLYDATA_GRID_OPEN_ACCESS_BASE_URL",
-            "https://api-op.grid.gg",
-        ),
-        grid_central_data_graphql_url=_get_str(
-            "POLYDATA_GRID_CENTRAL_DATA_GRAPHQL_URL",
-            "https://api-op.grid.gg/central-data/graphql",
-        ),
-        grid_series_state_graphql_url=_get_str(
-            "POLYDATA_GRID_SERIES_STATE_GRAPHQL_URL",
-            "https://api-op.grid.gg/live-data-feed/series-state/graphql",
-        ),
+        grid_open_access_base_url=source_value('POLYDATA_GRID_OPEN_ACCESS_BASE_URL'),
+        grid_central_data_graphql_url=source_value('POLYDATA_GRID_CENTRAL_DATA_GRAPHQL_URL'),
+        grid_series_state_graphql_url=source_value('POLYDATA_GRID_SERIES_STATE_GRAPHQL_URL'),
         grid_api_key=_get_str("POLYDATA_GRID_API_KEY", _get_str("grid_api_key", _get_str("GRID_API_KEY", ""))),
-        grid_source_url=_get_str("POLYDATA_GRID_SOURCE_URL", "https://grid.gg/open-access/"),
+        grid_source_url=source_value('POLYDATA_GRID_SOURCE_URL'),
         grid_esports_ttl_seconds=_get_int("POLYDATA_GRID_ESPORTS_TTL_SECONDS", 120),
         grid_esports_lookback_days=_get_int("POLYDATA_GRID_ESPORTS_LOOKBACK_DAYS", 2),
         grid_esports_lookahead_days=_get_int("POLYDATA_GRID_ESPORTS_LOOKAHEAD_DAYS", 14),
         grid_esports_pm_search_enabled=_get_bool("POLYDATA_GRID_ESPORTS_PM_SEARCH_ENABLED", False),
-        the_odds_api_base_url=_get_str("POLYDATA_THE_ODDS_API_BASE_URL", "https://api.the-odds-api.com"),
+        the_odds_api_base_url=source_value('POLYDATA_THE_ODDS_API_BASE_URL'),
         the_odds_api_key=_get_str(
             "POLYDATA_THE_ODDS_API_KEY2",
             _get_str(
@@ -442,7 +403,7 @@ def load_api_settings() -> ApiSettings:
                 ),
             ),
         ),
-        the_odds_source_url=_get_str("POLYDATA_THE_ODDS_SOURCE_URL", "https://the-odds-api.com/"),
+        the_odds_source_url=source_value('POLYDATA_THE_ODDS_SOURCE_URL'),
         worldcup_odds_markets=_get_str("POLYDATA_WORLDCUP_ODDS_MARKETS", "h2h,spreads,totals"),
         worldcup_core_seed_ttl_seconds=_get_int("POLYDATA_WORLDCUP_CORE_SEED_TTL_SECONDS", 86400),
         worldcup_live_seed_ttl_seconds=_get_int("POLYDATA_WORLDCUP_LIVE_SEED_TTL_SECONDS", 300),
@@ -508,87 +469,40 @@ def load_api_settings() -> ApiSettings:
             ),
         ),
         defi_token_watch_ttl_seconds=_get_int("POLYDATA_DEFI_TOKEN_WATCH_TTL_SECONDS", 120),
-        yahoo_chart_base_url=_get_str(
-            "POLYDATA_YAHOO_CHART_BASE_URL", "https://query1.finance.yahoo.com/v8/finance/chart"
-        ),
+        yahoo_chart_base_url=source_value('POLYDATA_YAHOO_CHART_BASE_URL'),
         coingecko_base_url=_get_str("POLYDATA_COINGECKO_BASE_URL", ("")),
         espn_nba_base_url=_get_str("POLYDATA_ESPN_NBA_BASE_URL", ("")),
         espn_core_nba_base_url=_get_str("POLYDATA_ESPN_CORE_NBA_BASE_URL", ("")),
         nba_lineups_base_url=_get_str("POLYDATA_NBA_LINEUPS_BASE_URL", ("")),
         nba_official_base_url=_get_str("POLYDATA_NBA_OFFICIAL_BASE_URL", ("")),
         cleveland_fed_nowcast_url=_get_str("POLYDATA_CLEVELAND_FED_NOWCAST_URL", ("")),
-        cpi_calendar_bls_cpi_url=_get_str(
-            "POLYDATA_CPI_CALENDAR_BLS_CPI_URL",
-            "https://www.bls.gov/schedule/news_release/cpi.htm?lv=true",
-        ),
-        cpi_calendar_bls_employment_url=_get_str(
-            "POLYDATA_CPI_CALENDAR_BLS_EMPLOYMENT_URL",
-            "https://www.bls.gov/schedule/news_release/empsit.htm?lv=true",
-        ),
-        cpi_calendar_bea_schedule_url=_get_str(
-            "POLYDATA_CPI_CALENDAR_BEA_SCHEDULE_URL",
-            "https://www.bea.gov/news/schedule",
-        ),
-        cpi_calendar_fomc_url=_get_str(
-            "POLYDATA_CPI_CALENDAR_FOMC_URL",
-            "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm",
-        ),
-        cpi_calendar_source_url=_get_str(
-            "POLYDATA_CPI_CALENDAR_SOURCE_URL",
-            "https://www.bls.gov/schedule/news_release/cpi.htm?lv=true",
-        ),
+        cpi_calendar_bls_cpi_url=source_value('POLYDATA_CPI_CALENDAR_BLS_CPI_URL'),
+        cpi_calendar_bls_employment_url=source_value('POLYDATA_CPI_CALENDAR_BLS_EMPLOYMENT_URL'),
+        cpi_calendar_bea_schedule_url=source_value('POLYDATA_CPI_CALENDAR_BEA_SCHEDULE_URL'),
+        cpi_calendar_fomc_url=source_value('POLYDATA_CPI_CALENDAR_FOMC_URL'),
+        cpi_calendar_source_url=source_value('POLYDATA_CPI_CALENDAR_SOURCE_URL'),
         cpi_calendar_ttl_seconds=_get_int("POLYDATA_CPI_CALENDAR_TTL_SECONDS", 3600),
-        energy_shock_wti_xls_url=_get_str(
-            "POLYDATA_ENERGY_SHOCK_WTI_XLS_URL",
-            "https://www.eia.gov/dnav/pet/hist_xls/RWTCd.xls",
-        ),
-        energy_shock_gasoline_xls_url=_get_str(
-            "POLYDATA_ENERGY_SHOCK_GASOLINE_XLS_URL",
-            "https://www.eia.gov/dnav/pet/hist_xls/EMM_EPM0_PTE_NUS_DPGw.xls",
-        ),
-        energy_shock_diesel_xls_url=_get_str(
-            "POLYDATA_ENERGY_SHOCK_DIESEL_XLS_URL",
-            "https://www.eia.gov/dnav/pet/hist_xls/EMD_EPD2D_PTE_NUS_DPGw.xls",
-        ),
-        energy_shock_source_url=_get_str(
-            "POLYDATA_ENERGY_SHOCK_SOURCE_URL",
-            "https://www.eia.gov/petroleum/",
-        ),
+        energy_shock_wti_xls_url=source_value('POLYDATA_ENERGY_SHOCK_WTI_XLS_URL'),
+        energy_shock_gasoline_xls_url=source_value('POLYDATA_ENERGY_SHOCK_GASOLINE_XLS_URL'),
+        energy_shock_diesel_xls_url=source_value('POLYDATA_ENERGY_SHOCK_DIESEL_XLS_URL'),
+        energy_shock_source_url=source_value('POLYDATA_ENERGY_SHOCK_SOURCE_URL'),
         energy_shock_ttl_seconds=_get_int("POLYDATA_ENERGY_SHOCK_TTL_SECONDS", 21600),
-        food_basket_fred_csv_url_template=_get_str(
-            "POLYDATA_FOOD_BASKET_FRED_CSV_URL_TEMPLATE",
-            "https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}",
-        ),
-        food_basket_source_url=_get_str(
-            "POLYDATA_FOOD_BASKET_SOURCE_URL",
-            "https://fred.stlouisfed.org/",
-        ),
+        food_basket_fred_csv_url_template=source_value('POLYDATA_FOOD_BASKET_FRED_CSV_URL_TEMPLATE'),
+        food_basket_source_url=source_value('POLYDATA_FOOD_BASKET_SOURCE_URL'),
         food_basket_ttl_seconds=_get_int("POLYDATA_FOOD_BASKET_TTL_SECONDS", 21600),
         macro_cpi_panel_ttl_seconds=_get_int("POLYDATA_MACRO_CPI_PANEL_TTL_SECONDS", 21600),
         macro_cpi_registry_ttl_seconds=_get_int("POLYDATA_MACRO_CPI_REGISTRY_TTL_SECONDS", 21600),
-        geo_shock_ofac_sdn_url=_get_str(
-            "POLYDATA_GEO_SHOCK_OFAC_SDN_URL",
-            "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/SDN.XML",
-        ),
-        geo_shock_ofac_consolidated_url=_get_str(
-            "POLYDATA_GEO_SHOCK_OFAC_CONSOLIDATED_URL",
-            "https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports/CONSOLIDATED.XML",
-        ),
-        geo_shock_federal_register_api_url=_get_str(
-            "POLYDATA_GEO_SHOCK_FEDERAL_REGISTER_API_URL",
-            "https://www.federalregister.gov/api/v1/documents.json",
-        ),
+        geo_shock_ofac_sdn_url=source_value('POLYDATA_GEO_SHOCK_OFAC_SDN_URL'),
+        geo_shock_ofac_consolidated_url=source_value('POLYDATA_GEO_SHOCK_OFAC_CONSOLIDATED_URL'),
+        geo_shock_federal_register_api_url=source_value('POLYDATA_GEO_SHOCK_FEDERAL_REGISTER_API_URL'),
         geo_shock_conflict_api_url=_get_str("POLYDATA_GEO_SHOCK_CONFLICT_API_URL", ("")),
-        geo_shock_gdelt_doc_api_url=_get_str(
-            "POLYDATA_GEO_SHOCK_GDELT_DOC_API_URL",
-            "https://api.gdeltproject.org/api/v2/doc/doc",
-        ),
+        geo_shock_gdelt_doc_api_url=source_value('POLYDATA_GEO_SHOCK_GDELT_DOC_API_URL'),
         geo_shock_ucdp_api_url=_get_str(
             "POLYDATA_GEO_SHOCK_UCDP_API_URL",
             _get_str(
                 "UCDP_API_URL",
                 (env_str("POLYDATA_GEO_SHOCK_UCDP_API_URL") or env_str("UCDP_API_URL"))
-                or "https://ucdpapi.pcr.uu.se/api/gedevents/25.1",
+                or source_value('POLYMONITOR_URL_UCDPAPI_PCR_UU_SE_API_GEDEVENTS_25_1_46DFB9'),
             ),
         ),
         geo_shock_ucdp_access_token=_get_str(
@@ -613,14 +527,8 @@ def load_api_settings() -> ApiSettings:
                 ),
             ),
         ),
-        geo_shock_acled_token_url=_get_str(
-            "POLYDATA_GEO_SHOCK_ACLED_TOKEN_URL",
-            "https://acleddata.com/oauth/token",
-        ),
-        geo_shock_acled_api_url=_get_str(
-            "POLYDATA_GEO_SHOCK_ACLED_API_URL",
-            "https://acleddata.com/api/acled/read",
-        ),
+        geo_shock_acled_token_url=source_value('POLYDATA_GEO_SHOCK_ACLED_TOKEN_URL'),
+        geo_shock_acled_api_url=source_value('POLYDATA_GEO_SHOCK_ACLED_API_URL'),
         geo_shock_acled_email=_get_str(
             "POLYDATA_GEO_SHOCK_ACLED_EMAIL",
             _get_str("ACLED_USERNAME", (env_str("POLYDATA_GEO_SHOCK_ACLED_EMAIL") or env_str("ACLED_USERNAME"))),
@@ -629,42 +537,21 @@ def load_api_settings() -> ApiSettings:
             "POLYDATA_GEO_SHOCK_ACLED_PASSWORD",
             _get_str("ACLED_PASSWORD", (env_str("POLYDATA_GEO_SHOCK_ACLED_PASSWORD") or env_str("ACLED_PASSWORD"))),
         ),
-        geo_shock_source_url=_get_str(
-            "POLYDATA_GEO_SHOCK_SOURCE_URL",
-            "https://ofac.treasury.gov/sanctions-list-service",
-        ),
+        geo_shock_source_url=source_value('POLYDATA_GEO_SHOCK_SOURCE_URL'),
         geo_shock_ttl_seconds=_get_int("POLYDATA_GEO_SHOCK_TTL_SECONDS", 900),
-        natural_hazards_usgs_url=_get_str(
-            "POLYDATA_NATURAL_HAZARDS_USGS_URL",
-            "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_week.geojson",
-        ),
-        natural_hazards_eonet_url=_get_str(
-            "POLYDATA_NATURAL_HAZARDS_EONET_URL",
-            "https://eonet.gsfc.nasa.gov/api/v3/events",
-        ),
-        natural_hazards_gdacs_url=_get_str(
-            "POLYDATA_NATURAL_HAZARDS_GDACS_URL",
-            "https://www.gdacs.org/gdacsapi/api/events/geteventlist/events4app",
-        ),
-        natural_hazards_nws_url=_get_str(
-            "POLYDATA_NATURAL_HAZARDS_NWS_URL",
-            "https://api.weather.gov/alerts/active",
-        ),
-        natural_hazards_firms_base_url=_get_str(
-            "POLYDATA_NATURAL_HAZARDS_FIRMS_BASE_URL",
-            "https://firms.modaps.eosdis.nasa.gov/api/area/csv",
-        ),
+        natural_hazards_usgs_url=source_value('POLYDATA_NATURAL_HAZARDS_USGS_URL'),
+        natural_hazards_eonet_url=source_value('POLYDATA_NATURAL_HAZARDS_EONET_URL'),
+        natural_hazards_gdacs_url=source_value('POLYDATA_NATURAL_HAZARDS_GDACS_URL'),
+        natural_hazards_nws_url=source_value('POLYDATA_NATURAL_HAZARDS_NWS_URL'),
+        natural_hazards_firms_base_url=source_value('POLYDATA_NATURAL_HAZARDS_FIRMS_BASE_URL'),
         natural_hazards_firms_source=_get_str(
             "POLYDATA_NATURAL_HAZARDS_FIRMS_SOURCE",
             "VIIRS_NOAA20_NRT",
         ),
-        open_meteo_api_url=_get_str("POLYDATA_OPEN_METEO_API_URL", "https://api.open-meteo.com/v1/forecast"),
-        aviationweather_metar_api_url=_get_str(
-            "POLYDATA_AVIATIONWEATHER_METAR_API_URL",
-            "https://aviationweather.gov/api/data/metar",
-        ),
-        google_news_rss_url=_get_str("POLYDATA_GOOGLE_NEWS_RSS_URL", "https://news.google.com/rss/search"),
-        weather_source_url=_get_str("POLYDATA_WEATHER_SOURCE_URL", "https://open-meteo.com/"),
+        open_meteo_api_url=source_value('POLYDATA_OPEN_METEO_API_URL'),
+        aviationweather_metar_api_url=source_value('POLYDATA_AVIATIONWEATHER_METAR_API_URL'),
+        google_news_rss_url=source_value('POLYDATA_GOOGLE_NEWS_RSS_URL'),
+        weather_source_url=source_value('POLYDATA_WEATHER_SOURCE_URL'),
         global_weather_map_ttl_seconds=_get_int("POLYDATA_GLOBAL_WEATHER_MAP_TTL_SECONDS", 7200),
         global_weather_market_days=_get_int("POLYDATA_GLOBAL_WEATHER_MARKET_DAYS", 4),
         weather_news_ttl_seconds=_get_int("POLYDATA_WEATHER_NEWS_TTL_SECONDS", 300),

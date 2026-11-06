@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from data_sources import source_value
+
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from api.services.worldcup.common import headers, parse_iso, team_tokens, utc_now_iso
@@ -276,7 +278,7 @@ def fetch_bookmaker_events(ctx: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], s
     api_key = str(getattr(settings, "the_odds_api_key", "") or "").strip()
     if not callable(getter) or not api_key:
         return [], "missing-key", {"sportKey": WORLDCUP_ODDS_SPORT_KEY, "events": 0, "matched": 0}
-    base_url = str(getattr(settings, "the_odds_api_base_url", "") or "https://api.the-odds-api.com").rstrip("/")
+    base_url = str(getattr(settings, "the_odds_api_base_url", "") or source_value('POLYDATA_THE_ODDS_API_BASE_URL')).rstrip("/")
     markets = _configured_worldcup_odds_markets(settings)
     try:
         payload = getter(
@@ -343,7 +345,7 @@ def link_bookmaker_odds(ctx: Dict[str, Any], matches: List[Dict[str, Any]]) -> T
                     "outcomes": outcomes,
                     "generatedAt": generated_at,
                     "source": "the-odds-api",
-                    "sourceUrl": str(getattr(ctx.get("SETTINGS"), "the_odds_source_url", "") or "https://the-odds-api.com/"),
+                    "sourceUrl": str(getattr(ctx.get("SETTINGS"), "the_odds_source_url", "") or source_value('POLYDATA_THE_ODDS_SOURCE_URL')),
                     "bookmakerCount": book_count,
                     "bookmakers": bookmakers,
                     "eventId": event_id,

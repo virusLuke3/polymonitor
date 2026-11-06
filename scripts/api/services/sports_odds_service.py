@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from data_sources import source_value
+
 import hashlib
 import json
 import math
@@ -419,7 +421,7 @@ def normalize_sports_odds_payload(payload: Any, *, settings: Any, limit: int, ge
         **payload,
         "generatedAt": str(payload.get("generatedAt") or generated_at or ""),
         "source": str(payload.get("source") or "The Odds API"),
-        "sourceUrl": str(payload.get("sourceUrl") or getattr(settings, "the_odds_source_url", "") or "https://the-odds-api.com/"),
+        "sourceUrl": str(payload.get("sourceUrl") or getattr(settings, "the_odds_source_url", "") or source_value('POLYDATA_THE_ODDS_SOURCE_URL')),
         "status": str(payload.get("status") or ("ok" if items else "empty")),
         "cacheMode": str(payload.get("cacheMode") or ""),
         "sources": payload.get("sources") if isinstance(payload.get("sources"), dict) else {},
@@ -496,7 +498,7 @@ def fetch_live_sports_odds_payload(
             limit=limit,
             generated_at=generated_at,
         )
-    url = f"{str(getattr(settings, 'the_odds_api_base_url', '') or 'https://api.the-odds-api.com').rstrip('/')}/v4/sports/{getattr(settings, 'sports_odds_sport_key', 'upcoming')}/odds/"
+    url = f"{str(getattr(settings, 'the_odds_api_base_url', '') or source_value('POLYDATA_THE_ODDS_API_BASE_URL')).rstrip('/')}/v4/sports/{getattr(settings, 'sports_odds_sport_key', 'upcoming')}/odds/"
     params = {
         "apiKey": api_key,
         "regions": str(getattr(settings, "sports_odds_regions", "us") or "us"),

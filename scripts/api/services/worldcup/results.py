@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from data_sources import source_value
+
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -7,7 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from api.services.worldcup.common import headers, parse_iso, safe_int, team_tokens, utc_now_iso
 
 
-ESPN_SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard"
+ESPN_SCOREBOARD_URL = source_value('POLYMONITOR_URL_SITE_API_ESPN_COM_APIS_SITE_V2_SPORTS_SOCCER_FIFA_WORLD_SCOREBOARD_436904')
 DEFAULT_SCOREBOARD_DATES = "20260611-20260719"
 
 

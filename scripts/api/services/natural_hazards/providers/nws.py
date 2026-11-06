@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from data_sources import source_value
+
 from contextlib import nullcontext
 from datetime import datetime, timezone
 from api.context import RuntimeResources
@@ -14,8 +16,8 @@ from ..severity import nws_severity
 
 
 PROVIDER_KEY = "nws"
-DEFAULT_URL = "https://api.weather.gov/alerts"
-SOURCE_URL = "https://www.weather.gov/documentation/services-web-alerts"
+DEFAULT_URL = source_value('POLYMONITOR_URL_API_WEATHER_GOV_ALERTS_0C3310')
+SOURCE_URL = source_value('POLYMONITOR_URL_WWW_WEATHER_GOV_DOCUMENTATION_SERVICES_WEB_ALERTS_948E93')
 ZONE_SNAPSHOT_NAMESPACE = "snapshot:world:nws-zones"
 ZONE_CACHE_TTL_SECONDS = 6 * 60 * 60
 # CAP acquisition has its own deadline. Detached, bounded zone work must not
@@ -65,7 +67,7 @@ def _trusted_zone_url(value: Any) -> str | None:
     if not url:
         return None
     parsed = urlparse(url)
-    if parsed.scheme != "https" or parsed.hostname != "api.weather.gov":
+    if parsed.scheme != "https" or not DEFAULT_URL or parsed.hostname != urlparse(DEFAULT_URL).hostname:
         return None
     if not parsed.path.startswith("/zones/"):
         return None
@@ -133,7 +135,7 @@ def _zone_geometry(resources, http_json_get, url: str, deadline: float, snapshot
                 remaining = deadline - monotonic()
                 if remaining <= .1 or resources.stopped.is_set(): return None
                 payload = http_json_get(url, timeout=Timeout(total=remaining, connect=min(2., remaining), read=min(3., remaining)),
-                    headers={"Accept": "application/geo+json", "User-Agent": "polymonitor-world-event-map/1.0 (https://polymonitor.club)"})
+                    headers={"Accept": "application/geo+json", "User-Agent": "polymonitor-world-event-map/1.0"})
                 geometry = _generalized_geometry(payload.get("geometry") if isinstance(payload, dict) else None)
                 if geometry is not None and snapshot_store:
                     snapshot_store.set(ZONE_SNAPSHOT_NAMESPACE, url, geometry, ZONE_CACHE_TTL_SECONDS)
@@ -284,7 +286,7 @@ def fetch(
         timeout=Timeout(total=max(0.1, deadline - monotonic() - 0.25), connect=2.0, read=max(0.1, deadline - monotonic() - 0.25)),
         headers={
             "Accept": "application/geo+json",
-            "User-Agent": "polymonitor-world-event-map/1.0 (https://polymonitor.club)",
+            "User-Agent": "polymonitor-world-event-map/1.0",
         },
     )
     features = payload.get("features") if isinstance(payload, dict) else None

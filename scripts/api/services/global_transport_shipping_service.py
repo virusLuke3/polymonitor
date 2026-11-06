@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from data_sources import source_value
+
 from api.context import RuntimeResources, runtime_resources
 
 import csv
@@ -43,17 +45,17 @@ AVIATION_FLIGHT_LAYER_LIMIT = 140
 EVIDENCE_SCHEMA_VERSION = "air-evidence-v1"
 AVIATION_VIEWPORT_SCHEMA_VERSION = "aviation-viewport.v1"
 
-OPENFLIGHTS_AIRPORTS_URL = "https://raw.githubusercontent.com/jpatokal/openflights/master/data/airports.dat"
-OPENFLIGHTS_ROUTES_URL = "https://raw.githubusercontent.com/jpatokal/openflights/master/data/routes.dat"
-OPENFLIGHTS_AIRLINES_URL = "https://raw.githubusercontent.com/jpatokal/openflights/master/data/airlines.dat"
-TRANSITLAND_ATLAS_URL = "https://raw.githubusercontent.com/transitland/transitland-atlas/master/feeds/gtfs-source-feeds.transit.land.dmfr.json"
-TRANSITLAND_ATLAS_INDEX_URL = "https://api.github.com/repos/transitland/transitland-atlas/contents/feeds"
-AISSTREAM_DOC_URL = "https://aisstream.io/documentation"
-OPENSKY_AUTH_URL = "https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token"
-OPENSKY_STATES_URL = "https://opensky-network.org/api/states/all"
-OPENSKY_DOC_URL = "https://openskynetwork.github.io/opensky-api/rest.html"
-ADSB_LOL_BASE_URL = "https://api.adsb.lol/v2"
-ADSB_LOL_DOC_URL = "https://www.adsb.lol/docs/open-data/api/"
+OPENFLIGHTS_AIRPORTS_URL = source_value('POLYMONITOR_URL_RAW_GITHUBUSERCONTENT_COM_JPATOKAL_OPENFLIGHTS_MASTER_DATA_AIRPORTS_DAT_F4FD1F')
+OPENFLIGHTS_ROUTES_URL = source_value('POLYMONITOR_URL_RAW_GITHUBUSERCONTENT_COM_JPATOKAL_OPENFLIGHTS_MASTER_DATA_ROUTES_DAT_F40544')
+OPENFLIGHTS_AIRLINES_URL = source_value('POLYMONITOR_URL_RAW_GITHUBUSERCONTENT_COM_JPATOKAL_OPENFLIGHTS_MASTER_DATA_AIRLINES_DAT_6C6C61')
+TRANSITLAND_ATLAS_URL = source_value('POLYMONITOR_URL_RAW_GITHUBUSERCONTENT_COM_TRANSITLAND_TRANSITLAND_ATLAS_MASTER_FEEDS_GTFS_SOURCE_495A53')
+TRANSITLAND_ATLAS_INDEX_URL = source_value('POLYMONITOR_URL_API_GITHUB_COM_REPOS_TRANSITLAND_TRANSITLAND_ATLAS_CONTENTS_FEEDS_F56700')
+AISSTREAM_DOC_URL = source_value('POLYMONITOR_URL_AISSTREAM_IO_DOCUMENTATION_3B8E27')
+OPENSKY_AUTH_URL = source_value('POLYMONITOR_URL_AUTH_OPENSKY_NETWORK_ORG_AUTH_REALMS_OPENSKY_NETWORK_PROTOCOL_OPENID_CONNECT_TOK_964E85')
+OPENSKY_STATES_URL = source_value('POLYMONITOR_URL_OPENSKY_NETWORK_ORG_API_STATES_ALL_277055')
+OPENSKY_DOC_URL = source_value('POLYMONITOR_URL_OPENSKYNETWORK_GITHUB_IO_OPENSKY_API_REST_HTML_8AAFD5')
+ADSB_LOL_BASE_URL = source_value('POLYMONITOR_URL_API_ADSB_LOL_V2_809C83')
+ADSB_LOL_DOC_URL = source_value('POLYMONITOR_URL_WWW_ADSB_LOL_DOCS_OPEN_DATA_API_7DC6E8')
 OPENSKY_REGIONS = [
     {"id": "us-east", "label": "US East", "lamin": 24.0, "lomin": -88.0, "lamax": 49.5, "lomax": -66.0},
     {"id": "europe", "label": "Europe", "lamin": 35.0, "lomin": -12.0, "lamax": 61.0, "lomax": 32.0},
@@ -866,7 +868,7 @@ async def _sample_aisstream(api_key: str, *, timeout_seconds: int) -> Dict[str, 
     import asyncio
     import websockets
 
-    uri = os.environ.get("POLYDATA_AISSTREAM_WS_URL", "wss://stream.aisstream.io/v0/stream")
+    uri = source_value('POLYDATA_AISSTREAM_WS_URL')
     bbox = json.loads(os.environ.get("POLYDATA_AISSTREAM_BBOX_JSON", "[[[-90,-180],[90,180]]]"))
     subscription = {
         "APIKey": api_key,
@@ -1759,7 +1761,7 @@ def _market_links(
                 "marketId": row.get("id") or row.get("marketId"),
                 "slug": row.get("slug"),
                 "question": row.get("question") or row.get("title"),
-                "marketUrl": f"https://polymarket.com/event/{row.get('slug')}" if row.get("slug") else None,
+                "marketUrl": f"{source_value('POLYMONITOR_URL_POLYMARKET_COM_EVENT_E8B690')}{row.get('slug')}" if row.get("slug") else None,
                 "matchScore": 0.62,
                 "matchReasons": ["transport", "entity"],
             }
@@ -2158,7 +2160,7 @@ def get_global_transport_shipping_snapshot(
     )
 
 
-FAA_STATUS_URL = "https://nasstatus.faa.gov/api/airport-status-information"
+FAA_STATUS_URL = source_value('POLYMONITOR_URL_NASSTATUS_FAA_GOV_API_AIRPORT_STATUS_INFORMATION_D2589A')
 TRANSPORT_MAP_NAMESPACE = "snapshot:transport:map"
 
 

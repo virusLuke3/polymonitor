@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from data_sources import source_value
+
 from api.context import RuntimeResources, runtime_resources
 
 import hashlib
@@ -289,7 +291,7 @@ def build_weather_news_payload(
     return {
         "generatedAt": _utc_now_iso(dependencies),
         "source": "Google News RSS",
-        "sourceUrl": getattr(dependencies.settings, "google_news_rss_url", "https://news.google.com/rss/search"),
+        "sourceUrl": getattr(dependencies.settings, "google_news_rss_url", source_value('POLYDATA_GOOGLE_NEWS_RSS_URL')),
         "status": status,
         "sources": source_states,
         "summary": build_news_summary(ranked),
@@ -305,7 +307,7 @@ def _empty_payload(
     return {
         "generatedAt": _utc_now_iso(dependencies),
         "source": "Google News RSS",
-        "sourceUrl": getattr(dependencies.settings, "google_news_rss_url", "https://news.google.com/rss/search"),
+        "sourceUrl": getattr(dependencies.settings, "google_news_rss_url", source_value('POLYDATA_GOOGLE_NEWS_RSS_URL')),
         "status": status,
         "sources": {},
         "summary": {"articleCount": 0, "cityCount": 0, "warningCount": 0, "topCity": None},
@@ -334,7 +336,7 @@ def normalize_weather_news_payload(
         or getattr(
             dependencies.settings,
             "google_news_rss_url",
-            "https://news.google.com/rss/search",
+            source_value('POLYDATA_GOOGLE_NEWS_RSS_URL'),
         )
     )
     return result

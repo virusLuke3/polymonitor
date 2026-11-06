@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from data_sources import source_value
+
 import json
 import math
 import re
@@ -28,8 +30,8 @@ TECH_PANEL_IDS = (
     "big-tech-market-cap",
     "consumer-app-pulse",
 )
-OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
-OPENROUTER_RANKINGS_URL = "https://openrouter.ai/rankings?view=week"
+OPENROUTER_MODELS_URL = source_value('POLYMONITOR_URL_OPENROUTER_AI_API_V1_MODELS_051E06')
+OPENROUTER_RANKINGS_URL = source_value('POLYMONITOR_URL_OPENROUTER_AI_RANKINGS_301592')
 OPENROUTER_USAGE_LIMIT = 20
 
 AI_ENTITIES = (
@@ -370,7 +372,7 @@ def _news_url(ctx: TechPanelsContext, query: str) -> str:
         getattr(settings, "tech_google_news_rss_url", "")
         or getattr(settings, "google_news_rss_url", "")
         or getattr(settings, "finance_google_news_rss_url", "")
-        or "https://news.google.com/rss/search"
+        or source_value('POLYDATA_GOOGLE_NEWS_RSS_URL')
     ).rstrip("?")
     return f"{base}?{urlencode({'q': query, 'hl': 'en-US', 'gl': 'US', 'ceid': 'US:en'})}"
 
@@ -520,7 +522,7 @@ def _provider_from_model_id(value: Any) -> str:
 
 
 def _openrouter_model_url(model_id: Any) -> str:
-    return f"https://openrouter.ai/{str(model_id or '').strip()}"
+    return f"{source_value('POLYMONITOR_URL_OPENROUTER_AI_6DBA8B')}{str(model_id or '').strip()}"
 
 
 def _format_model_price(pricing: Any) -> str:
@@ -937,7 +939,7 @@ def _nested_value(payload: Dict[str, Any], path: tuple[str, ...]) -> Any:
 
 
 def _apple_chart_url(country: str, chart: str, per_feed_limit: int, genre: Optional[str]) -> str:
-    url = f"https://itunes.apple.com/{country}/rss/{chart}/limit={per_feed_limit}"
+    url = f"{source_value('POLYMONITOR_URL_ITUNES_APPLE_COM_CF3C75')}{country}/rss/{chart}/limit={per_feed_limit}"
     if genre:
         url = f"{url}/genre={genre}"
     return f"{url}/json"

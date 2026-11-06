@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import os
+from scripts.runtime.environment import configured_value
 
 
 def get_env(name: str, default: str = "") -> str:
-    return os.environ.get(name, default)
+    return configured_value(name, default)
 
 
 def get_float_env(name: str, default: float) -> float:

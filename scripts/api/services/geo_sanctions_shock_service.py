@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from data_sources import source_value
+
 import io
 import json
 import math
@@ -793,7 +795,7 @@ def _ucdp_version_candidates(configured_url: str) -> List[str]:
 
 
 def _ucdp_url_for_version(configured_url: str, version: str) -> str:
-    base = str(configured_url or "https://ucdpapi.pcr.uu.se/api/gedevents/25.1").strip().rstrip("/")
+    base = str(configured_url or source_value('POLYMONITOR_URL_UCDPAPI_PCR_UU_SE_API_GEDEVENTS_25_1_46DFB9')).strip().rstrip("/")
     tail = base.rsplit("/", 1)[-1]
     if "." in tail:
         return f"{base.rsplit('/', 1)[0]}/{version}"

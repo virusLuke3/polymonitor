@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from data_sources import source_value
+
 from datetime import datetime, timezone
 from typing import Any, Dict
 
@@ -8,8 +10,8 @@ from ..normalize import compact_text, iso_timestamp, valid_point
 
 
 PROVIDER_KEY = "gdacs"
-DEFAULT_URL = "https://www.gdacs.org/gdacsapi/api/events/geteventlist/events4app"
-SOURCE_URL = "https://www.gdacs.org/"
+DEFAULT_URL = source_value('POLYDATA_NATURAL_HAZARDS_GDACS_URL')
+SOURCE_URL = source_value('POLYMONITOR_URL_WWW_GDACS_ORG_08EDCB')
 
 HAZARD_KINDS = {
     "FL": "flood",
@@ -65,7 +67,7 @@ def fetch(http_json_get, *, url: str = DEFAULT_URL, limit: int = 160) -> Provide
         timeout=18,
         headers={
             "Accept": "*/*",
-            "User-Agent": "polymonitor-world-event-map/1.0 (https://polymonitor.club)",
+            "User-Agent": "polymonitor-world-event-map/1.0",
         },
     )
     features = payload.get("features") if isinstance(payload, dict) else None

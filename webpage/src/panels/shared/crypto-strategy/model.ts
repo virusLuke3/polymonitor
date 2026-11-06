@@ -1,3 +1,4 @@
+import { publicSource } from '@/config/publicSources';
 import { RuntimeResponseError } from '@/panels/runtime-store';
 
 export type Point = { t: number; v: number };
@@ -85,5 +86,5 @@ export function referenceUsable(ref: Reference | undefined, now = Date.now()) {
 }
 export function marketUrl(ref?: Reference): string | null {
   const slug = ref?.market?.slug;
-  return slug && /^[a-zA-Z0-9-]+$/.test(slug) ? `https://polymarket.com/event/${slug}` : null;
+  return publicSource('VITE_PUBLIC_MARKET_EVENT_URL') && slug && /^[a-zA-Z0-9-]+$/.test(slug) ? `${publicSource('VITE_PUBLIC_MARKET_EVENT_URL')}${slug}` : null;
 }

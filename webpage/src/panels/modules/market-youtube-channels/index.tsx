@@ -1,3 +1,4 @@
+import { publicSource } from '@/config/publicSources';
 import { scoreLabel } from '../../shared/formatters';
 import { openExternal } from '../../shared/renderers';
 import {
@@ -96,7 +97,7 @@ function MarketYoutubePlayer({ item, onEnded }: { item: RuntimeMarketTvWireItem;
   const endedRef = useRef(false);
   const embedUrl = youtubeEmbedUrl(item);
   const videoId = youtubeVideoId(item);
-  const externalUrl = item.externalUrl || item.sourceUrl || (videoId ? `https://www.youtube.com/watch?v=${videoId}` : null);
+  const externalUrl = item.externalUrl || item.sourceUrl || (videoId && publicSource('VITE_PUBLIC_YOUTUBE_WATCH_URL') ? `${publicSource('VITE_PUBLIC_YOUTUBE_WATCH_URL')}${videoId}` : null);
   const [frameState, setFrameState] = useState<'connecting' | 'playing' | 'waiting' | 'blocked' | 'external'>(embedUrl ? 'connecting' : 'external');
   const shouldLoad = useStaggeredLoad(Boolean(embedUrl), 900);
 

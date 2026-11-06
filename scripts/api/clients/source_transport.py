@@ -6,7 +6,7 @@ import json
 import os
 import threading
 import time
-from pathlib import Path
+from data_sources import source_value
 from urllib.parse import urlsplit
 
 import requests
@@ -21,12 +21,23 @@ _NAMESPACE = "state:source-transport"
 
 
 def _routes() -> dict:
-    path = os.environ.get("POLYMONITOR_SOURCE_ROUTES_FILE", "")
-    if not path:
+    raw = source_value("POLYMONITOR_SOURCE_ROUTES_JSON")
+    if not raw:
+        if source_value("POLYMONITOR_SOURCE_ROUTES_FILE"):
+            raise ValueError("Move source routes into POLYMONITOR_SOURCE_ROUTES_JSON in .env")
         return {}
-    data = json.loads(Path(path).read_text())
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        raise ValueError("Invalid POLYMONITOR_SOURCE_ROUTES_JSON") from None
     if not isinstance(data, dict):
         raise ValueError("source route configuration must be an object")
+    for host, routes in data.items():
+        if not isinstance(host, str) or not host or "/" in host or not isinstance(routes, list):
+            raise ValueError("Invalid source route entry")
+        for route in routes:
+            if not isinstance(route, str) or route and urlsplit(route).scheme not in {"http", "https", "socks5", "socks5h"}:
+                raise ValueError("Invalid source route protocol")
     return data
 
 
@@ -128,6 +139,6 @@ class SourceSession(requests.Session):
 
 def source_session(requests_lib=requests):
     # Dependency-injected test clients retain their own constructors.
-    if requests_lib is requests and os.environ.get("POLYMONITOR_SOURCE_ROUTES_FILE"):
+    if requests_lib is requests and (source_value("POLYMONITOR_SOURCE_ROUTES_JSON") or source_value("POLYMONITOR_SOURCE_ROUTES_FILE")):
         return SourceSession()
     return requests_lib.Session()

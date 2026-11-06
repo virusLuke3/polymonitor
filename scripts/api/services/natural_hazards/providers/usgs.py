@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from data_sources import source_value
+
 from typing import Any, Dict
 
 from ..contracts import ProviderResult
@@ -8,8 +10,8 @@ from ..severity import usgs_severity
 
 
 PROVIDER_KEY = "usgs"
-DEFAULT_URL = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_week.geojson"
-SOURCE_URL = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/geojson.php"
+DEFAULT_URL = source_value('POLYDATA_NATURAL_HAZARDS_USGS_URL')
+SOURCE_URL = source_value('POLYMONITOR_URL_EARTHQUAKE_USGS_GOV_EARTHQUAKES_FEED_V1_0_GEOJSON_PHP_0B7517')
 
 
 def fetch(http_json_get, *, url: str = DEFAULT_URL, limit: int = 500) -> ProviderResult:
@@ -18,7 +20,7 @@ def fetch(http_json_get, *, url: str = DEFAULT_URL, limit: int = 500) -> Provide
         timeout=8,
         headers={
             "Accept": "application/geo+json, application/json",
-            "User-Agent": "polymonitor-world-event-map/1.0 (https://polymonitor.club)",
+            "User-Agent": "polymonitor-world-event-map/1.0",
         },
     )
     features = payload.get("features") if isinstance(payload, dict) else None

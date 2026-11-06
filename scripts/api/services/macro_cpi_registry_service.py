@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from data_sources import source_value
+
 import csv
 import io
 import json
@@ -451,7 +453,7 @@ def _fred_url(
         getattr(
             dependencies.settings,
             "food_basket_fred_csv_url_template",
-            "https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}",
+            source_value('POLYDATA_FINANCE_FRED_CSV_URL_TEMPLATE'),
         ),
     )
     url = str(template).format(series_id=series_id)
@@ -494,7 +496,7 @@ def _fetch_cpi_series_stats(dependencies: MacroCpiRegistryDependencies) -> Dict[
             continue
         try:
             url = _fred_url(dependencies, series_id)
-            text = dependencies.http_text_get(url, timeout=12, headers={"User-Agent": "Polymonitor/1.0 (+https://www.polymonitor.club/)"})
+            text = dependencies.http_text_get(url, timeout=12, headers={"User-Agent": "Polymonitor/1.0"})
             rows = []
             for row in csv.DictReader(io.StringIO(str(text or ""))):
                 value, date = _float(row.get(series_id)), _fred_row_date(row)
@@ -503,7 +505,7 @@ def _fetch_cpi_series_stats(dependencies: MacroCpiRegistryDependencies) -> Dict[
             rows.sort(key=lambda row: row["date"])
             if rows:
                 stats[series_id] = {"seriesId": series_id, "date": rows[-1]["date"], "observations": rows,
-                                    "source": "FRED / BLS CPI", "sourceUrl": f"https://fred.stlouisfed.org/series/{series_id}",
+                                    "source": "FRED / BLS CPI", "sourceUrl": f"{source_value('POLYMONITOR_URL_FRED_STLOUISFED_ORG_SERIES_695D67')}{series_id}",
                                     "fetchedAt": _utc_now_iso(dependencies)}
         except Exception:
             continue

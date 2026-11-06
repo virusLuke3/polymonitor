@@ -1,6 +1,8 @@
 """Bounded acquisition with full per-attempt budgets, no browser-triggered work."""
 from __future__ import annotations
 
+from data_sources import source_value
+
 import json
 import os
 import re
@@ -38,7 +40,7 @@ class Transport:
                     options = {"stream": True, "allow_redirects": False,
                         "timeout": (min(15, left), min(45, left)),
                         "proxies": {"http": proxy, "https": proxy},
-                        "headers": {"User-Agent": "Polymonitor/1.0 https://polymonitor.club", "Accept": "*/*"}}
+                        "headers": {"User-Agent": "Polymonitor/1.0", "Accept": "*/*"}}
                     if hasattr(self.session, "routes"):
                         options["source_deadline"] = deadline
                     return self.session.get(target, **options)
@@ -49,9 +51,9 @@ class Transport:
                     original, target = urlsplit(url), urlsplit(destination)
                     # FEC publishes bulk files through this verified US GovCloud bucket.
                     # No arbitrary cross-host redirects, credential forwarding or private URLs.
-                    if not (original.hostname == "www.fec.gov" and original.path.startswith("/files/bulk-downloads/")
+                    if not (bool(source_value("POLYMONITOR_URL_WWW_FEC_GOV_FILES_BULK_DOWNLOADS_AB50B3")) and original.hostname == urlsplit(source_value("POLYMONITOR_URL_WWW_FEC_GOV_FILES_BULK_DOWNLOADS_AB50B3")).hostname and original.path.startswith("/files/bulk-downloads/")
                             and target.scheme == "https"
-                            and target.hostname == "cg-519a459a-0ea3-42c2-b7bc-fa1143481f74.s3-us-gov-west-1.amazonaws.com"
+                            and bool(source_value("POLYMONITOR_FEC_BULK_REDIRECT_URL")) and target.hostname == urlsplit(source_value("POLYMONITOR_FEC_BULK_REDIRECT_URL")).hostname
                             and target.path == original.path.removeprefix("/files")
                             and not target.username and not target.query):
                         raise ValueError("Source redirected; review its canonical URL")
@@ -101,13 +103,13 @@ def collect_bills(store, transport):
     spec = next(s for s in catalog() if s.key.startswith("bills-"))
     feed = (store.get_stale(SOURCE_NS, spec.key) or {}).get("data", {})
     targets = {r["id"]: r["statusUrl"] for r in feed.get("items", [])}
-    targets["119hr6500"] = "https://www.govinfo.gov/bulkdata/BILLSTATUS/119/hr/BILLSTATUS-119hr6500.xml"
+    targets["119hr6500"] = source_value('POLYMONITOR_URL_WWW_GOVINFO_GOV_BULKDATA_BILLSTATUS_119_HR_BILLSTATUS_119HR6500_XML_7E532C')
     # Explicit watch targets supplement a bounded recent-publications feed.
     for identity in os.environ.get("POLYMONITOR_POLITICS_BILLS", "").split(","):
         match = re.fullmatch(r"(\d+)(hr|s|hjres|sjres|hconres|sconres|hres|sres)(\d+)", identity.strip())
         if match:
             key = match[0]
-            targets[key] = f"https://www.govinfo.gov/bulkdata/BILLSTATUS/{match[1]}/{match[2]}/BILLSTATUS-{key}.xml"
+            targets[key] = f"{source_value('POLYMONITOR_URL_WWW_GOVINFO_GOV_BULKDATA_BILLSTATUS_D7E568')}{match[1]}/{match[2]}/BILLSTATUS-{key}.xml"
     index = store.get_stale(SOURCE_NS, "bill-index") or {"ids": []}
     # Rotate due targets using persisted last-attempt timestamps; max five per round.
     due = sorted(targets, key=lambda key: ((store.get_stale(SOURCE_NS, "bill:" + key) or {}).get("lastAttemptAt", 0), key != "119hr6500"))

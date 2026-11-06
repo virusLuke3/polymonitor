@@ -33,7 +33,7 @@ def test_contact_identity_is_sec_only(monkeypatch, redirect):
 
         def iter_content(self, _):
             assert not redirect, "Redirect response must not be parsed as source data"
-            yield b'{}'
+            yield b'{"results": []}'
 
     def get(url, **kwargs):
         calls.append((url, kwargs))
@@ -51,15 +51,15 @@ def test_contact_identity_is_sec_only(monkeypatch, redirect):
                 with pytest.raises(ValueError, match="redirected"):
                     fetch(target)
             else:
-                assert fetch(target) == {}
+                assert fetch(target)["results"] == []
         return {}
 
     monkeypatch.setattr(watcher, "collect_source", collect)
     watcher.run()
-    assert len(calls) == 5
+    assert len(calls) == 6
     for index, (_, request) in enumerate(calls):
-        is_sec = index >= 3
-        assert request["headers"]["User-Agent"] == (contact if is_sec else "Polymonitor https://polymonitor.club")
+        is_sec = index >= 4
+        assert request["headers"]["User-Agent"] == (contact if is_sec else "Polymonitor")
         assert request["proxies"] == {"http": sec_proxy if is_sec else "", "https": sec_proxy if is_sec else ""}
         assert request["allow_redirects"] is False
     assert session.trust_env is False

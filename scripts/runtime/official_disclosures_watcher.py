@@ -1,6 +1,8 @@
 """Scheduled source acquisition. No browser or API-triggered network work."""
 from __future__ import annotations
 
+from data_sources import source_value
+
 import os
 import json
 import time
@@ -25,7 +27,7 @@ def run():
             raise ValueError("SEC contact User-Agent is not configured")
         request_deadline = min(deadline, time.monotonic() + 100)
         proxy = os.environ.get("POLYMONITOR_DISCLOSURES_SEC_PROXY_URL", "") if is_sec else ""
-        request_user_agent = user_agent if is_sec else "Polymonitor https://polymonitor.club"
+        request_user_agent = user_agent if is_sec else "Polymonitor"
         for attempt in range(2):
             try:
                 remaining = request_deadline - time.monotonic()
@@ -55,7 +57,7 @@ def run():
             since = (datetime.now(timezone.utc) - timedelta(days=30)).date().isoformat()
             params = {"per_page": 100, "order": "newest", "conditions[publication_date][gte]": since,
                       "fields[]": ["document_number", "title", "type", "publication_date", "html_url", "pdf_url", "agencies", "effective_on", "comments_close_on"]}
-            url = "https://www.federalregister.gov/api/v1/documents.json?" + urlencode(params, doseq=True)
+            url = source_value('POLYMONITOR_URL_WWW_FEDERALREGISTER_GOV_API_V1_DOCUMENTS_JSON_C2538A') + urlencode(params, doseq=True)
             collect_source(store, "federal-register", url, policies, fetch, 1800)
             presidential_since = (datetime.now(timezone.utc) - timedelta(days=90)).date().isoformat()
             presidential_params = {"per_page": 100, "order": "newest", "conditions[type][]": "PRESDOCU",
@@ -63,7 +65,7 @@ def run():
                 "fields[]": ["document_number", "title", "type", "publication_date", "html_url", "pdf_url", "agencies",
                     "effective_on", "signing_date", "subtype", "executive_order_number", "proclamation_number",
                     "raw_text_url", "correction_of", "executive_order_notes"]}
-            presidential_url = "https://www.federalregister.gov/api/v1/documents.json?" + urlencode(presidential_params, doseq=True)
+            presidential_url = source_value('POLYMONITOR_URL_WWW_FEDERALREGISTER_GOV_API_V1_DOCUMENTS_JSON_C2538A') + urlencode(presidential_params, doseq=True)
             def presidential_fetch(first_url):
                 first = fetch(first_url)
                 rows, next_url = first["results"], first.get("next_page_url")
@@ -81,8 +83,8 @@ def run():
             publish(store)
             for symbol, cik in WATCHLIST.items():
                 for kind, cadence, url, parse in [
-                    ("submissions", 1800, f"https://data.sec.gov/submissions/CIK{cik}.json", lambda raw: filings(raw, cik, symbol)),
-                    ("facts", 21600, f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json", lambda raw: facts(raw, cik)),
+                    ("submissions", 1800, f"{source_value('POLYMONITOR_URL_DATA_SEC_GOV_SUBMISSIONS_CIK_0584E3')}{cik}.json", lambda raw: filings(raw, cik, symbol)),
+                    ("facts", 21600, f"{source_value('POLYMONITOR_URL_DATA_SEC_GOV_API_XBRL_COMPANYFACTS_CIK_2BF4F6')}{cik}.json", lambda raw: facts(raw, cik)),
                 ]:
                     if time.monotonic() + 100 > deadline:
                         return

@@ -1,9 +1,10 @@
+import { publicSource } from '@/config/publicSources';
 export type WeatherMapTheme = 'dark' | 'dark-matter' | 'positron';
 
-export const OPENFREEMAP_DARK_STYLE = 'https://tiles.openfreemap.org/styles/dark';
-export const OPENFREEMAP_LIGHT_STYLE = 'https://tiles.openfreemap.org/styles/positron';
-export const CARTO_DARK_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
-export const CARTO_LIGHT_STYLE = 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json';
+export const OPENFREEMAP_DARK_STYLE = publicSource('VITE_PUBLIC_OPENFREEMAP_DARK_STYLE');
+export const OPENFREEMAP_LIGHT_STYLE = publicSource('VITE_PUBLIC_OPENFREEMAP_LIGHT_STYLE');
+export const CARTO_DARK_STYLE = publicSource('VITE_PUBLIC_CARTO_DARK_STYLE');
+export const CARTO_LIGHT_STYLE = publicSource('VITE_PUBLIC_CARTO_LIGHT_STYLE');
 export const WORLD_EVENT_PMTILES_URL = (import.meta.env.VITE_PMTILES_URL || '').trim();
 
 export function getWeatherBasemapAttribution(provider: 'auto' | 'pmtiles' | 'openfreemap' | 'carto' = 'auto') {

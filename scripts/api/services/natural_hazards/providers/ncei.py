@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from data_sources import source_value
+
 from calendar import monthrange
 from datetime import datetime, timezone
 from typing import Any, Dict
@@ -9,8 +11,8 @@ from ..normalize import finite_number
 
 
 PROVIDER_KEY = "climate-anomaly"
-DEFAULT_URL_TEMPLATE = "https://www.ncei.noaa.gov/access/monitoring/climate-at-a-glance/global/mapping/tavg-{year_month}/data.json?raw=1"
-SOURCE_URL = "https://www.ncei.noaa.gov/access/monitoring/climate-at-a-glance/global/mapping"
+DEFAULT_URL_TEMPLATE = source_value('POLYMONITOR_URL_WWW_NCEI_NOAA_GOV_ACCESS_MONITORING_CLIMATE_AT_A_GLANCE_GLOBAL_MAPPING_TAVG_YEAR_776F7A')
+SOURCE_URL = source_value('POLYMONITOR_URL_WWW_NCEI_NOAA_GOV_ACCESS_MONITORING_CLIMATE_AT_A_GLANCE_GLOBAL_MAPPING_957773')
 BASELINE_PERIOD = "1991-2020"
 CALCULATION_VERSION = "NOAA-NCEI-CAG-global-mapping.v1"
 MIN_ABSOLUTE_ANOMALY_C = 2.0
@@ -52,7 +54,7 @@ def fetch(
                 timeout=10,
                 headers={
                     "Accept": "application/json",
-                    "User-Agent": "polymonitor-world-event-map/1.0 (https://polymonitor.club)",
+                    "User-Agent": "polymonitor-world-event-map/1.0",
                 },
             )
         except Exception as exc:

@@ -22,6 +22,7 @@ from typing import Any, Dict, Iterable, List, Optional
 _scripts_root = Path(__file__).resolve().parents[1]
 if str(_scripts_root) not in sys.path:
     sys.path.insert(0, str(_scripts_root))
+from data_sources import source_value
 
 try:
     import redis

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from .env import get_env as source_value
+
 import asyncio
 import contextlib
 import json
@@ -165,7 +167,7 @@ else:
 class OpenAICompatibleClient:
     def __init__(self) -> None:
         self.api_key = _configured_api_key()
-        self.api_base = get_env("POLYDATA_AGENT_API_BASE", "http://127.0.0.1:18003/v1")
+        self.api_base = source_value('POLYDATA_AGENT_API_BASE')
         self.model = get_env("POLYDATA_AGENT_MODEL", "qwen3.5-9b")
         self.timeout = get_float_env("POLYDATA_AGENT_TIMEOUT_SECONDS", 45.0)
         self.verify_ssl = get_bool_env("POLYDATA_AGENT_SSL_VERIFY", False)

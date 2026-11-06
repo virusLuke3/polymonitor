@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from data_sources import source_value
+
 from typing import Any, Dict
 
 from ..contracts import ProviderResult
@@ -8,8 +10,8 @@ from ..severity import eonet_severity
 
 
 PROVIDER_KEY = "eonet"
-DEFAULT_URL = "https://eonet.gsfc.nasa.gov/api/v3/events"
-SOURCE_URL = "https://eonet.gsfc.nasa.gov/"
+DEFAULT_URL = source_value('POLYDATA_NATURAL_HAZARDS_EONET_URL')
+SOURCE_URL = source_value('POLYMONITOR_URL_EONET_GSFC_NASA_GOV_A42650')
 CATEGORY_IDS = "severeStorms,floods,volcanoes,wildfires,tempExtremes,drought,dustHaze,snow"
 
 
@@ -71,7 +73,7 @@ def fetch(http_json_get, *, url: str = DEFAULT_URL, limit: int = 300) -> Provide
         timeout=8,
         headers={
             "Accept": "application/json",
-            "User-Agent": "polymonitor-world-event-map/1.0 (https://polymonitor.club)",
+            "User-Agent": "polymonitor-world-event-map/1.0",
         },
     )
     raw_events = payload.get("events") if isinstance(payload, dict) else None

@@ -1,10 +1,12 @@
 """Viewport-scoped OSM infrastructure, using native way geometry (ODbL)."""
+
+from data_sources import source_value
 from contextlib import nullcontext
 from math import isfinite
 from api.context import resolve_service_callable
 
 NAMESPACE = 'snapshot:map:infrastructure'
-URL = 'https://overpass-api.de/api/interpreter'
+URL = source_value('POLYMONITOR_URL_OVERPASS_API_DE_API_INTERPRETER_891755')
 
 
 def infrastructure_snapshot(context, *, bbox):
@@ -22,7 +24,7 @@ def infrastructure_snapshot(context, *, bbox):
         if cached is not None:return cached
         box = ','.join(str(v) for v in (south,west,north,east))
         query = f'[out:json][timeout:7][maxsize:134217728];(way["waterway"~"^(river|canal)$"]({box});way["man_made"="pipeline"]({box});way["man_made"="submarine_cable"]({box});way["man_made"="cable"]["location"="underwater"]({box}););out geom;'
-        raw = resolve_service_callable(context,'http_json_get')(URL,params={'data':query},timeout=9,headers={'Accept':'application/json','User-Agent':'Polymonitor/1.0 (+https://polymonitor.club; research map)'})
+        raw = resolve_service_callable(context,'http_json_get')(URL,params={'data':query},timeout=9,headers={'Accept':'application/json','User-Agent':'Polymonitor/1.0'})
         if not isinstance(raw,dict) or not isinstance(raw.get('elements'),list):raise ValueError('invalid-overpass-response')
         events = []; rejected = 0
         updated = (raw.get('osm3s') or {}).get('timestamp_osm_base')
@@ -34,7 +36,7 @@ def infrastructure_snapshot(context, *, bbox):
             tags = way.get('tags') or {}; kind = 'waterways' if tags.get('waterway') else 'pipelines' if tags.get('man_made')=='pipeline' else 'submarine-cables'
             events.append({'id':f'osm:way:{way["id"]}', 'category':'infrastructure', 'title':tags.get('name') or f'{kind} · OSM {way["id"]}',
                 'summary':' · '.join(f'{k}: {v}' for k,v in tags.items()), 'severity':'info', 'geometry':{'type':'LineString','coordinates':coords},
-                'locationPrecision':'exact', 'sources':[{'provider':'OpenStreetMap contributors','url':f'https://www.openstreetmap.org/way/{way["id"]}',
+                'locationPrecision':'exact', 'sources':[{'provider':'OpenStreetMap contributors','url':f"{source_value('POLYMONITOR_URL_WWW_OPENSTREETMAP_ORG_WAY_A31DB2')}{way['id']}",
                     'nativeId':str(way['id']), 'ingestedAt':updated, 'freshness':'unknown','status':'partial'}],
                 'limitations':['Mapped infrastructure reference, not operational status. OSM coverage is incomplete; the database timestamp is not an observation time.'],
                 'relatedMarketIds':[], 'properties':{'mapLayer':kind,'datasetUpdatedAt':updated,'attribution':'© OpenStreetMap contributors · ODbL'}})
@@ -73,14 +75,14 @@ def parse_gpsjam(csv_text, date):
             ring = [[lon,lat] for lat,lon in h3.cell_to_boundary(cell)]; ring.append(ring[0])
             event = _signal_event('gpsjam:'+date+':'+cell, 'GNSS accuracy · '+format(percent,'.1f')+'%',
                 f'{bad} bad / {total} aircraft; GPSJAM denoised fraction {percent:.2f}%. Daily UTC aggregate, not real-time jamming confirmation.',
-                'GPSJAM · airplanes.live / ADS-B Exchange', 'https://gpsjam.org/?date='+date, date+'T00:00:00Z',
+                'GPSJAM · airplanes.live / ADS-B Exchange', source_value('POLYMONITOR_URL_GPSJAM_ORG_93EEE7')+date, date+'T00:00:00Z',
                 {'mapLayer':'gnss-interference','h3':cell,'goodAircraft':good,'badAircraft':bad,'totalAircraft':total,'percent':percent},
                 {'type':'Polygon','coordinates':[ring]}, severity='warning' if percent>10 else 'watch')
             events.append(event)
         except (ValueError,TypeError): invalid += 1
     return {'status':'partial','events':events,'updatedAt':date+'T00:00:00Z', 'recordCount':rows,
         'belowThresholdCount':below,'rejectedCount':invalid,
-        'message':f'GPSJAM daily UTC aggregate: {rows} cells, {below} below the 2% degraded-navigation threshold; {invalid} invalid. All source cells: https://gpsjam.org/data/{date}-h3_4.csv'}
+        'message':f'GPSJAM daily UTC aggregate: {rows} cells, {below} below the 2% degraded-navigation threshold; {invalid} invalid. All source cells: {source_value("POLYMONITOR_URL_GPSJAM_ORG_DATA_EC7FF7")}{date}-h3_4.csv'}
 
 
 def parse_ioda(payload):
@@ -95,7 +97,7 @@ def parse_ioda(payload):
         datasource = str(item.get('datasource') or 'unknown')
         events.append(_signal_event(f'ioda:{country}:{datasource}:{item["from"]}', f'{entity.get("name") or country} · Internet signal',
             f'{datasource} / {item.get("method")} · score {item.get("score")} · {start} → {end}. Country-level measurement, not a confirmed nationwide outage.',
-            'IODA · Georgia Tech', 'https://ioda.inetintel.cc.gatech.edu/country/'+country, start,
+            'IODA · Georgia Tech', source_value('POLYMONITOR_URL_IODA_INETINTEL_CC_GATECH_EDU_COUNTRY_254543')+country, start,
             {'mapLayer':'internet-outages','datasource':datasource,'score':item.get('score'),'periodEnd':end}, country=country))
     return {'status':'partial','events':events,'message':'IODA country-level signals in the past 24 hours. BGP / active-probing measurements are not confirmed nationwide outages.'}
 
@@ -114,17 +116,17 @@ def spatial_signal_snapshot(context, *, source):
             if cached is not None:return cached
             if source=='gpsjam':
                 get=resolve_service_callable(context,'http_text_get')
-                manifest=list(csv.DictReader(io.StringIO(get('https://gpsjam.org/data/manifest.csv',timeout=4))))
+                manifest=list(csv.DictReader(io.StringIO(get(source_value('POLYMONITOR_URL_GPSJAM_ORG_DATA_MANIFEST_CSV_1474F3'),timeout=4))))
                 # A suspect publication is still displayed as partial; never silently claim complete data.
                 latest=manifest[-1]; date=latest.get('date') or next(iter(latest.values()))
                 observed=datetime.strptime(date,'%Y-%m-%d').replace(tzinfo=timezone.utc)
                 if not 0 <= (datetime.now(timezone.utc)-observed).total_seconds() <= 3*86400:raise ValueError('gpsjam-date-outside-retention')
-                result=parse_gpsjam(get(f'https://gpsjam.org/data/{date}-h3_4.csv',timeout=6),date)
+                result=parse_gpsjam(get(f"{source_value('POLYMONITOR_URL_GPSJAM_ORG_DATA_EC7FF7')}{date}-h3_4.csv",timeout=6),date)
                 result['message'] += ' · manifest suspect: '+str(latest.get('suspect','unknown'))
                 ttl=3600
             else:
                 now=int(time.time())
-                result=parse_ioda(resolve_service_callable(context,'http_json_get')('https://api.ioda.inetintel.cc.gatech.edu/v2/outages/events',
+                result=parse_ioda(resolve_service_callable(context,'http_json_get')(source_value('POLYMONITOR_URL_API_IODA_INETINTEL_CC_GATECH_EDU_V2_OUTAGES_EVENTS_F8F4A7'),
                     params={'entityType':'country','from':now-86400,'until':now,'limit':10000,'format':'ioda'},timeout=7))
                 if len(result['events'])>=10000:result['message']+=' · API result limit reached; partial catalog.'
                 ttl=300

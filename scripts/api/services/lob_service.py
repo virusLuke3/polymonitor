@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from data_sources import source_value
+
 import logging
 import os
 from datetime import datetime, timezone
@@ -16,7 +18,7 @@ def get_lob_runtime_status() -> dict[str, Any]:
     try:
         with requests.Session() as session:
             session.trust_env = False
-            base = os.environ.get("MARKET_DATA_LOB_URL", "http://127.0.0.1:18861").rstrip("/")
+            base = source_value('MARKET_DATA_LOB_URL').rstrip("/")
             response = session.get(f"{base}/health", timeout=(0.5, 1.5))
             response.raise_for_status()
             return response.json()
@@ -89,7 +91,7 @@ def get_runtime_lob_by_token_payload(
         # One local request for both outcomes; never warm, collect, or write here.
         with requests.Session() as session:
             session.trust_env = False
-            base = os.environ.get("MARKET_DATA_LOB_URL", "http://127.0.0.1:18861").rstrip("/")
+            base = source_value('MARKET_DATA_LOB_URL').rstrip("/")
             response = session.get(f"{base}/book/{token_id}", params={"noTokenId": no_token_id}, timeout=(0.5, min(3.0, max(0.5, float(read_timeout_seconds)))))
             response.raise_for_status()
             payload = response.json()

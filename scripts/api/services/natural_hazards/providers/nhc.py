@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from data_sources import source_value
+
 from concurrent.futures import wait
 
 import io
@@ -12,8 +14,8 @@ from ..normalize import compact_text, finite_number, iso_timestamp
 
 
 PROVIDER_KEY = "nhc"
-DEFAULT_URL = "https://www.nhc.noaa.gov/CurrentStorms.json"
-SOURCE_URL = "https://www.nhc.noaa.gov/gis/"
+DEFAULT_URL = source_value('POLYMONITOR_URL_WWW_NHC_NOAA_GOV_CURRENTSTORMS_JSON_B69F6C')
+SOURCE_URL = source_value('POLYMONITOR_URL_WWW_NHC_NOAA_GOV_GIS_3D5EE5')
 MAX_GEOMETRY_POINTS = 320
 
 
@@ -124,12 +126,12 @@ def _split_dateline_polygon(ring: list[list[float]]) -> Dict[str, Any] | None:
 
 
 def _kmz_geometry(http_bytes_get, url: str, kind: str) -> Dict[str, Any] | None:
-    if not url.lower().startswith("https://www.nhc.noaa.gov/"):
+    if not url.lower().startswith(source_value('POLYMONITOR_URL_WWW_NHC_NOAA_GOV_BA526A')):
         return None
     content = http_bytes_get(
         url,
         timeout=5,
-        headers={"User-Agent": "polymonitor-world-event-map/1.0 (https://polymonitor.club)"},
+        headers={"User-Agent": "polymonitor-world-event-map/1.0"},
     )
     with zipfile.ZipFile(io.BytesIO(content)) as archive:
         name = next((candidate for candidate in archive.namelist() if candidate.lower().endswith(".kml")), None)
@@ -189,7 +191,7 @@ def fetch(
         timeout=8,
         headers={
             "Accept": "application/json",
-            "User-Agent": "polymonitor-world-event-map/1.0 (https://polymonitor.club)",
+            "User-Agent": "polymonitor-world-event-map/1.0",
         },
     )
     storms = payload.get("activeStorms") if isinstance(payload, dict) else None

@@ -20,7 +20,7 @@
     "test:unit": "vitest run src",
     "test:frontend:e2e": "playwright test e2e/frontend-lifecycle.spec.ts e2e/frontend-architecture.spec.ts e2e/panel-styles.spec.ts",
     "test:browser": "playwright test",
-    "preview:map-alignment": "POLYDATA_READONLY_PREVIEW=1 VITE_POLYDATA_API_BASE_URL=/wm-api VITE_POLYDATA_PROXY_TARGET=https://polymonitor.club/wm-api POLYDATA_MAP_TILES_TARGET=https://polymonitor.club/map-tiles VITE_PMTILES_URL=/map-tiles/planet.pmtiles vite --host 127.0.0.1 --port 4191 --strictPort",
+    "preview:map-alignment": "POLYDATA_READONLY_PREVIEW=1 vite --host 127.0.0.1 --port 4191 --strictPort",
     "preview:map-fixtures": "MAP_ALIGNMENT_PHASE=preview MAP_ALIGNMENT_PREVIEW=1 VITE_PMTILES_URL=/map-tiles/planet.pmtiles playwright test e2e/map-alignment.spec.ts --grep 'alignment en' --headed"
   },
   "dependencies": {

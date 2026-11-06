@@ -1,10 +1,11 @@
+import { publicSource } from '@/config/publicSources';
 import { withRuntimeRequestBudget } from '@/services/api';
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
 
 export type RadarFrame = { time: number; tiles: string; coverageTiles: string };
 export type WeatherRadar = { frame: RadarFrame | null; status: 'off' | 'loading' | 'ready' | 'stale' | 'error'; error?: string };
 import { WEATHER_RADAR_ENABLED } from '../config/layerRegistry';
-const MANIFEST = 'https://api.rainviewer.com/public/weather-maps.json';
+const MANIFEST = publicSource('VITE_PUBLIC_RADAR_MANIFEST_URL');
 const REFRESH_MS = 300_000;
 
 /** Three prompt retries, then the normal poll. Never hammer blocked sources. */
@@ -17,7 +18,7 @@ export function radarRetryDelay(failures: number, status = 0, retryAfterMs = 0) 
 /** The public product currently supplies past radar only, native zoom <= 7. */
 export function latestRadarFrame(payload: unknown, now = Date.now()): RadarFrame {
   const data = payload as { host?: unknown; radar?: { past?: unknown } } | null;
-  if (data?.host !== 'https://tilecache.rainviewer.com' || !Array.isArray(data.radar?.past)) {
+  if (!publicSource('VITE_PUBLIC_RADAR_TILE_ORIGIN') || data?.host !== publicSource('VITE_PUBLIC_RADAR_TILE_ORIGIN') || !Array.isArray(data.radar?.past)) {
     throw new Error('Invalid RainViewer manifest or tile host');
   }
   const frames = data.radar.past.filter((frame): frame is { time: number; path: string } => (
@@ -70,6 +71,7 @@ export function useWeatherRadar(enabled: boolean) {
       try {
         const frame = await withRuntimeRequestBudget(async () => {
         deadline = setTimeout(() => request.abort(), 12_000);
+        if (!MANIFEST) throw new Error('Radar source is not configured');
         const response = await fetch(MANIFEST, { signal: request.signal, credentials: 'omit' });
         if (!response.ok) {
           const header = response.headers.get('Retry-After');

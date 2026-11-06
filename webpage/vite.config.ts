@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { defineConfig, loadEnv, type Plugin } from 'vite';
+import { existsSync, readFileSync } from 'node:fs';
+import { parseEnv } from 'node:util';
+import { defineConfig, type Plugin } from 'vite';
 import preact from '@preact/preset-vite';
 import { resolve } from 'path';
 
@@ -56,18 +57,30 @@ function pwaServiceWorker(buildId: string): Plugin {
 }
 
 export default defineConfig(({ mode }) => {
+  const envPath = resolve(__dirname, mode === 'test' ? 'test-config/.env.test' : '../.env');
   const env = {
-    ...loadEnv(mode, resolve(__dirname, '..'), ''),
-    ...loadEnv(mode, process.cwd(), ''),
-    ...process.env,
+    ...(existsSync(envPath) ? parseEnv(readFileSync(envPath, 'utf8')) : {}),
+        ...process.env,
   };
   const apiHost = env.POLYDATA_API_HOST || '127.0.0.1';
   const apiPort = env.POLYDATA_API_PORT || '5000';
   const apiBase = env.VITE_POLYDATA_API_BASE_URL || '';
-  const target = env.VITE_POLYDATA_PROXY_TARGET
+  const target = env.POLYDATA_DEV_PROXY_TARGET
     || (apiBase.startsWith('http') ? apiBase : `http://${apiHost}:${apiPort}`);
-  const mapTilesTarget = env.POLYDATA_MAP_TILES_TARGET || 'https://maps.worldmonitor.app';
+  const mapTilesTarget = env.POLYDATA_MAP_TILES_TARGET || '';
   const buildId = String(env.GITHUB_SHA || env.POLYDATA_BUILD_SHA || repositorySha()).slice(0, 40);
+  const publicEnv = Object.entries(env).filter(([name]) => name.startsWith('VITE_PUBLIC_')
+    || ['VITE_POLYDATA_API_BASE_URL', 'VITE_PMTILES_URL', 'VITE_WEATHER_RADAR_ENABLED'].includes(name));
+  for (const [name, value] of publicEnv) {
+    if (!value || name === 'VITE_WEATHER_RADAR_ENABLED') continue;
+    try {
+      const url = new URL(value, 'https://configuration.invalid');
+      if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password
+        || value.startsWith('//') || [...url.searchParams.keys()].some(key => /^(api_?key|token|secret|password|authorization)$/i.test(key))) throw new Error();
+    } catch {
+      throw new Error(`Invalid public source configuration: ${name}`);
+    }
+  }
 
   const mapTilesProxy = {
     target: mapTilesTarget,
@@ -76,6 +89,8 @@ export default defineConfig(({ mode }) => {
   };
 
   return {
+    envDir: false,
+    envPrefix: 'VITE_PUBLIC_',
     // Prefresh retains historical vnodes for hot replacement. Browser tests
     // measure application ownership, so use production-like component lifetime.
     plugins: [preact({ prefreshEnabled: mode !== 'test' }), pwaServiceWorker(buildId), ...(env.POLYDATA_READONLY_PREVIEW === '1' ? [{
@@ -97,6 +112,8 @@ export default defineConfig(({ mode }) => {
     } satisfies Plugin] : [])],
     define: {
       __BUILD_ID__: JSON.stringify(buildId),
+      ...Object.fromEntries(publicEnv
+        .map(([name, value]) => [`import.meta.env.${name}`, JSON.stringify(value)])),
     },
     resolve: {
       alias: {
@@ -112,7 +129,7 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/wm-api/, ''),
         },
-        '/map-tiles': mapTilesProxy,
+        ...(mapTilesTarget ? { '/map-tiles': mapTilesProxy } : {}),
       },
     },
     preview: {
@@ -122,7 +139,7 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/wm-api/, ''),
         },
-        '/map-tiles': mapTilesProxy,
+        ...(mapTilesTarget ? { '/map-tiles': mapTilesProxy } : {}),
       },
     },
     build: {

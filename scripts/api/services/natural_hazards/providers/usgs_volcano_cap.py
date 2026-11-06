@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from data_sources import source_value
+
 from typing import Any, Dict
 
 from ..contracts import ProviderResult, SEVERITY_MAPPING_VERSION
@@ -7,8 +9,8 @@ from ..normalize import compact_text, finite_number, iso_timestamp
 
 
 PROVIDER_KEY = "usgs-volcano-cap"
-DEFAULT_URL = "https://volcanoes.usgs.gov/hans-public/api/volcano/getCapElevated"
-SOURCE_URL = "https://volcanoes.usgs.gov/hans-public/resources/"
+DEFAULT_URL = source_value('POLYMONITOR_URL_VOLCANOES_USGS_GOV_HANS_PUBLIC_API_VOLCANO_GETCAPELEVATED_5D9A92')
+SOURCE_URL = source_value('POLYMONITOR_URL_VOLCANOES_USGS_GOV_HANS_PUBLIC_RESOURCES_8FA866')
 
 
 def _severity(row: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
@@ -33,7 +35,7 @@ def _severity(row: Dict[str, Any]) -> tuple[str, Dict[str, Any]]:
 def fetch(http_json_get, *, url: str = DEFAULT_URL, limit: int = 80) -> ProviderResult:
     payload = http_json_get(url, timeout=8, headers={
         "Accept": "application/json",
-        "User-Agent": "polymonitor-world-event-map/1.0 (https://polymonitor.club)",
+        "User-Agent": "polymonitor-world-event-map/1.0",
     })
     if not isinstance(payload, list):
         raise ValueError("usgs-volcano-cap-schema")

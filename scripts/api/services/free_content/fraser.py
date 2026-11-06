@@ -1,6 +1,8 @@
 """Bounded FRASER transport for the existing three BLS content sources."""
 from __future__ import annotations
 
+from data_sources import source_value
+
 import re
 import hashlib
 import threading
@@ -78,7 +80,7 @@ def collect(session, snapshot_store, source, *, deadline, probe=False):
         # The displayed/clickable URL remains the actually retrieved FRASER item.
         release_date = datetime.fromisoformat(record["published_at"].replace("Z", "+00:00")).strftime("%m%d%Y")
         prefix = "empsit" if kind == "nfp" else kind
-        legacy_identity = f"https://www.bls.gov/news.release/archives/{prefix}_{release_date}.htm"
+        legacy_identity = f"{source_value('POLYMONITOR_URL_WWW_BLS_GOV_NEWS_RELEASE_ARCHIVES_3FA6C1')}{prefix}_{release_date}.htm"
         item = {"external_id": record["releaseNumber"], "event_id": legacy_identity,
                 "title": record["title"], "url": record["archiveUrl"], "summary": record["summary"],
                 "published_at": record["published_at"], "reference_period": record["referencePeriod"],

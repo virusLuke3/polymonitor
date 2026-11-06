@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from data_sources import source_value
+
 from api.context import RuntimeResources, runtime_resources
 
 import json
@@ -24,7 +26,7 @@ from weather.open_meteo import get_json
 GLOBAL_WEATHER_MAP_SNAPSHOT_NAMESPACE = "snapshot:weather:global-map"
 GLOBAL_WEATHER_MAP_CACHE_KEY = "panel-v1"
 DEFAULT_ITEM_LIMIT = 60
-WTTR_URL = "https://wttr.in"
+WTTR_URL = source_value('POLYMONITOR_URL_WTTR_IN_AB1DA8')
 
 WEATHER_MARKET_TERMS = (
     "temperature",
@@ -1221,7 +1223,7 @@ def _normalize_temperature_db_group(
         "marketFamilyLabel": _family_label("highest_temperature"),
         "metricType": "highest_temperature",
         "eventStatus": "live" if any((not _truthy(row.get("is_trading_closed")) and not _truthy(row.get("is_resolved")) and not _truthy(row.get("gamma_closed"))) for row in rows) else "inactive",
-        "marketUrl": f"https://polymarket.com/event/{event_slug}",
+        "marketUrl": f"{source_value('POLYMONITOR_URL_POLYMARKET_COM_EVENT_E8B690')}{event_slug}",
         "quoteCoverage": f"{quoted}/{len(bins)}",
         "topBin": top,
         "bins": bins,
@@ -1305,7 +1307,7 @@ def _normalize_weather_db_group(
         "marketFamilyLabel": _family_label(family),
         "metricType": family,
         "eventStatus": "live" if any((not _truthy(row.get("is_trading_closed")) and not _truthy(row.get("is_resolved")) and not _truthy(row.get("gamma_closed"))) for row in rows) else "inactive",
-        "marketUrl": f"https://polymarket.com/event/{event_slug}" if event_slug else None,
+        "marketUrl": f"{source_value('POLYMONITOR_URL_POLYMARKET_COM_EVENT_E8B690')}{event_slug}" if event_slug else None,
         "quoteCoverage": f"{quoted}/{len(bins)}",
         "topBin": top,
         "bins": bins,
@@ -1748,7 +1750,7 @@ def build_global_weather_map_payload(
         "sourceUrl": getattr(
             dependencies.settings,
             "weather_source_url",
-            "https://open-meteo.com/",
+            source_value('POLYDATA_WEATHER_SOURCE_URL'),
         ),
         "status": status,
         "sources": sources,
@@ -1772,7 +1774,7 @@ def _empty_payload(
         "sourceUrl": getattr(
             dependencies.settings,
             "weather_source_url",
-            "https://open-meteo.com/",
+            source_value('POLYDATA_WEATHER_SOURCE_URL'),
         ),
         "status": status,
         "sources": {},
@@ -1806,7 +1808,7 @@ def normalize_global_weather_map_payload(
         or getattr(
             dependencies.settings,
             "weather_source_url",
-            "https://open-meteo.com/",
+            source_value('POLYDATA_WEATHER_SOURCE_URL'),
         )
     )
     refresh = result.get("refresh") or {}
@@ -1992,9 +1994,9 @@ def get_global_weather_map_snapshot(
 
 def _met_no_map_forecast(dependencies, latitude: float, longitude: float) -> Dict[str, Any]:
     """Independent global model fallback; preserve native sample times and units."""
-    raw = dependencies.http_json_get("https://api.met.no/weatherapi/locationforecast/2.0/compact",
+    raw = dependencies.http_json_get(source_value('POLYMONITOR_URL_API_MET_NO_WEATHERAPI_LOCATIONFORECAST_2_0_COMPACT_39323D'),
         params={"lat": f"{latitude:.4f}", "lon": f"{longitude:.4f}"}, timeout=5,
-        headers={"Accept": "application/json", "User-Agent": "Polymonitor/0.2 (https://polymonitor.club)"})
+        headers={"Accept": "application/json", "User-Agent": "Polymonitor/0.2"})
     properties = raw.get("properties", {}) if isinstance(raw, dict) else {}
     now = datetime.now(timezone.utc)
     rows = []
@@ -2022,7 +2024,7 @@ def _met_no_map_forecast(dependencies, latitude: float, longitude: float) -> Dic
         "daily": {"time": days, "temperature_2m_min": [min(daily[d]) for d in days],
             "temperature_2m_max": [max(daily[d]) for d in days]},
         "dailySampled": True, "units": {"temperature_2m": "°C", "wind_speed_10m": "km/h"},
-        "timezone": "UTC", "source": "MET Norway", "sourceUrl": "https://api.met.no/doc/locationforecast/HowTO",
+        "timezone": "UTC", "source": "MET Norway", "sourceUrl": source_value('POLYMONITOR_URL_API_MET_NO_DOC_LOCATIONFORECAST_HOWTO_465F32'),
         "fetchedAt": _utc_now_iso(dependencies), "limitations": [
             "Open-Meteo unavailable; independent MET Norway model forecast, not a station observation or hazard warning.",
             "Daily ranges use available forecast samples; later periods may have six-hour resolution."]}
@@ -2060,7 +2062,7 @@ def query_map_weather(ctx: GlobalWeatherMapContext, *, query: str = "", language
         if cached is not None:
             return cached
         if latitude is None or longitude is None:
-            raw = get_json(dependencies.http_json_get, store, "https://geocoding-api.open-meteo.com/v1/search",
+            raw = get_json(dependencies.http_json_get, store, source_value('POLYMONITOR_URL_GEOCODING_API_OPEN_METEO_COM_V1_SEARCH_1BFFF6'),
                 params={"name": query, "count": 12, "language": language, "format": "json"}, timeout=7)
             if not isinstance(raw, dict) or raw.get("error"):
                 raise RuntimeError("invalid-geocoding-response")
@@ -2070,7 +2072,7 @@ def query_map_weather(ctx: GlobalWeatherMapContext, *, query: str = "", language
                 if isinstance(p, dict) and all(k in p for k in ("id", "name", "latitude", "longitude"))
                 and -90 <= p["latitude"] <= 90 and -180 <= p["longitude"] <= 180]
             payload = {"status": "ok" if places else "empty", "places": places,
-                "source": "Open-Meteo / GeoNames", "sourceUrl": "https://open-meteo.com/en/docs/geocoding-api"}
+                "source": "Open-Meteo / GeoNames", "sourceUrl": source_value('POLYMONITOR_URL_OPEN_METEO_COM_EN_DOCS_GEOCODING_API_BB0364')}
         else:
             cooldown = store.get(namespace, "open-meteo-cooldown") if store else None
             try:
@@ -2078,7 +2080,7 @@ def query_map_weather(ctx: GlobalWeatherMapContext, *, query: str = "", language
                     raise RuntimeError("open-meteo-cooldown")
                 raw = get_json(
                     dependencies.http_json_get, store,
-                    getattr(dependencies.settings, "open_meteo_api_url", "") or "https://api.open-meteo.com/v1/forecast",
+                    getattr(dependencies.settings, "open_meteo_api_url", "") or source_value('POLYDATA_OPEN_METEO_API_URL'),
                     params={"latitude": latitude, "longitude": longitude, "current": "temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m",
                         "hourly": "temperature_2m", "daily": "temperature_2m_max,temperature_2m_min", "forecast_days": 7,
                         "timezone": "UTC"}, timeout=7)
@@ -2087,7 +2089,7 @@ def query_map_weather(ctx: GlobalWeatherMapContext, *, query: str = "", language
                 payload = {"status": "ok", "latitude": latitude, "longitude": longitude,
                     "current": raw["current"], "hourly": raw.get("hourly", {}), "daily": raw.get("daily", {}),
                     "units": raw.get("current_units", {}), "timezone": "UTC", "source": "Open-Meteo",
-                    "sourceUrl": "https://open-meteo.com/", "fetchedAt": _utc_now_iso(dependencies),
+                    "sourceUrl": source_value('POLYDATA_WEATHER_SOURCE_URL'), "fetchedAt": _utc_now_iso(dependencies),
                     "limitations": ["Weather model estimate and forecast; not an official hazard warning."]}
             except Exception as exc:
                 if store and not cooldown:

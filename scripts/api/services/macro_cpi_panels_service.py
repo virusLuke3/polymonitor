@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from data_sources import source_value
+
 import csv
 import io
 import json
@@ -33,7 +35,7 @@ MACRO_CPI_PANEL_IDS = (
 PANEL_CONFIGS: Dict[str, Dict[str, Any]] = {
     "supply-tariff-import-watch": {
         "source": "FRED CSV / Federal Register trade policy",
-        "sourceUrl": "https://fred.stlouisfed.org/",
+        "sourceUrl": source_value('POLYDATA_FOOD_BASKET_SOURCE_URL'),
         "signalHot": "SUPPLY / TARIFF PRESSURE",
         "signalCool": "SUPPLY CHAIN EASING",
         "signalNeutral": "IMPORT WATCH MIXED",
@@ -54,7 +56,7 @@ PANEL_CONFIGS: Dict[str, Dict[str, Any]] = {
     },
     "shelter-rent-oer-pressure": {
         "source": "FRED CSV / BLS shelter CPI",
-        "sourceUrl": "https://fred.stlouisfed.org/",
+        "sourceUrl": source_value('POLYDATA_FOOD_BASKET_SOURCE_URL'),
         "signalHot": "SHELTER CPI STICKY",
         "signalCool": "SHELTER DISINFLATION",
         "signalNeutral": "SHELTER WATCH",
@@ -71,7 +73,7 @@ PANEL_CONFIGS: Dict[str, Dict[str, Any]] = {
     },
     "labor-wage-services-pressure": {
         "source": "FRED CSV / BLS labor indicators",
-        "sourceUrl": "https://fred.stlouisfed.org/",
+        "sourceUrl": source_value('POLYDATA_FOOD_BASKET_SOURCE_URL'),
         "signalHot": "WAGE / SERVICES HOT",
         "signalCool": "LABOR COOLING",
         "signalNeutral": "LABOR MIXED",
@@ -98,7 +100,7 @@ PANEL_CONFIGS: Dict[str, Dict[str, Any]] = {
     },
     "growth-demand-recession-tracker": {
         "source": "FRED CSV / growth and curve signals",
-        "sourceUrl": "https://fred.stlouisfed.org/",
+        "sourceUrl": source_value('POLYDATA_FOOD_BASKET_SOURCE_URL'),
         "signalHot": "DEMAND STILL FIRM",
         "signalCool": "RECESSION PRESSURE",
         "signalNeutral": "GROWTH MIXED",
@@ -118,7 +120,7 @@ PANEL_CONFIGS: Dict[str, Dict[str, Any]] = {
     },
     "fed-rates-polymarket-gap": {
         "source": "FRED CSV / Fed and Treasury rates",
-        "sourceUrl": "https://fred.stlouisfed.org/",
+        "sourceUrl": source_value('POLYDATA_FOOD_BASKET_SOURCE_URL'),
         "signalHot": "RATES HAWKISH GAP",
         "signalCool": "CUT PATH EASING",
         "signalNeutral": "FED GAP WATCH",
@@ -236,7 +238,7 @@ def _fred_url(
     template = getattr(
         settings,
         "finance_fred_csv_url_template",
-        getattr(settings, "food_basket_fred_csv_url_template", "https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"),
+        getattr(settings, "food_basket_fred_csv_url_template", source_value('POLYDATA_FINANCE_FRED_CSV_URL_TEMPLATE')),
     )
     url = str(template).format(series_id=series_id)
     lookback_years = int(getattr(settings, "fred_csv_lookback_years", FRED_CSV_LOOKBACK_YEARS) or FRED_CSV_LOOKBACK_YEARS)
@@ -261,7 +263,7 @@ def _fetch_fred_series(
     text = dependencies.http_text_get(
         url,
         timeout=15,
-        headers={"User-Agent": "Polymonitor/1.0 (+https://www.polymonitor.club/)"},
+        headers={"User-Agent": "Polymonitor/1.0"},
     )
     rows: List[Dict[str, Any]] = []
     reader = csv.DictReader(io.StringIO(str(text or "")))
@@ -283,7 +285,7 @@ def _fetch_fred_series(
         "group": spec.get("group") or spec["key"], "icon": spec.get("icon") or "source",
         "metric": spec.get("metric") or "level", "date": latest["date"],
         "value": round(latest["value"], 3), "tone": tone,
-        "source": FRED_SOURCE, "sourceUrl": f"https://fred.stlouisfed.org/series/{series_id}",
+        "source": FRED_SOURCE, "sourceUrl": f"{source_value('POLYMONITOR_URL_FRED_STLOUISFED_ORG_SERIES_695D67')}{series_id}",
         **contract,
     }
 
@@ -314,13 +316,13 @@ def _fetch_federal_register_items(
     url = getattr(
         dependencies.settings,
         "geo_shock_federal_register_api_url",
-        "https://www.federalregister.gov/api/v1/documents.json",
+        source_value('POLYDATA_GEO_SHOCK_FEDERAL_REGISTER_API_URL'),
     )
     payload = dependencies.http_json_get(
         url,
         params={"conditions[term]": query, "order": "newest", "per_page": min(5, max(1, limit))},
         timeout=12,
-        headers={"Accept": "application/json", "User-Agent": "Polymonitor/1.0 (+https://www.polymonitor.club/)"},
+        headers={"Accept": "application/json", "User-Agent": "Polymonitor/1.0"},
     )
     docs = (payload or {}).get("results") if isinstance(payload, dict) else []
     items: List[Dict[str, Any]] = []
@@ -430,7 +432,7 @@ def build_macro_cpi_panel_payload(
         "schemaVersion": 3,
         "expectedIntervalSeconds": 21600,
         "source": config.get("source") or FRED_SOURCE,
-        "sourceUrl": config.get("sourceUrl") or "https://fred.stlouisfed.org/",
+        "sourceUrl": config.get("sourceUrl") or source_value('POLYDATA_FOOD_BASKET_SOURCE_URL'),
         "status": status,
         "sources": sources,
         "summary": _summary(panel_id, config, limited_items, sources),
@@ -449,7 +451,7 @@ def _empty(
         "schemaVersion": 3,
         "expectedIntervalSeconds": 21600,
         "source": config.get("source") or FRED_SOURCE,
-        "sourceUrl": config.get("sourceUrl") or "https://fred.stlouisfed.org/",
+        "sourceUrl": config.get("sourceUrl") or source_value('POLYDATA_FOOD_BASKET_SOURCE_URL'),
         "status": status,
         "sources": {},
         "summary": _summary(panel_id, config, [], {}),
@@ -478,7 +480,7 @@ def normalize_macro_cpi_panel_payload(
     )
     result["status"] = str(result.get("status") or ("ok" if result["items"] else "warming"))
     result["source"] = str(result.get("source") or config.get("source") or FRED_SOURCE)
-    result["sourceUrl"] = str(result.get("sourceUrl") or config.get("sourceUrl") or "https://fred.stlouisfed.org/")
+    result["sourceUrl"] = str(result.get("sourceUrl") or config.get("sourceUrl") or source_value('POLYDATA_FOOD_BASKET_SOURCE_URL'))
     result["sources"] = result.get("sources") if isinstance(result.get("sources"), dict) else {}
     return result
 

@@ -1,3 +1,4 @@
+import { publicSource } from '@/config/publicSources';
 import type { WorldEventSourceStatus } from '../data/sourceStatus';
 import { useI18n } from '@/services/i18n';
 
@@ -12,7 +13,7 @@ export function MapStatus({ sources }: { sources: WorldEventSourceStatus[] }) {
       </span>)}
     </span>
     <ul className="wm-map-source-notes">{sources.filter(s => s.message).map(source => <li key={source.key}><b>{source.label}</b> · {source.message}
-      {source.key === 'gpsjam' ? <> · <a href="https://gpsjam.org/data/manifest.csv" target="_blank" rel="noreferrer">GPSJAM source catalog</a></> : null}
+      {source.key === 'gpsjam' ? <> · <a href={publicSource('VITE_PUBLIC_GPSJAM_CATALOG_URL') || undefined} target="_blank" rel="noreferrer">GPSJAM source catalog</a></> : null}
     </li>)}</ul>
   </details>;
 }

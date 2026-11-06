@@ -14,6 +14,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from data_sources import source_value
 
 from api.config import load_api_settings
 from api.services.crypto_strategy import providers
@@ -82,7 +83,7 @@ def main():
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     store = Store(path)
     cadence = SourceCadence()
-    base = os.environ.get("POLYDATA_CRYPTO_STRATEGY_BYBIT", "https://api.bybit.com")
+    base = source_value('POLYDATA_CRYPTO_STRATEGY_BYBIT')
     while True:
         start = time.monotonic()
         try:

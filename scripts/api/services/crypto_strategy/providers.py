@@ -1,6 +1,8 @@
 """Bounded public source adapters; only called by the seed worker."""
 from __future__ import annotations
 
+from data_sources import source_value
+
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import time
@@ -83,7 +85,7 @@ def venue_asset(get, base, asset, now, cadence=None):
 
 
 def options(get, asset, now):
-    base = "https://www.deribit.com/api/v2/public/"
+    base = source_value('POLYMONITOR_URL_WWW_DERIBIT_COM_API_V2_PUBLIC_99D260')
     instrument_payload = get(base + "get_instruments", params={"currency": asset, "kind": "option", "expired": "false"})
     quote_payload = get(base + "get_book_summary_by_currency", params={"currency": asset, "kind": "option"})
     if "error" in instrument_payload or "error" in quote_payload:
@@ -107,7 +109,7 @@ def references(get, url, now, lob_url=None):
         valid = market.get("asset") == asset and (number(market.get("ends_at_ms")) or 0) > now
         valid = valid and (number(market.get("starts_at_ms")) or now + 1) <= now
         valid = valid and str(market.get("condition_id", "")).startswith("0x") and bool(market.get("rule_version"))
-        valid = valid and market.get("rule_url", "").startswith("https://data.chain.link/")
+        valid = valid and market.get("rule_url", "").startswith(source_value('POLYMONITOR_URL_DATA_CHAIN_LINK_C3DCEB'))
         valid = valid and market.get("price_kind") == "twap" and market.get("window_seconds") == 60 and market.get("comparator") == ">="
         anchor = market.get("anchor") or {}
         if anchor.get("condition_id") != market.get("condition_id") or not (number(anchor.get("value")) or 0) > 0:
@@ -168,10 +170,10 @@ def stablecoins(get, now):
         for source, pair in (("Coinbase", symbol + "-USD"), ("Kraken", symbol + "USD")):
             try:
                 if source == "Coinbase":
-                    raw = get("https://api.coinbase.com/v2/prices/" + pair + "/spot")
+                    raw = get(source_value('POLYMONITOR_URL_API_COINBASE_COM_V2_PRICES_771506') + pair + "/spot")
                     value = number(raw["data"]["amount"])
                 else:
-                    raw = get("https://api.kraken.com/0/public/Ticker", params={"pair": pair})
+                    raw = get(source_value('POLYMONITOR_URL_API_KRAKEN_COM_0_PUBLIC_TICKER_C10C94'), params={"pair": pair})
                     if raw.get("error"):
                         raise ValueError("KRAKEN_PAIR_UNAVAILABLE")
                     value = number(next(iter(raw["result"].values()))["c"][0])

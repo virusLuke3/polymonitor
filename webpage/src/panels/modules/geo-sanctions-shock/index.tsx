@@ -1,3 +1,4 @@
+import { publicSource } from '@/config/publicSources';
 import { macroSnapshot, macroRefreshPolicy, MacroRefresh } from '@/panels/shared/macro-runtime';
 import { panelStatus as panelTone } from '@/panels/shared/formatters';
 import { useMemo, useState } from 'preact/hooks';
@@ -122,7 +123,7 @@ function GeoShockPanel({ payload }: {
           <div><strong>{item.headline}</strong><p>{item.summary}</p>
             <small className="wm-macro-observation">{item.source} · {item.kind === 'sanction' ? 'List published' : 'Published'} {formatDate(item.occurredAt)}</small>
             <small className="wm-macro-observation">Collected {item.collectedAt ? new Date(item.collectedAt).toLocaleString() : 'Unknown'}{item.retained ? ' · Saved record; source refresh failed' : ''}</small>
-            <a className="wm-macro-source-link" href={item.sourceUrl || 'https://ofac.treasury.gov/sanctions-list-service'} target="_blank" rel="noopener noreferrer">Source</a>
+            <a className="wm-macro-source-link" href={item.sourceUrl || publicSource('VITE_PUBLIC_OFAC_SOURCE_URL')} target="_blank" rel="noopener noreferrer">Source</a>
           </div>
         </article>) : <p>No sanctions / policy observations available. Check source status above.</p>}
       </div> : <div className="wm-geo-ucdp-panel">

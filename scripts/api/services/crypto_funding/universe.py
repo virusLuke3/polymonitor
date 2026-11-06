@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from data_sources import source_value
+
 import re
 import time
 from functools import lru_cache
@@ -104,7 +106,7 @@ def market_relations(events: list[dict], *, eligible_assets: set[str], now: str)
                     relation["relatedMarkets"].append({
                         "id": market_id, "eventId": str(event.get("id") or ""),
                         "title": str(market.get("question") or event.get("title") or asset)[:220],
-                        "url": f"https://polymarket.com/event/{slug}", "endAt": end_at,
+                        "url": f"{source_value('POLYMONITOR_URL_POLYMARKET_COM_EVENT_E8B690')}{slug}", "endAt": end_at,
                         "relation": "price-asset" if price else "asset-context",
                     })
     return result

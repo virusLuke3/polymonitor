@@ -1,11 +1,13 @@
 """WMO member CAP catalog, retaining country-only records without fake points."""
+
+from data_sources import source_value
 import re
 from datetime import datetime, timezone
 from ..contracts import SEVERITY_MAPPING_VERSION
 from ..normalize import iso_timestamp
 from ..source_health import SOURCE_COVERAGE
 
-URL = 'https://severeweather.wmo.int/json/wmo_all.json'
+URL = source_value('POLYMONITOR_URL_SEVEREWEATHER_WMO_INT_JSON_WMO_ALL_JSON_779945')
 
 
 def fetch(http_json_get, *, now=None):

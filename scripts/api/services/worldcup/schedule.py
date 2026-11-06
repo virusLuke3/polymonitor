@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from data_sources import source_value
+
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
 from zoneinfo import ZoneInfo
 
-OPENFOOTBALL_2026_URL = "https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json"
+OPENFOOTBALL_2026_URL = source_value('POLYMONITOR_URL_RAW_GITHUBUSERCONTENT_COM_OPENFOOTBALL_WORLDCUP_JSON_MASTER_2026_WORLDCUP_JSON_6EB357')
 
 WORLD_CUP_CITIES: List[Dict[str, Any]] = [
     {"id": "atlanta", "city": "Atlanta", "country": "US", "countryName": "United States", "venue": "Mercedes-Benz Stadium", "latitude": 33.7554, "longitude": -84.4008, "timezone": "America/New_York", "capacity": 71000},

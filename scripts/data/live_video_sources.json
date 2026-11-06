@@ -8,10 +8,16 @@
     "region": "global",
     "country": "US",
     "language": "en",
-    "externalUrl": "https://www.nasa.gov/nasatv/",
+    "externalUrl": "${POLYMONITOR_URL_WWW_NASA_GOV_NASATV_4CB579}",
     "sourceName": "NASA",
-    "sourceUrl": "https://www.nasa.gov/nasatv/",
-    "marketTags": ["space", "nasa", "launch", "science", "government"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_NASA_GOV_NASATV_4CB579}",
+    "marketTags": [
+      "space",
+      "nasa",
+      "launch",
+      "science",
+      "government"
+    ],
     "marketUseCase": "Official live and event video for space, launch, and US agency markets.",
     "notes": "Use external link as the reliable fallback; HLS availability varies by NASA event page.",
     "risk": "Schedule-driven programming and occasional embed changes."
@@ -27,10 +33,16 @@
     "language": "en",
     "youtubeHandle": "@NASA",
     "youtubeChannelId": "UCLA_DiR1FfKNvjuUpBHmylQ",
-    "externalUrl": "https://www.youtube.com/@NASA/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_NASA_STREAMS_26B430}",
     "sourceName": "NASA YouTube",
-    "sourceUrl": "https://www.youtube.com/@NASA/streams",
-    "marketTags": ["space", "launch", "nasa", "iss", "science"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_NASA_STREAMS_26B430}",
+    "marketTags": [
+      "space",
+      "launch",
+      "nasa",
+      "iss",
+      "science"
+    ],
     "marketUseCase": "Fast external stream fallback for NASA events and space-related prediction markets.",
     "notes": "Open externally in MVP to avoid brittle embeds.",
     "risk": "YouTube live URLs change per event."
@@ -46,10 +58,16 @@
     "language": "en",
     "youtubeHandle": "@SkyNews",
     "youtubeChannelId": "UCoMdktPbSTixAyNGwb-UYkQ",
-    "externalUrl": "https://www.youtube.com/@SkyNews/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_SKYNEWS_STREAMS_788B51}",
     "sourceName": "Sky News YouTube",
-    "sourceUrl": "https://www.youtube.com/@SkyNews/streams",
-    "marketTags": ["breaking", "uk", "europe", "politics", "geopolitics"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_SKYNEWS_STREAMS_788B51}",
+    "marketTags": [
+      "breaking",
+      "uk",
+      "europe",
+      "politics",
+      "geopolitics"
+    ],
     "marketUseCase": "Breaking English-language news stream for UK, Europe, and geopolitical markets.",
     "notes": "Open externally in MVP.",
     "risk": "Live event availability can rotate."
@@ -63,10 +81,16 @@
     "region": "europe",
     "country": "EU",
     "language": "en",
-    "externalUrl": "https://www.euronews.com/live",
+    "externalUrl": "${POLYMONITOR_URL_WWW_EURONEWS_COM_LIVE_71B96E}",
     "sourceName": "Euronews",
-    "sourceUrl": "https://www.euronews.com/live",
-    "marketTags": ["europe", "eu", "politics", "breaking", "macro"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_EURONEWS_COM_LIVE_71B96E}",
+    "marketTags": [
+      "europe",
+      "eu",
+      "politics",
+      "breaking",
+      "macro"
+    ],
     "marketUseCase": "Europe-first rolling news for EU policy, elections, and regional event markets.",
     "notes": "Official live page is more stable than third-party stream URLs.",
     "risk": "Player may be geo-limited."
@@ -80,10 +104,16 @@
     "region": "americas",
     "country": "US",
     "language": "en",
-    "externalUrl": "https://abcnews.go.com/Live",
+    "externalUrl": "${POLYMONITOR_URL_ABCNEWS_GO_COM_LIVE_4088D4}",
     "sourceName": "ABC News",
-    "sourceUrl": "https://abcnews.go.com/Live",
-    "marketTags": ["us", "breaking", "politics", "elections", "weather"],
+    "sourceUrl": "${POLYMONITOR_URL_ABCNEWS_GO_COM_LIVE_4088D4}",
+    "marketTags": [
+      "us",
+      "breaking",
+      "politics",
+      "elections",
+      "weather"
+    ],
     "marketUseCase": "US live news context for politics, elections, and breaking event markets.",
     "notes": "Official live page fallback.",
     "risk": "May require region support or player refresh."
@@ -99,10 +129,16 @@
     "language": "en",
     "youtubeHandle": "@dwnews",
     "youtubeChannelId": "UCknLrEdhRCp1aegoMqRaCZg",
-    "externalUrl": "https://www.youtube.com/@dwnews/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_DWNEWS_STREAMS_78D87D}",
     "sourceName": "DW News YouTube",
-    "sourceUrl": "https://www.youtube.com/@dwnews/streams",
-    "marketTags": ["germany", "europe", "geopolitics", "war", "policy"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_DWNEWS_STREAMS_78D87D}",
+    "marketTags": [
+      "germany",
+      "europe",
+      "geopolitics",
+      "war",
+      "policy"
+    ],
     "marketUseCase": "European geopolitical coverage with strong international focus.",
     "notes": "Open externally in MVP.",
     "risk": "YouTube live URLs rotate."
@@ -118,10 +154,16 @@
     "language": "en",
     "youtubeHandle": "@aljazeeraenglish",
     "youtubeChannelId": "UCNye-wNBqNL5ZzHSJj3l8Bg",
-    "externalUrl": "https://www.youtube.com/@aljazeeraenglish/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_ALJAZEERAENGLISH_STREAMS_91221E}",
     "sourceName": "Al Jazeera English YouTube",
-    "sourceUrl": "https://www.youtube.com/@aljazeeraenglish/streams",
-    "marketTags": ["middle-east", "conflict", "geopolitics", "war", "diplomacy"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_ALJAZEERAENGLISH_STREAMS_91221E}",
+    "marketTags": [
+      "middle-east",
+      "conflict",
+      "geopolitics",
+      "war",
+      "diplomacy"
+    ],
     "marketUseCase": "Middle East and conflict-heavy live news context for geopolitical markets.",
     "notes": "Open externally in MVP.",
     "risk": "Editorial framing and availability should be cross-checked with other sources."
@@ -135,10 +177,17 @@
     "region": "americas",
     "country": "US",
     "language": "en",
-    "externalUrl": "https://www.cnbc.com/live-tv/",
+    "externalUrl": "${POLYMONITOR_URL_WWW_CNBC_COM_LIVE_TV_D6B761}",
     "sourceName": "CNBC",
-    "sourceUrl": "https://www.cnbc.com/live-tv/",
-    "marketTags": ["stocks", "fed", "rates", "macro", "earnings", "oil"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_CNBC_COM_LIVE_TV_D6B761}",
+    "marketTags": [
+      "stocks",
+      "fed",
+      "rates",
+      "macro",
+      "earnings",
+      "oil"
+    ],
     "marketUseCase": "Market-moving US business news for rate, equity, commodity, and macro event markets.",
     "notes": "May require TV provider or region; keep as external source.",
     "risk": "Access restrictions."
@@ -152,10 +201,17 @@
     "region": "global",
     "country": "US",
     "language": "en",
-    "externalUrl": "https://www.bloomberg.com/live",
+    "externalUrl": "${POLYMONITOR_URL_WWW_BLOOMBERG_COM_LIVE_C99BE0}",
     "sourceName": "Bloomberg",
-    "sourceUrl": "https://www.bloomberg.com/live",
-    "marketTags": ["macro", "fed", "rates", "stocks", "fx", "commodities"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_BLOOMBERG_COM_LIVE_C99BE0}",
+    "marketTags": [
+      "macro",
+      "fed",
+      "rates",
+      "stocks",
+      "fx",
+      "commodities"
+    ],
     "marketUseCase": "Global macro, central bank, and markets context for financial prediction markets.",
     "notes": "Official page; access and live mode may vary.",
     "risk": "Paywall or player restrictions."
@@ -169,10 +225,16 @@
     "region": "global",
     "country": "GB",
     "language": "en",
-    "externalUrl": "https://www.reuters.com/video/",
+    "externalUrl": "${POLYMONITOR_URL_WWW_REUTERS_COM_VIDEO_9D0BC2}",
     "sourceName": "Reuters",
-    "sourceUrl": "https://www.reuters.com/video/",
-    "marketTags": ["breaking", "world", "macro", "policy", "markets"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_REUTERS_COM_VIDEO_9D0BC2}",
+    "marketTags": [
+      "breaking",
+      "world",
+      "macro",
+      "policy",
+      "markets"
+    ],
     "marketUseCase": "Wire-style video context for major global news and market-moving events.",
     "notes": "Video hub, not always a continuous live stream.",
     "risk": "Not always live."
@@ -186,10 +248,16 @@
     "region": "americas",
     "country": "US",
     "language": "en",
-    "externalUrl": "https://weather.com/",
+    "externalUrl": "${POLYMONITOR_URL_WEATHER_COM_DFD469}",
     "sourceName": "The Weather Channel",
-    "sourceUrl": "https://weather.com/",
-    "marketTags": ["weather", "hurricane", "storm", "temperature", "disaster"],
+    "sourceUrl": "${POLYMONITOR_URL_WEATHER_COM_DFD469}",
+    "marketTags": [
+      "weather",
+      "hurricane",
+      "storm",
+      "temperature",
+      "disaster"
+    ],
     "marketUseCase": "Weather event context for hurricane, storm, temperature, and disaster markets.",
     "notes": "Use as official weather video/context entry point.",
     "risk": "Live video access varies."
@@ -205,10 +273,16 @@
     "language": "en",
     "youtubeHandle": "@Foxweather",
     "youtubeChannelId": "UC1FbPiXx59_ltnFVx7IxWow",
-    "externalUrl": "https://www.youtube.com/@Foxweather/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_FOXWEATHER_STREAMS_A0F536}",
     "sourceName": "FOX Weather YouTube",
-    "sourceUrl": "https://www.youtube.com/@Foxweather/streams",
-    "marketTags": ["weather", "hurricane", "storm", "flood", "temperature"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_FOXWEATHER_STREAMS_A0F536}",
+    "marketTags": [
+      "weather",
+      "hurricane",
+      "storm",
+      "flood",
+      "temperature"
+    ],
     "marketUseCase": "US weather live stream fallback for severe weather markets.",
     "notes": "Open externally in MVP.",
     "risk": "Live availability rotates."
@@ -224,10 +298,16 @@
     "language": "en",
     "youtubeHandle": "@France24_en",
     "youtubeChannelId": "UCCCPCZNChQdGa9EkATeye4g",
-    "externalUrl": "https://www.youtube.com/@France24_en/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_FRANCE24_EN_STREAMS_262DCD}",
     "sourceName": "France 24 YouTube",
-    "sourceUrl": "https://www.youtube.com/@France24_en/streams",
-    "marketTags": ["france", "europe", "geopolitics", "breaking", "elections"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_FRANCE24_EN_STREAMS_262DCD}",
+    "marketTags": [
+      "france",
+      "europe",
+      "geopolitics",
+      "breaking",
+      "elections"
+    ],
     "marketUseCase": "European and international live news for elections, EU policy, and geopolitical markets.",
     "risk": "Live availability can rotate."
   },
@@ -242,10 +322,16 @@
     "language": "en",
     "youtubeHandle": "@CNBCtelevision",
     "youtubeChannelId": "UCvJJ_dzjViJCoLf5uKUTwoA",
-    "externalUrl": "https://www.youtube.com/@CNBCtelevision/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_CNBCTELEVISION_STREAMS_6FC528}",
     "sourceName": "CNBC Television YouTube",
-    "sourceUrl": "https://www.youtube.com/@CNBCtelevision/streams",
-    "marketTags": ["stocks", "fed", "rates", "earnings", "economy"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_CNBCTELEVISION_STREAMS_6FC528}",
+    "marketTags": [
+      "stocks",
+      "fed",
+      "rates",
+      "earnings",
+      "economy"
+    ],
     "marketUseCase": "US market and business video context for rates, earnings, and equity markets.",
     "risk": "Some programming may be clips rather than continuous live."
   },
@@ -261,10 +347,16 @@
     "youtubeHandle": "@markets",
     "youtubeChannelId": "UCIALMKvObZNtJ6AmdCLP7Lg",
     "youtubeProbeEnabled": false,
-    "externalUrl": "https://www.youtube.com/@markets/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_MARKETS_STREAMS_196FFB}",
     "sourceName": "Bloomberg Television YouTube",
-    "sourceUrl": "https://www.youtube.com/@markets/streams",
-    "marketTags": ["macro", "markets", "fed", "rates", "stocks"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_MARKETS_STREAMS_196FFB}",
+    "marketTags": [
+      "macro",
+      "markets",
+      "fed",
+      "rates",
+      "stocks"
+    ],
     "marketUseCase": "Global market television entry point for macro and central-bank event context.",
     "risk": "Live schedule and embed availability may vary."
   },
@@ -280,10 +372,16 @@
     "youtubeHandle": "@YahooFinance",
     "youtubeChannelId": "UCEAZeUIeJs0IjQiqTCdVSIg",
     "youtubeProbeEnabled": false,
-    "externalUrl": "https://www.youtube.com/@YahooFinance/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_YAHOOFINANCE_STREAMS_556F78}",
     "sourceName": "Yahoo Finance YouTube",
-    "sourceUrl": "https://www.youtube.com/@YahooFinance/streams",
-    "marketTags": ["finance", "stocks", "earnings", "economy", "macro"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_YAHOOFINANCE_STREAMS_556F78}",
+    "marketTags": [
+      "finance",
+      "stocks",
+      "earnings",
+      "economy",
+      "macro"
+    ],
     "marketUseCase": "Market commentary and earnings clips for US equities and macro markets.",
     "risk": "Often clip-first rather than live."
   },
@@ -298,10 +396,16 @@
     "language": "en",
     "youtubeHandle": "@Reuters",
     "youtubeChannelId": "UChqUTb7kYRX8-EiaN3XFrSQ",
-    "externalUrl": "https://www.youtube.com/@Reuters/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_REUTERS_STREAMS_6E724B}",
     "sourceName": "Reuters YouTube",
-    "sourceUrl": "https://www.youtube.com/@Reuters/streams",
-    "marketTags": ["breaking", "world", "policy", "markets", "geopolitics"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_REUTERS_STREAMS_6E724B}",
+    "marketTags": [
+      "breaking",
+      "world",
+      "policy",
+      "markets",
+      "geopolitics"
+    ],
     "marketUseCase": "Wire-style breaking video for major global events and policy markets.",
     "risk": "Live streams appear around events rather than 24/7."
   },
@@ -318,10 +422,16 @@
     "youtubeChannelId": "UC52X5wxOL_s5yw0dQk7NtgA",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "ySRoMhkzYoQ",
-    "externalUrl": "https://www.youtube.com/@AssociatedPress/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_ASSOCIATEDPRESS_STREAMS_68BBC7}",
     "sourceName": "AP YouTube",
-    "sourceUrl": "https://www.youtube.com/@AssociatedPress/streams",
-    "marketTags": ["breaking", "politics", "world", "elections", "courts"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_ASSOCIATEDPRESS_STREAMS_68BBC7}",
+    "marketTags": [
+      "breaking",
+      "politics",
+      "world",
+      "elections",
+      "courts"
+    ],
     "marketUseCase": "AP event streams for politics, courts, elections, and global breaking news.",
     "risk": "Event-driven live availability."
   },
@@ -338,10 +448,16 @@
     "youtubeChannelId": "UC2s0uKOc2WgB9eGta7cUUEA",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "UNeVMdtqd1g",
-    "externalUrl": "https://www.youtube.com/@PBSNewsHour/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_PBSNEWSHOUR_STREAMS_1DAA13}",
     "sourceName": "PBS NewsHour YouTube",
-    "sourceUrl": "https://www.youtube.com/@PBSNewsHour/streams",
-    "marketTags": ["politics", "elections", "congress", "policy", "debates"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_PBSNEWSHOUR_STREAMS_1DAA13}",
+    "marketTags": [
+      "politics",
+      "elections",
+      "congress",
+      "policy",
+      "debates"
+    ],
     "marketUseCase": "US politics, elections, and policy video for government-related markets.",
     "risk": "Live schedule follows programs and events."
   },
@@ -358,10 +474,16 @@
     "youtubeChannelId": "UC5yU2PtjeqXuTASGylDncFw",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "8FGm8soU304",
-    "externalUrl": "https://www.youtube.com/@CSPAN/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_CSPAN_STREAMS_ED1BA5}",
     "sourceName": "C-SPAN YouTube",
-    "sourceUrl": "https://www.youtube.com/@CSPAN/streams",
-    "marketTags": ["elections", "politics", "congress", "white-house", "hearings"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_CSPAN_STREAMS_ED1BA5}",
+    "marketTags": [
+      "elections",
+      "politics",
+      "congress",
+      "white-house",
+      "hearings"
+    ],
     "marketUseCase": "Official-ish US political event coverage for hearings, campaigns, and election markets.",
     "risk": "Event schedule dependent."
   },
@@ -378,10 +500,16 @@
     "youtubeChannelId": "UCd94YCD7yp6d-YZSRYWyeFA",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "QLQ58dn3RRI",
-    "externalUrl": "https://www.youtube.com/@CGTN/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_CGTN_STREAMS_227E33}",
     "sourceName": "CGTN YouTube",
-    "sourceUrl": "https://www.youtube.com/@CGTN/streams",
-    "marketTags": ["china", "asia", "geopolitics", "economy", "diplomacy"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_CGTN_STREAMS_227E33}",
+    "marketTags": [
+      "china",
+      "asia",
+      "geopolitics",
+      "economy",
+      "diplomacy"
+    ],
     "marketUseCase": "China and Asia geopolitical/economic context for regional markets.",
     "risk": "Editorial framing should be cross-checked."
   },
@@ -397,10 +525,16 @@
     "youtubeHandle": "@trtworld",
     "youtubeChannelId": "UCnyCrv8b7bu0oWFXGyHaPzg",
     "youtubeProbeEnabled": false,
-    "externalUrl": "https://www.youtube.com/@trtworld/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_TRTWORLD_STREAMS_1FF4A9}",
     "sourceName": "TRT World YouTube",
-    "sourceUrl": "https://www.youtube.com/@trtworld/streams",
-    "marketTags": ["turkey", "middle-east", "geopolitics", "conflict", "diplomacy"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_TRTWORLD_STREAMS_1FF4A9}",
+    "marketTags": [
+      "turkey",
+      "middle-east",
+      "geopolitics",
+      "conflict",
+      "diplomacy"
+    ],
     "marketUseCase": "Turkey and Middle East live context for diplomatic and conflict markets.",
     "risk": "Live availability and editorial framing vary."
   },
@@ -417,10 +551,16 @@
     "youtubeChannelId": "UC_gUM8rL-Lrg6O3adPW9K1g",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "0rQttCC2z7A",
-    "externalUrl": "https://www.youtube.com/@WION/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_WION_STREAMS_7D198F}",
     "sourceName": "WION YouTube",
-    "sourceUrl": "https://www.youtube.com/@WION/streams",
-    "marketTags": ["india", "asia", "geopolitics", "breaking", "economy"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_WION_STREAMS_7D198F}",
+    "marketTags": [
+      "india",
+      "asia",
+      "geopolitics",
+      "breaking",
+      "economy"
+    ],
     "marketUseCase": "India and Asia-heavy international news for geopolitics and economy markets.",
     "risk": "Live availability can rotate."
   },
@@ -434,10 +574,16 @@
     "country": "IR",
     "language": "en",
     "youtubeHandle": "@IranIntl_En",
-    "externalUrl": "https://www.youtube.com/@IranIntl_En/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_IRANINTL_EN_STREAMS_BAF561}",
     "sourceName": "Iran International YouTube",
-    "sourceUrl": "https://www.youtube.com/@IranIntl_En/streams",
-    "marketTags": ["iran", "middle-east", "conflict", "nuclear", "diplomacy"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_IRANINTL_EN_STREAMS_BAF561}",
+    "marketTags": [
+      "iran",
+      "middle-east",
+      "conflict",
+      "nuclear",
+      "diplomacy"
+    ],
     "marketUseCase": "Iran-focused live/video source for sanctions, nuclear, conflict, and diplomacy markets.",
     "risk": "Live availability can rotate."
   },
@@ -452,10 +598,16 @@
     "language": "en",
     "youtubeHandle": "@livenowfox",
     "youtubeChannelId": "UCDiPds0v60wueil5B8w3fPQ",
-    "externalUrl": "https://www.youtube.com/@livenowfox/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_LIVENOWFOX_STREAMS_5F2A04}",
     "sourceName": "LiveNOW from FOX YouTube",
-    "sourceUrl": "https://www.youtube.com/@livenowfox/streams",
-    "marketTags": ["breaking", "us", "weather", "politics", "disaster"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_LIVENOWFOX_STREAMS_5F2A04}",
+    "marketTags": [
+      "breaking",
+      "us",
+      "weather",
+      "politics",
+      "disaster"
+    ],
     "marketUseCase": "Fast US breaking-event stream for politics, disasters, and public-safety markets.",
     "risk": "Event-driven stream rotation."
   },
@@ -472,10 +624,16 @@
     "youtubeChannelId": "UCuYqi3hOfz6-3Hdp6tEJjAg",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "dLO5fC3nB2c",
-    "externalUrl": "https://www.youtube.com/@accuweather/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_ACCUWEATHER_STREAMS_B0B610}",
     "sourceName": "AccuWeather YouTube",
-    "sourceUrl": "https://www.youtube.com/@accuweather/streams",
-    "marketTags": ["weather", "hurricane", "storm", "temperature", "forecast"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_ACCUWEATHER_STREAMS_B0B610}",
+    "marketTags": [
+      "weather",
+      "hurricane",
+      "storm",
+      "temperature",
+      "forecast"
+    ],
     "marketUseCase": "Weather video and forecast context for storm, hurricane, and temperature markets.",
     "risk": "Often forecast clips rather than always-live."
   },
@@ -492,10 +650,16 @@
     "youtubeChannelId": "UCWJ2lWNubArHWmf3FIHbfcQ",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "YAJeGthcrCU",
-    "externalUrl": "https://www.youtube.com/@NBA/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_NBA_STREAMS_539963}",
     "sourceName": "NBA YouTube",
-    "sourceUrl": "https://www.youtube.com/@NBA/streams",
-    "marketTags": ["sports", "nba", "basketball", "playoffs", "injury"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_NBA_STREAMS_539963}",
+    "marketTags": [
+      "sports",
+      "nba",
+      "basketball",
+      "playoffs",
+      "injury"
+    ],
     "marketUseCase": "NBA video context for game, awards, injury, and league markets.",
     "risk": "Live events are scheduled and may be rights-limited."
   },
@@ -512,10 +676,16 @@
     "youtubeChannelId": "UCpcTrCXblq78GZrTUTLWeBw",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "ZOrx-kj9gQ8",
-    "externalUrl": "https://www.youtube.com/@FIFA/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_FIFA_STREAMS_7121E2}",
     "sourceName": "FIFA YouTube",
-    "sourceUrl": "https://www.youtube.com/@FIFA/streams",
-    "marketTags": ["sports", "soccer", "world-cup", "fifa", "draw"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_FIFA_STREAMS_7121E2}",
+    "marketTags": [
+      "sports",
+      "soccer",
+      "world-cup",
+      "fifa",
+      "draw"
+    ],
     "marketUseCase": "Official football video for World Cup, draws, and tournament markets.",
     "risk": "Rights restrictions and schedule-dependent streams."
   },
@@ -532,10 +702,16 @@
     "youtubeChannelId": "UCd8iY-kEHtaB8qt8MH--zGw",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "K6JjBIyiTPQ",
-    "externalUrl": "https://www.youtube.com/@Formula1/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_FORMULA1_STREAMS_80B295}",
     "sourceName": "Formula 1 YouTube",
-    "sourceUrl": "https://www.youtube.com/@Formula1/streams",
-    "marketTags": ["sports", "f1", "racing", "qualifying", "grand-prix"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_FORMULA1_STREAMS_80B295}",
+    "marketTags": [
+      "sports",
+      "f1",
+      "racing",
+      "qualifying",
+      "grand-prix"
+    ],
     "marketUseCase": "Formula 1 official video context for race, qualifying, and driver markets.",
     "risk": "Live video is schedule and rights dependent."
   },
@@ -552,10 +728,16 @@
     "youtubeChannelId": "UC7i94bTxxuZBrllSxXHyFxg",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "vl0OY9Pttjw",
-    "externalUrl": "https://www.youtube.com/@espn/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_ESPN_STREAMS_E09845}",
     "sourceName": "ESPN YouTube",
-    "sourceUrl": "https://www.youtube.com/@espn/streams",
-    "marketTags": ["sports", "nba", "nfl", "college", "odds"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_ESPN_STREAMS_E09845}",
+    "marketTags": [
+      "sports",
+      "nba",
+      "nfl",
+      "college",
+      "odds"
+    ],
     "marketUseCase": "Sports video context for league, award, and event markets.",
     "risk": "Most live content is rights-limited."
   },
@@ -572,10 +754,16 @@
     "youtubeChannelId": "UCA1d3HFGFUmkKr2JIUA5Vlw",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "ED7blaTBwOI",
-    "externalUrl": "https://www.youtube.com/@valorantesports/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_VALORANTESPORTS_STREAMS_74F055}",
     "sourceName": "VALORANT Esports YouTube",
-    "sourceUrl": "https://www.youtube.com/@valorantesports/streams",
-    "marketTags": ["esports", "valorant", "gaming", "tournament", "riot"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_VALORANTESPORTS_STREAMS_74F055}",
+    "marketTags": [
+      "esports",
+      "valorant",
+      "gaming",
+      "tournament",
+      "riot"
+    ],
     "marketUseCase": "Esports live/video context for tournament and game-market questions.",
     "risk": "Season and tournament schedule dependent."
   },
@@ -592,10 +780,16 @@
     "youtubeChannelId": "UCCjyq_K1Xwfg8Lndy7lKMpA",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "dDWx85SIrYg",
-    "externalUrl": "https://www.youtube.com/@TechCrunch/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_TECHCRUNCH_STREAMS_EADFD2}",
     "sourceName": "TechCrunch YouTube",
-    "sourceUrl": "https://www.youtube.com/@TechCrunch/streams",
-    "marketTags": ["tech", "ai", "startups", "ipo", "regulation"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_TECHCRUNCH_STREAMS_EADFD2}",
+    "marketTags": [
+      "tech",
+      "ai",
+      "startups",
+      "ipo",
+      "regulation"
+    ],
     "marketUseCase": "Tech and startup video context for AI, IPO, and regulatory markets.",
     "risk": "Mostly clips and conference streams."
   },
@@ -612,10 +806,16 @@
     "youtubeChannelId": "UCddiUEpeqJcYeBxX1IVBKvQ",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "mXn16ZzcukY",
-    "externalUrl": "https://www.youtube.com/@TheVerge/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_THEVERGE_STREAMS_D93935}",
     "sourceName": "The Verge YouTube",
-    "sourceUrl": "https://www.youtube.com/@TheVerge/streams",
-    "marketTags": ["tech", "ai", "consumer", "platforms", "culture"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_THEVERGE_STREAMS_D93935}",
+    "marketTags": [
+      "tech",
+      "ai",
+      "consumer",
+      "platforms",
+      "culture"
+    ],
     "marketUseCase": "Consumer tech and platform context for AI/product event markets.",
     "risk": "Usually event clips rather than continuous live."
   },
@@ -632,10 +832,16 @@
     "youtubeChannelId": "UC7TghOL755nBk7HelHoi9LQ",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "75LrBmSScvY",
-    "externalUrl": "https://www.youtube.com/@CoinDesk/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_COINDESK_STREAMS_BBD08A}",
     "sourceName": "CoinDesk YouTube",
-    "sourceUrl": "https://www.youtube.com/@CoinDesk/streams",
-    "marketTags": ["crypto", "bitcoin", "ethereum", "etf", "regulation"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_COINDESK_STREAMS_BBD08A}",
+    "marketTags": [
+      "crypto",
+      "bitcoin",
+      "ethereum",
+      "etf",
+      "regulation"
+    ],
     "marketUseCase": "Crypto markets and policy video for BTC, ETF, and regulation questions.",
     "risk": "Programming is schedule dependent."
   },
@@ -652,10 +858,16 @@
     "youtubeChannelId": "UCCRxYlYOmLE2l5wxs3ckJtg",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "uBFTG23f-Do",
-    "externalUrl": "https://www.youtube.com/@Bankless/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_BANKLESS_STREAMS_F6E350}",
     "sourceName": "Bankless YouTube",
-    "sourceUrl": "https://www.youtube.com/@Bankless/streams",
-    "marketTags": ["crypto", "ethereum", "defi", "policy", "markets"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_BANKLESS_STREAMS_F6E350}",
+    "marketTags": [
+      "crypto",
+      "ethereum",
+      "defi",
+      "policy",
+      "markets"
+    ],
     "marketUseCase": "Crypto-native video context for ETH, DeFi, regulation, and sentiment markets.",
     "risk": "Mostly commentary and event streams."
   },
@@ -671,10 +883,16 @@
     "youtubeHandle": "@BBCNews",
     "youtubeChannelId": "UCCj956IF62FbT7Gouszaj9w",
     "youtubeProbeEnabled": false,
-    "externalUrl": "https://www.youtube.com/@BBCNews/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_BBCNEWS_STREAMS_3C6E6C}",
     "sourceName": "BBC News YouTube",
-    "sourceUrl": "https://www.youtube.com/@BBCNews/streams",
-    "marketTags": ["culture", "world", "breaking", "politics", "europe"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_BBCNEWS_STREAMS_3C6E6C}",
+    "marketTags": [
+      "culture",
+      "world",
+      "breaking",
+      "politics",
+      "europe"
+    ],
     "marketUseCase": "Global news and culture-adjacent event video for broad public-interest markets.",
     "risk": "Live stream availability depends on programming."
   },
@@ -691,10 +909,16 @@
     "youtubeChannelId": "UCBi2mrWuNuyYy4gbM6fU18Q",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "DhTHNJzAMfc",
-    "externalUrl": "https://www.youtube.com/@ABCNews/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_ABCNEWS_STREAMS_B42181}",
     "sourceName": "ABC News YouTube",
-    "sourceUrl": "https://www.youtube.com/@ABCNews/streams",
-    "marketTags": ["us", "breaking", "politics", "elections", "weather"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_ABCNEWS_STREAMS_B42181}",
+    "marketTags": [
+      "us",
+      "breaking",
+      "politics",
+      "elections",
+      "weather"
+    ],
     "marketUseCase": "US news video context for politics, elections, severe weather, and breaking-event markets.",
     "risk": "Mostly clips and scheduled event streams."
   },
@@ -711,10 +935,16 @@
     "youtubeChannelId": "UChDKyKQ59fYz3JO2fl0Z6sg",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "Qdk8EVhO10E",
-    "externalUrl": "https://www.youtube.com/@NBCNews/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_NBCNEWS_STREAMS_F5F596}",
     "sourceName": "NBC News YouTube",
-    "sourceUrl": "https://www.youtube.com/@NBCNews/streams",
-    "marketTags": ["us", "breaking", "politics", "elections", "weather"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_NBCNEWS_STREAMS_F5F596}",
+    "marketTags": [
+      "us",
+      "breaking",
+      "politics",
+      "elections",
+      "weather"
+    ],
     "marketUseCase": "US rolling-news and event video for election, policy, disaster, and public-safety markets.",
     "risk": "Live programming and embed availability can rotate."
   },
@@ -731,10 +961,16 @@
     "youtubeChannelId": "UC-SJ6nODDmufqBzPBwCvYvQ",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "LBrUebrMSl8",
-    "externalUrl": "https://www.youtube.com/@CBSNews/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_CBSNEWS_STREAMS_CC3DD3}",
     "sourceName": "CBS News YouTube",
-    "sourceUrl": "https://www.youtube.com/@CBSNews/streams",
-    "marketTags": ["us", "breaking", "politics", "elections", "economy"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_CBSNEWS_STREAMS_CC3DD3}",
+    "marketTags": [
+      "us",
+      "breaking",
+      "politics",
+      "elections",
+      "economy"
+    ],
     "marketUseCase": "US news and political event video for elections, courts, policy, and economy markets.",
     "risk": "Mostly clips and scheduled live events."
   },
@@ -751,10 +987,16 @@
     "youtubeChannelId": "UCupvZG-5ko_eiXAupbDfxWw",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "bUzezeDJdqs",
-    "externalUrl": "https://www.youtube.com/@CNN/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_CNN_STREAMS_C2F3AC}",
     "sourceName": "CNN YouTube",
-    "sourceUrl": "https://www.youtube.com/@CNN/streams",
-    "marketTags": ["breaking", "us", "politics", "world", "elections"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_CNN_STREAMS_C2F3AC}",
+    "marketTags": [
+      "breaking",
+      "us",
+      "politics",
+      "world",
+      "elections"
+    ],
     "marketUseCase": "US and global breaking-news video for politics, elections, and geopolitical markets.",
     "risk": "Continuous live video is usually rights-limited."
   },
@@ -771,10 +1013,16 @@
     "youtubeChannelId": "UCqlYzSgsh5jdtWYfVIBoTDw",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "xbT7fBpV9Dw",
-    "externalUrl": "https://www.youtube.com/@FoxNews/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_FOXNEWS_STREAMS_0614F5}",
     "sourceName": "Fox News YouTube",
-    "sourceUrl": "https://www.youtube.com/@FoxNews/streams",
-    "marketTags": ["politics", "us", "elections", "white-house", "congress"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_FOXNEWS_STREAMS_0614F5}",
+    "marketTags": [
+      "politics",
+      "us",
+      "elections",
+      "white-house",
+      "congress"
+    ],
     "marketUseCase": "US political video context for White House, Congress, election, and policy markets.",
     "risk": "Live programming and editorial framing should be cross-checked."
   },
@@ -791,10 +1039,16 @@
     "youtubeChannelId": "UCXIJgqnII2ZOINSWNOGFThA",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "eOmtWbcDj2Q",
-    "externalUrl": "https://www.youtube.com/@FoxBusiness/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_FOXBUSINESS_STREAMS_D22B01}",
     "sourceName": "Fox Business YouTube",
-    "sourceUrl": "https://www.youtube.com/@FoxBusiness/streams",
-    "marketTags": ["finance", "stocks", "fed", "rates", "economy"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_FOXBUSINESS_STREAMS_D22B01}",
+    "marketTags": [
+      "finance",
+      "stocks",
+      "fed",
+      "rates",
+      "economy"
+    ],
     "marketUseCase": "Business and markets video for equities, rates, macro, and policy-linked markets.",
     "risk": "Mostly clips and scheduled programming."
   },
@@ -811,10 +1065,16 @@
     "youtubeChannelId": "UCPWXiRWZ29zrxPFIQT7eHSA",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "mss6CvvcaaI",
-    "externalUrl": "https://www.youtube.com/@TheHill/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_THEHILL_STREAMS_3695DC}",
     "sourceName": "The Hill YouTube",
-    "sourceUrl": "https://www.youtube.com/@TheHill/streams",
-    "marketTags": ["politics", "congress", "white-house", "elections", "policy"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_THEHILL_STREAMS_3695DC}",
+    "marketTags": [
+      "politics",
+      "congress",
+      "white-house",
+      "elections",
+      "policy"
+    ],
     "marketUseCase": "US politics and policy video for election, Congress, agency, and White House markets.",
     "risk": "Mostly clip-first coverage."
   },
@@ -831,10 +1091,16 @@
     "youtubeChannelId": "UCmh7afBz-uWwOSSNTqUBAhg",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "OvgtOSVZx-M",
-    "externalUrl": "https://www.youtube.com/@ForbesBreakingNews/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_FORBESBREAKINGNEWS_STREAMS_B42C33}",
     "sourceName": "Forbes Breaking News YouTube",
-    "sourceUrl": "https://www.youtube.com/@ForbesBreakingNews/streams",
-    "marketTags": ["breaking", "business", "politics", "markets", "tech"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_FORBESBREAKINGNEWS_STREAMS_B42C33}",
+    "marketTags": [
+      "breaking",
+      "business",
+      "politics",
+      "markets",
+      "tech"
+    ],
     "marketUseCase": "Fast business, politics, and public-company video context for event-driven markets.",
     "risk": "Mostly clips and event streams."
   },
@@ -851,10 +1117,16 @@
     "youtubeChannelId": "UCef1-8eOpJgud7szVPlZQAQ",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "psqk74AAJ5Y",
-    "externalUrl": "https://www.youtube.com/@Firstpost/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_FIRSTPOST_STREAMS_544C07}",
     "sourceName": "Firstpost YouTube",
-    "sourceUrl": "https://www.youtube.com/@Firstpost/streams",
-    "marketTags": ["india", "asia", "geopolitics", "china", "economy"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_FIRSTPOST_STREAMS_544C07}",
+    "marketTags": [
+      "india",
+      "asia",
+      "geopolitics",
+      "china",
+      "economy"
+    ],
     "marketUseCase": "India and Asia geopolitical video for regional conflict, trade, and diplomacy markets.",
     "risk": "Editorial framing and live availability vary."
   },
@@ -871,10 +1143,16 @@
     "youtubeChannelId": "UCXBD5iG5cr4ZYZ99K-fmDHg",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "v-YZWllIhow",
-    "externalUrl": "https://www.youtube.com/@NDTV/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_NDTV_STREAMS_B39B5E}",
     "sourceName": "NDTV YouTube",
-    "sourceUrl": "https://www.youtube.com/@NDTV/streams",
-    "marketTags": ["india", "asia", "elections", "weather", "geopolitics"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_NDTV_STREAMS_B39B5E}",
+    "marketTags": [
+      "india",
+      "asia",
+      "elections",
+      "weather",
+      "geopolitics"
+    ],
     "marketUseCase": "India-focused news video for elections, weather, policy, and regional markets.",
     "risk": "Live programming and editorial framing vary."
   },
@@ -891,10 +1169,16 @@
     "youtubeChannelId": "UCTrQ7HXWRRxr7OsOtodr2_w",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "YwbdTb1vlK0",
-    "externalUrl": "https://www.youtube.com/@Channel4News/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_CHANNEL4NEWS_STREAMS_729285}",
     "sourceName": "Channel 4 News YouTube",
-    "sourceUrl": "https://www.youtube.com/@Channel4News/streams",
-    "marketTags": ["uk", "europe", "geopolitics", "politics", "conflict"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_CHANNEL4NEWS_STREAMS_729285}",
+    "marketTags": [
+      "uk",
+      "europe",
+      "geopolitics",
+      "politics",
+      "conflict"
+    ],
     "marketUseCase": "UK and Europe political/geopolitical video for policy, elections, and conflict markets.",
     "risk": "Mostly clips and scheduled news programming."
   },
@@ -911,10 +1195,16 @@
     "youtubeChannelId": "UCHpw8xwDNhU9gdohEcJu4aA",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "NqJ7_7YepT4",
-    "externalUrl": "https://www.youtube.com/@guardiannews/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_GUARDIANNEWS_STREAMS_5D986D}",
     "sourceName": "Guardian News YouTube",
-    "sourceUrl": "https://www.youtube.com/@guardiannews/streams",
-    "marketTags": ["uk", "europe", "politics", "climate", "culture"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_GUARDIANNEWS_STREAMS_5D986D}",
+    "marketTags": [
+      "uk",
+      "europe",
+      "politics",
+      "climate",
+      "culture"
+    ],
     "marketUseCase": "UK, Europe, climate, and public-interest video for culture and politics markets.",
     "risk": "Mostly clips and event streams."
   },
@@ -931,10 +1221,16 @@
     "youtubeChannelId": "UCHJuQZuzapBh-CuhRYxIZrg",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "0bN1aNbevK8",
-    "externalUrl": "https://www.youtube.com/@businessinsider/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_BUSINESSINSIDER_STREAMS_CDCD93}",
     "sourceName": "Business Insider YouTube",
-    "sourceUrl": "https://www.youtube.com/@businessinsider/streams",
-    "marketTags": ["economy", "business", "tech", "consumer", "markets"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_BUSINESSINSIDER_STREAMS_CDCD93}",
+    "marketTags": [
+      "economy",
+      "business",
+      "tech",
+      "consumer",
+      "markets"
+    ],
     "marketUseCase": "Business, consumer, and tech video context for economy and company-linked markets.",
     "risk": "Mostly explainers and clips."
   },
@@ -951,10 +1247,16 @@
     "youtubeChannelId": "UC0p5jTq6Xx_DosDFxVXnWaQ",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "rToAdvKPuu8",
-    "externalUrl": "https://www.youtube.com/@TheEconomist/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_THEECONOMIST_STREAMS_9FE580}",
     "sourceName": "The Economist YouTube",
-    "sourceUrl": "https://www.youtube.com/@TheEconomist/streams",
-    "marketTags": ["economy", "geopolitics", "policy", "markets", "elections"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_THEECONOMIST_STREAMS_9FE580}",
+    "marketTags": [
+      "economy",
+      "geopolitics",
+      "policy",
+      "markets",
+      "elections"
+    ],
     "marketUseCase": "Global economy and policy context for macro, election, and geopolitical markets.",
     "risk": "Mostly analysis clips, not continuous live."
   },
@@ -971,10 +1273,16 @@
     "youtubeChannelId": "UCoUxsWakJucWg46KW5RsvPw",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "_Tvakqhql4w",
-    "externalUrl": "https://www.youtube.com/@FinancialTimes/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_FINANCIALTIMES_STREAMS_6DB23D}",
     "sourceName": "Financial Times YouTube",
-    "sourceUrl": "https://www.youtube.com/@FinancialTimes/streams",
-    "marketTags": ["finance", "macro", "markets", "economy", "policy"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_FINANCIALTIMES_STREAMS_6DB23D}",
+    "marketTags": [
+      "finance",
+      "macro",
+      "markets",
+      "economy",
+      "policy"
+    ],
     "marketUseCase": "Financial news and analysis video for macro, markets, policy, and corporate event markets.",
     "risk": "Mostly analysis clips and event streams."
   },
@@ -991,10 +1299,16 @@
     "youtubeChannelId": "UCMliswJ7oukCeW35GSayhRA",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "qfojduzYW5s",
-    "externalUrl": "https://www.youtube.com/@WSJ/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_WSJ_STREAMS_7EFDDF}",
     "sourceName": "Wall Street Journal YouTube",
-    "sourceUrl": "https://www.youtube.com/@WSJ/streams",
-    "marketTags": ["finance", "markets", "economy", "tech", "policy"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_WSJ_STREAMS_7EFDDF}",
+    "marketTags": [
+      "finance",
+      "markets",
+      "economy",
+      "tech",
+      "policy"
+    ],
     "marketUseCase": "Markets, corporate, technology, and policy video for US economy and company markets.",
     "risk": "Mostly clips and explainers."
   },
@@ -1011,10 +1325,16 @@
     "youtubeChannelId": "UCCKy7J6X7ofXXpNnlXfVGlw",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "4_gcBZn_71o",
-    "externalUrl": "https://www.youtube.com/@unitednations/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_UNITEDNATIONS_STREAMS_6CC709}",
     "sourceName": "United Nations YouTube",
-    "sourceUrl": "https://www.youtube.com/@unitednations/streams",
-    "marketTags": ["un", "geopolitics", "diplomacy", "conflict", "climate"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_UNITEDNATIONS_STREAMS_6CC709}",
+    "marketTags": [
+      "un",
+      "geopolitics",
+      "diplomacy",
+      "conflict",
+      "climate"
+    ],
     "marketUseCase": "Official multilateral video for UN votes, diplomacy, conflict, and climate markets.",
     "risk": "Language and live availability vary by event."
   },
@@ -1031,10 +1351,16 @@
     "youtubeChannelId": "UCYxRlFDqcWM4y7FfpiAN3KQ",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "coRix2BQ2UA",
-    "externalUrl": "https://www.youtube.com/@WhiteHouse/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_WHITEHOUSE_STREAMS_D2BAB3}",
     "sourceName": "White House YouTube",
-    "sourceUrl": "https://www.youtube.com/@WhiteHouse/streams",
-    "marketTags": ["white-house", "politics", "policy", "elections", "government"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_WHITEHOUSE_STREAMS_D2BAB3}",
+    "marketTags": [
+      "white-house",
+      "politics",
+      "policy",
+      "elections",
+      "government"
+    ],
     "marketUseCase": "Official White House video for executive action, speeches, policy, and political markets.",
     "risk": "Official-source framing and event schedule dependence."
   },
@@ -1051,10 +1377,16 @@
     "youtubeChannelId": "UCAzhpt9DmG6PnHXjmJTvRGQ",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "OGs9KSti1QY",
-    "externalUrl": "https://www.youtube.com/@Federalreserve/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_FEDERALRESERVE_STREAMS_5F86E6}",
     "sourceName": "Federal Reserve YouTube",
-    "sourceUrl": "https://www.youtube.com/@Federalreserve/streams",
-    "marketTags": ["fed", "rates", "macro", "inflation", "policy"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_FEDERALRESERVE_STREAMS_5F86E6}",
+    "marketTags": [
+      "fed",
+      "rates",
+      "macro",
+      "inflation",
+      "policy"
+    ],
     "marketUseCase": "Official Fed video for rates, inflation, central-bank, and macro markets.",
     "risk": "Event schedule dependent; most content is hearings and remarks."
   },
@@ -1071,10 +1403,16 @@
     "youtubeChannelId": "UCOZRnhGFjclZcBFHDoIn2Ig",
     "youtubeProbeEnabled": false,
     "fallbackVideoId": "s3Ibar7yYS4",
-    "externalUrl": "https://www.youtube.com/@Cointelegraph/streams",
+    "externalUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_COINTELEGRAPH_STREAMS_24CB15}",
     "sourceName": "Cointelegraph YouTube",
-    "sourceUrl": "https://www.youtube.com/@Cointelegraph/streams",
-    "marketTags": ["crypto", "bitcoin", "ethereum", "regulation", "markets"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_YOUTUBE_COM_COINTELEGRAPH_STREAMS_24CB15}",
+    "marketTags": [
+      "crypto",
+      "bitcoin",
+      "ethereum",
+      "regulation",
+      "markets"
+    ],
     "marketUseCase": "Crypto news and market video for BTC, ETH, regulation, and sentiment markets.",
     "risk": "Mostly clips and event streams."
   },
@@ -1087,10 +1425,16 @@
     "region": "americas",
     "country": "US",
     "language": "en",
-    "externalUrl": "https://www.espn.com/watch/",
+    "externalUrl": "${POLYMONITOR_URL_WWW_ESPN_COM_WATCH_512D0A}",
     "sourceName": "ESPN",
-    "sourceUrl": "https://www.espn.com/watch/",
-    "marketTags": ["sports", "nba", "nfl", "mlb", "soccer"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_ESPN_COM_WATCH_512D0A}",
+    "marketTags": [
+      "sports",
+      "nba",
+      "nfl",
+      "mlb",
+      "soccer"
+    ],
     "marketUseCase": "Sports broadcast entry point for game and league markets.",
     "notes": "Usually authenticated; keep as external only.",
     "risk": "Paywall and regional restrictions."
@@ -1104,10 +1448,16 @@
     "region": "global",
     "country": "US",
     "language": "en",
-    "externalUrl": "https://www.coindesk.com/tv/",
+    "externalUrl": "${POLYMONITOR_URL_WWW_COINDESK_COM_TV_6A543F}",
     "sourceName": "CoinDesk",
-    "sourceUrl": "https://www.coindesk.com/tv/",
-    "marketTags": ["crypto", "bitcoin", "ethereum", "etf", "regulation"],
+    "sourceUrl": "${POLYMONITOR_URL_WWW_COINDESK_COM_TV_6A543F}",
+    "marketTags": [
+      "crypto",
+      "bitcoin",
+      "ethereum",
+      "etf",
+      "regulation"
+    ],
     "marketUseCase": "Crypto market and policy video context for BTC, ETH, ETF, and regulation markets.",
     "notes": "Official crypto video hub.",
     "risk": "Programming schedule changes."
