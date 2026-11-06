@@ -107,7 +107,8 @@ def _source_limitations(payload: dict[str, Any]) -> list[str]:
             if status == 'partial':
                 limitations.append(f'{label} have partial source coverage; only available evidence is used.')
             else:
-                limitations.append(f'{label} are {status} and excluded; zero loaded rows does not establish no activity.')
+                description = 'unavailable (read failed)' if status == 'error' else status
+                limitations.append(f'{label} are {description} and excluded; zero loaded rows does not establish no activity.')
     return limitations
 
 

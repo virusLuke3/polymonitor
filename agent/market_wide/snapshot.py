@@ -450,6 +450,19 @@ def _seed_live_enabled() -> bool:
     return _truthy_env("POLYDATA_AGENT_SEED_ENABLED", False) and _truthy_env("POLYDATA_AGENT_ENABLED", False)
 
 
+def _trade_inputs_recovered(helpers: dict[str, Any], data: dict[str, Any]) -> bool:
+    """Let the existing scheduled seed replace an incomplete analysis after recovery."""
+    states = data.get("sourceStates") or {}
+    for key, reader, limit in (("trades", "get_recent_trades_snapshot", 24),
+                               ("whaleSignals", "get_whale_trades_snapshot", 10)):
+        previous = states.get(key) or {}
+        if previous.get("status") and previous["status"] not in {"ok", "empty"}:
+            _, current = _read_trade_evidence(helpers, reader, limit)
+            if current["status"] in {"ok", "empty"}:
+                return True
+    return False
+
+
 def _snapshot_from_insight(lens: str, insight: dict[str, Any], *, live_attempted: bool, budget: dict[str, Any] | None) -> dict[str, Any]:
     now = _utc_now()
     ttl = snapshot_ttl_seconds()
@@ -488,7 +501,9 @@ def build_market_wide_snapshot(
         data = existing.get("data") or {}
         retry_interval = snapshot_min_live_interval_seconds() if data.get("status") == "live" else 300
         if age_seconds is not None and age_seconds < retry_interval:
-            return _return_skipped_snapshot(existing, "fresh-snapshot")
+            if (age_seconds < 300 or not (live and _seed_live_enabled())
+                    or not _trade_inputs_recovered(helpers, data)):
+                return _return_skipped_snapshot(existing, "fresh-snapshot")
         if not (live and _seed_live_enabled()):
             return _return_skipped_snapshot(existing, "live-disabled-existing-snapshot")
 

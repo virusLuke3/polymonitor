@@ -62,6 +62,11 @@ in `sourceStates`. Recent global trades reuse the existing 24-row snapshot and
 15-second read cache. Successful empty reads and failed reads have distinct
 states; those states reach every model prompt through `metrics.sourceStates`
 and produce deterministic limitations in both AI and fallback responses.
+Once an incomplete analysis is at least five minutes old, the existing scheduled
+seed checks its failed trade inputs using those same bounded readers. A recovered
+source can trigger regeneration before the usual AI minimum interval; unchanged
+failures retain the current snapshot without spending another model run. This
+does not add a timer or reader-triggered generation to public GETs.
 `tests/test_market_wide_trade_inputs.py` covers the real runtime/SQLite reader,
 canonical key, stale exclusion, failure versus empty, and prompt/output paths.
 
