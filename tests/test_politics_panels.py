@@ -109,3 +109,34 @@ def test_all_politics_routes_registered_without_extra_visible_legislation_panel(
     assert "politics-legislation" not in DEFAULT_WORKSPACE_PANEL_IDS
     assert all(p in DEFAULT_WORKSPACE_PANEL_IDS for p in snapshots.PANELS if p != "politics-legislation")
     assert all(p in get_panel_ids() for p in snapshots.PANELS)
+
+
+def test_transport_accepts_only_verified_fec_redirect(monkeypatch):
+    from api.services.politics import collector
+    class Response:
+        def __init__(self, status, location=None):
+            self.status_code = status
+            self.headers = {"Location": location} if location else {}
+        def close(self): pass
+        def raise_for_status(self): pass
+        def iter_content(self, size): yield b"source"
+        def __enter__(self): return self
+        def __exit__(self, *args): self.close()
+    class Session:
+        trust_env = True
+        def __init__(self, destination): self.destination, self.calls = destination, []
+        def get(self, url, **kwargs):
+            self.calls.append((url, kwargs))
+            return Response(302, self.destination) if len(self.calls) == 1 else Response(200)
+        def close(self): pass
+    destination = "https://cg-519a459a-0ea3-42c2-b7bc-fa1143481f74.s3-us-gov-west-1.amazonaws.com/bulk-downloads/2026/weball26.zip"
+    session = Session(destination)
+    monkeypatch.setattr(collector, "source_session", lambda: session)
+    transport = collector.Transport()
+    assert transport.get("https://www.fec.gov/files/bulk-downloads/2026/weball26.zip") == b"source"
+    assert len(session.calls) == 2 and all(call[1]["allow_redirects"] is False for call in session.calls)
+    session = Session("http://127.0.0.1/private")
+    transport = collector.Transport()
+    with pytest.raises(ValueError, match="redirected"):
+        transport.get("https://www.fec.gov/files/bulk-downloads/2026/weball26.zip")
+    assert len(session.calls) == 1

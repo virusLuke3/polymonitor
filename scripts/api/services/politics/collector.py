@@ -87,8 +87,10 @@ def collect_owner(store, owner):
                 def acquire():
                     raw = transport.get(spec.url)
                     return raw, spec.parse(raw)
+                previous_attempt = (store.get_stale(SOURCE_NS, spec.key) or {}).get("lastAttemptAt")
                 state = collect(store, spec.key, acquire, spec.cadence)
-                print(f"{spec.key}: {state.get('error') or 'stored'}", flush=True)
+                outcome = "not-due" if state.get("lastAttemptAt") == previous_attempt else state.get("error") or "stored"
+                print(f"{spec.key}: {outcome}", flush=True)
             if owner == "government":
                 collect_bills(store, transport)
     finally:
