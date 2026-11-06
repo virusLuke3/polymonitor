@@ -1,0 +1,10 @@
+import { useState } from 'preact/hooks';
+import { Empty, Evidence, Link, Note, Scope, Shell, Stat, Tabs, useCopy } from '../../shared/politics/ui';
+import type { Payload } from './model';
+export function View({data}:{data?:Payload}) {
+ const t=useCopy(),[selected,set]=useState(''),[tab,setTab]=useState('submitted'),rows=data?.items||[],row=rows.find(r=>r.id===selected)||rows[0];
+ return <Shell id="politics-appointments" title={t('政治任命','APPOINTMENTS')} data={data} explanation={t('白宫正式送交提名及撤回公告。不是参院确认记录；一个公告可能包含多人。','Official White House nomination and withdrawal announcements. One announcement may include many nominees and does not prove Senate confirmation.')}>
+  <Scope name="US · NOMINATIONS" tag={t('正式公告','ANNOUNCEMENTS')}/><Tabs values={[[ 'submitted',t('提交记录','Submissions') ],['votes',t('确认表决','Confirmation votes')]]} value={tab} set={setTab}/>
+  {tab==='votes' ? <><div className="pol-stats"><Stat label={t('委员会票','Committee votes')} value="—" tone="cyan"/><Stat label={t('最终确认票','Confirmation votes')} value="—" tone="purple"/></div><Empty>{t('尚未取得可用的参议院逐名确认记录。提交、结束辩论、最终确认和就职不会混为一项。','Senate roll-call confirmation records are unavailable. Submission, cloture, confirmation and taking office remain distinct.')}</Empty></> : row ? <><select aria-label={t('选择提名公告','Select nomination announcement')} value={row.id} onChange={e=>set(e.currentTarget.value)}>{rows.map(r=><option key={r.id} value={r.id}>{r.publishedAt} · {r.title}</option>)}</select><div className="pol-person"><span className="pol-avatar pol-purple" aria-hidden="true">PN</span><div><b>{row.title}</b><p>{row.publishedAt}</p></div></div><Note tone="purple">{t('白宫提交记录 · 最终确认尚未核实','White House submission · confirmation unverified')}</Note><p>{(row.text || '').slice(0,900)}</p><Evidence><Link href={row.url}>{t('完整人选、职位与撤回名单','Full nominees, offices and withdrawals')}</Link><p>{(row.text || '').slice(900)}</p><p>{t('未核对 PN 子编号前不按人名自动合并任命批次。公告日期不是计划听证日期。','No automatic merging by name without PN sub-identities. Announcement dates are not hearing dates.')}</p></Evidence></> : <Empty>{t('尚无已取得的正式提名公告。','No acquired official nomination announcements.')}</Empty>}
+ </Shell>;
+}

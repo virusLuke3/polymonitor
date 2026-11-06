@@ -826,3 +826,7 @@ export function fetchMapSignalSource(source: string, signal?: AbortSignal) {
 export function fetchOfficialDisclosures(panelId: "company-events" | "policy-progress", signal?: AbortSignal) {
   return apiGet<unknown>(`/runtime/disclosures/${panelId}`, signal);
 }
+
+export function fetchPolitics(domain: string, signal?: AbortSignal) {
+  return apiGet<unknown>(`/runtime/politics/${encodeURIComponent(domain)}`, signal);
+}

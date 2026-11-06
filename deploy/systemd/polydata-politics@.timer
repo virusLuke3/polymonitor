@@ -1,0 +1,12 @@
+[Unit]
+Description=Check due political sources for %i
+
+[Timer]
+OnBootSec=60s
+OnCalendar=*:0/5
+RandomizedDelaySec=20s
+Persistent=true
+Unit=polydata-politics@%i.service
+
+[Install]
+WantedBy=timers.target

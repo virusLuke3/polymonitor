@@ -95,6 +95,19 @@ def policies(raw):
     return {"items": rows, "availableCount": raw["count"]}
 
 
+def presidential_documents(raw):
+    data = policies(raw)
+    for item, original in zip(data["items"], raw["results"]):
+        item.update(subtype=original.get("subtype"), signingDate=original.get("signing_date"),
+                    executiveOrderNumber=original.get("executive_order_number"),
+                    proclamationNumber=original.get("proclamation_number"),
+                    textUrl=original.get("raw_text_url"), correctionOf=original.get("correction_of"),
+                    executiveOrderNotes=original.get("executive_order_notes"))
+    data["coverage"] = "presidential-documents-last-90-days"
+    data["truncated"] = raw["count"] > len(raw["results"])
+    return data
+
+
 def archive(store, key, raw, now):
     path = Path(store.db_path).with_name("official_disclosures.sqlite3")
     packed = json.dumps(raw, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
@@ -188,4 +201,6 @@ def get_snapshot(store, panel_id, *, limit=100):
     else:
         payload["source"] = refresh_meta(payload["source"])
         payload["items"] = payload["items"][:limit] if payload["source"]["usable"] else []
+        from api.services.politics.snapshots import get_snapshot as get_politics_snapshot
+        payload["legislation"] = get_politics_snapshot(store, "politics-legislation", limit=40)
     return {**payload, "status": "ok"}

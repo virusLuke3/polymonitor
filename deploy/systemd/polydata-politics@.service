@@ -1,0 +1,14 @@
+[Unit]
+Description=Polymonitor political facts owner %i
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/__POLYDATA_REPO_ROOT__
+EnvironmentFile=%h/.config/polydata/politics.env
+Environment=PYTHONPATH=/__POLYDATA_REPO_ROOT__/scripts
+ExecStart=/__POLYDATA_VENV__/bin/python -m runtime.politics_watcher --owner %i
+TimeoutStartSec=1200
+MemoryMax=512M
+StandardOutput=journal
+StandardError=journal

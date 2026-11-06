@@ -9,7 +9,7 @@ from urllib.parse import urlencode, urlsplit
 
 import requests
 from api.clients.source_transport import source_session
-from api.services.official_disclosures_service import WATCHLIST, collect_source, facts, filings, policies, publish
+from api.services.official_disclosures_service import WATCHLIST, collect_source, facts, filings, policies, presidential_documents, publish
 from runtime.snapshot_store import SnapshotStore
 
 
@@ -57,6 +57,27 @@ def run():
                       "fields[]": ["document_number", "title", "type", "publication_date", "html_url", "pdf_url", "agencies", "effective_on", "comments_close_on"]}
             url = "https://www.federalregister.gov/api/v1/documents.json?" + urlencode(params, doseq=True)
             collect_source(store, "federal-register", url, policies, fetch, 1800)
+            presidential_since = (datetime.now(timezone.utc) - timedelta(days=90)).date().isoformat()
+            presidential_params = {"per_page": 100, "order": "newest", "conditions[type][]": "PRESDOCU",
+                "conditions[publication_date][gte]": presidential_since,
+                "fields[]": ["document_number", "title", "type", "publication_date", "html_url", "pdf_url", "agencies",
+                    "effective_on", "signing_date", "subtype", "executive_order_number", "proclamation_number",
+                    "raw_text_url", "correction_of", "executive_order_notes"]}
+            presidential_url = "https://www.federalregister.gov/api/v1/documents.json?" + urlencode(presidential_params, doseq=True)
+            def presidential_fetch(first_url):
+                first = fetch(first_url)
+                rows, next_url = first["results"], first.get("next_page_url")
+                for _ in range(4):
+                    if not next_url:
+                        break
+                    if urlsplit(next_url).hostname != "www.federalregister.gov":
+                        raise ValueError("Unexpected Federal Register continuation host")
+                    page = fetch(next_url)
+                    rows.extend(page["results"])
+                    next_url = page.get("next_page_url")
+                return {**first, "results": rows, "next_page_url": next_url}
+            collect_source(store, "federal-register:presidential", presidential_url,
+                           presidential_documents, presidential_fetch, 1800)
             publish(store)
             for symbol, cik in WATCHLIST.items():
                 for kind, cadence, url, parse in [

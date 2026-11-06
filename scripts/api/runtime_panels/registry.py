@@ -5,6 +5,16 @@ from typing import Dict, Iterable, List, Optional
 
 from .modules import (
     company_events,
+    politics_election,
+    politics_early_vote,
+    politics_nomination,
+    politics_seats,
+    politics_campaign_finance,
+    politics_government,
+    politics_executive,
+    politics_appointments,
+    politics_funding,
+    politics_legislation,
     policy_progress,
     crypto_order_flow,
     crypto_oracle_reference,
@@ -77,6 +87,16 @@ from .types import RuntimePanelModule
 
 _MODULES: List[ModuleType] = [
     company_events,
+    politics_election,
+    politics_early_vote,
+    politics_nomination,
+    politics_seats,
+    politics_campaign_finance,
+    politics_government,
+    politics_executive,
+    politics_appointments,
+    politics_funding,
+    politics_legislation,
     policy_progress,
     crypto_order_flow,
     crypto_oracle_reference,
@@ -160,6 +180,16 @@ def _coerce_module(module: ModuleType) -> RuntimePanelModule:
 RUNTIME_PANEL_MODULES: List[RuntimePanelModule] = [_coerce_module(module) for module in _MODULES]
 
 DEFAULT_WORKSPACE_PANEL_IDS: List[str] = [
+    "politics-election",
+    "politics-early-vote",
+    "politics-nomination",
+    "politics-seats",
+    "politics-campaign-finance",
+    "politics-government",
+    "politics-executive",
+    "politics-appointments",
+    "politics-funding",
+
     "company-events",
     "policy-progress",
     "active-markets",

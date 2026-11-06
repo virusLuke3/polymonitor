@@ -77,6 +77,15 @@ import { panel as lobDepth } from './lob-depth';
 import { panel as f1Trackside } from './f1-trackside';
 import { panel as companyEvents } from './company-events';
 import { panel as policyProgress } from './policy-progress';
+import { panel as politicsElection } from './politics-election';
+import { panel as politicsEarlyVote } from './politics-early-vote';
+import { panel as politicsNomination } from './politics-nomination';
+import { panel as politicsSeats } from './politics-seats';
+import { panel as politicsCampaignFinance } from './politics-campaign-finance';
+import { panel as politicsGovernment } from './politics-government';
+import { panel as politicsExecutive } from './politics-executive';
+import { panel as politicsAppointments } from './politics-appointments';
+import { panel as politicsFunding } from './politics-funding';
 export const PANEL_MODULES: PanelModule[] = [
   activeMarkets,
   globalOrderfilled,
@@ -156,4 +165,14 @@ export const PANEL_MODULES: PanelModule[] = [
   f1Trackside,
   companyEvents,
   policyProgress,
+  politicsElection,
+  politicsEarlyVote,
+  politicsNomination,
+  politicsSeats,
+  politicsCampaignFinance,
+  politicsGovernment,
+  politicsExecutive,
+  politicsAppointments,
+  politicsFunding,
+
 ];

@@ -1,0 +1,22 @@
+export type Source = { id: string; url: string; lastSuccessAt: string | null; lastAttemptAt: string | null; stale: boolean; error?: string | null; revision?: string };
+export type Base = { panelId: string; schemaVersion: number; generatedAt: string; sources: Source[] };
+export type Choice = { name: string; party: string; votes: number };
+export type Race = { id: string; title: string; electionDate: string; choices: Choice[]; counties: number; certified: null; remainingVotes: null };
+export type Seat = { id: string; name: string | null; party: string; caucus: string | null; sworn: string | null; url: string };
+export type House = Base & { items?: Seat[]; counts?: Record<string, number>; congress?: string; publishedAt?: string; majority?: string; totalSeats?: number; basis?: string };
+export type Bill = { id: string; title: string; introducedAt: string; updatedAt: string; url: string; latestAction: { date: string; text: string }; actions: { date: string; text: string; type: string; votes: string[] }[]; committees: string[]; cosponsors: number; textVersions: { name: string; date: string; urls: string[] }[]; laws: { type: string; number: string }[]; source: Source };
+export type Legislation = Base & { items: Bill[]; targetCount: number; acquiredCount: number; deadline?: string | null; fundingCoverage?: unknown[] };
+export const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+export const base = (v: unknown): v is Base => record(v) && typeof v.panelId === 'string' && v.schemaVersion === 1 && typeof v.generatedAt === 'string' && Number.isFinite(Date.parse(v.generatedAt)) && Array.isArray(v.sources) && v.sources.every(s => record(s) && typeof s.id === 'string' && typeof s.url === 'string' && typeof s.stale === 'boolean' && (s.lastSuccessAt === null || typeof s.lastSuccessAt === 'string'));
+export const safeUrl = (v: unknown): v is string => typeof v === 'string' && /^https:\/\//.test(v) && (() => { try { const u = new URL(v); return !u.username && !u.password; } catch { return false; } })();
+export const num = (v: number | null | undefined, digits = 0) => v === null || v === undefined || !Number.isFinite(v) ? '—' : v.toLocaleString(undefined, { maximumFractionDigits: digits });
+export const money = (v: number | null | undefined) => v === null || v === undefined ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 1 }).format(v);
+export const partyTone = (party: string) => party === 'D' || party === 'DEM' ? 'blue' : party === 'R' || party === 'REP' ? 'purple' : 'muted';
+
+export const finite = (v: unknown) => typeof v === 'number' && Number.isFinite(v);
+export const optionalNumber = (v: unknown) => v === null || finite(v);
+export const strings = (r: Record<string, unknown>, fields: string[]) => fields.every(k => typeof r[k] === 'string');
+export const rows = (v: unknown, valid: (r: Record<string, unknown>) => boolean, max = 500) => v === undefined || Array.isArray(v) && v.length <= max && v.every(r => record(r) && valid(r));
+export const validRace = (r: Record<string, unknown>) => strings(r,['id','title','electionDate']) && Array.isArray(r.choices) && rows(r.choices,c => strings(c,['name','party']) && finite(c.votes));
+export const validHouse = (v: unknown) => record(v) && rows(v.items,r => strings(r,['id','party','url']) && (r.name === null || typeof r.name === 'string')) && (v.counts === undefined || record(v.counts) && Object.values(v.counts).every(finite)) && base(v);
+export const validBill = (r: Record<string, unknown>) => strings(r,['id','title','url']) && record(r.latestAction) && typeof r.latestAction.text === 'string' && Array.isArray(r.actions) && rows(r.actions,a => strings(a,['date','text']) && Array.isArray(a.votes) && a.votes.every(safeUrl)) && Array.isArray(r.committees) && Array.isArray(r.textVersions) && rows(r.textVersions,a => typeof a.name === 'string' && Array.isArray(a.urls) && a.urls.every(safeUrl));

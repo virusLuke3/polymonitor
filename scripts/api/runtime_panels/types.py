@@ -198,6 +198,7 @@ class RuntimePanelContext:
     world: WorldRuntimePanelDependencies
     get_official_disclosures_snapshot: Callable[..., PanelPayload] | None = None
     get_crypto_strategy_snapshot: Callable[..., PanelPayload] | None = None
+    get_politics_snapshot: Callable[..., PanelPayload] | None = None
 
     @classmethod
     def from_context(cls, context: Mapping[str, Any]) -> RuntimePanelContext:
@@ -229,6 +230,7 @@ class RuntimePanelContext:
             world=WorldRuntimePanelDependencies.from_context(context),
             get_official_disclosures_snapshot=context.get("get_official_disclosures_snapshot"),
             get_crypto_strategy_snapshot=context.get("get_crypto_strategy_snapshot"),
+            get_politics_snapshot=context.get("get_politics_snapshot"),
         )
 
 
