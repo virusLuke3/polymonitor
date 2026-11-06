@@ -37,6 +37,20 @@ Redis configuration. The persisted namespace is `agent:market-wide:snapshot`,
 with keys `v1:overview`, `v1:special`, and `v1:trend`. Existing quant/history and
 node-event records stay with that producer. No browser-side generation is added.
 
+News evidence reuses the `related-news` owner's reviewed public-content reader:
+`content-topic-refresh` writes `content_items` and the shared
+`snapshot:content:free-public / candidates-v4` seed; `ServiceRuntime` injects
+`content_service.get_latest_content_payload` into the Agent seed context. Each
+lens reads at most 12 items from the global seven-day window. Model context keeps
+at most six excerpts (four when the context-size budget requires trimming),
+with their original publisher and publication time. No additional feed request,
+collector, database pool or cache is introduced. The existing content owner
+retains its source schedules, 90-second fresh seed and 300-second stale recovery;
+AI generation and browser checks keep their independent clocks below. The
+`contentItems` metric counts loaded input items, not complete news coverage or
+the number of excerpts retained in every specialist prompt. Source failures and
+candidate truncation remain limitations of the shared news feed.
+
 The production seed checks hourly, generates each successful lens at most once
 per six hours (`POLYDATA_AGENT_MARKET_WIDE_MIN_LIVE_INTERVAL_SECONDS=21600`), and
 publishes all three lenses. Snapshots expire after twelve hours; browsers read
@@ -54,6 +68,9 @@ Verification: `tests/test_agent_llm_client.py`, `tests/test_market_wide_agent_gr
 `tests/test_market_wide_node_budget.py`, and `webpage/e2e/panel-discovery.spec.ts`.
 Production acceptance additionally checks the actual model identity, stored
 snapshots, public API and desktop/mobile panels; tests alone do not establish it.
+`tests/test_market_wide_content_binding.py` exercises actual runtime assembly
+through seed input and model context for all three lenses, including an empty
+feed, bounded input and unchanged publication timestamps.
 
 ### Acceptance observed on 2026-11-05
 

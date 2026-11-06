@@ -742,6 +742,9 @@ def bind_services(runtime: ServiceRuntime) -> None:
         "app": runtime.app,
         "get_active_markets_snapshot": get_active_markets_snapshot,
         "get_cached_json": get_cached_json,
+        "get_latest_content_payload": lambda limit=12: content_service.get_latest_content_payload(
+            runtime.latest_content, limit=limit, days=7
+        ),
         "get_market_by_id": get_market_by_id,
         "get_market_groups_payload": get_market_groups_payload,
         "get_recent_oracle_snapshot": get_recent_oracle_snapshot,
