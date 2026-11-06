@@ -62,6 +62,12 @@ export default defineConfig(({ mode }) => {
     ...(existsSync(envPath) ? parseEnv(readFileSync(envPath, 'utf8')) : {}),
     ...process.env,
   };
+  if (mode === 'production' && env.VITE_POLYDATA_API_BASE_URL) {
+    const apiHost = new URL(env.VITE_POLYDATA_API_BASE_URL, 'https://configuration.invalid').hostname;
+    if (apiHost === 'localhost' || apiHost.endsWith('.localhost') || apiHost === '[::1]' || apiHost === '0.0.0.0' || /^127\./.test(apiHost)) {
+      throw new Error('Production API base must not point to localhost; configure the public API path before building.');
+    }
+  }
   const target = env.POLYDATA_DEV_PROXY_TARGET || '';
   const mapTilesTarget = env.POLYDATA_MAP_TILES_TARGET || '';
   const buildId = String(env.GITHUB_SHA || env.POLYDATA_BUILD_SHA || repositorySha()).slice(0, 40);
