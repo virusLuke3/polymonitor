@@ -186,6 +186,11 @@ FRASER 使用同一 Rabisu 接口优先、直连备用；未配置 host route �
 不继承 worker 的默认代理。来源状态用 `configured-routes` 区分显式路由策略与纯直连，
 该字段不声称每个目录/PDF 请求走了同一出口。
 Fed、NASA、NHC 保留既有路径；USGS/NWS 继续只复用地图快照。
+灾害 owner 的 `earthquake.usgs.gov` 与 `api.weather.gov` 路由也使用
+`["http://127.0.0.1:17890", ""]`，在既有 `POLYMONITOR_SOURCE_ROUTES_FILE` 中配置。
+长期 HTTP session 只在创建时读取该文件，因此配置后重启既有
+`polymonitor-backend-natural-hazards-seed.service`；不在新闻 worker 内另抓这两路数据。
+地图提供者的 60 秒快照时效、独立失败退避、来源覆盖和事件时间保持不变。
 
 正常采集时钟不变：Global Voices/ECB 每 15 分钟，FRASER 三类各每 6 小时。
 非限流失败的恢复时钟独立为 60、120、240、480、960、1920、3600 秒，之后上限 1 小时；

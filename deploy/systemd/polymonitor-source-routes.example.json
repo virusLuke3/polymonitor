@@ -1,4 +1,8 @@
 {
+  "earthquake.usgs.gov": [
+    "http://127.0.0.1:17890",
+    ""
+  ],
   "fraser.stlouisfed.org": [
     "http://127.0.0.1:17890",
     ""
