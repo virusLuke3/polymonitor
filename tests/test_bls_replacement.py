@@ -100,10 +100,18 @@ def test_failed_calendar_keeps_original_verified_time_with_seven_day_bound():
     assert calendar.build(fail, None, now + timedelta(days=8), {"items": [old]})[0] == []
 
 
-def test_archive_transport_ingestion_restart_and_news_window(storage, tmp_path, monkeypatch):
+@pytest.mark.parametrize("routed", [False, True])
+def test_archive_transport_ingestion_restart_and_news_window(storage, tmp_path, monkeypatch, routed):
     source = source_map()["bls-cpi"]
     snapshots = SnapshotStore(str(tmp_path / "snapshots.sqlite"))
     calls = []
+    session_type = requests.Session
+    def configured_session():
+        session = session_type()
+        if routed:
+            session.routes = {"fraser.stlouisfed.org": ["http://127.0.0.1:17890", ""]}
+        return session
+    monkeypatch.setattr(requests, "Session", configured_session)
     def fetch(session, url, configured, state, **kwargs):
         assert session.trust_env is False and not session.proxies
         calls.append((url, state))
@@ -123,7 +131,7 @@ def test_archive_transport_ingestion_restart_and_news_window(storage, tmp_path, 
     store.persist(storage, source, [legacy], "2026-10-14T12:00:00Z")
     first = collector.collect_one(storage, snapshots, source, {})
     assert first["status"] == "ok" and first["updated"] == 1 and first["new"] == 0 and first["public"] == 1
-    assert first["proxy_mode"] == "direct"
+    assert first["proxy_mode"] == ("configured-routes" if routed else "direct")
     record = archive.read_latest(snapshots, "cpi")
     assert (archive.archive_root(snapshots) / "cpi" / record["pdfFile"]).read_bytes() == b"%PDF-fixture-original"
     second = collector.collect_one(storage, SnapshotStore(snapshots.db_path), source, first)

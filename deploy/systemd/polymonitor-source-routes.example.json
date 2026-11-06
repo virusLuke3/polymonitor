@@ -1,4 +1,8 @@
 {
+  "fraser.stlouisfed.org": [
+    "http://127.0.0.1:17890",
+    ""
+  ],
   "globalvoices.org": [
     "http://127.0.0.1:17890"
   ],

@@ -6,7 +6,7 @@ import hashlib
 import threading
 import time
 from datetime import datetime, timezone
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 from bs4 import BeautifulSoup
 
@@ -42,9 +42,12 @@ def collect(session, snapshot_store, source, *, deadline, probe=False):
     if not DOMAIN_LOCK.acquire(timeout=max(0, deadline - time.monotonic())):
         raise TimeoutError("fraser-domain-budget-exhausted")
     try:
-        # Per-source policy: unrelated feeds retain their configured egress.
+        # Direct by default; only an explicit host route may override it.
+        # Never inherit the worker's default proxy or the interactive shell's.
         session.trust_env = False
         session.proxies.clear()
+        routes = getattr(session, "routes", {}).get(urlsplit(source["feed_url"]).hostname)
+        proxy_mode = "configured-routes" if routes else "direct"
         directory, directory_meta = _checked_fetch(session, source["feed_url"], source, {}, deadline)
         item_url = latest_item(directory, source)
         body, _ = _checked_fetch(session, item_url, source, {}, deadline)
@@ -83,7 +86,7 @@ def collect(session, snapshot_store, source, *, deadline, probe=False):
                 "excerpt_origin": "official-release", "distributor": record["distributor"],
                 "pdf_url": record["pdfUrl"], "archive_sha256": record.get("sha256"),
                 "archive_received_at": record["receivedAt"], "release_number": record["releaseNumber"]}
-        return [item], {**directory_meta, "transport": "fraser-pdf", "proxy_mode": "direct",
+        return [item], {**directory_meta, "transport": "fraser-pdf", "proxy_mode": proxy_mode,
                         "latest_release": record["published_at"], "latest_reference_period": record["referencePeriod"],
                         "archive_sha256": record.get("sha256"), "pdf_http_status": meta["http_status"]}
     finally:

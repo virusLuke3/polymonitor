@@ -182,7 +182,10 @@ watch 父进程启动时完成 schema 初始化，周期子进程不再重复执
 共用用户指定的 Rabisu 独立接口 `http://127.0.0.1:17890`；ECB 明确直连。
 该配置复用已部署的 `source_session` 路由能力。Rabisu 接口由现有
 `polydata-clob-profile12-proxy.service` 提供；内容 worker 不管理代理进程或主 Clash。
-FRASER 保持既有直连策略；Fed、NASA、NHC 保留既有路径；USGS/NWS 继续只复用地图快照。
+FRASER 使用同一 Rabisu 接口优先、直连备用；未配置 host route 的安装仍默认直连，
+不继承 worker 的默认代理。来源状态用 `configured-routes` 区分显式路由策略与纯直连，
+该字段不声称每个目录/PDF 请求走了同一出口。
+Fed、NASA、NHC 保留既有路径；USGS/NWS 继续只复用地图快照。
 
 正常采集时钟不变：Global Voices/ECB 每 15 分钟，FRASER 三类各每 6 小时。
 非限流失败的恢复时钟独立为 60、120、240、480、960、1920、3600 秒，之后上限 1 小时；
