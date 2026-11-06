@@ -99,3 +99,29 @@ feed, bounded input and unchanged publication timestamps.
 - PolySignal's running client also uses the local 9B endpoint; its existing daily
   budget was exhausted during verification, so its observed explanation remained
   a template. Its budget was not reset or increased.
+
+### News binding recovery observed on 2026-11-06
+
+- Backend change `33c83218` supplies the missing content reader. Only that owned
+  binding hunk was installed in the existing backend, preserving its other live
+  changes; installed `scripts/api/bindings.py` SHA-256:
+  `4f8b5fb6a4892bd85e6a7f9571a6330ddc0f47445635bbddb50ef5546c53aa3d`.
+- A bounded one-off execution of the existing Agent seed regenerated the three
+  lenses with `qwen3.5-9b`. AI Insights, Special Radar and Trend Watch each loaded
+  12 content items and made five model requests, with no recorded node errors.
+  Generation times were 09:51:57, 09:53:00 and 09:53:53 Asia/Shanghai. The catalyst
+  tool trace contains real content titles, excerpts and original publication
+  times. SQLite, the serving API and the public API agreed on the snapshots.
+- All 19 targeted tests passed in both the working checkout and a clean archive
+  of the pushed commit; scoped Ruff passed. The whole-repository gate remains
+  blocked by the unrelated personal-path finding in `docs/crypto-strategy-panels.md`.
+- The public desktop homepage displayed all three new generation timestamps;
+  its unchanged frontend release was `696061ed3ea1727c309518a872e78f68137a6912`.
+- The 390px cold-page check did not complete: it waited for the AI response and
+  then timed out loading fonts. A subsequent navigation was refused at the
+  existing TLS tunnel; the Tencent link journal recorded peer timeouts and
+  automatic reconnection attempts. Mobile production acceptance remains open.
+- PolySignal is stopped and disabled at the user's request. Source-feed errors,
+  sampled coverage, missing whale inputs, failed trade reads and missing
+  price-history/LOB fields are outside this news-binding repair. Loaded content
+  does not establish complete or continuously fresh news coverage.
