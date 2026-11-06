@@ -60,13 +60,9 @@ export default defineConfig(({ mode }) => {
   const envPath = resolve(__dirname, mode === 'test' ? 'test-config/.env.test' : '../.env');
   const env = {
     ...(existsSync(envPath) ? parseEnv(readFileSync(envPath, 'utf8')) : {}),
-        ...process.env,
+    ...process.env,
   };
-  const apiHost = env.POLYDATA_API_HOST || '127.0.0.1';
-  const apiPort = env.POLYDATA_API_PORT || '5000';
-  const apiBase = env.VITE_POLYDATA_API_BASE_URL || '';
-  const target = env.POLYDATA_DEV_PROXY_TARGET
-    || (apiBase.startsWith('http') ? apiBase : `http://${apiHost}:${apiPort}`);
+  const target = env.POLYDATA_DEV_PROXY_TARGET || '';
   const mapTilesTarget = env.POLYDATA_MAP_TILES_TARGET || '';
   const buildId = String(env.GITHUB_SHA || env.POLYDATA_BUILD_SHA || repositorySha()).slice(0, 40);
   const publicEnv = Object.entries(env).filter(([name]) => name.startsWith('VITE_PUBLIC_')
@@ -124,21 +120,21 @@ export default defineConfig(({ mode }) => {
       port: 3000,
       watch: { ignored: ['**/artifacts/**', '**/test-results/**', '**/playwright-report/**'] },
       proxy: {
-        '/wm-api': {
+        ...(target ? { '/wm-api': {
           target,
           changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/wm-api/, ''),
-        },
+          rewrite: (path: string) => path.replace(/^\/wm-api/, ''),
+        } } : {}),
         ...(mapTilesTarget ? { '/map-tiles': mapTilesProxy } : {}),
       },
     },
     preview: {
       proxy: {
-        '/wm-api': {
+        ...(target ? { '/wm-api': {
           target,
           changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/wm-api/, ''),
-        },
+          rewrite: (path: string) => path.replace(/^\/wm-api/, ''),
+        } } : {}),
         ...(mapTilesTarget ? { '/map-tiles': mapTilesProxy } : {}),
       },
     },
