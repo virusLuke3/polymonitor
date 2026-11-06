@@ -51,6 +51,29 @@ AI generation and browser checks keep their independent clocks below. The
 the number of excerpts retained in every specialist prompt. Source failures and
 candidate truncation remain limitations of the shared news feed.
 
+Whale evidence reuses `signal_service.get_whale_trades_snapshot` through
+`ServiceRuntime.agent_snapshot_context`, exactly as Whale Tracker does. The
+signal owner controls the `snapshot:signals:whales / {"limit":14,"v":2}` identity,
+300-second freshness and read-time outcome verification. The Agent consumes at
+most ten items; it does not reconstruct a cache key, run the whale builder or
+renew its generation clock. Stale/warming/error snapshots are excluded, while
+their original status, generation time and available item count remain visible
+in `sourceStates`. Recent global trades reuse the existing 24-row snapshot and
+15-second read cache. Successful empty reads and failed reads have distinct
+states; those states reach every model prompt through `metrics.sourceStates`
+and produce deterministic limitations in both AI and fallback responses.
+`tests/test_market_wide_trade_inputs.py` covers the real runtime/SQLite reader,
+canonical key, stale exclusion, failure versus empty, and prompt/output paths.
+
+Both trade sources depend on the existing OrderFilled owner and ClickHouse
+`block_timestamps`; they do not use the optional PolySignal producer. RPC repair
+belongs to the existing `polydata-trade-sync`, `polydata-block-timestamps-live`
+and `polydata-orderfilled-health` units. Service-specific route overrides must
+load after their other environment files and preserve sequential cursors,
+confirmation depth, original block timestamps and existing resource budgets.
+Verify effective process environment and actual cursor/store progress: a
+responsive stale RPC can otherwise report false `caught_up` / empty windows.
+
 The production seed checks hourly, generates each successful lens at most once
 per six hours (`POLYDATA_AGENT_MARKET_WIDE_MIN_LIVE_INTERVAL_SECONDS=21600`), and
 publishes all three lenses. Snapshots expire after twelve hours; browsers read

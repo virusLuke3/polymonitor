@@ -15,6 +15,7 @@ from .rules import (
     _items,
     _market_candidates,
     _signal_items,
+    _source_limitations,
     _summary_metrics,
     _top_categories,
     _utc_now_iso,
@@ -371,6 +372,8 @@ def _normalize(raw: dict[str, Any], payload: dict[str, Any], lens: str, search_r
         "themes": themes,
         "watchlist": watchlist,
         "evidence": [compact_text(item, 120) for item in evidence[:4]],
+        "sourceStates": payload.get("sourceStates") or {},
+        "limitations": _source_limitations(payload),
         "metrics": _summary_metrics(payload),
         "searchResults": search_results,
     }

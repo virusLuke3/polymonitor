@@ -750,6 +750,7 @@ def bind_services(runtime: ServiceRuntime) -> None:
         "get_recent_oracle_snapshot": get_recent_oracle_snapshot,
         "get_recent_trades_snapshot": get_recent_trades_snapshot,
         "get_trades_by_market_id": get_trades_by_market_id,
+        "get_whale_trades_snapshot": get_whale_trades_snapshot,
         "set_cached_json": runtime.set_cached_json,
     }
 

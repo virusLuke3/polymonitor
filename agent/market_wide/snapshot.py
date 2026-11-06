@@ -18,7 +18,6 @@ QUANT_HISTORY_NAMESPACE = "agent:market-wide:quant-history"
 SNAPSHOT_VERSION = "v1"
 DEFAULT_LENSES = ("overview", "special", "trend")
 SIGNAL_SNAPSHOT_NAMESPACE_ALPHA = "snapshot:signals:alpha"
-SIGNAL_SNAPSHOT_NAMESPACE_WHALES = "snapshot:signals:whales"
 SIGNAL_SNAPSHOT_NAMESPACE_SUSPICIOUS = "snapshot:signals:suspicious"
 
 
@@ -354,6 +353,35 @@ def _cached_signal_items(helpers: dict[str, Any], namespace: str, cache_key: str
     return _items(_read_cached_snapshot(helpers, namespace, cache_key))[:limit]
 
 
+def _read_trade_evidence(helpers: dict[str, Any], name: str, limit: int) -> tuple[list[Any], dict[str, Any]]:
+    """Preserve owner health; an unavailable read is not an empty trading window."""
+    state: dict[str, Any] = {"status": "unavailable", "checkedAt": _iso(_utc_now()), "itemCount": 0}
+    reader = helpers.get(name)
+    if not callable(reader):
+        return [], {**state, "reason": "reader-not-bound"}
+    try:
+        result = reader(limit)
+    except Exception as exc:
+        logger = getattr(helpers.get("app"), "logger", None)
+        if logger is not None:
+            logger.exception("agent snapshot source failed source=%s", name)
+        return [], {**state, "status": "error", "reason": type(exc).__name__}
+    if isinstance(result, list):
+        items = result[:limit]
+        return items, {**state, "status": "ok" if items else "empty", "itemCount": len(items)}
+    if not isinstance(result, dict) or not isinstance(result.get("items"), list):
+        return [], {**state, "reason": "invalid-source-payload"}
+    items = result["items"][:limit]
+    state.update({key: result[key] for key in ("status", "generatedAt", "lastAttemptAt") if key in result})
+    state["availableItemCount"] = len(items)
+    if state["status"] not in {"ok", "empty", "partial"}:
+        # The shared signal reader applies the owner's TTL and label checks.
+        # Keep its original clock, but never promote an old seed to live evidence.
+        return [], state
+    state["itemCount"] = len(items)
+    return items, state
+
+
 def _forecast_memory_items(helpers: dict[str, Any], lens: str, limit: int = 24) -> list[Any]:
     store = helpers.get("SNAPSHOT_STORE")
     if store is not None and hasattr(store, "get_agent_forecast_memory"):
@@ -396,22 +424,20 @@ def build_market_wide_seed_payload(helpers: dict[str, Any], lens: Any, *, run_id
     active_markets = _safe_call(helpers, "get_active_markets_snapshot", {}, 80)
     market_groups = _safe_call(helpers, "get_market_groups_payload", {}, query="", page=1, page_size=60)
     content = _safe_call(helpers, "get_latest_content_payload", {}, 12)
+    trades, trade_state = _read_trade_evidence(helpers, "get_recent_trades_snapshot", 24)
+    whales, whale_state = _read_trade_evidence(helpers, "get_whale_trades_snapshot", 10)
     markets = _items(active_markets)[:80]
     payload = {
         "lens": normalized_lens,
         "markets": markets,
         "marketGroups": _items(market_groups)[:60],
         "topMarketFillTape": _top_market_fill_tape_items(helpers, markets),
-        "trades": _safe_call(helpers, "get_recent_trades_snapshot", [], 24)[:24],
+        "trades": trades,
         "oracle": _safe_call(helpers, "get_recent_oracle_snapshot", [], 24)[:24],
         "content": _items(content)[:12],
         "alphaSignals": _cached_signal_items(helpers, SIGNAL_SNAPSHOT_NAMESPACE_ALPHA, _json_key({"limit": 8}), 8),
-        "whaleSignals": _cached_signal_items(
-            helpers,
-            SIGNAL_SNAPSHOT_NAMESPACE_WHALES,
-            _json_key({"limit": 14, "lookbackDays": 7}),
-            10,
-        ),
+        "whaleSignals": whales,
+        "sourceStates": {"trades": trade_state, "whaleSignals": whale_state},
         "suspiciousSignals": _cached_signal_items(helpers, SIGNAL_SNAPSHOT_NAMESPACE_SUSPICIOUS, _json_key({"limit": 12}), 10),
         "forecastMemory": _forecast_memory_items(helpers, normalized_lens, limit=24),
     }

@@ -23,6 +23,7 @@ Prediction-market usefulness rules:
 - A loaded sample is not the whole market. Do not add event-group turnover to underlying-market turnover.
 - Absolute turnover does not prove a spike. Category counts do not prove rotation. Require a named historical baseline for either claim.
 - Null trade counts are unknown, never zero. Stale fills cannot anchor current prices; show their timestamp and limitation.
+- Check metrics.sourceStates: unavailable, error, warming or stale sources are missing evidence, never proof of no activity. Partial sources support only bounded observations.
 - Leave arrays empty when evidence does not support a finding. Do not manufacture four findings to fill the panel.
 - Keep all claims informational. Do not recommend trades, position sizing, or financial advice.
 """

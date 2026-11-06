@@ -93,7 +93,22 @@ def _summary_metrics(payload: dict[str, Any]) -> dict[str, Any]:
         'contentItems': len(_items(payload, 'content')), 'fillTapeMarkets': len(_items(payload, 'topMarketFillTape')),
         'fillTapeConflicts': sum(bool(item.get('priceSourceConflict')) for item in _items(payload, 'topMarketFillTape') if isinstance(item, dict)),
         **{key: len(_signal_items(payload, key)) for key in ('whaleSignals', 'suspiciousSignals', 'alphaSignals')},
+        'sourceStates': payload.get('sourceStates') or {},
     }
+
+
+def _source_limitations(payload: dict[str, Any]) -> list[str]:
+    limitations = []
+    states = payload.get('sourceStates') or {}
+    for key, label in [('trades', 'Recent global trades'), ('whaleSignals', 'Whale signals')]:
+        state = states.get(key) or {}
+        status = state.get('status')
+        if status and status not in {'ok', 'empty'}:
+            if status == 'partial':
+                limitations.append(f'{label} have partial source coverage; only available evidence is used.')
+            else:
+                limitations.append(f'{label} are {status} and excluded; zero loaded rows does not establish no activity.')
+    return limitations
 
 
 def _price_change(candidate: dict[str, Any]) -> tuple[float, float, float] | None:
@@ -161,6 +176,7 @@ def _fallback_response(payload: dict[str, Any], lens: str, *, reason: str, searc
         'generatedAt': _utc_now_iso(), 'model': 'deterministic-fallback', 'brief': brief,
         'focus': focus, 'specialMarkets': special if lens == 'special' else [], 'themes': themes,
         'watchlist': [], 'evidence': [f"{metrics['activeMarkets']} sampled markets", f"{metrics['marketGroups']} event groups", f"{metrics['tradeRows']} loaded trades", f"{metrics['contentItems']} content items"],
-        'limitations': ['AI generation is unavailable; these are rules-based observations.', 'Sample coverage only. Event-group turnover is excluded from market totals.', 'No historical volume baseline or category-rotation claim. Reported prices require freshness checks.'],
+        'limitations': [*_source_limitations(payload), 'AI generation is unavailable; these are rules-based observations.', 'Sample coverage only. Event-group turnover is excluded from market totals.', 'No historical volume baseline or category-rotation claim. Reported prices require freshness checks.'],
+        'sourceStates': payload.get('sourceStates') or {},
         'metrics': metrics, 'searchResults': search_results or [], 'error': reason,
     }
