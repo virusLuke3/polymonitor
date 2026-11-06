@@ -11,7 +11,8 @@ export const base = (v: unknown): v is Base => record(v) && typeof v.panelId ===
 export const safeUrl = (v: unknown): v is string => typeof v === 'string' && /^https:\/\//.test(v) && (() => { try { const u = new URL(v); return !u.username && !u.password; } catch { return false; } })();
 export const num = (v: number | null | undefined, digits = 0) => v === null || v === undefined || !Number.isFinite(v) ? '—' : v.toLocaleString(undefined, { maximumFractionDigits: digits });
 export const money = (v: number | null | undefined) => v === null || v === undefined ? '—' : new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', notation: 'compact', maximumFractionDigits: 1 }).format(v);
-export const partyTone = (party: string) => party === 'D' || party === 'DEM' ? 'blue' : party === 'R' || party === 'REP' ? 'purple' : 'muted';
+// US party identity, independent of rank, vote share or outcome.
+export const partyTone = (party: string) => party === 'D' || party === 'DEM' ? 'blue' : party === 'R' || party === 'REP' ? 'red' : 'muted';
 
 export const finite = (v: unknown) => typeof v === 'number' && Number.isFinite(v);
 export const optionalNumber = (v: unknown) => v === null || finite(v);

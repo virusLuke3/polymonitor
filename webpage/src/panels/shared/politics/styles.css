@@ -2,6 +2,7 @@
 .pol-body { font-size:12px; line-height:1.5; overflow-wrap:anywhere; }
 .pol-body strong,.pol-body b { font-weight:700; }
 .pol-blue { color:var(--ds-color-info); }
+.pol-red { color:var(--ds-color-critical); }
 .pol-purple { color:var(--ds-color-category-purple); }
 .pol-cyan { color:var(--ds-color-category-cyan); }
 .pol-amber { color:var(--ds-color-warning); }
