@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 from unittest.mock import patch
 
-from agent.market_wide.graph import GRAPH_VERSION, run_forecast_intelligence_graph
+from agent.market_wide.graph import GRAPH_VERSION, _build_quant_forecaster, run_forecast_intelligence_graph
 from agent.market_wide.service import _build_agent_context
 from agent.market_wide.snapshot import (
     QUANT_HISTORY_NAMESPACE,
@@ -119,6 +119,30 @@ class FakeSnapshotStore:
 
 
 class MarketWideAgentGraphTestCase(unittest.TestCase):
+    def test_optional_price_history_does_not_warn_or_invent_momentum(self):
+        for history in ({}, {"price24hAgo": None, "change24h": None}):
+            with self.subTest(history=history):
+                quant = _build_quant_forecaster({"markets": [{
+                    "title": "Will the event happen?", "latestPrice": 0.52,
+                    "volume24h": 1200, "tradeCount24h": 8,
+                    "bestBid": 0.50, "bestAsk": 0.55, **history,
+                }]})
+                self.assertEqual(quant["dataWarnings"], [])
+                self.assertEqual(quant["priceDriftLeaders"], [])
+                self.assertEqual(quant["topFlowMarkets"][0]["price"], "52.0%")
+                self.assertEqual(len(quant["lobSpreads"]), 1)
+
+    def test_supplied_price_history_remains_available_without_missing_field_warning(self):
+        for history in ({"price24hAgo": 0.47}, {"change24h": 0.05}):
+            with self.subTest(history=history):
+                quant = _build_quant_forecaster({"markets": [{
+                    "title": "Will the event happen?", "latestPrice": 0.52,
+                    "volume24h": 1200, "tradeCount24h": 8,
+                    "bestBid": 0.50, "bestAsk": 0.55, **history,
+                }]})
+                self.assertEqual(quant["dataWarnings"], [])
+                self.assertEqual(quant["priceDriftLeaders"][0]["drift24h"], "+5.0 pts")
+
     def test_forecast_graph_runs_specialists_and_preserves_response_schema(self):
         payload = {"lens": "overview", "forecastRunId": "fig-test", "markets": []}
         context = {

@@ -19,7 +19,7 @@ Prediction-market usefulness rules:
 - Prefer market-level theses: named market, current implied probability, volume/trade-count, deadline or outcome bucket, catalyst, and resolution caveat.
 - Surface probability structure: near-50c repricing zones, deadline ladders, term spreads, mutually related markets, one-sided liquidity, stale prices, and group-vs-single-market mismatches.
 - Explain what would move the price next: official source, match result, court/government release, shipping/oil data, oracle update, or new large fills.
-- Say "no directional edge" when price-change data is missing; then identify what data would be needed. Do not fill the gap with category commentary.
+- Historical price change is optional. When absent, omit historical momentum analysis and missing-history caveats or requests to collect it. Analyze the available evidence without inferring price direction from volume alone.
 - A loaded sample is not the whole market. Do not add event-group turnover to underlying-market turnover.
 - Absolute turnover does not prove a spike. Category counts do not prove rotation. Require a named historical baseline for either claim.
 - Null trade counts are unknown, never zero. Stale fills cannot anchor current prices; show their timestamp and limitation.
@@ -623,7 +623,6 @@ def _build_quant_forecaster(context: dict[str, Any], related_markets: dict[str, 
                 "evidence": f"{_fmt_price(item['price'])}; {_fmt_money(item['volume24h'])}",
                 "interpretation": "Could be live/resolved/stale rather than a normal ex-ante probability.",
             })
-    missing_change = sum(1 for item in rows if item.get("change24h") in (None, "", "null"))
     missing_lob = sum(1 for item in rows if _lob_spread(item) is None)
     drift_titles = {item["title"] for item in drift_rows}
     trade_drift_rows = [item for item in _trade_price_drift(context) if item["title"] not in drift_titles]
@@ -647,8 +646,6 @@ def _build_quant_forecaster(context: dict[str, Any], related_markets: dict[str, 
         if item.get("priceSourceConflict")
     ]
     warnings = []
-    if missing_change:
-        warnings.append(f"{missing_change} market rows have missing change24h/price24hAgo; directional momentum should not be inferred from volume alone.")
     if missing_lob:
         warnings.append(f"{missing_lob} market rows have no bid/ask in the agent context; LOB spread is unavailable until orderbook snapshots are joined.")
     if price_source_conflicts:
@@ -971,7 +968,7 @@ def _build_calibration_agent(
         },
         "probabilityDiscipline": [
             "Use market-implied price as anchor unless a named catalyst or resolution issue explains the deviation.",
-            "Discount signals when change24h, LOB spread, or resolution state is missing.",
+            "Evaluate each claim against the evidence it uses; optional price history is not required for other supported findings.",
         ],
         "discounts": warnings[:4],
         "relatedMarketStress": related_scores[:4],
@@ -1000,7 +997,7 @@ def _specialist_prompt(
         "microstructure": "You are the market microstructure agent for a Polymarket intelligence graph. Focus on named markets, implied probability, volume, trade-count, liquidity concentration, close probabilities, deadline ladders, and group-vs-single-market mismatches.",
         "catalyst": "You are the catalyst research agent for a Polymarket intelligence graph. Focus on named markets, current prices, concrete external triggers, related-market catalysts, event timing, and what news/data would move probability.",
         "resolution": "You are the resolution-risk agent for a Polymarket intelligence graph. Focus on market wording, deadline buckets, official source hierarchy, oracle/resolution events, ambiguity, and settlement risk that changes how prices should be interpreted.",
-        "skeptic": "You are the skeptic and calibration agent for a Polymarket intelligence graph. Challenge weak evidence, missing price-change data, stale signals, narrative overreach, and probability miscalibration.",
+        "skeptic": "You are the skeptic and calibration agent for a Polymarket intelligence graph. Challenge unsupported price-direction claims, stale signals, narrative overreach, and probability miscalibration.",
     }[node]
     user_context = {
         "lens": lens,

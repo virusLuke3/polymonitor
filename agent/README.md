@@ -37,6 +37,15 @@ Redis configuration. The persisted namespace is `agent:market-wide:snapshot`,
 with keys `v1:overview`, `v1:special`, and `v1:trend`. Existing quant/history and
 node-event records stay with that producer. No browser-side generation is added.
 
+Historical price change is optional for these three panels. When `price24hAgo`
+and `change24h` are absent, skip historical momentum analysis without reporting
+missing-history warnings, requesting acquisition or discounting unrelated
+supported findings. Supplied price history remains usable; volume alone cannot
+establish a price move. This policy adds no source, storage, query or refresh
+work. Existing source failure/staleness reporting and snapshot clocks remain
+unchanged. `tests/test_market_wide_agent_graph.py` covers absent and supplied
+history alongside the existing trade-source failure tests.
+
 News evidence reuses the `related-news` owner's reviewed public-content reader:
 `content-topic-refresh` writes `content_items` and the shared
 `snapshot:content:free-public / candidates-v4` seed; `ServiceRuntime` injects
