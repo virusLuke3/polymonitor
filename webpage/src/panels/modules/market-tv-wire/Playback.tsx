@@ -101,13 +101,11 @@ export function MarketTvPreview({ item }: { item: RuntimeMarketTvWireItem }) {
       video.addEventListener('play', onPlay);
       video.addEventListener('waiting', onWaiting);
       video.addEventListener('stalled', onWaiting);
-      if (video.canPlayType('application/vnd.apple.mpegurl')) {
-        video.src = url;
-        play();
-      } else {
-        void import('hls.js').then(({ default: Hls }) => {
-          if (disposed || failed) return;
-          if (!Hls.isSupported()) { fail(); return; }
+      void import('hls.js').then(({ default: Hls }) => {
+        if (disposed || failed) return;
+        // Chrome can report native HLS "maybe" while failing to decode a live
+        // stream. Prefer the supported MSE engine before native-only platforms.
+        if (Hls.isSupported()) {
           const player = new Hls({ enableWorker: true, lowLatencyMode: true, startLevel: 0 });
           destroy = () => player.destroy();
           player.on(Hls.Events.LEVEL_LOADED, (_, data) => { live = data.details.live; if (!live) fail(); });
@@ -115,8 +113,11 @@ export function MarketTvPreview({ item }: { item: RuntimeMarketTvWireItem }) {
           player.on(Hls.Events.MANIFEST_PARSED, play);
           player.loadSource(url);
           player.attachMedia(video);
-        }).catch(fail);
-      }
+        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+          video.src = url;
+          play();
+        } else fail();
+      }).catch(fail);
     }
     const onMessage = (event: MessageEvent) => {
       if (disposed || failed) return;

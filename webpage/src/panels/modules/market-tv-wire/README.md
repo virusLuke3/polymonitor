@@ -27,6 +27,9 @@
   30 秒后尝试同频道下一来源；暂停/隐藏时不判失败，卸载清理请求、播放器和计时器。
 - 视频直接使用原站播放器/CDN；受维护的 HLS 可经现有受限转发接口回退。
   后端出口与浏览器网络分别验收。地区限制不通过切换受限国家规避。
+- HLS 引擎先检查 `Hls.isSupported()`，支持时使用 Hls.js；仅不支持 MSE/MMS
+  而浏览器报告原生 HLS 时使用 `<video src>`，保留 Safari/iOS 的原生回退。
+  两者都不支持则继续同频道备用源。切源和卸载沿用同一销毁与异步失效检查。
 
 ## 验证
 
@@ -40,6 +43,10 @@
 WorldMonitor `65860c21` 的 `live-video-sources.ts`、`live-video/model.ts`、
 `live-video/session.ts` 及 `seed-live-video-resolved.mjs`。复用其有序候选、真实播放
 判断与有界更新思想；继续使用本项目 Python owner、Preact 与既有存储。
+
+引擎顺序采用 [Hls.js 官方 embedding](https://github.com/video-dev/hls.js#embedding-hlsjs)
+的 Hls.js 优先方案。WorldMonitor 此版本 `session.ts` 使用带音轨能力条件的原生
+优先分支，再检查 Hls.js；本模块没有其音轨功能，不照搬该原生优先条件。
 
 已退役且没有已核验备用源的 Reuters TV / The Guardian 从 TV 选择项隐藏；ABC / NBC 仅使用其官方 YouTube 频道，不再反复探测旧 HLS。提高探测超时预算后只重测旧失败结果，成功结果仍复用每日缓存。
 
@@ -65,3 +72,14 @@ WorldMonitor `65860c21` 的 `live-video-sources.ts`、`live-video/model.ts`、
 完整窗口、来源失败与存储核对见 [恢复记录](../../../../../docs/panel-data-recovery-2026-11-04.md)，该窗口不代表未来持续健康。
 
 本轮正式页面实测：CGTN 媒体时间连续推进约30秒、最高1920宽；NHK约45秒、1280宽。DW原Akamai在两个窗口缓冲停滞，播放器依次尝试同频道代理/备用并最终进入YouTube直播；单独实测新Amagi经真实公网API转发约37秒、936解码帧，随后调整为优先源。该证据不是全部240条目录的连续实播验收。
+
+前端 `1fd7c528` 的 DW 首页验收仍失败：Chrome 149 的原生 HLS 能力返回 `maybe`，
+旧分支因此绕过 Hls.js；Amagi 请求得到 200/206，视频宽度 426 但未解码帧，随后
+转入同频道备用源。单独强制 Hls.js 的 37 秒成功与首页原生分支不是同一路径。
+本次改为 Hls.js 优先；本地浏览器分支测试不代替新版本首页连续实播验收。
+本地 4 项浏览器回归通过：同时支持时选择真实 Hls.js 媒体对象、仅原生支持时
+保留原生路径、均不支持时同频道回退，以及原有失败/缓冲/进度/自动重试。
+切源后旧视频清空 `src`，Hls.js 创建的媒体对象 URL 被撤销；另有 9 项单测及
+类型检查通过。以同一公网 API 强制选择 Hls.js 的能力隔离预检中，DW attempt 0
+由 4.15 秒/109 帧推进至 34.11 秒/859 帧，短暂缓冲、追直播边缘后恢复至
+90.25 秒/1008 帧；该窗口有中断，且使用了能力覆盖，仍不是无注入生产验收。
