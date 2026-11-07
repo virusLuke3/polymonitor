@@ -3,7 +3,7 @@ import { fetchWeatherBooks } from '@/services/api';
 import { usePanelResource, type PanelResource } from '@/panels/usePanelResource';
 import type { RuntimeGlobalWeatherCity, RuntimeWeatherQuoteBin } from '@/types';
 import { displayQuoteBins } from './model';
-import { mergeLiveQuote, quoteFromLob, type LiveWeatherQuote } from './quote';
+import { mergeLiveQuote, quoteFromLob, RETAINED_BOOK_MS, type LiveWeatherQuote } from './quote';
 
 type QuoteSnapshot = { checkedAt: number; status: string; quotes: Record<string, LiveWeatherQuote> };
 export const WEATHER_QUOTE_REFRESH_MS = 15_000;
@@ -11,10 +11,15 @@ export const WEATHER_QUOTE_REFRESH_MS = 15_000;
 export function weatherQuoteResource(bins: RuntimeWeatherQuoteBin[]): PanelResource<QuoteSnapshot> {
   const tokens = [...new Set(bins.map(bin => String(bin.yesTokenId || '').trim()).filter(Boolean))].sort();
   return {
-    key: `weather:books:v2:${tokens.join(',') || 'none'}`, title: 'Weather books',
+    key: `weather:books:v3:${tokens.join(',') || 'none'}`, title: 'Weather books',
     maxAgeMs: 20_000, staleAgeMs: 120_000, acceptStale: true,
     refreshPolicy: { tier: 'fast', intervalMs: WEATHER_QUOTE_REFRESH_MS, staleAfterMs: 20_000, requestTimeoutMs: 25_000 },
     updatedAt: value => value.checkedAt,
+    nextValidationAt: (value, now) => {
+      const times = Object.values(value.quotes).flatMap(quote => [Date.parse(quote.quoteStaleAfter || ''), Date.parse(quote.quoteUpdatedAt || '') + RETAINED_BOOK_MS])
+        .filter(time => Number.isFinite(time) && time > now);
+      return times.length ? Math.min(...times) : null;
+    },
     parse: value => {
       const snapshot = value as QuoteSnapshot;
       if (!snapshot || !Number.isFinite(snapshot.checkedAt) || !snapshot.quotes || tokens.some(token => !snapshot.quotes[token])) {
@@ -25,9 +30,9 @@ export function weatherQuoteResource(bins: RuntimeWeatherQuoteBin[]): PanelResou
     fetch: async context => {
       const quotes: Record<string, LiveWeatherQuote> = {};
       const response = await fetchWeatherBooks(tokens, context?.signal);
-      for (const token of tokens) quotes[token] = quoteFromLob(response.books[token] || null);
+      for (const token of tokens) quotes[token] = quoteFromLob(response.books[token] || null, Date.now(), token);
       const values = Object.values(quotes);
-      return { checkedAt: Date.now(), quotes, status: values.every(quote => quote.bookStatus === 'ok') ? 'ok' : 'partial' };
+      return { checkedAt: Date.now(), quotes, status: values.every(quote => ['ok', 'snapshot'].includes(quote.bookStatus || '')) ? 'ok' : 'partial' };
     },
   };
 }

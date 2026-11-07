@@ -601,7 +601,7 @@ def test_global_weather_map_prefers_clob_book_over_db_price(monkeypatch):
 
     def clob_quote(ctx, market):
         calls["clob"] += 1
-        return {"bestBidYes": 0.24, "bestAskYes": 0.30, "bookStatus": "ok", "yesTokenId": "yes-token"}
+        return {"bestBidYes": 0.24, "bestAskYes": 0.30, "bookStatus": "ok", "priceSource": "clob-book", "yesTokenId": "yes-token"}
 
     monkeypatch.setattr(global_weather_map_service, "_clob_yes_quote", clob_quote)
     db_rows = [
@@ -984,7 +984,12 @@ def test_watchers_preserve_previous_on_empty_or_exception(monkeypatch):
 
 def test_weather_quotes_read_live_engine_without_reusing_stale_quote():
     ctx = make_ctx()
-    state = {"bookStatus": "live", "bids": [{"price": "0.4"}], "asks": [{"price": "0.5"}]}
+    from datetime import datetime, timezone, timedelta
+    now = datetime.now(timezone.utc)
+    state = {"tokenId": "123", "bookStatus": "live", "continuity": True,
+             "receivedAt": now.isoformat(), "heartbeatAt": now.isoformat(),
+             "staleAfter": (now + timedelta(seconds=20)).isoformat(),
+             "bids": [{"price": "0.4"}], "asks": [{"price": "0.5"}]}
     ctx["get_runtime_lob_by_token_payload"] = lambda token: {"yes": state}
     market = {"clobTokenIds": ["123", "456"]}
     quote = global_weather_map_service._clob_yes_quote(ctx, market)

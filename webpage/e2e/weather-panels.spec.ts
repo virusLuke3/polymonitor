@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { installDashboard } from './fixtures/dashboard';
 
-test('selected-city books refresh every 15s, clear failed ladders and recover', async ({ page }) => {
+test('selected-city books refresh every 15s, retain dated snapshots and recover', async ({ page }) => {
   await installDashboard(page, 'en', ['weather-quote-table']);
   await page.clock.install({ time: new Date() });
   let state = 'warming', requests = 0;
@@ -27,10 +27,36 @@ test('selected-city books refresh every 15s, clear failed ladders and recover', 
   expect(requests).toBeGreaterThanOrEqual(2);
   state = 'error'; await page.clock.runFor(32_000);
   await expect(page.locator('.wm-weather-source-status')).toContainText('API 503');
-  await expect(table.locator('td').nth(1)).toHaveText('--');
+  await expect(table).toContainText('RETAINED');
+  await expect(table.locator('td').nth(1)).toHaveText('30%');
   state = 'live'; await page.clock.runFor(16_000);
   await expect(table).toContainText('CLOB MID');
   const before = requests;
   await page.getByRole('button', { name: 'Refresh', exact: true }).click();
   await expect.poll(() => requests).toBeGreaterThan(before);
+});
+
+test('native snapshots expire on source clocks without being relabeled live', async ({ page }) => {
+  await installDashboard(page, 'en', ['weather-quote-table']);
+  const started = Date.now();
+  await page.clock.install({ time: new Date(started) });
+  await page.route('**/wm-api/runtime/lob/books**', route => route.fulfill({ json: { books: {
+    '123': { marketId: 1, yes: { tokenId: '123', bookStatus: 'available', upstreamReady: true,
+      observedAt: new Date(started).toISOString(), eventAt: new Date(started - 2 * 3600_000 + 50_000).toISOString(),
+      bestBid: 0, bestAsk: .1 } },
+  } } }));
+  await page.goto('/e2e/panels.html');
+  await page.waitForFunction(() => window.panelHarness);
+  await page.evaluate(() => window.panelHarness.mount('weather-quote-table', { 'global-temperature-monitor': {
+    items: [{ cityId: 'new-york', city: 'New York', marketDate: '2026-11-08', bins: [{ label: '60°F', yesTokenId: '123' }] }],
+  } }));
+  const table = page.locator('.wm-weather-quote-table');
+  await expect(table).toContainText('SNAPSHOT');
+  await expect(table.locator('td').nth(1)).toHaveText('0%');
+  await page.clock.runFor(31_000);
+  await expect(table).toContainText('RETAINED');
+  await expect(page.locator('.wm-weather-source-status')).toContainText('Current books 0/1');
+  await page.clock.runFor(20_000);
+  await expect(table.locator('td').nth(1)).toHaveText('--');
+  await expect(table.locator('td').nth(3)).toHaveText('--');
 });

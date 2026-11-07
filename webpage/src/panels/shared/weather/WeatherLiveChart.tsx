@@ -9,10 +9,11 @@ import {
   type ISeriesApi,
   type LineData,
   type Time,
+  type WhitespaceData,
 } from 'lightweight-charts';
 
-type AreaPoint = AreaData<Time>;
-type LinePoint = LineData<Time>;
+type AreaPoint = AreaData<Time> | WhitespaceData<Time>;
+type LinePoint = LineData<Time> | WhitespaceData<Time>;
 
 export type WeatherLiveChartSeries =
   | {

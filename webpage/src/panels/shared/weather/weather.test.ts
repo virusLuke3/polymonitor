@@ -7,7 +7,7 @@ import { weatherQuoteResource } from './useLiveWeatherQuoteBins';
 import { fetchWeatherBooks } from '@/services/api';
 vi.mock('@/services/api', () => ({ fetchWeatherBooks: vi.fn() }));
 const now = Date.now();
-const live = (): LobPayload => ({ marketId: 1, bookStatus: 'live', yes: { bookStatus: 'live', continuity: true,
+const live = (tokenId?: string): LobPayload => ({ marketId: 1, bookStatus: 'live', yes: { tokenId, bookStatus: 'live', continuity: true,
   bestBid: .3, bestAsk: .4, receivedAt: new Date(now - 1000).toISOString(), heartbeatAt: new Date(now).toISOString(), staleAfter: new Date(now + 20_000).toISOString() } });
 afterEach(() => vi.resetAllMocks());
 describe('weather source and book contracts', () => {
@@ -30,13 +30,13 @@ describe('weather source and book contracts', () => {
       expect(quoteFromLob(payload, now).bestBidYes).toBeNull();
     }
   });
-  it('clears failed bids/asks and labels retained reference prices separately', () => {
+  it('clears undated prices and bounds retained prices by the original source time', () => {
     const seed = { bestBidYes: .3, bestAskYes: .4, midPriceYes: .35, priceSource: 'clob-book', bookStatus: 'ok' };
     const next = mergeLiveQuote(seed, { bestBidYes: null, bestAskYes: null, bookStatus: 'warming' }, now);
-    expect(next.bestBidYes).toBeNull(); expect(next.priceSource).toBe('previous-book');
-    expect(next.midPriceYes).toBe(.35); expect(bookMidPrice(next)).toBeNull();
+    expect(next.bestBidYes).toBeNull(); expect(next.priceSource).toBeUndefined();
+    expect(next.midPriceYes).toBeNull(); expect(bookMidPrice(next)).toBeNull();
     const expired = mergeLiveQuote(seed, quoteFromLob(live(), now), now + 21_000);
-    expect(expired.bookStatus).toBe('stale'); expect(bookMidPrice(expired)).toBeNull();
+    expect(expired.bookStatus).toBe('retained'); expect(bookMidPrice(expired)).toBeNull();
   });
   it('deduplicates identity and recovers warming books on the next check', async () => {
     const resource = weatherQuoteResource([{ yesTokenId: '2' }, { yesTokenId: '1' }, { yesTokenId: '2' }]);
@@ -45,8 +45,28 @@ describe('weather source and book contracts', () => {
     const fetch = vi.mocked(fetchWeatherBooks);
     fetch.mockResolvedValue({ books: { '1': { marketId: 1, bookStatus: 'warming' }, '2': { marketId: 1, bookStatus: 'warming' } } });
     expect(resource.parse(await resource.fetch()).status).toBe('partial'); expect(fetch).toHaveBeenCalledTimes(1);
-    fetch.mockResolvedValue({ books: { '1': live(), '2': live() } });
+    fetch.mockResolvedValue({ books: { '1': live('1'), '2': live('2') } });
     expect(resource.parse(await resource.fetch()).status).toBe('ok'); expect(fetch).toHaveBeenCalledTimes(2);
+  });
+  it('uses a committed ready snapshot without inventing continuous live reception', () => {
+    const payload = { marketId: 1, yes: { tokenId: '1', bookStatus: 'available' as const, upstreamReady: true,
+      observedAt: new Date(now).toISOString(), eventAt: new Date(now - 60_000).toISOString(), bestBid: 0, bestAsk: .1 } };
+    const quote = quoteFromLob(payload, now, '1');
+    expect(quote.bookStatus).toBe('snapshot'); expect(quote.bestBidYes).toBe(0);
+    expect(quote.quoteUpdatedAt).toBe(payload.yes.eventAt);
+    expect(quoteFromLob(payload, now, 'wrong').bestBidYes).toBeNull();
+    const stale = quoteFromLob({ ...payload, yes: { ...payload.yes, upstreamReady: false } }, now, '1');
+    expect(stale.bookStatus).toBe('retained'); expect(bookMidPrice(stale)).toBeNull();
+    const later = mergeLiveQuote({}, stale, now + 2 * 60 * 60 * 1000);
+    expect(later.bestBidYes).toBeNull(); expect(later.midPriceYes).toBeNull();
+    expect(quoteFromLob({ ...payload, yes: { ...payload.yes, upstreamReady: false, eventAt: undefined } }, now).bestBidYes).toBeNull();
+  });
+  it('expires ready snapshots into retained quotes and clears valid empty books', () => {
+    const quote = { bookStatus: 'snapshot', priceSource: 'clob-snapshot', bestBidYes: .2, bestAskYes: .3,
+      quoteUpdatedAt: new Date(now - 1000).toISOString(), quoteStaleAfter: new Date(now + 30_000).toISOString() };
+    expect(mergeLiveQuote({}, quote, now + 31_000).bookStatus).toBe('retained');
+    expect(mergeLiveQuote(quote, { bookStatus: 'no-book', bestBidYes: null, bestAskYes: null }, now).midPriceYes).toBeNull();
+    expect(mergeLiveQuote({}, { ...quote, bestBidYes: .9 }, now).bookStatus).toBe('invalid');
   });
   it('uses one bounded HTTP batch and forwards cancellation', async () => {
     const controller = new AbortController();

@@ -1,6 +1,6 @@
 import type { RuntimeGlobalWeatherCity, RuntimeGlobalWeatherMapPayload } from '@/types';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
-import { forecastSourceLabel } from './model';
+import { forecastSourceLabel, hasCurrentBook } from './model';
 import type { useLiveWeatherQuoteBins } from './useLiveWeatherQuoteBins';
 
 export function WeatherDataStatus({ city, payload }: { city?: RuntimeGlobalWeatherCity | null; payload?: RuntimeGlobalWeatherMapPayload | null }) {
@@ -19,9 +19,10 @@ export function WeatherDataStatus({ city, payload }: { city?: RuntimeGlobalWeath
 }
 
 export function WeatherQuoteStatus({ feed, city }: { feed: ReturnType<typeof useLiveWeatherQuoteBins>; city?: RuntimeGlobalWeatherCity | null }) {
-  const { shared, formatRelativeTime } = useSpecialistCopy('weather-shared');
-  const live = feed.bins.filter(bin => bin.bookStatus === 'ok').length;
-  const missing = feed.bins.length - live;
+  const { shared } = useSpecialistCopy('weather-shared');
+  const live = feed.bins.filter(hasCurrentBook).length;
+  const retained = feed.bins.filter(bin => bin.bookStatus === 'retained').length;
+  const missing = feed.bins.length - live - retained;
   return <div className="wm-weather-source-status">
     <div className="wm-weather-refresh-row">
       <span>{shared('marketDate', 'Market date')} {city?.marketDate || '--'}</span>
@@ -29,7 +30,8 @@ export function WeatherQuoteStatus({ feed, city }: { feed: ReturnType<typeof use
         {feed.refreshing ? shared('refreshing', 'Refreshing…') : shared('refresh', 'Refresh')}
       </button>
     </div>
-    <span>{shared('checked', 'Checked')} {formatRelativeTime(feed.checkedAt ? new Date(feed.checkedAt).toISOString() : null)} · {shared('book', 'Book')} {live}/{feed.bins.length}</span>
+    <span>{shared('currentBooks', 'Current books')} {live}/{feed.bins.length} · {shared('retainedBooks', 'Retained')} {retained}</span>
+    {retained ? <strong>{shared('retainedBookNotice', 'Source interrupted; amber quotes are retained, not current. Original source times appear in the table.')}</strong> : null}
     {feed.suspended ? <span>{shared('refreshPaused', 'Refresh paused while this view is hidden.')}</span> : null}
     {missing ? <strong>{shared('missingBooks', '{count} intervals have no current book; retrying automatically.', { count: missing })}</strong> : null}
     {feed.error ? <strong>{feed.error}</strong> : null}

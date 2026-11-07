@@ -547,8 +547,8 @@ def _quote_coverage(bins: List[Dict[str, Any]]) -> Dict[str, int]:
         status = str(row.get("bookStatus") or "not-queried")
         states[status] = states.get(status, 0) + 1
     return {"total": len(bins), "queried": sum(v for k, v in states.items() if k != "not-queried"),
-            "quoted": sum(row.get("bestBidYes") is not None or row.get("bestAskYes") is not None for row in bins),
-            "twoSided": sum(row.get("bestBidYes") is not None and row.get("bestAskYes") is not None for row in bins),
+            "quoted": sum(row.get("bookStatus") in {"ok", "live", "snapshot"} and (row.get("bestBidYes") is not None or row.get("bestAskYes") is not None) for row in bins),
+            "twoSided": sum(row.get("bookStatus") in {"ok", "live", "snapshot"} and row.get("bestBidYes") is not None and row.get("bestAskYes") is not None for row in bins),
             **{f"status:{k}": v for k, v in states.items()}}
 
 
@@ -941,10 +941,8 @@ def _clob_book_payload(ctx: GlobalWeatherMapContext, token_id: str) -> Dict[str,
     reader = _dependencies(ctx).lob_reader
     if reader is None:
         return {"bookStatus": "unavailable", "bids": [], "asks": []}
-    payload = reader(token_id)
-    side = payload.get("yes") or {}
-    status = side.get("bookStatus") or payload.get("bookStatus") or "unknown"
-    return {"bookStatus": status, "quoteUpdatedAt": side.get("receivedAt"), "quoteStaleAfter": side.get("staleAfter"), "bids": side.get("bids", []) if status == "live" else [], "asks": side.get("asks", []) if status == "live" else []}
+    from .weather_book_quote import project_weather_book
+    return project_weather_book(reader(token_id), token_id)
 
 
 def _clob_yes_quote(
@@ -969,8 +967,8 @@ def _clob_yes_quote(
     asks = book.get("asks") if isinstance(book, dict) and isinstance(book.get("asks"), list) else []
     best_bid = max((price for row in bids if isinstance(row, dict) and (price := _float(row.get("price"))) is not None), default=None)
     best_ask = min((price for row in asks if isinstance(row, dict) and (price := _float(row.get("price"))) is not None), default=None)
-    status = "ok" if best_bid is not None or best_ask is not None else str(book.get("bookStatus") or "no-book")
-    if best_bid is not None or best_ask is not None:
+    status = str(book.get("bookStatus") or "no-book")
+    if status in {"ok", "snapshot"} and (best_bid is not None or best_ask is not None):
         stats["quoted"] = int(stats.get("quoted") or 0) + 1
     elif status == "no-book":
         stats["noBook"] = int(stats.get("noBook") or 0) + 1
@@ -978,9 +976,10 @@ def _clob_yes_quote(
         "bestBidYes": best_bid,
         "bestAskYes": best_ask,
         "bookStatus": status,
-        "priceSource": "clob-book",
+        "priceSource": book.get("priceSource"),
         "yesTokenId": token_ids[0],
         "quoteUpdatedAt": book.get("quoteUpdatedAt"),
+        "quoteObservedAt": book.get("quoteObservedAt"),
         "quoteStaleAfter": book.get("quoteStaleAfter"),
     }
     return payload
@@ -1002,9 +1001,10 @@ def _apply_clob_quote_to_bin(
     row["yesTokenId"] = clob.get("yesTokenId")
     row["quoteUpdatedAt"] = clob.get("quoteUpdatedAt")
     row["quoteStaleAfter"] = clob.get("quoteStaleAfter")
+    row["quoteObservedAt"] = clob.get("quoteObservedAt")
     if bid is not None and ask is not None:
         row["midPriceYes"] = round((bid + ask) / 2, 4)
-        row["priceSource"] = "clob-book"
+        row["priceSource"] = clob.get("priceSource")
 
 
 def _strip_internal_market(rows: List[Dict[str, Any]]) -> None:

@@ -6,6 +6,8 @@ import { readResourceCache, resourceIsCurrent, type PanelSnapshotContract } from
 
 export interface PanelResource<T> extends PanelSnapshotContract<T> {
   title: string;
+  /** Domain deadlines reuse the resource expiry clock, never a second poller. */
+  nextValidationAt?: (value: T, now: number) => number | null;
   fetch: (context?: PanelFetchContext) => Promise<unknown>;
   refreshPolicy: PanelRefreshConfig;
   statusLabel?: (value: T, status: PanelRuntimeStatus) => string | undefined;
@@ -112,12 +114,13 @@ export function usePanelResource<T>(contract: PanelResource<T>, active?: boolean
   const retentionMs = Math.max(contract.maxAgeMs, contract.staleAgeMs ?? contract.maxAgeMs);
   const stale = latest != null && !resourceIsCurrent(timestamp, contract.maxAgeMs);
   const expired = latest != null && !resourceIsCurrent(timestamp, retentionMs);
+  const domainDeadline = latest == null ? null : declaration.nextValidationAt?.(latest, Date.now());
   useEffect(() => {
     if (timestamp == null || expired) return;
     const timer = window.setTimeout(() => tick(version => version + 1),
-      Math.min(2_147_483_647, Math.max(1, timestamp + (stale ? retentionMs : contract.maxAgeMs) - Date.now())));
+      Math.min(2_147_483_647, Math.max(1, Math.min(timestamp + (stale ? retentionMs : contract.maxAgeMs), domainDeadline ?? Infinity) - Date.now())));
     return () => window.clearTimeout(timer);
-  }, [timestamp, contract.maxAgeMs, retentionMs, stale, expired]);
+  }, [timestamp, contract.maxAgeMs, retentionMs, stale, expired, domainDeadline]);
   const data = expired ? null : latest ?? null;
   return {
     data, status, expired, suspended: runtime.suspended || !enabled,

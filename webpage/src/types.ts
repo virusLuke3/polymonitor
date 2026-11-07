@@ -1338,6 +1338,7 @@ export type RuntimeWeatherQuoteBin = {
   bookStatus?: string | null;
   yesTokenId?: string | null;
   quoteUpdatedAt?: string | null;
+  quoteObservedAt?: string | null;
   quoteStaleAfter?: string | null;
 };
 

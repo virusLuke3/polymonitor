@@ -1,15 +1,15 @@
 import { WeatherQuoteStatus } from '@/panels/shared/weather/WeatherDataStatus';
-import { panelStatus } from '../../shared/formatters';
 import { Panel } from '@/components/Panel';
 import type { RuntimeGlobalWeatherMapPayload, RuntimeWeatherQuoteBin } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { panelFromRenderer } from '@/panels/definePanel';
-import { bestBookQuoteBin, bestQuoteBin, bookMidCoverage, bookMidPrice, bookCoverage, marketSourceLabel, midCoverage, num, priceLabel, selectedWeatherCity, tempLabel } from '@/panels/shared/weather/model';
+import { bestBookQuoteBin, bookMidCoverage, bookMidPrice, bookCoverage, marketSourceLabel, midCoverage, num, priceLabel, selectedWeatherCity, tempLabel } from '@/panels/shared/weather/model';
 import { useLiveWeatherQuoteBins } from '@/panels/shared/weather/useLiveWeatherQuoteBins';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
 function sourceLabel(value?: string | null) {
   if (value === 'clob-book') return 'CLOB';
+  if (value === 'clob-snapshot') return 'SNAPSHOT';
   if (value === 'previous-book') return 'PREVIOUS';
   if (value === 'db-latest') return 'LAST';
   if (value === 'gamma-outcome') return 'GAMMA';
@@ -25,6 +25,8 @@ function bookLabel(value: string | null | undefined, shared: ReturnType<typeof u
 }
 
 function quoteState(bin: RuntimeWeatherQuoteBin) {
+  if (bin.bookStatus === 'retained') return 'RETAINED';
+  if (bin.bookStatus === 'snapshot') return 'SNAPSHOT';
   if (bookMidPrice(bin) !== null) return 'CLOB MID';
   if (num(bin.bestBidYes) !== null || num(bin.bestAskYes) !== null) return 'CLOB 1-SIDED';
   if (num(bin.midPriceYes) !== null) return sourceLabel(bin.priceSource) === '--' ? 'QUOTED' : sourceLabel(bin.priceSource);
@@ -32,12 +34,12 @@ function quoteState(bin: RuntimeWeatherQuoteBin) {
 }
 
 function QuoteRow({ bin, active }: { bin: RuntimeWeatherQuoteBin; active: boolean }) {
-  const { shared } = useSpecialistCopy('weather-quote-table');
+  const { shared, formatRelativeTime } = useSpecialistCopy('weather-quote-table');
   const state = quoteState(bin);
   const stateLabel = state === 'QUOTED' ? shared('quoted', 'QUOTED') : state === 'MISSING' ? shared('missing', 'MISSING') : state;
   return (
-    <tr className={active ? 'active' : ''}>
-      <td>{bin.label || tempLabel(bin.minTemp, bin.unit)}</td>
+    <tr className={`${active ? 'active' : ''} ${bin.bookStatus === 'retained' ? 'is-retained' : ''}`}>
+      <td>{bin.label || tempLabel(bin.minTemp, bin.unit)}{bin.quoteUpdatedAt ? <small className="wm-weather-quote-time" title={bin.quoteUpdatedAt}>{shared('sourceTime', 'Source time')} {formatRelativeTime(bin.quoteUpdatedAt)}</small> : null}</td>
       <td>{priceLabel(bin.bestBidYes)}</td>
       <td>{priceLabel(bin.bestAskYes)}</td>
       <td>{priceLabel(bin.midPriceYes)}</td>
@@ -57,17 +59,15 @@ function WeatherQuoteTablePanel({
   const { copy, shared } = useSpecialistCopy('weather-quote-table');
   const city = selectedWeatherCity(payload, selectedCityId);
   const feed = useLiveWeatherQuoteBins(city);
-  const { bins, loading } = feed;
+  const { bins } = feed;
   const liveCity = city ? { ...city, bins } : null;
   const topBookBin = bestBookQuoteBin(liveCity);
-  const topBin = topBookBin || bestQuoteBin(liveCity);
+  const topBin = topBookBin;
   const topBookPrice = bookMidPrice(topBookBin);
   const topLabel = topBin?.label || bins[Math.floor(bins.length / 2)]?.label || '--';
   return (
     <Panel
       title={copy('title', 'WEATHER QUOTE TABLE')}
-      badge={loading ? 'WARMING' : feed.data?.status === 'ok' ? 'BOOK' : 'PARTIAL'}
-      status={panelStatus(feed.data?.status)}
       className="wm-market-panel wm-weather-quote-table-only-panel"
       dataPanelId="weather-quote-table"
     >
