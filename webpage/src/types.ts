@@ -1224,6 +1224,7 @@ export type RuntimePolymarketMacroMapSummary = {
 
 export type RuntimePolymarketMacroMapPayload = {
   generatedAt?: string;
+  displayRetention?: { maxAgeSeconds?: number; expiredItemCount?: number; unknownClockItemCount?: number };
   fetchedAt?: string | null;
   sourceObservedAt?: string | null;
   coverage?: { candidateCount?: number; matchedEventCount?: number; marketLimit?: number;

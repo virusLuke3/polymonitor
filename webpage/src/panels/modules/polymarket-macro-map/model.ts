@@ -4,9 +4,10 @@ import type { RuntimePolymarketMacroMapPayload } from '@/types';
 export function projectMacroMapDisplay(value: unknown, now = Date.now()): unknown {
   const payload = value as RuntimePolymarketMacroMapPayload | null;
   if (!payload || !Array.isArray(payload.items)) return value;
+  const maxAge = Math.max(1, Number(payload.displayRetention?.maxAgeSeconds) || 7200) * 1000;
   const items = payload.items.filter(item => {
     const observed = Date.parse(item.sourceObservedAt || '');
-    return Number.isFinite(observed) && now - observed >= -60000 && now - observed < 7200000;
+    return Number.isFinite(observed) && now - observed >= -60000 && now - observed < maxAge;
   });
   if (items.length === payload.items.length) return value;
   return { ...payload, items, status: items.length ? 'degraded' : 'expired',
