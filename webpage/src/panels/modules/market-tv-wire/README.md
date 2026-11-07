@@ -48,10 +48,10 @@ WorldMonitor `65860c21` 的 `live-video-sources.ts`、`live-video/model.ts`、
 ## 最近验收
 
 2026-11-07：按 WorldMonitor 的当前来源表将 CGTN、NHK 的失效域名替换为
-官方新 HLS；从 iptv-org 的 news 目录核对并增加 DW 同频道 Amagi 备用源。
+官方新 HLS；从 iptv-org 的 news 目录核对 DW 同频道 Amagi 源；真实公网转发播放通过后将其作为优先源，原 Akamai 与 YouTube 保留为同频道备用。
 三个地址分别只由 `POLYMONITOR_TV_CGTN_HLS_URL`、
-`POLYMONITOR_TV_NHK_HLS_URL`、`POLYMONITOR_TV_DW_ALTERNATE_HLS_URL` 配置，
-缺失配置不回退到旧地址。DW 备用源只允许自身明确路径经既有 HLS 转发。
+`POLYMONITOR_TV_NHK_HLS_URL`、`POLYMONITOR_TV_DW_HLS_URL` 配置，
+缺失配置不回退到旧地址。DW 优先源只允许 `.env` 的 `POLYMONITOR_TV_DW_RESOURCE_PATHS` 明确路径经既有 HLS 转发；307 每一跳复核来源和路径，不放开任意跳转。
 不把其他国家版本、活动流或名称相近的 IPTV 条目冒充同频道备用源。
 
 播放器从低码率开始并保留自动升档，只有可见视频尺寸与媒体时钟推进才确认播放；
@@ -63,3 +63,5 @@ WorldMonitor `65860c21` 的 `live-video-sources.ts`、`live-video/model.ts`、
 正式直播状态已有 9/12 项解析成功（频道 ID 与固定视频 ID 分别计数，不是 9 个频道）；其余失败按原周期恢复。
 最终实播轮仍有主频道未出画面，未完成全部频道连续播放验收。DW 转发已加入实际清单使用的明确备用目录，未放开任意主机或路径。
 完整窗口、来源失败与存储核对见 [恢复记录](../../../../../docs/panel-data-recovery-2026-11-04.md)，该窗口不代表未来持续健康。
+
+本轮正式页面实测：CGTN 媒体时间连续推进约30秒、最高1920宽；NHK约45秒、1280宽。DW原Akamai在两个窗口缓冲停滞，播放器依次尝试同频道代理/备用并最终进入YouTube直播；单独实测新Amagi经真实公网API转发约37秒、936解码帧，随后调整为优先源。该证据不是全部240条目录的连续实播验收。

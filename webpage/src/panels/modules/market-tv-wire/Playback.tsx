@@ -3,7 +3,7 @@ import type { RuntimeMarketTvWireItem } from '@/types';
 import { buildRuntimeHlsProxyUrl, buildRuntimeYoutubeEmbedUrl } from '@/services/api';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 import { openExternal } from '../../shared/renderers';
-import { advancing, playbackCandidates, START_TIMEOUT_MS, STALL_TIMEOUT_MS, youtubeVerdict } from './playback';
+import { advancing, observedPlaybackState, playbackCandidates, requestPlayback, START_TIMEOUT_MS, STALL_TIMEOUT_MS, youtubeVerdict } from './playback';
 
 export function MarketTvPreview({ item }: { item: RuntimeMarketTvWireItem }) {
   const { shared } = useSpecialistCopy('market-tv-wire');
@@ -62,6 +62,7 @@ export function MarketTvPreview({ item }: { item: RuntimeMarketTvWireItem }) {
       setAttempt((current) => current + 1);
     };
     const observe = (time: number, playing: boolean, live: boolean | undefined) => {
+      if (disposed || failed) return;
       const at = performance.now();
       const moves = advancing(previous, time, at, playing);
       if (moves) {
@@ -72,36 +73,53 @@ export function MarketTvPreview({ item }: { item: RuntimeMarketTvWireItem }) {
       if (playing && live === false) { fail(); return; }
       if (playing && live === true && moves && progressSeconds >= 1) {
         confirmed = true;
-        setState('playing');
-      } else if (confirmed && !playing) setState(paused ? 'paused' : 'waiting');
+      }
+      setState(observedPlaybackState(confirmed, moves, playing, paused));
     };
     const video = videoRef.current;
     let live: boolean | undefined;
-    const onPause = () => { paused = true; setState('paused'); };
-    const onPlay = () => { paused = false; lastProgress = performance.now(); };
+    const onPause = () => {
+      if (disposed || failed || document.hidden) return;
+      paused = true;
+      setState('paused');
+    };
+    const onPlay = () => {
+      if (disposed || failed) return;
+      paused = false;
+      lastProgress = performance.now();
+      setState(confirmed ? 'waiting' : 'connecting');
+    };
+    const onWaiting = () => { if (!disposed && !failed && !paused) setState('waiting'); };
+    const play = () => {
+      if (video) void requestPlayback(video, () => !disposed && !failed && !paused && !document.hidden,
+        () => { paused = true; setState('paused'); }, fail);
+    };
     if (source.kind === 'hls' && video) {
       video.addEventListener('error', fail);
       video.addEventListener('ended', fail);
       video.addEventListener('pause', onPause);
       video.addEventListener('play', onPlay);
+      video.addEventListener('waiting', onWaiting);
+      video.addEventListener('stalled', onWaiting);
       if (video.canPlayType('application/vnd.apple.mpegurl')) {
         video.src = url;
-        video.play().catch(() => { paused = true; setState('paused'); });
+        play();
       } else {
         void import('hls.js').then(({ default: Hls }) => {
-          if (disposed) return;
+          if (disposed || failed) return;
           if (!Hls.isSupported()) { fail(); return; }
           const player = new Hls({ enableWorker: true, lowLatencyMode: true, startLevel: 0 });
           destroy = () => player.destroy();
           player.on(Hls.Events.LEVEL_LOADED, (_, data) => { live = data.details.live; if (!live) fail(); });
           player.on(Hls.Events.ERROR, (_, data) => { if (data.fatal) fail(); });
-          player.on(Hls.Events.MANIFEST_PARSED, () => { video.play().catch(() => { paused = true; setState('paused'); }); });
+          player.on(Hls.Events.MANIFEST_PARSED, play);
           player.loadSource(url);
           player.attachMedia(video);
         }).catch(fail);
       }
     }
     const onMessage = (event: MessageEvent) => {
+      if (disposed || failed) return;
       const frame = frameRef.current;
       if (!frame || event.source !== frame.contentWindow || event.origin !== new URL(url, location.href).origin) return;
       const data = event.data;
@@ -116,7 +134,7 @@ export function MarketTvPreview({ item }: { item: RuntimeMarketTvWireItem }) {
       paused = data.state === 2;
       observe(data.time, data.state === 1, data.isLive);
     };
-    let resumeOnVisible = false;
+    let resumeOnVisible = document.hidden;
     const visibility = () => {
       const frame = frameRef.current;
       if (document.hidden) {
@@ -127,7 +145,7 @@ export function MarketTvPreview({ item }: { item: RuntimeMarketTvWireItem }) {
         start = lastProgress = performance.now();
         previous = null;
         paused = false;
-        void video?.play().catch(() => { paused = true; setState('paused'); });
+        play();
         frame?.contentWindow?.postMessage({ type: 'play' }, new URL(url, location.href).origin);
         resumeOnVisible = false;
       }
@@ -150,6 +168,8 @@ export function MarketTvPreview({ item }: { item: RuntimeMarketTvWireItem }) {
       video?.removeEventListener('ended', fail);
       video?.removeEventListener('pause', onPause);
       video?.removeEventListener('play', onPlay);
+      video?.removeEventListener('waiting', onWaiting);
+      video?.removeEventListener('stalled', onWaiting);
       destroy();
       if (video) { video.pause(); video.removeAttribute('src'); video.load(); }
     };

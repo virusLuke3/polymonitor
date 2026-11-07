@@ -3,6 +3,30 @@ import type { RuntimeMarketTvWireItem, TvPlaybackSource } from '@/types';
 export const START_TIMEOUT_MS = 20_000;
 export const STALL_TIMEOUT_MS = 30_000;
 
+// Source teardown may reject a pending play with AbortError. It is neither a
+// user pause nor autoplay denial; leave the existing watchdog able to recover.
+export async function requestPlayback(
+  video: Pick<HTMLMediaElement, 'play'>,
+  active: () => boolean,
+  blocked: () => void,
+  failed: () => void,
+): Promise<void> {
+  if (!active()) return;
+  try { await video.play(); }
+  catch (error) {
+    if (!active()) return;
+    const name = error && typeof error === 'object' && 'name' in error ? error.name : '';
+    if (name === 'NotAllowedError') blocked();
+    else if (name !== 'AbortError') failed();
+  }
+}
+
+export function observedPlaybackState(confirmed: boolean, moving: boolean, playing: boolean, paused: boolean): string {
+  if (paused) return 'paused';
+  if (confirmed && playing && moving) return 'playing';
+  return confirmed ? 'waiting' : 'connecting';
+}
+
 export function playbackCandidates(item: RuntimeMarketTvWireItem): TvPlaybackSource[] {
   const inputs = item.playbackSources ?? [
     ...(item.hlsUrl ? [{ kind: 'hls' as const, url: item.hlsUrl, proxy: !!item.hlsProxyRequired, proxyFallback: item.playbackTier === 'trusted-hls' }] : []),
