@@ -73,7 +73,7 @@ export function WeatherLiveChart({
 
     const chart = createChart(container, {
       autoSize: false,
-      height: Math.max(120, container.clientHeight || 160),
+      height: Math.max(60, container.clientHeight || 160),
       width: Math.max(240, container.clientWidth || 320),
       layout: {
         attributionLogo: false,
@@ -117,7 +117,7 @@ export function WeatherLiveChart({
     const observer = new ResizeObserver(([entry]) => {
       if (!entry) return;
       const width = Math.max(240, Math.floor(entry.contentRect.width));
-      const height = Math.max(120, Math.floor(entry.contentRect.height));
+      const height = Math.max(60, Math.floor(entry.contentRect.height));
       chart.resize(width, height);
       chart.timeScale().fitContent();
     });

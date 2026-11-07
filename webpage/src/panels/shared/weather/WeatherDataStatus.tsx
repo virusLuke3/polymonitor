@@ -31,7 +31,7 @@ export function WeatherQuoteStatus({ feed, city }: { feed: ReturnType<typeof use
       </button>
     </div>
     <span>{shared('currentBooks', 'Current books')} {live}/{feed.bins.length} · {shared('retainedBooks', 'Retained')} {retained}</span>
-    {retained ? <strong>{shared('retainedBookNotice', 'Source interrupted · amber quotes show the last known book.')}</strong> : null}
+    {retained ? <strong>{shared('retainedBookNotice', 'Retained quotes · source interrupted')}</strong> : null}
     {feed.suspended ? <span>{shared('refreshPaused', 'Refresh paused while this view is hidden.')}</span> : null}
     {missing ? <strong>{shared('missingBooks', '{count} intervals have no current book; retrying automatically.', { count: missing })}</strong> : null}
     {feed.error ? <strong>{feed.error}</strong> : null}

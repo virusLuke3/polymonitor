@@ -1373,7 +1373,7 @@
 }
 
 .wm-dashboard .wm-weather-quote-curve-panel {
-  grid-template-rows: 18px minmax(0, 1fr) auto;
+  grid-template-rows: 18px auto minmax(0, 1fr);
   align-content: stretch;
   gap: 7px;
   border-color: rgba(255, 153, 0, 0.2);
@@ -1398,7 +1398,7 @@
 }
 
 .wm-dashboard .wm-weather-quote-table-panel {
-  grid-template-rows: auto 42px minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   align-content: stretch;
   gap: 7px;
   padding: 9px 10px;
@@ -1448,8 +1448,14 @@
 }
 
 /* Provenance belongs to each interval; retained prices never use the current-book color. */
-.wm-weather-quote-table .wm-weather-quote-time { display: block; color: var(--text-muted); font-size: 10px; font-weight: 400; white-space: normal; }
+.wm-weather-quote-table .wm-weather-quote-time { display: inline; margin-left: 4px; color: var(--text-muted); font-size: 9px; font-weight: 400; white-space: normal; }
 .wm-weather-quote-table tr.is-retained td:nth-child(n+2),
 .wm-weather-quote-legend span:nth-child(2) { color: #e3ac53; }
 .wm-weather-quote-state.snapshot, .wm-weather-quote-legend span:first-child { color: #5b9eff; }
 .wm-weather-quote-legend { display: flex; gap: 12px; padding: 4px 0; font-size: 11px; }
+
+.wm-dashboard .wm-weather-quote-detail-panel .wm-panel-body {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 6px;
+}

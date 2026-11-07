@@ -19,7 +19,6 @@ function QuoteCurve({ bins, cityName }: { bins: RuntimeWeatherQuoteBin[]; cityNa
   const retained = bins.map((bin) => retainedBookMidPrice(bin));
   const hasBookQuote = [...values, ...retained].some(value => value !== null);
   const hasRetained = retained.some(value => value !== null);
-  const hasLastOnly = bins.some(bin => bin.bestBidYes == null || bin.bestAskYes == null);
   const chartSeries = useMemo<WeatherLiveChartSeries[]>(() => [
     { id: 'book-mid', type: 'line', color: '#5b9eff', data: values.map((value, index) =>
       value === null ? { time: numericTime(index + 1) } : { time: numericTime(index + 1), value: value * 100 }) },
@@ -43,7 +42,7 @@ function QuoteCurve({ bins, cityName }: { bins: RuntimeWeatherQuoteBin[]; cityNa
       ) : (
         <div className="wm-weather-detail-empty-line wm-weather-quote-curve-large">{copy('noBookMid', 'No two-sided CLOB book mid for this market.')}</div>
       )}
-      {hasLastOnly ? <p>{copy('lastOnlyNote', 'LAST and one-sided book quotes stay in the table but are not plotted as live bid/ask mid.')}</p> : null}
+
     </div>
   );
 }
