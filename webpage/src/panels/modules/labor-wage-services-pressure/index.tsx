@@ -1,3 +1,4 @@
+import { macroSnapshot } from '@/panels/shared/macro-runtime';
 import { fetchRuntimeLaborWageServicesPressure } from '@/services/api';
 import type { RuntimeMacroDriverPayload, RuntimePolymarketMacroMapPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
@@ -30,6 +31,7 @@ const renderers: PanelRenderMap = {
 
 export const panel = runtimePanelFromRenderer(renderers, {
   id: 'labor-wage-services-pressure',
+  snapshot: macroSnapshot('labor-wage-services-pressure', false, 'source'),
   dataDependencies: ['polymarket-macro-map'],
   title: 'Labor Wage Services Pressure',
   eyebrow: 'macro',

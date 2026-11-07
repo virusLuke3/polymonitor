@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { macroRefreshPolicy, macroSnapshot } from './macro-runtime';
+import { macroRefreshPolicy, macroSnapshot, projectMacroDisplay } from './macro-runtime';
+import { revalidateRuntimeSnapshots } from '../usePanelRuntime';
+import { macroMapSnapshot } from '../modules/polymarket-macro-map/model';
+import type { PanelModule } from '../types';
 import { readResourceCache, writeResourceCache } from '@/panels/resource-cache';
 
 const id = 'labor-services-inflation-monitor';
 const contract = macroSnapshot(id);
 const now = Date.now();
 const payload = { panelId: id, schemaVersion: 2, status: 'ok', generatedAt: new Date(now).toISOString(),
-  items: [{ key: 'payrolls', label: 'Nonfarm payrolls monthly change', value: 159029, change: 29, valueLabel: '29K persons' }] };
+  items: [{ key: 'payrolls', label: 'Nonfarm payrolls monthly change', value: 159029, change: 29, valueLabel: '29K persons', metadata: { fetchedAt: new Date(now).toISOString() } }] };
 
 describe('macro snapshot and refresh contract', () => {
   it('polls independently with a deadline and a freshness budget longer than the seed cycle', () => {
@@ -38,5 +41,40 @@ describe('macro snapshot and refresh contract', () => {
     expect(geo.parse(raw)).toEqual(raw);
     expect(() => geo.parse({ ...raw, sanctionsItems: [null] })).toThrow();
     expect(() => geo.parse({ ...raw, sanctionsItems: 'broken' })).toThrow();
+  });
+  it('expires individual fetch clocks offline without mistaking an old observation month for stale acquisition', () => {
+    const current = { ...payload, items: [
+      { key: 'old', date: '2026-01-01', metadata: { fetchedAt: new Date(now - 17 * 3600000).toISOString() } },
+      { key: 'new', date: '2026-01-01', metadata: { fetchedAt: new Date(now).toISOString() } },
+    ] };
+    expect(projectMacroDisplay(current, now)).toBe(current);
+    const panel = { id, snapshot: contract } as PanelModule;
+    const unmodified = { id: 'unrelated', snapshot: { ...contract, revalidate: undefined, parse: () => { throw Error('Not opt-in'); } } } as unknown as PanelModule;
+    const data = { [id]: current, unrelated: current };
+    const next = revalidateRuntimeSnapshots([panel, unmodified], data, now + 2 * 3600000);
+    expect((next[id] as typeof current).items.map(row => row.key)).toEqual(['new']);
+    expect(next.unrelated).toBe(current);
+    expect(revalidateRuntimeSnapshots([panel, unmodified], next, now + 2 * 3600000)).toBe(next);
+    expect(data[id].items).toHaveLength(2);
+  });
+  it('clears CPI actuals after 5400 seconds even when the composed snapshot is newly generated', () => {
+    const current = { ...payload, events: [{ actual: 0, previous: 2, actualLabel: '0.0%',
+      fetchedAt: new Date(now - 5399000).toISOString(), forecast: 3,
+      forecastFetchedAt: new Date(now).toISOString() }] };
+    expect(projectMacroDisplay(current, now)).toBe(current);
+    const projected = projectMacroDisplay(current, now + 1000) as typeof current;
+    expect(projected.events[0]?.actual).toBeNull();
+    expect(projected.events[0]?.previous).toBeNull();
+    expect(projected.events[0]?.forecast).toBe(3);
+  });
+  it('expires macro-map quote clocks at two hours without refreshing them from projection time', () => {
+    const current = { generatedAt: new Date(now).toISOString(), status: 'degraded', items: [
+      { eventId: 'old', sourceObservedAt: new Date(now - 7199000).toISOString() },
+      { eventId: 'new', sourceObservedAt: new Date(now).toISOString() },
+    ] };
+    const panel = { id: 'map', snapshot: macroMapSnapshot } as PanelModule;
+    const next = revalidateRuntimeSnapshots([panel], { map: current }, now + 1000);
+    expect((next.map as typeof current).items.map(row => row.eventId)).toEqual(['new']);
+    expect((next.map as typeof current).generatedAt).toBe(current.generatedAt);
   });
 });

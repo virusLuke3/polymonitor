@@ -4,6 +4,6 @@ export const panel = createFinanceWatchPanel({
   id: 'tradfi-perp-radar',
   title: 'TRADFI PERPS',
   description: 'Tokenized stock, index, and commodity perp radar.',
-  question: 'Tracks traditional market perpetual contracts and reference perps such as index, gold, oil, and ETF-linked swaps.',
-  limit: 16,
+  question: 'OKX perpetuals with source mark, index, funding forecasts and contract-unit volumes; futures reference quotes are shown separately.',
+  limit: 24,
 });

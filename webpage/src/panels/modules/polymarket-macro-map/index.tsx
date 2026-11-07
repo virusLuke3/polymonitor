@@ -10,6 +10,7 @@ import type {
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '@/panels/definePanel';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
+import { macroMapSnapshot } from './model';
 
 function badgeLabel(status?: string | null) {
   const normalized = String(status || '').toLowerCase();
@@ -20,6 +21,7 @@ function badgeLabel(status?: string | null) {
 }
 
 function numberLabel(value?: string | number | null) {
+  if (value == null || value === '') return '--';
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return '--';
   if (Math.abs(numeric) >= 1000) {
@@ -60,7 +62,6 @@ function MacroMarketRow({ item }: { item: RuntimePolymarketMacroMapItem }) {
   const { copy, shared, formatRelativeTime } = useSpecialistCopy('polymarket-macro-map');
   const topOutcome = item.topOutcomes?.[0];
   const category = item.categoryLabels?.[0] || 'Macro';
-  const outcomeLabel = String(topOutcome?.label || '').trim();
   const tone = signalToneClass(category);
   return (
     <div className={`wm-macro-map-row ${tone}`}>
@@ -74,10 +75,15 @@ function MacroMarketRow({ item }: { item: RuntimePolymarketMacroMapItem }) {
           <span>VOL {numberLabel(item.volume24h)}</span>
         </div>
         <strong>{item.title || copy('untitledMarket', 'Untitled macro market')}</strong>
+        {topOutcome?.title && topOutcome.title !== item.title ? <small>{topOutcome.title}</small> : null}
       </div>
       <div className="wm-macro-map-prob">
-        <StatusBadge tone="market">{probabilityLabel(topOutcome?.yesPrice)}</StatusBadge>
-        <em>{outcomeLabel && outcomeLabel.length <= 14 ? outcomeLabel : 'YES'}</em>
+        {topOutcome?.sourceOutcomes?.length ? topOutcome.sourceOutcomes.map((outcome) => (
+          <div key={outcome.tokenId} data-outcome-token={outcome.tokenId}>
+            <StatusBadge tone="market">{probabilityLabel(outcome.price)}</StatusBadge>
+            <em title={outcome.sourceLabel}>{outcome.sourceLabel}</em>
+          </div>
+        )) : <StatusBadge tone="market">--</StatusBadge>}
       </div>
     </div>
   );
@@ -89,7 +95,7 @@ function MacroMarketList({ items }: { items: RuntimePolymarketMacroMapItem[] }) 
     return (
       <div className="wm-empty-state wm-registry-empty">
         <strong>{copy('empty', 'No macro market cluster found.')}</strong>
-        <em>{copy('emptyText', 'Gamma feed is available, but no active CPI/Fed/GDP/oil markets matched the current terms.')}</em>
+        <em>{copy('catalogEmpty', 'No current verified macro markets are available in the bounded catalog snapshot.')}</em>
       </div>
     );
   }
@@ -141,7 +147,7 @@ function PolymarketMacroMapPanel({ payload }: { payload?: RuntimePolymarketMacro
             <strong>{signalLabel(summary?.signal)}</strong>
           </div>
         </div>
-        <em>{copy('activeRoute', 'Polymarket macro route / {count} active', { count: summary?.activeCount ?? items.length })}</em>
+        <em>{copy('observedRoute', '{count} observed matching events / partial catalog', { count: summary?.activeCount ?? items.length })}</em>
       </div>
       <div className="wm-macro-map-summary">
         <div>
@@ -156,6 +162,13 @@ function PolymarketMacroMapPanel({ payload }: { payload?: RuntimePolymarketMacro
           <span><i>◎</i> {copy('topCluster', 'Top Cluster')}</span>
           <strong>{clusterLabel(summary?.topCategory || 'Macro')}</strong>
         </div>
+      </div>
+      <div className="wm-macro-map-meta">
+        <span>{copy('boundedCoverage', 'Showing {shown} of {events} observed events · {markets} candidate markets', {
+          shown: items.length, events: summary?.activeCount ?? items.length,
+          markets: payload?.coverage?.candidateCount ?? '--',
+        })}</span>
+        <span>{copy('quoteObserved', 'Quote observed')}: {payload?.sourceObservedAt ? formatRelativeTime(payload.sourceObservedAt) : '--'}</span>
       </div>
       <MacroMarketList items={items} />
     </Panel>
@@ -173,6 +186,7 @@ const renderers: PanelRenderMap = {
 
 export const panel = runtimePanelFromRenderer(renderers, {
   id: 'polymarket-macro-map',
+  snapshot: macroMapSnapshot,
   title: 'Polymarket Macro Market Map',
   eyebrow: 'macro',
   description: 'Active CPI, Fed, growth, labor, and energy market clusters from Polymarket.',

@@ -12,6 +12,8 @@ export interface ResourceCacheContract<T> {
 /** The same validation contract is used for dedicated and batched snapshots. */
 export interface PanelSnapshotContract<T> extends ResourceCacheContract<T> {
   acceptStale?: boolean;
+  /** Opt-in local display expiry on the existing Runtime sweep; preserve identity when unchanged. */
+  revalidate?: (value: T, now: number) => T;
   shouldPersist?: (next: T, previous: T | null) => boolean;
 }
 

@@ -8,7 +8,7 @@ import { advancing, playbackCandidates, START_TIMEOUT_MS, STALL_TIMEOUT_MS, yout
 export function MarketTvPreview({ item }: { item: RuntimeMarketTvWireItem }) {
   const { shared } = useSpecialistCopy('market-tv-wire');
   const sources = playbackCandidates(item);
-  const identity = JSON.stringify(sources);
+  const identity = JSON.stringify(sources.map(({ resolvedAt: _clock, ...candidate }) => candidate));
   const [attempt, setAttempt] = useState(0);
   const [retry, setRetry] = useState(0);
   const [state, setState] = useState('connecting');
@@ -91,7 +91,7 @@ export function MarketTvPreview({ item }: { item: RuntimeMarketTvWireItem }) {
         void import('hls.js').then(({ default: Hls }) => {
           if (disposed) return;
           if (!Hls.isSupported()) { fail(); return; }
-          const player = new Hls({ enableWorker: true, lowLatencyMode: true });
+          const player = new Hls({ enableWorker: true, lowLatencyMode: true, startLevel: 0 });
           destroy = () => player.destroy();
           player.on(Hls.Events.LEVEL_LOADED, (_, data) => { live = data.details.live; if (!live) fail(); });
           player.on(Hls.Events.ERROR, (_, data) => { if (data.fatal) fail(); });
@@ -138,7 +138,7 @@ export function MarketTvPreview({ item }: { item: RuntimeMarketTvWireItem }) {
       if (disposed || failed) return;
       const now = performance.now();
       if (document.hidden || paused) { start = now; lastProgress = now; previous = null; return; }
-      if (source.kind === 'hls' && video) observe(video.currentTime, !video.paused && video.readyState >= 2, live ?? (video.duration === Infinity ? true : undefined));
+      if (source.kind === 'hls' && video) observe(video.currentTime, !video.paused && video.readyState >= 2 && video.videoWidth > 0, live ?? (video.duration === Infinity ? true : undefined));
       if ((!confirmed && now - start >= START_TIMEOUT_MS) || (confirmed && now - lastProgress >= STALL_TIMEOUT_MS)) fail();
     }, 1000);
     return () => {

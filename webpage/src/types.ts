@@ -1166,6 +1166,13 @@ export type RuntimeGeoSanctionsShockPayload = {
 
 export type RuntimePolymarketMacroMapOutcome = {
   outcomeKey?: string | null;
+  marketId?: string | number | null;
+  tokenId?: string | null;
+  sourceLabel?: string | null;
+  sourceIndex?: number | null;
+  price?: number | null;
+  sourceObservedAt?: string | null;
+  sourceOutcomes?: { tokenId: string; sourceLabel: string; sourceIndex: number; price: number }[];
   gammaMarketId?: string | number | null;
   label?: string | null;
   title?: string | null;
@@ -1177,6 +1184,7 @@ export type RuntimePolymarketMacroMapOutcome = {
 };
 
 export type RuntimePolymarketMacroMapItem = {
+  sourceObservedAt?: string | null;
   eventId?: string | number | null;
   slug?: string | null;
   title?: string | null;
@@ -1216,6 +1224,10 @@ export type RuntimePolymarketMacroMapSummary = {
 
 export type RuntimePolymarketMacroMapPayload = {
   generatedAt?: string;
+  fetchedAt?: string | null;
+  sourceObservedAt?: string | null;
+  coverage?: { candidateCount?: number; matchedEventCount?: number; marketLimit?: number;
+    displayedEventCount?: number; displayTruncated?: boolean; truncated?: boolean; completeness?: string };
   source?: string | null;
   sourceUrl?: string | null;
   cacheMode?: string | null;
@@ -1722,187 +1734,6 @@ export type RuntimeSignalPayload = {
   generatedAt?: string;
 };
 
-export type RuntimePolySignalWallet = RuntimeSignalAddress & {
-  netCashPnlProxy?: string | null;
-  tradeCashPnl?: string | null;
-  redeemCashflow?: string | null;
-  pnlSource?: string | null;
-  smartScore?: string | null;
-  activeMarkets?: number | string | null;
-  officialLikePnl?: string | null;
-  qualityTier?: string | null;
-  qualityErrorPct?: string | null;
-  qualityReason?: string | null;
-  categoryEdge?: RuntimePolySignalCategoryEdge | null;
-  marketExposure?: RuntimePolySignalMarketExposure[];
-  riskFlags?: string[];
-  recentTrades?: RuntimePolySignalTradeEvidence[];
-};
-
-export type RuntimePolySignalPnlSummary = {
-  address?: string | null;
-  safeBlock?: number | string | null;
-  realizedTradePnl?: string | null;
-  nonTradePnl?: string | null;
-  conversionCollateralDelta?: string | null;
-  unrealizedPositionValue?: string | null;
-  officialLikePnl?: string | null;
-  buyUsdc?: string | null;
-  sellUsdc?: string | null;
-  redeemUsdc?: string | null;
-  mergeUsdc?: string | null;
-  splitUsdc?: string | null;
-  makerRebateUsdc?: string | null;
-};
-
-export type RuntimePolySignalQuality = {
-  address?: string | null;
-  qualityTier?: string | null;
-  errorPct?: string | null;
-  reason?: string | null;
-  benchmarkSource?: string | null;
-  benchmarkPnl?: string | null;
-  calculatedPnl?: string | null;
-  safeBlock?: number | string | null;
-  flags?: string[];
-  userName?: string | null;
-  rank?: string | number | null;
-};
-
-export type RuntimePolySignalCategoryEdge = {
-  category?: string | null;
-  tradeCount?: number | string | null;
-  buyNotional?: string | null;
-  sellNotional?: string | null;
-  netPnl?: string | null;
-  winRate?: string | null;
-  avgPositionSize?: string | null;
-  largestWin?: string | null;
-  largestLoss?: string | null;
-  resolvedMarketCount?: number | string | null;
-};
-
-export type RuntimePolySignalTradeEvidence = {
-  txHash?: string | null;
-  marketId?: number | string | null;
-  marketTitle?: string | null;
-  conditionId?: string | null;
-  side?: string | null;
-  outcome?: string | null;
-  price?: string | null;
-  size?: string | null;
-  notional?: string | null;
-  blockNumber?: number | string | null;
-  logIndex?: number | string | null;
-  createdAt?: string | null;
-  timestamp?: string | null;
-  maker?: string | null;
-  taker?: string | null;
-};
-
-export type RuntimePolySignalMarketExposure = {
-  marketId?: number | string | null;
-  title?: string | null;
-  conditionId?: string | null;
-  category?: string | null;
-  side?: string | null;
-  outcome?: string | null;
-  netPosition?: string | null;
-  avgEntryPrice?: string | null;
-  realizedPnl?: string | null;
-  unrealizedValue?: string | null;
-  currentProbability?: string | null;
-  tradeCount?: number | string | null;
-  firstTradeBlock?: number | string | null;
-  lastTradeBlock?: number | string | null;
-};
-
-export type RuntimePolySignalAddressProfile = {
-  address?: string | null;
-  shortAddress?: string | null;
-  generatedAt?: string | null;
-  safeBlock?: number | string | null;
-  pnlSummary?: RuntimePolySignalPnlSummary | null;
-  quality?: RuntimePolySignalQuality | null;
-  categoryStats?: RuntimePolySignalCategoryEdge[];
-  categoryEdge?: RuntimePolySignalCategoryEdge | null;
-  recentTrades?: RuntimePolySignalTradeEvidence[];
-  marketExposure?: RuntimePolySignalMarketExposure[];
-  riskFlags?: string[];
-};
-
-export type RuntimePolySignalMarketInfo = {
-  marketId?: number | string | null;
-  title?: string | null;
-  slug?: string | null;
-  conditionId?: string | null;
-  category?: string | null;
-  tags?: string[];
-  currentProbability?: string | null;
-  latestYesPrice?: string | null;
-  latestNoPrice?: string | null;
-  volume24h?: string | null;
-  tradeCount24h?: number | string | null;
-  lastTradeAt?: string | null;
-  status?: string | null;
-  oracleRisk?: string[];
-  oracle?: string | null;
-  settlementSource?: string | null;
-  settlementOutcome?: string | null;
-  enableNegRisk?: boolean | null;
-};
-
-export type RuntimePolySignalAgentSummary = {
-  brief?: string | null;
-  whyItMatters?: string | null;
-  walletRead?: string | null;
-  marketRead?: string | null;
-  risk?: string | null;
-  confidence?: string | null;
-  contentText?: string | null;
-  tags?: string[];
-};
-
-export type RuntimePolySignalItem = RuntimeTradeSignal & {
-  id?: string | null;
-  signalType?: string | null;
-  domain?: string | null;
-  marketSlug?: string | null;
-  marketCategory?: string | null;
-  tags?: string[];
-  wallets?: RuntimePolySignalWallet[];
-  addressProfiles?: RuntimePolySignalAddressProfile[];
-  orderfilled?: RuntimePolySignalTradeEvidence | null;
-  tradeEvidence?: RuntimePolySignalTradeEvidence[];
-  market?: RuntimePolySignalMarketInfo | null;
-  marketIntel?: {
-    netFlow?: Record<string, unknown> | null;
-    pnlQualitySummary?: Record<string, unknown> | null;
-    riskFlags?: string[];
-  } | null;
-  agentSummary?: RuntimePolySignalAgentSummary | null;
-  evidencePacket?: Record<string, unknown> | null;
-  reasonCodes?: string[];
-  explanation?: string | null;
-  narrativeSource?: string | null;
-  signalScore?: string | null;
-  signalScoreValue?: string | null;
-  signalConfidence?: string | null;
-  smartSignal?: boolean | null;
-  sourceLayer?: string | null;
-  sourceTables?: string[];
-  contentText?: string | null;
-};
-
-export type RuntimePolySignalPayload = {
-  items: RuntimePolySignalItem[];
-  generatedAt?: string;
-  status?: string | null;
-  cacheMode?: string | null;
-  source?: string | null;
-  sources?: Record<string, string | null | undefined>;
-};
-
 export type RuntimeMarketTvWireCategory = {
   id: string;
   label: string;
@@ -2282,6 +2113,7 @@ export type RuntimeDefiTokenWatchPayload = {
 };
 
 export type RuntimeFinanceWatchItem = {
+  details?: Array<{ label: string; value: string; status?: string | null; observedAt?: string | null; fetchedAt?: string | null }>;
   id?: string | null;
   label?: string | null;
   symbol?: string | null;

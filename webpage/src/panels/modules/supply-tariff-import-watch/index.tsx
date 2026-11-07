@@ -1,3 +1,4 @@
+import { macroSnapshot } from '@/panels/shared/macro-runtime';
 import { fetchRuntimeSupplyTariffImportWatch } from '@/services/api';
 import type { RuntimeMacroDriverPayload, RuntimePolymarketMacroMapPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
@@ -30,6 +31,7 @@ const renderers: PanelRenderMap = {
 
 export const panel = runtimePanelFromRenderer(renderers, {
   id: 'supply-tariff-import-watch',
+  snapshot: macroSnapshot('supply-tariff-import-watch', false, 'source'),
   dataDependencies: ['polymarket-macro-map'],
   title: 'Supply Tariff Import Watch',
   eyebrow: 'macro',

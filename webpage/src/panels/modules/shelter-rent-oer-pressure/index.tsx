@@ -1,3 +1,4 @@
+import { macroSnapshot } from '@/panels/shared/macro-runtime';
 import { fetchRuntimeShelterRentOerPressure } from '@/services/api';
 import type { RuntimeMacroDriverPayload, RuntimePolymarketMacroMapPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
@@ -30,6 +31,7 @@ const renderers: PanelRenderMap = {
 
 export const panel = runtimePanelFromRenderer(renderers, {
   id: 'shelter-rent-oer-pressure',
+  snapshot: macroSnapshot('shelter-rent-oer-pressure', false, 'source'),
   dataDependencies: ['polymarket-macro-map'],
   title: 'Shelter Rent OER Pressure',
   eyebrow: 'macro',

@@ -54,6 +54,19 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error || 'Panel refresh failed.');
 }
 
+export function revalidateRuntimeSnapshots(panels: PanelModule[], data: PanelRuntimeData, now: number): PanelRuntimeData {
+  let next = data;
+  for (const panel of panels) {
+    const revalidate = panel.snapshot?.revalidate;
+    if (!revalidate || data[panel.id] == null) continue;
+    const value = revalidate(data[panel.id], now);
+    if (value === data[panel.id]) continue;
+    if (next === data) next = { ...data };
+    next[panel.id] = value;
+  }
+  return next;
+}
+
 
 function payloadIsDegraded(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false;
@@ -304,6 +317,12 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
           && now - status.updatedAt > (panel.refreshPolicy.staleAfterMs ?? DEFAULT_STALE_AFTER_MS[panel.refreshPolicy.tier]);
       });
       updateStatuses(stale.map((panel) => panel.id), (status) => ({ ...status, phase: 'stale' }));
+      const projected = revalidateRuntimeSnapshots(panels, dataRef.current, now);
+      if (projected !== dataRef.current) {
+        const changed = panels.filter(panel => projected[panel.id] !== dataRef.current[panel.id]);
+        setRuntimeData(current => revalidateRuntimeSnapshots(panels, current, now));
+        updateStatuses(changed.map(panel => panel.id), status => ({ ...status, phase: 'degraded' }));
+      }
       const expired = panels.filter(panel => {
         const contract = panel.snapshot, value = dataRef.current[panel.id];
         return contract && value != null && !resourceIsCurrent(contract.updatedAt(value), Math.max(contract.maxAgeMs, contract.staleAgeMs ?? contract.maxAgeMs));

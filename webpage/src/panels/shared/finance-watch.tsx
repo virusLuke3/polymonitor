@@ -35,6 +35,7 @@ function itemSignature(item: RuntimeFinanceWatchItem) {
     item.analyst,
     item.rating,
     item.targetPriceLabel,
+    JSON.stringify(item.details),
   ].map((value) => String(value ?? '')).join('::');
 }
 
@@ -73,6 +74,19 @@ function QuoteRow({ item, fresh = false }: { item: RuntimeFinanceWatchItem; fres
         <FinanceTags tags={item.tags} />
         {item.secondaryLabel ? <span>{item.secondaryLabel}</span> : null}
       </div>
+      {item.details?.length ? (
+        <details className="wm-finance-row-foot">
+          <summary>Contract metrics</summary>
+          <dl>
+            {item.details.map((fact) => (
+              <div key={fact.label} title={fact.observedAt ? `Source: ${fact.observedAt}` : fact.fetchedAt ? `Read: ${fact.fetchedAt}` : undefined}>
+                <dt>{fact.label}</dt>
+                <dd>{fact.value}{fact.status === 'stale' ? ' · STALE' : ''}</dd>
+              </div>
+            ))}
+          </dl>
+        </details>
+      ) : null}
     </article>
   );
 }

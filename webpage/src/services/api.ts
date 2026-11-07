@@ -39,7 +39,6 @@ import type {
   RuntimeNbaPayload,
   RuntimeNbaIntelPayload,
   RuntimeNewMarketSignalsPayload,
-  RuntimePolySignalPayload,
   RuntimePolymarketMacroMapPayload,
   RuntimeSignalPayload,
   RuntimeSportsOddsPayload,
@@ -418,10 +417,6 @@ export function fetchNaturalHazardRelatedMarkets(eventId: string, signal?: Abort
 
 export function fetchRuntimeAlpha(limit = 8, signal?: AbortSignal) {
   return apiGet<RuntimeSignalPayload>(`/runtime/signals/alpha?limit=${limit}`, signal);
-}
-
-export function fetchRuntimePolySignal(limit = 8, signal?: AbortSignal) {
-  return apiGet<RuntimePolySignalPayload>(`/runtime/panels/polysignal-feed?limit=${limit}`, signal);
 }
 
 export function fetchRuntimeMarketTvWire(limit = 24, category?: string | null, signal?: AbortSignal) {

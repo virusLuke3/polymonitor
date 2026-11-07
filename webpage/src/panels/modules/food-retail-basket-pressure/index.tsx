@@ -1,3 +1,4 @@
+import { macroSnapshot } from '@/panels/shared/macro-runtime';
 import { panelStatus as panelTone } from '@/panels/shared/formatters';
 import { useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
@@ -141,6 +142,7 @@ const renderers: PanelRenderMap = {
 
 export const panel = runtimePanelFromRenderer(renderers, {
   id: 'food-retail-basket-pressure',
+  snapshot: macroSnapshot('food-retail-basket-pressure', false, 'source'),
   dataDependencies: ['polymarket-macro-map'],
   title: 'Food & Retail Basket Pressure',
   eyebrow: 'macro',

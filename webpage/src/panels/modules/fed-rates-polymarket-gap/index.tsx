@@ -1,3 +1,4 @@
+import { macroSnapshot } from '@/panels/shared/macro-runtime';
 import { fetchRuntimeFedRatesPolymarketGap } from '@/services/api';
 import type { RuntimeMacroDriverPayload, RuntimePolymarketMacroMapPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
@@ -30,6 +31,7 @@ const renderers: PanelRenderMap = {
 
 export const panel = runtimePanelFromRenderer(renderers, {
   id: 'fed-rates-polymarket-gap',
+  snapshot: macroSnapshot('fed-rates-polymarket-gap', false, 'source'),
   dataDependencies: ['polymarket-macro-map'],
   title: 'Fed Rates Polymarket Gap',
   eyebrow: 'macro',

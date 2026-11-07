@@ -22,6 +22,8 @@ export function View({ data }: { data?: Payload }) {
       {race.choices.map(c=><Bar key={c.name} label={c.name} value={`${num(c.votes)} · ${total ? num(c.votes/total*100,2)+'%':'—'}`} percent={total ? c.votes/total*100:null} tone={partyTone(c.party)}/>)}
       <Note>{t('已发布分区统计；认证状态与剩余票数尚未核实。','Published precinct tabulation; certification and remaining votes are unverified.')}</Note><Row label={t('文件中覆盖县数','Counties in file')} value={race.counties}/>
       <Evidence><Link href={publicSource('VITE_PUBLIC_ELECTION_RESULTS_SOURCE_URL') || undefined}>NCSBE</Link><p>{t('分区重分配文件不作为官方结果认证证据；不由报告比例推算剩余票，不宣布获胜者。','Precinct-sorted files are not certification evidence. No remaining-vote estimate or winner is inferred.')}</p></Evidence>
-    </> : <Empty>{t('所选范围尚无票数记录。','No vote records for this scope.')}</Empty> : <Empty>{t('尚未接入当前竞选的认证、重计票与法院事件。已有票数不会自动标为认证。','Certification, recount and court events are not yet connected. Vote totals do not imply certification.')}</Empty>}
+    </> : <Empty>{t('所选范围尚无票数记录。','No vote records for this scope.')}</Empty> : data?.certifications?.length ? <>
+      {data.certifications.map(c=><div key={c.id}><Scope name={c.jurisdiction} tag={c.electionDate}/><Note tone="amber">{c.status==='pending' ? t('等待州级结果审定','State canvass pending') : t('预定日期已过，结果仍待核实','Scheduled date passed; outcome unverified')}</Note><Row label={t('官方预定时间','Official schedule')} value={`${c.scheduledDate} ${c.scheduledTime} ${c.timeZone}`}/><Evidence><Link href={c.url}>NCSBE · {t('官方程序公告','Official process notice')}</Link><p>{t('公告明确当前票数未认证。预定日期到达不会自动标记为已认证；重计票和法院事项另待核实。','The notice identifies unofficial results. A scheduled date never implies certification; recounts and court events remain unverified.')}</p></Evidence></div>)}
+    </> : <Empty>{t('尚无已取得的认证程序证据。已有票数不会自动标为认证。','No acquired certification evidence. Vote totals do not imply certification.')}</Empty>}
   </Shell>;
 }

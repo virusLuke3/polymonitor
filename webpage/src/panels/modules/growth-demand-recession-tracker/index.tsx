@@ -1,3 +1,4 @@
+import { macroSnapshot } from '@/panels/shared/macro-runtime';
 import { fetchRuntimeGrowthDemandRecessionTracker } from '@/services/api';
 import type { RuntimeMacroDriverPayload, RuntimePolymarketMacroMapPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
@@ -30,6 +31,7 @@ const renderers: PanelRenderMap = {
 
 export const panel = runtimePanelFromRenderer(renderers, {
   id: 'growth-demand-recession-tracker',
+  snapshot: macroSnapshot('growth-demand-recession-tracker', false, 'source'),
   dataDependencies: ['polymarket-macro-map'],
   title: 'Growth Demand Recession Tracker',
   eyebrow: 'macro',
