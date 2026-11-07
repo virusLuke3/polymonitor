@@ -184,5 +184,17 @@ def overlay_weather(payload, store, now=None):
                 "marketFetchedAt": catalog.get("generatedAt"), "catalogStatus": catalog.get("status"),
                 "sourceStates": {**old.get("sourceStates", {}), "polymarket": catalog.get("status")}}
         items.append(_align_city_forecast(item))
-    return {**payload, "items": items, "marketCatalogAt": catalog.get("generatedAt"),
-            "marketCatalogStatus": catalog.get("status"), "summary": {**payload.get("summary", {}), **build_summary(items)}}
+    primary_bins = [row for city in items for row in city.get("bins", [])]
+    acquired = sum(row.get("bookStatus") in {"snapshot", "no-book"} for row in primary_bins)
+    quoted = sum(row.get("bookStatus") == "snapshot" for row in primary_bins)
+    book_state = ("empty" if not primary_bins else
+                  "ok" if acquired == len(primary_bins) and quoted else
+                  "no-book" if acquired == len(primary_bins) else
+                  "partial" if acquired else "unavailable")
+    sources = {**payload.get("sources", {}), "marketDatabase": catalog.get("status"), "clob": book_state}
+    status = payload.get("status")
+    if status == "ok" and catalog.get("status") != "ok":
+        status = "degraded"
+    return {**payload, "status": status, "sources": sources, "items": items,
+            "marketCatalogAt": catalog.get("generatedAt"), "marketCatalogStatus": catalog.get("status"),
+            "summary": {**payload.get("summary", {}), **build_summary(items)}}

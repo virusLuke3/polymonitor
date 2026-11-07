@@ -97,6 +97,25 @@ def test_overlay_does_not_advance_forecast_clocks_and_removes_old_bins(store):
     assert not service.overlay_weather(old, store, NOW)['items'][0]['bins']
 
 
+def test_overlay_source_health_uses_independent_catalog_and_books(store):
+    service.publish(store, service.CATALOG_KEY, catalog())
+    books = {'1': service.validate_book(raw(), '1', NOW, 90),
+             '2': service.validate_book(raw('2', bids=[], asks=[]), '2', NOW, 90)}
+    service.publish(store, service.BOOKS_KEY, {'books': books})
+    old = {'status': 'ok', 'sources': {'clob': 'empty', 'marketDatabase': 'error', 'openMeteo': 'ok'},
+           'items': [{'cityId': 'new-york'}]}
+    result = service.overlay_weather(old, store, NOW)
+    assert result['sources'] == {'clob': 'ok', 'marketDatabase': 'ok', 'openMeteo': 'ok'}
+    assert result['items'][0]['bookCoverage']['quoted'] == 1
+    assert service.overlay_weather(old, store, NOW + 91)['sources']['clob'] == 'unavailable'
+    service.publish(store, service.CATALOG_KEY, {**catalog(), 'status': 'error'})
+    failed = service.overlay_weather(old, store, NOW)
+    assert failed['status'] == 'degraded' and failed['sources']['marketDatabase'] == 'error'
+    service.publish(store, service.CATALOG_KEY, {**catalog(), 'items': []})
+    empty = service.overlay_weather(old, store, NOW)
+    assert empty['sources']['clob'] == 'empty' and not empty['items'][0]['bins']
+
+
 class Reply:
     status_code = 200
     headers = {}

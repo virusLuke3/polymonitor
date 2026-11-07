@@ -43,3 +43,14 @@ The weather owner published `2026-11-07T10:46:36.215694Z` to its configured inst
 ## Acceptance
 
 Run the weather, geo-sanctions and transport backend tests, weather contract unit tests, weather browser refresh/recovery test and production build. Deploy only owned files from the pushed commit, then verify the real production desktop/mobile UI, successive snapshot times and autonomous quote checks without API substitution.
+
+
+## Independent official quote rollout — 2026-11-07
+
+Commit `745b2415dd62895bc9383f7c926e0bd6d6054ad4` introduced the independent catalog and official REST quote owner. The frontend was built from a clean archive of the pushed commit and served on the public homepage. Existing weather panels use the same shared resource; their order and sizes were not changed.
+
+After correcting the service's explicit private environment-file path at 11:35:44 UTC, automatic primary-city acquisitions at 11:35:51 and 11:41:03 UTC each validated and wrote 627 of 627 requested token books. Catalog generations at 11:36:02 and 11:41:04 UTC held 3,638 unique tokens across available dates/families. Catalog read attempts are scheduled 300 seconds apart; successful publication also includes database I/O time. While a browser viewed New York, successive 11-token acquisitions succeeded at 11:36:16, 11:36:47, 11:37:18, 11:37:49 and 11:38:19 UTC. After its demand lease expired, fast cycles requested zero tokens while five-minute overview acquisition continued. This evidence confirms scheduled acquisition and formal SQLite publication during this observation window, not an uninterrupted long-term guarantee or upstream market-database completeness.
+
+Real public desktop (2518×1249) and mobile (390×844) screenshots show New York 11/11 current snapshot books. No API or map-tile substitution was used. Artifacts are `webpage/design-previews/market-domains/images/weather-official-snapshots-{desktop,mobile}-20261107.png`. Quote source timestamps remain separate from acquisition, catalog and forecast clocks; forecast collection stays hourly. The API's source-health summary is joined from the independent catalog/books as well, so the old hourly snapshot cannot incorrectly report the new quote source as empty.
+
+Validation includes the clean-commit backend tests, 32 frontend weather/resource tests, two browser refresh/expiry/recovery tests and the clean frontend build. The additional independent-source-health regression passed with the weather tests (50 total). Whole-project `make quality` remains blocked by the unrelated pre-existing personal-path finding in `docs/crypto-strategy-panels.md`; it is not claimed as passed.
