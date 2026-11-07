@@ -938,11 +938,13 @@ def _empty_clob_quote(status: str, token_id: Optional[str] = None) -> Dict[str, 
 
 
 def _clob_book_payload(ctx: GlobalWeatherMapContext, token_id: str) -> Dict[str, Any]:
-    reader = _dependencies(ctx).lob_reader
-    if reader is None:
+    from .weather_market_service import NAMESPACE, BOOKS_KEY, visible_book
+    store = _dependencies(ctx).snapshot_store
+    if store is None:
         return {"bookStatus": "unavailable", "bids": [], "asks": []}
     from .weather_book_quote import project_weather_book
-    return project_weather_book(reader(token_id), token_id)
+    books = (store.get_stale(NAMESPACE, BOOKS_KEY) or {}).get("books", {})
+    return project_weather_book({"yes": visible_book(books.get(token_id), token_id)}, token_id)
 
 
 def _clob_yes_quote(
@@ -1319,6 +1321,7 @@ def _db_markets_by_city(
     ctx: GlobalWeatherMapContext,
     cities: List[Dict[str, Any]],
     dates: List[Dict[str, str]],
+    *, query_books: bool = False,
 ) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, str]]:
     dependencies = _dependencies(ctx)
     rows, db_status = _db_weather_market_rows(ctx, dates)
@@ -1382,7 +1385,7 @@ def _db_markets_by_city(
 
     def normalize_city(entry):
         city_id, groups = entry
-        normalized = [_normalize_weather_db_group(ctx, city, date_iso, family, rows, query_book=index == 0)
+        normalized = [_normalize_weather_db_group(ctx, city, date_iso, family, rows, query_book=query_books and index == 0)
                       for index, (city, date_iso, family, rows) in enumerate(groups)]
         return city_id, [group for group in normalized if group]
 
@@ -1407,6 +1410,11 @@ def _markets_by_city(
     cities: List[Dict[str, Any]],
 ) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, str]]:
     dependencies = _dependencies(ctx)
+    from .weather_market_service import NAMESPACE, CATALOG_KEY, read_catalog
+    if dependencies.snapshot_store and dependencies.snapshot_store.get_stale(NAMESPACE, CATALOG_KEY):
+        catalog = read_catalog(dependencies.snapshot_store)
+        markets = {row['cityId']: row for row in catalog.get('items', []) if row.get('bins')}
+        return markets, {str(city['city_id']): catalog.get('status', 'warming') for city in cities}
     dates = _date_labels(
         dependencies,
         int(
@@ -1794,6 +1802,8 @@ def normalize_global_weather_map_payload(
     if not isinstance(payload, dict):
         return _empty_payload(dependencies, status="invalid")
     result = json.loads(json.dumps(payload, ensure_ascii=True, default=str))
+    from .weather_market_service import overlay_weather
+    result = overlay_weather(result, dependencies.snapshot_store)
     items = [item for item in (result.get("items") or []) if isinstance(item, dict)]
     result["items"] = items[: max(1, min(int(limit or DEFAULT_ITEM_LIMIT), 60))]
     result["summary"] = result.get("summary") if isinstance(result.get("summary"), dict) else build_summary(result["items"])

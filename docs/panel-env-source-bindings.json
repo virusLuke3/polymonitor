@@ -12,7 +12,9 @@
     "scripts/api/config.py"
   ],
   "POLYDATA_CLOB_API_BASE": [
-    "scripts/runtime/new_market_signal_watcher.py"
+    "scripts/runtime/new_market_signal_watcher.py",
+    "scripts/api/clients/source_transport.py",
+    "scripts/runtime/weather_market_watcher.py"
   ],
   "POLYDATA_CPI_CALENDAR_BEA_SCHEDULE_URL": [
     "scripts/api/config.py"

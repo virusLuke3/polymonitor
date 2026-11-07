@@ -228,7 +228,7 @@ def test_global_weather_map_builds_weather_metar_and_market_payload(monkeypatch)
     assert city["hourly"][1]["windGust"] == 49.2
     assert city["daily"][0]["precipitationSum"] == 9.6
     assert city["quoteCoverage"] == "1/1"
-    assert city["topBin"]["midPriceYes"] == 0.33
+    assert city["topBin"]["midPriceYes"] == 0.3
     assert request_params["openMeteo"]["current"] == "temperature_2m,weather_code,precipitation,wind_speed_10m,wind_gusts_10m"
     assert "precipitation_probability" in request_params["openMeteo"]["hourly"]
     assert "wind_gusts_10m_max" in request_params["openMeteo"]["daily"]
@@ -382,9 +382,9 @@ def test_global_weather_map_uses_local_market_database_before_gamma(monkeypatch)
     assert fake_conn.closed is True
     assert city["sourceStates"]["polymarket"] == "ok"
     assert city["marketSource"] == "psql-db"
-    assert city["quoteCoverage"] == "1/1"
+    assert city["quoteCoverage"] == "0/1"
     assert city["topBin"]["label"] == "Will the highest temperature in New York City be 80°F or higher on May 12?"
-    assert city["topBin"]["midPriceYes"] == 0.46
+    assert city["topBin"]["midPriceYes"] is None
     assert city["bins"][0]["marketSlug"] == "highest-temperature-in-new-york-on-may-12-2026-80forhigher"
 
 
@@ -596,7 +596,7 @@ def test_global_weather_map_filters_hurricanes_sports_false_positives(monkeypatc
     assert all("Carolina Hurricanes" not in str(item) for item in payload["unmappedMarkets"])
 
 
-def test_global_weather_map_prefers_clob_book_over_db_price(monkeypatch):
+def test_global_weather_catalog_does_not_fetch_books(monkeypatch):
     calls = {"clob": 0}
 
     def clob_quote(ctx, market):
@@ -647,13 +647,13 @@ def test_global_weather_map_prefers_clob_book_over_db_price(monkeypatch):
     payload = global_weather_map_service.build_global_weather_map_payload(ctx, limit=1)
     top_bin = payload["items"][0]["topBin"]
 
-    assert calls["clob"] == 1
-    assert top_bin["midPriceYes"] == 0.27
-    assert top_bin["priceSource"] == "clob-book"
-    assert top_bin["bookStatus"] == "ok"
+    assert calls["clob"] == 0
+    assert top_bin["midPriceYes"] == 0.77
+    assert top_bin["priceSource"] == "db-latest"
+    assert top_bin["bookStatus"] == "not-queried"
 
 
-def test_global_weather_map_keeps_db_price_when_clob_has_no_book(monkeypatch):
+def test_weather_catalog_reference_price_is_not_a_queried_book(monkeypatch):
     monkeypatch.setattr(
         global_weather_map_service,
         "_clob_yes_quote",
@@ -702,7 +702,7 @@ def test_global_weather_map_keeps_db_price_when_clob_has_no_book(monkeypatch):
 
     assert top_bin["midPriceYes"] == 0.77
     assert top_bin["priceSource"] == "db-latest"
-    assert top_bin["bookStatus"] == "no-book"
+    assert top_bin["bookStatus"] == "not-queried"
 
 
 def test_global_weather_map_seeded_snapshot_does_not_live_fetch():
@@ -982,25 +982,20 @@ def test_watchers_preserve_previous_on_empty_or_exception(monkeypatch):
     assert stored["news_meta"]["preserve"] is True
 
 
-def test_weather_quotes_read_live_engine_without_reusing_stale_quote():
-    ctx = make_ctx()
-    from datetime import datetime, timezone, timedelta
-    now = datetime.now(timezone.utc)
-    state = {"tokenId": "123", "bookStatus": "live", "continuity": True,
-             "receivedAt": now.isoformat(), "heartbeatAt": now.isoformat(),
-             "staleAfter": (now + timedelta(seconds=20)).isoformat(),
-             "bids": [{"price": "0.4"}], "asks": [{"price": "0.5"}]}
-    ctx["get_runtime_lob_by_token_payload"] = lambda token: {"yes": state}
-    market = {"clobTokenIds": ["123", "456"]}
-    quote = global_weather_map_service._clob_yes_quote(ctx, market)
-    assert (quote["bestBidYes"], quote["bestAskYes"]) == (0.4, 0.5)
-    for status in ("stale", "warming", "unavailable"):
-        state["bookStatus"] = status
-        quote = global_weather_map_service._clob_yes_quote(ctx, market)
-        assert quote["bestBidYes"] is None
-        assert quote["bestAskYes"] is None
-        assert quote["bookStatus"] == status
-    assert ctx["_calls"]["json"] == 0
+def test_weather_quotes_read_official_snapshot_without_calling_lob(tmp_path):
+    from api.services.weather_market_service import NAMESPACE, BOOKS_KEY, validate_book
+    import time
+    store = SnapshotStore(str(tmp_path / 'books.sqlite3'))
+    ctx = make_ctx(store=store)
+    ctx["get_runtime_lob_by_token_payload"] = lambda token: (_ for _ in ()).throw(AssertionError('internal LOB called'))
+    now = time.time()
+    book = validate_book({'asset_id': '123', 'timestamp': str(int(now * 1000)),
+                          'bids': [{'price': .4, 'size': 1}], 'asks': [{'price': .5, 'size': 2}]}, '123', now, 90)
+    store.set(NAMESPACE, BOOKS_KEY, {'books': {'123': book}}, 7200)
+    quote = global_weather_map_service._clob_yes_quote(ctx, {'clobTokenIds': ['123', '456']})
+    assert (quote['bestBidYes'], quote['bestAskYes']) == (.4, .5)
+    assert quote['bookStatus'] == 'snapshot'
+    assert ctx['_calls']['json'] == 0
 
 
 def test_expired_weather_seed_keeps_original_clock_without_request_collection(monkeypatch):

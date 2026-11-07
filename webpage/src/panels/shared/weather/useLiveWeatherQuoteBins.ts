@@ -6,14 +6,14 @@ import { displayQuoteBins } from './model';
 import { mergeLiveQuote, quoteFromLob, RETAINED_BOOK_MS, type LiveWeatherQuote } from './quote';
 
 type QuoteSnapshot = { checkedAt: number; status: string; quotes: Record<string, LiveWeatherQuote> };
-export const WEATHER_QUOTE_REFRESH_MS = 15_000;
+export const WEATHER_QUOTE_REFRESH_MS = 30_000;
 
 export function weatherQuoteResource(bins: RuntimeWeatherQuoteBin[]): PanelResource<QuoteSnapshot> {
   const tokens = [...new Set(bins.map(bin => String(bin.yesTokenId || '').trim()).filter(Boolean))].sort();
   return {
-    key: `weather:books:v3:${tokens.join(',') || 'none'}`, title: 'Weather books',
-    maxAgeMs: 20_000, staleAgeMs: 120_000, acceptStale: true,
-    refreshPolicy: { tier: 'fast', intervalMs: WEATHER_QUOTE_REFRESH_MS, staleAfterMs: 20_000, requestTimeoutMs: 25_000 },
+    key: `weather:books:v4:${tokens.join(',') || 'none'}`, title: 'Weather books',
+    maxAgeMs: 60_000, staleAgeMs: 120_000, acceptStale: true,
+    refreshPolicy: { tier: 'fast', intervalMs: WEATHER_QUOTE_REFRESH_MS, staleAfterMs: 60_000, requestTimeoutMs: 10_000 },
     updatedAt: value => value.checkedAt,
     nextValidationAt: (value, now) => {
       const times = Object.values(value.quotes).flatMap(quote => [Date.parse(quote.quoteStaleAfter || ''), Date.parse(quote.quoteUpdatedAt || '') + RETAINED_BOOK_MS])

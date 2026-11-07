@@ -1,0 +1,18 @@
+[Unit]
+Description=Polymonitor shared weather catalog and official quote snapshots
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/__POLYDATA_REPO_ROOT__
+EnvironmentFile=%h/.config/polydata/polydata.env
+ExecStart=/bin/bash -lc 'exec "${POLYDATA_PYTHON_BIN:-python3}" scripts/runtime/weather_market_watcher.py --watch'
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

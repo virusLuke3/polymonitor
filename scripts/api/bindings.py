@@ -32,6 +32,7 @@ from api.services import (
     food_retail_basket_service,
     geo_sanctions_shock_service,
     global_weather_map_service,
+    weather_market_service,
     jin10_runtime_service,
     macro_cpi_panels_service,
     macro_cpi_registry_service,
@@ -1113,6 +1114,7 @@ def build_blueprints(runtime: ServiceRuntime):
                 map_infrastructure=lambda **kwargs: map_infrastructure_service.infrastructure_snapshot(runtime.natural_hazards_context, **kwargs),
                 transport_map_source=lambda **kwargs: global_transport_shipping_service.get_transport_map_source(runtime.global_transport_shipping_context, **kwargs),
                 map_weather_query=lambda **kwargs: global_weather_map_service.query_map_weather(runtime.global_weather_map, **kwargs),
+                weather_books=lambda tokens: weather_market_service.read_books(runtime.global_weather_map.snapshot_store, tokens),
                 aviation_viewport_snapshot=lambda bbox, zoom, limit=180: (
                     global_transport_shipping_service.get_aviation_viewport_snapshot(
                         runtime.global_transport_shipping_context, bbox=bbox, zoom=zoom, limit=limit

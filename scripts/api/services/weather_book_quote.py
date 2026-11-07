@@ -25,7 +25,9 @@ def project_weather_book(payload, token, *, now=None):
         return {**empty, "bookStatus": "invalid"}
     live = bool(status == "live" and side.get("continuity") is True and received and heartbeat and deadline
                 and 0 <= (now - heartbeat).total_seconds() < 20 and received <= heartbeat and deadline > now)
-    snapshot = bool(status == "available" and side.get("upstreamReady") is True and observed and 0 <= (now - observed).total_seconds() < 30)
+    official = side.get("source") == "official-clob-rest"
+    snapshot = bool(status == "available" and side.get("upstreamReady") is True and observed and observed <= now
+                    and (deadline and deadline > now if official else (now - observed).total_seconds() < 30))
     event = _time(side.get("eventAt")) or (received if live else None)
     retained = bool(status in {"live", "available", "stale"} and event and 0 <= (now - event).total_seconds() < RETAINED_SECONDS)
     if not (live or snapshot or retained):
@@ -46,7 +48,7 @@ def project_weather_book(payload, token, *, now=None):
         return {**empty, "bookStatus": "invalid"}
     if bid is None and ask is None:
         return {**empty, "bookStatus": "no-book"}
-    valid_until = deadline if live else observed + timedelta(seconds=30) if snapshot else event + timedelta(seconds=RETAINED_SECONDS)
+    valid_until = deadline if live or (snapshot and official) else observed + timedelta(seconds=30) if snapshot else event + timedelta(seconds=RETAINED_SECONDS)
     return {"bookStatus": "ok" if live else "snapshot" if snapshot else "retained",
             "priceSource": "clob-book" if live else "clob-snapshot" if snapshot else "previous-book",
             "quoteUpdatedAt": event.isoformat() if event else None,

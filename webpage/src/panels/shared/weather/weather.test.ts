@@ -43,9 +43,9 @@ describe('weather source and book contracts', () => {
   it('deduplicates identity and recovers warming books on the next check', async () => {
     const resource = weatherQuoteResource([{ yesTokenId: '2' }, { yesTokenId: '1' }, { yesTokenId: '2' }]);
     expect(resource.key).toBe(weatherQuoteResource([{ yesTokenId: '1' }, { yesTokenId: '2' }]).key);
-    expect(resource.refreshPolicy.intervalMs).toBe(15_000);
+    expect(resource.refreshPolicy.intervalMs).toBe(30_000);
     const fetch = vi.mocked(fetchWeatherBooks);
-    fetch.mockResolvedValue({ books: { '1': { marketId: 1, bookStatus: 'warming' }, '2': { marketId: 1, bookStatus: 'warming' } } });
+    fetch.mockResolvedValue({ books: { '1': { bookStatus: 'warming' }, '2': { bookStatus: 'warming' } } });
     expect(resource.parse(await resource.fetch()).status).toBe('partial'); expect(fetch).toHaveBeenCalledTimes(1);
     fetch.mockResolvedValue({ books: { '1': live('1'), '2': live('2') } });
     expect(resource.parse(await resource.fetch()).status).toBe('ok'); expect(fetch).toHaveBeenCalledTimes(2);

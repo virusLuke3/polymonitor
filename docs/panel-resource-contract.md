@@ -176,6 +176,9 @@ collector or data cache. Pure views continue reading the original owner.
 
 - Configure exact hostnames and approved exits. Only public GET/HEAD requests
   use this routing; local APIs, Polymarket/LOB and writes are excluded.
+  The weather snapshot owner explicitly opts into the exact configured public
+  `/books` POST with a validated token-only batch; this does not enable other
+  Polymarket requests or change internal LOB routing. See [weather ownership](weather-panel-runtime.md).
 - Keep independent restricted SSH keys and systemd services. Do not reuse LOB
   keys, weaken their `permitopen` rules, or change the user's main Clash route.
   See the [unit](../deploy/systemd/polymonitor-source-egress@.service),

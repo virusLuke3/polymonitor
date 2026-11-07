@@ -1,17 +1,17 @@
 import { test, expect } from '@playwright/test';
 import { installDashboard } from './fixtures/dashboard';
 
-test('selected-city books refresh every 15s, retain dated snapshots and recover', async ({ page }) => {
+test('selected-city books refresh every 30s, retain dated snapshots and recover', async ({ page }) => {
   await installDashboard(page, 'en', ['weather-quote-table']);
   await page.clock.install({ time: new Date() });
   let state = 'warming', requests = 0;
-  await page.route('**/wm-api/runtime/lob/books**', async route => {
+  await page.route('**/wm-api/runtime/weather/books**', async route => {
     requests++;
     if (state === 'error') return route.fulfill({ status: 503, json: { error: 'Fixture outage' } });
     const now = Number(new URL(route.request().url()).searchParams.get('_ts'));
     const live = state === 'live';
-    return route.fulfill({ json: { books: { '123': { marketId: 1, bookStatus: state, yes: { tokenId: '123', bookStatus: state,
-      continuity: live, receivedAt: new Date(now - 1000).toISOString(), heartbeatAt: new Date(now).toISOString(), staleAfter: new Date(now + 20_000).toISOString(),
+    return route.fulfill({ json: { books: { '123': { source: 'official-clob-rest', bookStatus: state, yes: { tokenId: '123', bookStatus: live ? 'available' : state, upstreamReady: live, observedAt: new Date(now).toISOString(), eventAt: new Date(now - 1000).toISOString(),
+      continuity: live, receivedAt: new Date(now - 1000).toISOString(), heartbeatAt: new Date(now).toISOString(), staleAfter: new Date(now + 90_000).toISOString(),
       bids: live ? [{ price: '.3', size: 100 }] : [], asks: live ? [{ price: '.4', size: 100 }] : [] } } } } });
   });
   await page.goto('/e2e/panels.html');
@@ -21,16 +21,16 @@ test('selected-city books refresh every 15s, retain dated snapshots and recover'
   } }));
   const table = page.locator('.wm-weather-quote-table');
   await expect(table).toContainText('WARMING');
-  state = 'live'; await page.clock.runFor(16_000);
-  await expect(table).toContainText('CLOB MID');
+  state = 'live'; await page.clock.runFor(31_000);
+  await expect(table).toContainText('SNAPSHOT');
   await expect(table.locator('td').nth(1)).toHaveText('30%');
   expect(requests).toBeGreaterThanOrEqual(2);
-  state = 'error'; await page.clock.runFor(32_000);
+  state = 'error'; await page.clock.runFor(95_000);
   await expect(page.locator('.wm-weather-source-status')).toContainText('API 503');
   await expect(table).toContainText('RETAINED');
   await expect(table.locator('td').nth(1)).toHaveText('30%');
-  state = 'live'; await page.clock.runFor(16_000);
-  await expect(table).toContainText('CLOB MID');
+  state = 'live'; await page.clock.runFor(31_000);
+  await expect(table).toContainText('SNAPSHOT');
   const before = requests;
   await page.getByRole('button', { name: 'Refresh', exact: true }).click();
   await expect.poll(() => requests).toBeGreaterThan(before);
@@ -40,7 +40,7 @@ test('native snapshots expire on source clocks without being relabeled live', as
   await installDashboard(page, 'en', ['weather-quote-table']);
   const started = Date.now();
   await page.clock.install({ time: new Date(started) });
-  await page.route('**/wm-api/runtime/lob/books**', route => route.fulfill({ json: { books: {
+  await page.route('**/wm-api/runtime/weather/books**', route => route.fulfill({ json: { books: {
     '123': { marketId: 1, yes: { tokenId: '123', bookStatus: 'available', upstreamReady: true,
       observedAt: new Date(started).toISOString(), eventAt: new Date(started - 2 * 3600_000 + 50_000).toISOString(),
       bestBid: 0, bestAsk: .1 } },

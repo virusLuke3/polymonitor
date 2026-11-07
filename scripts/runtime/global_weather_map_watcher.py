@@ -19,7 +19,7 @@ import requests
 
 from api.config import load_api_settings
 from api.context import RuntimeResources
-from api.services import global_weather_map_service, lob_service
+from api.services import global_weather_map_service
 from db.db import DEFAULT_DB_PATH, get_connection
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
 from runtime.snapshot_store import SnapshotStore
@@ -132,7 +132,6 @@ class GlobalWeatherMapWatcher:
         return {
             "_resources": self.resources,
             "SETTINGS": self.settings,
-            "get_runtime_lob_by_token_payload": lambda token: lob_service.get_runtime_lob_by_token_payload(token, read_timeout_seconds=3.0),
             "app": _App(),
             "http_json_get": self._http_json_get,
             "get_clob_session": lambda: self.requests,

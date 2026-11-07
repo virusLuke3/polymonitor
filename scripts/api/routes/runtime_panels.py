@@ -53,6 +53,7 @@ class RuntimePanelRouteDependencies:
     transport_map_source: Callable[..., dict[str, Any]] | None = None
     spatial_map_source: Callable[..., dict[str, Any]] | None = None
     map_infrastructure: Callable[..., dict[str, Any]] | None = None
+    weather_books: Callable[..., dict[str, Any]] | None = None
 
 
 def _get_panel_snapshot(panel, panel_context: RuntimePanelContext, limit: int | None):
@@ -68,6 +69,18 @@ def _get_panel_snapshot(panel, panel_context: RuntimePanelContext, limit: int | 
 
 def create_runtime_panels_blueprint(dependencies: RuntimePanelRouteDependencies) -> Blueprint:
     bp = Blueprint("runtime_panel_routes", __name__)
+
+    @bp.route('/runtime/weather/books', methods=['GET'])
+    def weather_books():
+        tokens = list(dict.fromkeys((request.args.get('tokens') or '').split(',')))
+        if dependencies.weather_books is None:
+            return jsonify({'error': 'Weather quotes unavailable'}), 503
+        try:
+            return jsonify(dependencies.weather_books(tokens)), 200, {'Cache-Control': 'no-store'}
+        except ValueError:
+            return jsonify({'error': 'Expected 1 to 24 numeric weather token ids'}), 400
+        except (TimeoutError, RuntimeError):
+            return jsonify({'error': 'Weather snapshot temporarily unavailable'}), 503, {'Retry-After': '30'}
 
     def _youtube_relay_token() -> str:
         return str(

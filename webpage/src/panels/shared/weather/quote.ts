@@ -18,7 +18,7 @@ function empty(bookStatus: string): LiveWeatherQuote {
 }
 
 /** Native snapshots and continuous live books have different evidence contracts. */
-export function quoteFromLob(lob: LobPayload | null, now = Date.now(), token?: string): LiveWeatherQuote {
+export function quoteFromLob(lob: Pick<LobPayload, 'yes' | 'bookStatus' | 'source'> | null, now = Date.now(), token?: string): LiveWeatherQuote {
   const yes = lob?.yes;
   const status = yes?.bookStatus || lob?.bookStatus || 'unavailable';
   if (token && yes?.tokenId !== token) return empty('unavailable');
@@ -26,7 +26,10 @@ export function quoteFromLob(lob: LobPayload | null, now = Date.now(), token?: s
   const continuous = status === 'live' && yes?.continuity === true
     && Date.parse(yes.staleAfter || '') > now && recent(yes.heartbeatAt, 20_000, now)
     && Number.isFinite(Date.parse(yes.receivedAt || '')) && Date.parse(yes.receivedAt || '') <= Date.parse(yes.heartbeatAt || '');
-  const snapshot = status === 'available' && yes?.upstreamReady === true && recent(yes.observedAt, 30_000, now);
+  const official = lob?.source === 'official-clob-rest';
+  const snapshot = status === 'available' && yes?.upstreamReady === true
+    && recent(yes.observedAt, official ? 600_000 : 30_000, now)
+    && (!official || Date.parse(yes.staleAfter || '') > now);
   const eventTime = yes?.eventAt || (continuous ? yes?.receivedAt : undefined);
   const retained = ['live', 'available', 'stale'].includes(status) && recent(eventTime, RETAINED_BOOK_MS, now);
   if (!continuous && !snapshot && !retained) return empty(['live', 'available', 'stale'].includes(status) ? 'stale' : status);
@@ -37,7 +40,7 @@ export function quoteFromLob(lob: LobPayload | null, now = Date.now(), token?: s
   return { bestBidYes: bid, bestAskYes: ask, bookStatus: continuous ? 'ok' : snapshot ? 'snapshot' : 'retained',
     priceSource: continuous ? 'clob-book' : snapshot ? 'clob-snapshot' : 'previous-book',
     quoteUpdatedAt: eventTime, quoteObservedAt: yes?.observedAt,
-    quoteStaleAfter: continuous ? yes?.staleAfter : new Date(snapshot
+    quoteStaleAfter: continuous || (official && snapshot) ? yes?.staleAfter : new Date(snapshot
       ? Date.parse(yes?.observedAt || '') + 30_000 : Date.parse(eventTime || '') + RETAINED_BOOK_MS).toISOString() };
 }
 

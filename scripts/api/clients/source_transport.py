@@ -136,6 +136,58 @@ class SourceSession(requests.Session):
             return response
         raise requests.exceptions.RetryError(f"{host}: no source route completed")
 
+    def read_weather_books(self, url, tokens, *, timeout=12, source_deadline=None):
+        """Explicit weather-only public POST, including bounded body retries.
+
+        Reuse route cooldowns and their durable store without enabling any other
+        Polymarket POST, account read, or internal LOB request.
+        """
+        if (not source_value("POLYDATA_CLOB_API_BASE")
+                or url != source_value("POLYDATA_CLOB_API_BASE").rstrip("/") + "/books"
+                or not 1 <= len(tokens) <= 100
+                or any(not isinstance(t, str) or not t.isdecimal() or len(t) > 100 for t in tokens)):
+            raise ValueError("Invalid weather book read")
+        host = urlsplit(url).hostname or ""
+        if not self._due(host + ":rate-limit"):
+            raise requests.exceptions.RetryError("Weather books Retry-After active")
+        routes = [(i, proxy) for i, proxy in enumerate(self.routes.get(host, [""])[:3])
+                  if self._due(f"{host}:{i}")][:2]
+        if not routes:
+            raise requests.exceptions.RetryError("Weather book routes cooling down")
+        deadline = min(source_deadline or float("inf"), time.monotonic() + timeout * len(routes))
+        for position, (index, proxy) in enumerate(routes):
+            allowance = min(timeout, deadline - time.monotonic())
+            if allowance <= 0:
+                raise requests.exceptions.Timeout("Weather book budget exhausted")
+            try:
+                with super().request("POST", url, json=[{"token_id": t} for t in tokens],
+                                     timeout=Timeout(total=allowance, connect=min(6, allowance)),
+                                     proxies={"http": proxy or "", "https": proxy or ""},
+                                     stream=True, allow_redirects=False) as response:
+                    if response.status_code == 429:
+                        self._cool(host + ":rate-limit", _retry_seconds(response.headers.get("Retry-After")))
+                        response.raise_for_status()
+                    if response.status_code in {502, 503, 504} and position + 1 < len(routes):
+                        self._route_failed(f"{host}:{index}")
+                        continue
+                    response.raise_for_status()
+                    body = bytearray()
+                    for chunk in response.iter_content(chunk_size=65536):
+                        if time.monotonic() >= deadline:
+                            raise requests.exceptions.Timeout("Weather book body deadline")
+                        body.extend(chunk)
+                        if len(body) > 2 * 1024 * 1024:
+                            raise ValueError("Weather book response too large")
+                    value = json.loads(body)
+                self._route_succeeded(f"{host}:{index}")
+                return value
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout,
+                    requests.exceptions.ChunkedEncodingError):
+                self._route_failed(f"{host}:{index}")
+                if position + 1 == len(routes):
+                    raise
+        raise requests.exceptions.RetryError("Weather book read failed")
+
 
 def source_session(requests_lib=requests):
     # Dependency-injected test clients retain their own constructors.

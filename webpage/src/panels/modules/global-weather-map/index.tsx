@@ -182,7 +182,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
 }, {
   tier: 'slow',
   batch: false,
-  intervalMs: 900000,
+  intervalMs: 60000,
   staleAfterMs: 7200000,
   requestTimeoutMs: 10000,
   limit: 60,
