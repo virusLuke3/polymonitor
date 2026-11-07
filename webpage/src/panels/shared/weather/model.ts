@@ -45,7 +45,7 @@ export function bookMidPrice(bin?: RuntimeWeatherQuoteBin | null) {
 }
 
 export function retainedBookMidPrice(bin: RuntimeWeatherQuoteBin) {
-  if (bin.bookStatus !== 'retained' || Date.parse(bin.quoteStaleAfter || '') <= Date.now()) return null;
+  if (bin.bookStatus !== 'retained' || !(Date.parse(bin.quoteStaleAfter || '') > Date.now())) return null;
   const bid = num(bin.bestBidYes), ask = num(bin.bestAskYes);
   return bid !== null && ask !== null && bid <= ask ? (bid + ask) / 2 : null;
 }

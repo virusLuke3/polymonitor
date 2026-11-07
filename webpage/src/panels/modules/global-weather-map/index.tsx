@@ -2,7 +2,7 @@ import { panelStatus } from '../../shared/formatters';
 import { statusBadge, num, tempLabel, currentWeatherTemp, highWeatherTemp, updatedLabel } from '@/panels/shared/weather/model';
 import { WeatherDataStatus } from '@/panels/shared/weather/WeatherDataStatus';
 import { useLiveWeatherQuoteBins } from '@/panels/shared/weather/useLiveWeatherQuoteBins';
-import { selectedWeatherCity, bestBookQuoteBin } from '@/panels/shared/weather/model';
+import { selectedWeatherCity, bestBookQuoteBin, bookMidPrice } from '@/panels/shared/weather/model';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeGlobalTemperatureMonitor } from '@/services/api';
 import type { RuntimeGlobalWeatherCity, RuntimeGlobalWeatherMapPayload, RuntimeWeatherQuoteBin } from '@/types';
@@ -110,7 +110,7 @@ function TemperatureCard({
         <div className="wm-temp-city-market">
           {city.marketUrl ? <a href={city.marketUrl} target="_blank" rel="noreferrer">Polymarket</a> : <span>{shared('market', 'Market')}</span>}
         <span>{top?.label || shared('quoteBins', 'Quote bins')}</span>
-        <b>{priceLabel(top?.midPriceYes)}</b>
+        <b>{priceLabel(bookMidPrice(top))}</b>
         <em>{coverage}</em>
       </div>
     ) : null}
