@@ -21,6 +21,14 @@ export function parseWatchSnapshot(value: unknown, panelId: string, limit: numbe
     numbers.forEach(key => { clean[key] = numeric(row[key]); });
     clean.url = typeof row.url === 'string' && /^https?:\/\//i.test(row.url) ? row.url : null;
     clean.tags = Array.isArray(row.tags) ? row.tags.filter(tag => typeof tag === 'string').slice(0, 12) : [];
+    clean.details = Array.isArray(row.details) ? row.details.slice(0, 16).flatMap(entry => {
+      const fact = record(entry);
+      if (typeof fact.label !== 'string' || !fact.label.trim() || typeof fact.value !== 'string') return [];
+      const clock = (value: unknown) => typeof value === 'string' && Number.isFinite(Date.parse(value)) ? value : null;
+      return [{ label: fact.label.slice(0, 80), value: fact.value.slice(0, 160),
+        status: typeof fact.status === 'string' ? fact.status.slice(0, 40) : null,
+        observedAt: clock(fact.observedAt), fetchedAt: clock(fact.fetchedAt) }];
+    }) : [];
     clean.points = Array.isArray(row.points) ? row.points.flatMap(entry => {
       const point = record(entry);
       return typeof point.timestamp === 'string' && Number.isFinite(Date.parse(point.timestamp)) && numeric(point.value) != null ? [{ timestamp: point.timestamp, value: numeric(point.value) }] : [];

@@ -1,7 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { parseWatchSnapshot } from './watch-snapshot';
+import type { RuntimeFinanceWatchPayload } from '@/types';
 const snapshot = { panelId: 'watch', generatedAt: '2026-10-03T06:00:00Z', status: 'ok', items: [{ id: 'one', label: 'ONE', metric: 10 }] };
 describe('family watch acceptance', () => {
+  it('retains bounded contract evidence and original clocks through API and cache parsing', () => {
+    const fact = { label: 'Funding forecast', value: '0 % / 8h', status: 'ok', observedAt: snapshot.generatedAt, fetchedAt: snapshot.generatedAt };
+    const raw = { ...snapshot, items: [{ id: 'one', details: [fact, { label: 'Malformed', value: {} }, { label: 'Missing', value: '--', observedAt: 'bad' }] }] };
+    const first = parseWatchSnapshot(raw, 'watch', 10) as RuntimeFinanceWatchPayload;
+    const restored = parseWatchSnapshot(first, 'watch', 10) as RuntimeFinanceWatchPayload;
+    expect(restored.items?.[0]?.details).toEqual([fact, { label: 'Missing', value: '--', status: null, observedAt: null, fetchedAt: null }]);
+    const bounded = parseWatchSnapshot({ ...raw, items: [{ id: 'one', details: Array(100).fill(fact) }] }, 'watch', 10) as RuntimeFinanceWatchPayload;
+    expect(bounded.items?.[0]?.details).toHaveLength(16);
+  });
   it('checks resource identity, clock and row schema', () => {
     for (const raw of [{ ...snapshot, panelId: 'other' }, { ...snapshot, generatedAt: '' }, { ...snapshot, items: [{ title: {} }] }]) expect(() => parseWatchSnapshot(raw, 'watch', 10)).toThrow();
   });
