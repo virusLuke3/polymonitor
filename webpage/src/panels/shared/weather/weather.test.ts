@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LobPayload } from '@/types';
-import { bookCoverage, bookMidPrice, currentWeatherTemp, displayQuoteBins, highWeatherTemp, weatherSourceLabel } from './model';
+import { bookCoverage, bookMidPrice, currentWeatherTemp, displayQuoteBins, highWeatherTemp, quoteBinLabel, weatherSourceLabel } from './model';
 import { mergeLiveQuote, quoteFromLob } from './quote';
 import { sevenDayPoints } from './trend';
 import { weatherQuoteResource } from './useLiveWeatherQuoteBins';
@@ -13,6 +13,8 @@ afterEach(() => vi.resetAllMocks());
 describe('weather source and book contracts', () => {
   it('does not construct unlisted bins or use seven-day maximum as market-day high', () => {
     expect(displayQuoteBins({ currentTemp: 70, forecastHigh: 98 })).toEqual([]);
+    expect(quoteBinLabel({ minTemp: 0, maxTemp: 1, unit: 'C' })).toBe('0–1°C');
+    expect(quoteBinLabel({ maxTemp: 51, unit: 'F' })).toBe('≤51°F');
     expect(highWeatherTemp({ marketDate: '2026-10-06', forecastHigh: 98, marketForecastHigh: 71 })).toBe(71);
     expect(highWeatherTemp({ marketDate: '2026-10-12', forecastHigh: 98 })).toBeNull();
   });

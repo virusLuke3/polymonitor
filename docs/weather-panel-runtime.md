@@ -31,6 +31,12 @@ The existing panel directories, Preact registry and public panel runtime remain 
 - Neither chart claims Weather Underground station observations. The nonfunctional quote-history control is removed until a real history source exists.
 - Market catalog rows display their own date and book coverage. Missing catalog bins are not fabricated around a forecast temperature.
 
+## Quote recovery verification — 2026-11-07
+
+The consumer contract was checked against the local installed API and the real public homepage. A scan of all 627 selected quote tokens across 49 cities found 377 usable native snapshots, 162 source-gap retained books and 88 books older than the two-hour display limit. These are point-in-time counts, not continuing availability. New York and Dallas had 22 retained books, including 20 two-sided books; their source owner had not recovered at verification time. The local P/Q cohort 0330 journals recorded connection failures and recovery-budget waits; a separate route probe observed a P connection closure and a Q 45-second handshake timeout. No LOB route, key restriction, collector or capture journal was changed by this consumer repair.
+
+The weather owner published `2026-11-07T10:46:36.215694Z` to its configured installed SQLite store under `snapshot:weather:global-map / panel-v1`; the API returned that same generation. The repository's old data directory is not this active store. Production desktop and mobile read real APIs, and the existing-layout reload kept the quote panel present. Observed selected-city request completions were about 15.4 seconds apart. Source timestamps stayed unchanged during the outage. Targeted checks passed: 51 weather/LOB backend tests, 88 related weather/transport/geo tests, 32 weather/resource unit tests, browser refresh/expiry/recovery checks and the clean release build. Whole-project quality remains blocked by an unrelated pre-existing personal-path check in the crypto strategy document.
+
 ## Acceptance
 
 Run the weather, geo-sanctions and transport backend tests, weather contract unit tests, weather browser refresh/recovery test and production build. Deploy only owned files from the pushed commit, then verify the real production desktop/mobile UI, successive snapshot times and autonomous quote checks without API substitution.

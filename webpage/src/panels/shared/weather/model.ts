@@ -21,6 +21,15 @@ export function highWeatherTemp(city?: RuntimeGlobalWeatherCity | null) {
   return city?.marketDate ? city?.marketForecastHigh ?? null : city?.todayHigh ?? null;
 }
 
+export function quoteBinLabel(bin: RuntimeWeatherQuoteBin) {
+  const low = num(bin.minTemp), high = num(bin.maxTemp);
+  const unit = bin.unit ? `°${bin.unit}` : '';
+  if (low !== null && high !== null) return `${low === high ? low : `${low}–${high}`}${unit}`;
+  if (high !== null) return `≤${high}${unit}`;
+  if (low !== null) return `≥${low}${unit}`;
+  return bin.label || '--';
+}
+
 export function priceLabel(value?: string | number | null) {
   const parsed = num(value);
   if (parsed === null) return '--';
