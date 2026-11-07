@@ -55,7 +55,9 @@ WorldMonitor `65860c21` 的 `live-video-sources.ts`、`live-video/model.ts`、
 ## 最近验收
 
 2026-11-07：按 WorldMonitor 的当前来源表将 CGTN、NHK 的失效域名替换为
-官方新 HLS；从 iptv-org 的 news 目录核对 DW 同频道 Amagi 源；真实公网转发播放通过后将其作为优先源，原 Akamai 与 YouTube 保留为同频道备用。
+官方新 HLS；从 iptv-org 的 news 目录核对 DW English Amagi 源，作为优先源。
+原先加入的 Akamai `dwstream103` 后经画面与频道目录核实为 DW Arabic，已从英语
+候选中移除；英语备用改由独立配置的 `dwstream102` 与原英语 YouTube 入口承担。
 三个地址分别只由 `POLYMONITOR_TV_CGTN_HLS_URL`、
 `POLYMONITOR_TV_NHK_HLS_URL`、`POLYMONITOR_TV_DW_HLS_URL` 配置，
 缺失配置不回退到旧地址。DW 优先源只允许 `.env` 的 `POLYMONITOR_TV_DW_RESOURCE_PATHS` 明确路径经既有 HLS 转发；307 每一跳复核来源和路径，不放开任意跳转。
@@ -71,7 +73,10 @@ WorldMonitor `65860c21` 的 `live-video-sources.ts`、`live-video/model.ts`、
 最终实播轮仍有主频道未出画面，未完成全部频道连续播放验收。DW 转发已加入实际清单使用的明确备用目录，未放开任意主机或路径。
 完整窗口、来源失败与存储核对见 [恢复记录](../../../../../docs/panel-data-recovery-2026-11-04.md)，该窗口不代表未来持续健康。
 
-本轮正式页面实测：CGTN 媒体时间连续推进约30秒、最高1920宽；NHK约45秒、1280宽。DW原Akamai在两个窗口缓冲停滞，播放器依次尝试同频道代理/备用并最终进入YouTube直播；单独实测新Amagi经真实公网API转发约37秒、936解码帧，随后调整为优先源。该证据不是全部240条目录的连续实播验收。
+本轮正式页面实测：CGTN 媒体时间连续推进约30秒、最高1920宽；NHK约45秒、1280宽。
+DW 原 Akamai 在两个窗口缓冲停滞后进入 YouTube；该 Akamai 后来确认是 Arabic，
+其播放或回退成功不能计为 DW English 验收。单独实测英语 Amagi 经真实公网 API
+转发约37秒、936解码帧，随后调整为优先源。该证据不是全部240条目录的连续实播验收。
 
 前端 `1fd7c528` 的 DW 首页验收仍失败：Chrome 149 的原生 HLS 能力返回 `maybe`，
 旧分支因此绕过 Hls.js；Amagi 请求得到 200/206，视频宽度 426 但未解码帧，随后
@@ -83,3 +88,40 @@ WorldMonitor `65860c21` 的 `live-video-sources.ts`、`live-video/model.ts`、
 类型检查通过。以同一公网 API 强制选择 Hls.js 的能力隔离预检中，DW attempt 0
 由 4.15 秒/109 帧推进至 34.11 秒/859 帧，短暂缓冲、追直播边缘后恢复至
 90.25 秒/1008 帧；该窗口有中断，且使用了能力覆盖，仍不是无注入生产验收。
+
+### DW 语言身份纠正，2026-11-07
+
+iptv-org 当前 [`streams/de.m3u`](https://github.com/iptv-org/iptv/blob/master/streams/de.m3u)
+及 [26615](https://github.com/iptv-org/iptv/issues/26615) 将 `dwstream103 / 2015526`
+明确列为 DW Arabic；[26616](https://github.com/iptv-org/iptv/issues/26616) 将
+`dwstream102 / 2015525` 列为 DW English；Amagi `amg01644c1` 的英语身份见
+[38618](https://github.com/iptv-org/iptv/issues/38618)。这是目录维护方的身份证据；
+DW 官方英语网页本轮未能读取，不宣称已核验其页面内播放器。
+
+旧备用源在后续正式窗口虽然播放约65秒、3285帧，但截图显示阿拉伯语，故撤销其
+“英语频道播放成功”结论。帧数、媒体时钟和 HTTP 成功不能替代语言/频道身份核验。
+新的英文备用仅读取 `POLYMONITOR_TV_DW_ENGLISH_BACKUP_HLS_URL` 和
+`POLYMONITOR_TV_DW_ENGLISH_BACKUP_RESOURCE_PATHS`；原 `dwstream103` 配置和
+原 Akamai 附加路径即使仍在旧环境中，也不再参与此英语频道候选或受信任转发。
+缺少新配置时直接保留其余英语候选，不恢复错误语言的旧源，不扩大任意主机/目录许可。
+
+31 项后端针对性测试通过，包括新配置缺失、旧 Arabic 配置残留、英语备用顺序和
+转发路径隔离。本机对102备用的单次直连检查止于网络连接失败；使用既有浏览器
+出口读取102主清单及首个变体均为200，主清单还明确声明英文字幕 `NAME=eng` /
+`LANGUAGE=ENG`。仅其实际声明的 `2015525-b/dwstream102` 额外目录进入配置。
+目录和字幕语言身份已核实，正式 owner/API 更新后的英语画面与连续播放仍须验收，
+不能用此前103的成功画面替代。
+
+### 正式版本与真实页面复核
+
+前端 `b4d321fef2f937bd7a223bf2ec169ae4bc735624` 从已推送提交的干净导出构建并发布；
+两个生产域名的 `release-sha` 一致。未替换API、瓦片或浏览器媒体能力的真实页面中，
+CGTN六次样本的媒体时间16.03→41.10秒、帧数155→782，NHK为18.21→43.27秒、
+100→852帧，两者均使用MSE且保持playing。新DW英语Amagi在90秒观察窗中解码
+86→1442帧，画面确认是英语新闻；期间出现缓冲和追直播边缘，随后恢复，不能将
+媒体时钟3.26→101.95秒当作无中断观看时长，也不宣称整窗连续成功。
+
+17:00:20（北京时间）生成的正式目录已落库，SQLite全部240条与API返回80条
+均无103；DW候选顺序和时间逐字段一致。102实际声明路径获准，103和无关路径被拒绝。
+桌面与390px手机截图保存在 `webpage/design-previews/politics/production-*-20261107.png`，
+手机无横向溢出、无浏览器脚本错误。该验收只覆盖本次变更的三个频道，不代表全目录实播。
