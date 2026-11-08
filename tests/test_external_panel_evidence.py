@@ -72,3 +72,12 @@ def test_custom_acquisition_obeys_raw_budget_and_rebuilds_normalization(tmp_path
     with sqlite3.connect(path) as db:
         first,last,normalized=db.execute('SELECT first_received,last_received,normalized FROM evidence').fetchone()
     assert first==11000 and last==12000 and json.loads(zlib.decompress(normalized))=={'corrected':True}
+
+
+def test_not_due_source_never_contends_for_an_acquisition_lock(tmp_path, monkeypatch):
+    store=SnapshotStore(str(tmp_path/'snapshot.db'))
+    spec=evidence.SourceSpec('daily','Daily','X',json.loads,cadence=86400)
+    previous={'nextAttemptAt':20000,'lastSuccessAt':10000,'data':{'value':1}}
+    store.set(evidence.NAMESPACE,'daily',previous,86400)
+    monkeypatch.setattr(store,'fetch_lock',lambda *a,**kw:pytest.fail('A not-due source must not lock'))
+    assert evidence.collect_one(store,spec,now=11000)==previous

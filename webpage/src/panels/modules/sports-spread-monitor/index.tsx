@@ -7,7 +7,7 @@ function View({ data }: { data?: SportsPayload }) {
   const game = data?.game, home = game?.teams.find(t => t.side === 'home'), away = game?.teams.find(t => t.side === 'away');
   const quote = game?.odds[0], margin = home?.score != null && away?.score != null ? home.score - away.score : null;
   const periods = Math.max(home?.periods.length ?? 0, away?.periods.length ?? 0);
-  return <Frame data={data} className="sportsx-spread">{game && <>
+  return <Frame id="sports-spread-monitor" title="Spread Monitor" data={data} className="sportsx-spread">{game && <>
     <h3><span className="sportsx-blue">{home?.name}</span><small> vs </small><span className="sportsx-orange">{away?.name}</span></h3>
     <p className="sportsx-meta">NBA · {date(game.eventTime)} · {game.statusText}</p>
     <div className="sportsx-hero"><div><small>Home reference spread</small><strong className="sportsx-blue">{signed(quote?.homeLine)}</strong></div><div><small>Actual home margin</small><strong>{signed(margin)}</strong></div></div>

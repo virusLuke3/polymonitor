@@ -1,11 +1,11 @@
 import type { ComponentChildren } from 'preact';
+import { Panel } from '@/components/Panel';
+import { DisclosureControls } from '../official-disclosures';
 import type { SportsPayload } from './model';
 import './style.css';
 
-export function Frame({ data, children, className = '' }: { data: SportsPayload | undefined; children: ComponentChildren; className?: string }) {
-  if (!data) return <p className="sportsx-note">Loading sports evidence…</p>;
-  if (data.status === 'unavailable') return <p className="sportsx-note sportsx-warning">The source has not published a usable snapshot yet.</p>;
-  return <div className={`sportsx-root ${className}`}>{data.sources.some(s => s.stale || s.error) && <p className="sportsx-warning">Source update delayed; retained observations are shown.</p>}{children}<details className="sportsx-evidence"><summary>Sources and coverage</summary><p>{data.coverage}</p>{data.sources.map(s => <p key={s.id}>{s.label} · {s.lastSuccessAt ? new Date(s.lastSuccessAt).toLocaleString() : 'No successful observation'}{s.error ? ` · ${s.error}` : ''}</p>)}</details></div>;
+export function Frame({ id, title, data, children, className = '' }: { id: string; title: string; data: SportsPayload | undefined; children: ComponentChildren; className?: string }) {
+  return <Panel title={title} dataPanelId={id} controls={<DisclosureControls><p>{data?.coverage}</p>{data?.sources.map(s => <p key={s.id}>{s.label} · {s.lastSuccessAt ? new Date(s.lastSuccessAt).toLocaleString() : 'No successful observation'}{s.error ? ` · ${s.error}` : ''}</p>)}</DisclosureControls>}><div className={`sportsx-root ${className}`}>{!data ? <p className="sportsx-note">Loading sports evidence…</p> : data.status === 'unavailable' ? <p className="sportsx-note sportsx-warning">The source has not published a usable snapshot yet.</p> : <>{data.sources.some(s => s.stale || s.error) && <p className="sportsx-warning">Source update delayed; retained observations are shown.</p>}{children}</>}</div></Panel>;
 }
 export function Tabs({ values, selected, onChange }: { values: string[]; selected: string; onChange: (s: string) => void }) {
   return <div className="sportsx-tabs" role="tablist">{values.map(v => <button key={v} type="button" role="tab" aria-selected={v === selected} onClick={() => onChange(v)}>{v}</button>)}</div>;

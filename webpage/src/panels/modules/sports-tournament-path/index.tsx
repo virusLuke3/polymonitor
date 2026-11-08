@@ -8,7 +8,7 @@ function View({ data }: { data?: SportsPayload }) {
   const tournaments = data?.tournaments ?? [], t = tournaments.find(t => t.id === event) ?? tournaments[0];
   const rounds = [...new Set((t?.matches ?? []).map(m => m.round).filter((r): r is string => !!r))];
   const chosen = tab === 'Final rounds' ? rounds.slice(-3) : rounds;
-  return <Frame data={data} className="sportsx-tournament">{t && <>
+  return <Frame id="sports-tournament-path" title="Tournament Path" data={data} className="sportsx-tournament">{t && <>
     <select aria-label="ATP tournament" value={t.id} onChange={e => setEvent(e.currentTarget.value)}>{tournaments.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}</select>
     <p className="sportsx-meta">ATP men's singles · {date(t.date)} – {date(t.endDate)}</p><Tabs values={['Final rounds', 'All rounds']} selected={tab} onChange={setTab}/>
     {chosen.map(round => <section className="sportsx-tennis-round" key={round}><h4>{round}</h4>{t.matches.filter(m => m.round === round).map(m => <div className={`sportsx-tennis-match ${m.state === 'pre' ? 'is-upcoming' : ''}`} key={m.id}>

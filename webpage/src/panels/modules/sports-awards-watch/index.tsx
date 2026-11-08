@@ -7,7 +7,7 @@ function View({ data }: { data?: SportsPayload }) {
   const [tab, setTab] = useState('Performance'), [key, setKey] = useState('pointsPerGame');
   const categories = (data?.categories ?? []).filter(c => ['pointsPerGame', 'reboundsPerGame', 'assistsPerGame', 'blocksPerGame', 'stealsPerGame', 'PER'].includes(c.id));
   const c = categories.find(c => c.id === key) ?? categories[0], leader = c?.rows[0];
-  return <Frame data={data} className="sportsx-awards"><h3 className="sportsx-gold">NBA · Award research</h3><p className="sportsx-meta">{data?.season} · performance context</p><Tabs values={['Performance', 'Eligibility & voting']} selected={tab} onChange={setTab}/>
+  return <Frame id="sports-awards-watch" title="Awards Watch" data={data} className="sportsx-awards"><h3 className="sportsx-gold">NBA · Award research</h3><p className="sportsx-meta">{data?.season} · performance context</p><Tabs values={['Performance', 'Eligibility & voting']} selected={tab} onChange={setTab}/>
     {tab === 'Performance' && <><select aria-label="Season award research statistic" value={c?.id} onChange={e => setKey(e.currentTarget.value)}>{categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
       {leader && <div className="sportsx-awards-leader"><span>#1 <small>statistical leader</small></span><h3>{leader.name}</h3><strong>{leader.displayValue}<small>{c?.abbreviation}</small></strong></div>}
       <p className="sportsx-warning">Statistical rank is not an official award nomination or MVP ranking.</p>

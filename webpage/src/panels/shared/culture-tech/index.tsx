@@ -1,5 +1,6 @@
 import type { ComponentChildren } from 'preact';
 import { Panel } from '@/components/Panel';
+import { DisclosureControls } from '../official-disclosures';
 import { isBasePayload, record, type BasePayload } from '../external/resource';
 import './styles.css';
 
@@ -24,12 +25,11 @@ export function Tabs({ values, value, onChange }: { values: string[]; value: str
   return <div className="wm-panel-tabs">{values.map(v => <button key={v} aria-pressed={v === value} onClick={() => onChange(v)}>{v}</button>)}</div>;
 }
 export function Frame({ id, title, data, children, tone = 'cyan' }: { id: string; title: string; data?: CulturePayload; children: ComponentChildren; tone?: string }) {
-  return <Panel title={title} dataPanelId={id} className={`wm-ct-panel wm-ct-${tone}`}>
+  return <Panel title={title} dataPanelId={id} className={`wm-ct-panel wm-ct-${tone}`} controls={<DisclosureControls><p>{data?.coverage}</p>{data?.sources.map(source => <p key={source.id}>{source.label} · acquired {source.lastSuccessAt || 'not yet'}</p>)}</DisclosureControls>}>
     <div className="wm-ct-body">
       {!data ? <p className="wm-ct-note">Loading the published source snapshot…</p> : <>
         {data.sources.some(source => source.error || source.stale || !source.usable) && <p className="wm-ct-warning">{data.sources.filter(source => source.error || source.stale || !source.usable).map(source => `${source.label || source.id}: ${source.error === 'not-configured' ? 'source not configured' : source.error || (source.usable ? 'retained older observation' : 'no usable observation')}`).join(' · ')}</p>}
         {data.items.length ? children : <p className="wm-ct-note">{data.status === 'unavailable' ? 'The source has not supplied a usable snapshot.' : 'No records in the acquired source scope.'}</p>}
-        <details className="wm-ct-method"><summary>Source & coverage</summary><p>{data.coverage}</p>{data.sources.map(source => <p key={source.id}>{source.label} · acquired {source.lastSuccessAt || 'not yet'}</p>)}</details>
       </>}
     </div>
   </Panel>;

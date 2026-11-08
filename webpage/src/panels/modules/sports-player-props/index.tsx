@@ -8,7 +8,7 @@ function View({ data }: { data?: SportsPayload }) {
   const g = data?.game, key = tab === 'Points' ? 'points' : tab === 'Rebounds' ? 'rebounds' : 'assists';
   const sorted = [...g?.players ?? []].sort((a, b) => (b[key] ?? -1) - (a[key] ?? -1)), player = sorted.find(p => p.id === selected) ?? sorted[0];
   const high = Math.max(1, ...sorted.map(p => p[key] ?? 0));
-  return <Frame data={data} className="sportsx-props">{g && <><p className="sportsx-meta">{g.name} · {date(g.eventTime)} · {g.statusText}</p><Tabs values={['Points', 'Rebounds', 'Assists']} selected={tab} onChange={setTab}/>
+  return <Frame id="sports-player-props" title="Player Props" data={data} className="sportsx-props">{g && <><p className="sportsx-meta">{g.name} · {date(g.eventTime)} · {g.statusText}</p><Tabs values={['Points', 'Rebounds', 'Assists']} selected={tab} onChange={setTab}/>
     {player && <div className="sportsx-props-profile"><span>{player.jersey ?? '—'}</span><div><h3>{player.name}</h3><small>{player.team} · {player.didNotPlay ? 'DNP' : `${player.minutes ?? 'Unknown'} minutes`} · {player.starter ? 'Starter' : 'Bench'}</small></div><strong>{num(player[key])}</strong></div>}
     <p className="sportsx-note">Actual game box score · select a player to inspect.</p>
     <div className="sportsx-props-bars">{sorted.slice(0, 12).map(p => <button key={p.id} type="button" aria-pressed={p.id === player?.id} onClick={() => setSelected(p.id)}><span>{p.name}<b>{p.didNotPlay ? 'DNP' : num(p[key])}</b></span><i style={{ width: `${Math.max(0, p[key] ?? 0) / high * 100}%` }}/></button>)}</div>

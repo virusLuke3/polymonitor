@@ -84,6 +84,11 @@ def archive(store, key, body, data, acquired_at):
 def collect_one(store, spec: SourceSpec, *, acquire=None, force=False, deadline=None, now=None):
     clock = time.time if now is None else lambda: now
     started = clock()
+    # A not-due source needs no acquisition lock. Recheck inside the lock for
+    # races when two schedulers both observe a due source.
+    previous = store.get_stale(NAMESPACE, spec.key) or {}
+    if not force and previous.get("nextAttemptAt", 0) > started:
+        return previous
     with store.fetch_lock(NAMESPACE, spec.key, timeout=1):
         previous = store.get_stale(NAMESPACE, spec.key) or {}
         if not force and previous.get("nextAttemptAt", 0) > started:
