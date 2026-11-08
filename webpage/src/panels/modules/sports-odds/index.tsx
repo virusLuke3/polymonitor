@@ -168,6 +168,8 @@ export const panel = runtimePanelFromRenderer(renderers, {
 }, {
   tier: 'slow',
   intervalMs: 900000,
+  // The quota-aware owner collects every two hours; browser checks do not refresh source time.
+  staleAfterMs: 3 * 60 * 60_000,
   limit: 8,
   fetchData: (context, limit) => fetchRuntimeSportsOdds(limit, context?.signal),
 });

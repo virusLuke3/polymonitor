@@ -23,7 +23,7 @@ function detectLocale(): Locale {
   return 'en';
 }
 
-function interpolate(message: string, params?: MessageParams) {
+export function interpolate(message: string, params?: MessageParams) {
   if (!params) return message;
   return message.replace(/\{([a-zA-Z0-9_]+)\}/g, (match, key: string) => {
     const value = params[key];

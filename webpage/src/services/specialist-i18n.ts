@@ -1,4 +1,4 @@
-import { useI18n, type MessageKey } from './i18n';
+import { interpolate, useI18n, type MessageKey } from './i18n';
 
 type Params = Record<string, string | number>;
 
@@ -9,7 +9,7 @@ function translatedOrFallback(
   params?: Params,
 ) {
   const translated = t(key as MessageKey, params);
-  return translated === key ? fallback : translated;
+  return translated === key ? interpolate(fallback, params) : translated;
 }
 
 export function useSpecialistCopy(panelId: string) {
