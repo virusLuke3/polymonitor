@@ -1,5 +1,7 @@
+import { usePanelResource } from '@/panels/usePanelResource';
+import { marketChartResource, marketDetailResource } from './resources';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { fetchMarketFocusTile, fetchMarketChart, fetchMarketFlow, fetchMarketOracle } from '@/services/api';
+import { fetchMarketFlow, fetchMarketOracle } from '@/services/api';
 import type { BootstrapPayload, MarketListItem, MarketGroupItem, MarketGroupDetail, MarketGroupChartPayload, MarketGroupChartRange, WorkspaceBundle } from '@/types';
 import { pickDefaultMarketId, pickDefaultGroupOutcome, optimisticBundleFromMarket, optimisticBundleFromGroup, emptyWorkspaceBundle, bundleMatchesMarket, mergeWorkspaceBundle } from './marketBundle';
 import { pollPanel } from './pollPanel';
@@ -57,6 +59,27 @@ export function useMarketFocus({ bootstrap, markets, marketGroups, catalogLoaded
     }
   }, [selectedMarketId]);
 
+  const detailFeed = usePanelResource(marketDetailResource(selectedMarketId, () => {
+    const fallback = pickDefaultMarketId(latestMarkets.current);
+    if (selected.current === selectedMarketId && fallback !== selectedMarketId) selectMarket(fallback, true);
+  }), selectedMarketId != null);
+  const chartFeed = usePanelResource(marketChartResource(selectedMarketId, selectedMarketGroupChartRange), selectedMarketId != null);
+  useEffect(() => {
+    const value = detailFeed.data;
+    if (value && selectedMarketId != null && bundleMatchesMarket(value, selectedMarketId)) {
+      setBundle(previous => ({ ...mergeWorkspaceBundle(previous, value), focusStatus: detailFeed.error ? 'unavailable' : value.focusStatus }));
+    } else if (detailFeed.expired) {
+      setBundle(previous => previous ? { ...previous, market: null, price: null, focusStatus: 'unavailable' } : previous);
+    }
+    setBundleLoading(Boolean(selectedMarketId && !value && !latestMarkets.current.some(row => row.id === selectedMarketId) && !detailFeed.error));
+    setError(detailFeed.error);
+  }, [detailFeed.data, detailFeed.error, detailFeed.expired, selectedMarketId]);
+  useEffect(() => {
+    const chart = chartFeed.data;
+    setBundle(base => base ? { ...base, chart: chart && chart.marketId === selectedMarketId && chart.range === selectedMarketGroupChartRange
+      ? chartFeed.error || chartFeed.status.phase === 'stale' ? { ...chart, historyStatus: 'stale' } : chart : null } : base);
+  }, [chartFeed.data, chartFeed.error, chartFeed.status.phase, selectedMarketId, selectedMarketGroupChartRange]);
+
   useEffect(() => {
     if (!selectedMarketId) { setBundleLoading(false); return; }
     const id = selectedMarketId;
@@ -68,23 +91,6 @@ export function useMarketFocus({ bootstrap, markets, marketGroups, catalogLoaded
       if (!current()) return;
       setBundle((previous) => change(bundleMatchesMarket(previous, id) ? previous! : emptyWorkspaceBundle()));
     };
-    const market = latestMarkets.current.find((row) => row.id === id);
-    setBundleLoading(!market);
-    const stopDetail = pollPanel(
-      (signal) => fetchMarketFocusTile(id, 6000, signal).catch((error) => {
-        if (current() && !signal.aborted && error?.status === 404) {
-          const fallback = pickDefaultMarketId(latestMarkets.current);
-          if (fallback !== id) selectMarket(fallback, true);
-        }
-        throw error;
-      }),
-      (value) => {
-        if (!current() || !bundleMatchesMarket(value, id)) return;
-        update((base) => mergeWorkspaceBundle(base, value)); setBundleLoading(false); setError(null);
-      },
-      () => { if (current()) { setBundleLoading(false); setError('Market metadata is unavailable; retrying with backoff.'); update((base) => ({ ...base, focusStatus: 'unavailable' })); } },
-      60_000,
-    );
     const stopOracle = pollPanel(
       (signal) => fetchMarketOracle(id, signal),
       (value) => { if (value.marketId === id) { lastOracleSuccess = Date.now(); update((base) => ({ ...base, oracle: value })); } },
@@ -107,32 +113,8 @@ export function useMarketFocus({ bootstrap, markets, marketGroups, catalogLoaded
         flowStatus: lastFlowSuccess && Date.now() - lastFlowSuccess <= 60_000 ? 'stale' : 'unavailable' })),
       10_000, 1000,
     );
-    return () => { alive = false; stopDetail(); stopOracle(); stopFlow(); };
+    return () => { alive = false; stopOracle(); stopFlow(); };
   }, [selectedMarketId]);
-
-  useEffect(() => {
-    if (!selectedMarketId) return;
-    const id = selectedMarketId;
-    const range = selectedMarketGroupChartRange;
-    let lastSuccess = 0;
-    setBundle((base) => base ? { ...base, chart: null } : base);
-    return pollPanel(
-      (signal) => fetchMarketChart(id, range, undefined, 10000, signal),
-      (chart) => {
-        if (selected.current !== id || chart.marketId !== id || chart.range !== range) return;
-        lastSuccess = Date.now();
-        setBundle((base) => ({ ...(base || emptyWorkspaceBundle()), chart }));
-      },
-      () => {
-        if (selected.current !== id) return;
-        setBundle((base) => ({ ...(base || emptyWorkspaceBundle()), chart: {
-          marketId: id, range, interval: 'observations', historyStatus: lastSuccess && Date.now() - lastSuccess <= 300_000 ? 'stale' : 'unavailable',
-          points: Date.now() - lastSuccess <= 300_000 ? base?.chart?.points || [] : [],
-        } }));
-      },
-      90_000, 1500,
-    );
-  }, [selectedMarketId, selectedMarketGroupChartRange]);
 
   const selectedMarketGroupChart: MarketGroupChartPayload | null = null;
   void marketGroups;

@@ -5,7 +5,7 @@ has no collection, exchange fallback, schema migration, replay, or trading task.
 
 | Panel | Store and bounded selection | Refresh / shared cache |
 | --- | --- | --- |
-| Catalog | PostgreSQL; 50 rows from at most 5,000 newest registry candidates, canonical identity and active lifecycle checks; indexed text search for other markets | 45 s / 45 s |
+| Catalog | PostgreSQL; 50 rows from at most 5,000 newest registry candidates, canonical identity and active lifecycle checks; indexed text search for other markets | browser 5 min / bounded server cache |
 | Metadata | PostgreSQL market ID lookup; existing stored trade quote, with its source timestamp | 60 s / 60 s |
 | Oracle | PostgreSQL exact identity indexes; newest 50 distinct events and stored lifecycle state | 20 s / 20 s |
 | OrderFilled | ClickHouse canonical token and partition/block predicates; one fixed block window, newest 50 events | 10 s / 8 s |
@@ -90,3 +90,31 @@ All market HTTP routes, MCP tools, and market-linking consumers use
 cache, exchange history fallback, bootstrap seed job and hover prefetch are
 removed. Group and workspace URLs remain thin compositions of the same bounded
 reads. Finance and other non-market seed jobs retain their existing ownership.
+
+
+## Browser recovery through the shared Runtime
+
+Catalog, metadata and history now use `usePanelResource` instead of private
+polling loops. Public cache keys include sort/page/limit for catalog, market ID
+for detail, and market ID/range/interval for history. Catalog uses a five-minute
+check and source retention limit; metadata checks every minute with at most
+five-minute retention; history checks every 90 seconds with five-minute retention.
+Source and successful-check clocks survive reload unchanged. Cached catalog
+quotes retain their own quote timestamps and existing validity checks.
+
+Catalog/detail use the bounded shared localStorage backend; history uses the
+same envelope/validation in IndexedDB (2,000,000 encoded-character entry cap).
+Restoration precedes network admission, and background failures preserve only
+unexpired data. API identity, shapes and timestamps are validated on both network
+and storage reads. Market/range/sort changes cannot reuse another identity's
+response. Detail excludes book, flow, Oracle and chart fields; those do not gain
+freshness by being embedded in metadata. Selected OrderFilled and Oracle retain
+their existing memory-only polling; LOB explicitly declares `cache: null`.
+Search is an on-demand query, not another periodic collector. No account data is
+persisted in these public snapshots. Runtime deadlines remain 6 s for detail and
+10 s for catalog/history; source/SQL budgets above are unchanged.
+
+Unit checks cover parameter identity, original retention and stripped live data;
+browser checks cover selection/range cancellation and restore-before-request.
+See [shared lifecycle](panel-runtime-lifecycle.md) for storage budgets and release
+acceptance. Restored context alone is not live market-data acceptance.

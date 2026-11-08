@@ -22,7 +22,7 @@ import { fixtureMarkets } from './dashboard';
 import { GENERATED_AT } from './world-event-map';
 
 const root = document.getElementById('root')!;
-type HarnessKind = 'cached-runtime' | 'runtime-defaults' | 'runtime' | 'runtime-policy' | 'runtime-batch-policy' | 'observed-runtime' | 'registered-runtime' | 'dashboard' | 'focus' | 'book' | 'book-pair' | 'workspace' | 'hazards' | 'dossier' | 'geometry' | 'aviation' | 'map-signals' | 'map-infrastructure';
+type HarnessKind = 'indexed-runtime' | 'cached-runtime' | 'runtime-defaults' | 'runtime' | 'runtime-policy' | 'runtime-batch-policy' | 'observed-runtime' | 'registered-runtime' | 'dashboard' | 'focus' | 'book' | 'book-pair' | 'workspace' | 'hazards' | 'dossier' | 'geometry' | 'aviation' | 'map-signals' | 'map-infrastructure';
 type HazardView = { layers: string[]; zoom: number; center: [number, number]; active: boolean };
 const noPanels: PanelModule[] = [];
 const translate = (key: string) => key;
@@ -44,6 +44,9 @@ const policyModules: PanelModule[] = ['frequent', 'blocked'].map(id => ({
 const cachedModules: PanelModule[] = modules.map(panel => panel.id !== 'shared' ? panel : ({ ...panel,
   snapshot: { key: 'reload-fixture', cache: { version: 1 }, maxAgeMs: 30_000, staleAgeMs: 90_000,
     parse: value => value, updatedAt: value => Date.parse((value as { generatedAt: string }).generatedAt) },
+}));
+const indexedModules: PanelModule[] = cachedModules.map(panel => !panel.snapshot ? panel : ({ ...panel,
+  snapshot: { ...panel.snapshot, key: 'reload-indexed-fixture', cache: { version: 1, storage: 'indexeddb', maxChars: 4_000_000 } },
 }));
 const defaultModules: PanelModule[] = (['fast', 'slow'] as const).map(tier => ({
   id: tier, title: tier, eyebrow: 'TEST', description: 'Default cadence fixture', batch: false,
@@ -81,8 +84,9 @@ const api = {
   setHazardView: (_patch: Partial<HazardView>) => {},
   setGeometryEnabled: (_enabled: boolean) => {},
   mount: (kind: HarnessKind) => {
+    if (kind === 'indexed-runtime') { render(<Runtime indexed />, root); return; }
     if (kind === 'cached-runtime') { render(<Runtime cached />, root); return; }
-    render(kind === 'runtime-defaults' ? <Runtime defaults /> : kind === 'map-signals' ? <Signals /> : kind === 'map-infrastructure' ? <Infrastructure /> : kind === 'dashboard' ? <PanelResourceProvider><Dashboard /></PanelResourceProvider> : kind === 'observed-runtime' ? <Runtime observed /> : kind === 'registered-runtime' ? <Runtime registered /> : kind === 'runtime-batch-policy' ? <Runtime policy batch /> : kind === 'runtime-policy' ? <Runtime policy /> : kind === 'runtime' ? <Runtime /> : kind === 'focus' ? <Focus /> : kind === 'book' || kind === 'book-pair' ? <PanelResourceProvider><Book pair={kind === 'book-pair'} /></PanelResourceProvider>
+    render(kind === 'runtime-defaults' ? <Runtime defaults /> : kind === 'map-signals' ? <Signals /> : kind === 'map-infrastructure' ? <Infrastructure /> : kind === 'dashboard' ? <PanelResourceProvider><Dashboard /></PanelResourceProvider> : kind === 'observed-runtime' ? <Runtime observed /> : kind === 'registered-runtime' ? <Runtime registered /> : kind === 'runtime-batch-policy' ? <Runtime policy batch /> : kind === 'runtime-policy' ? <Runtime policy /> : kind === 'runtime' ? <Runtime /> : kind === 'focus' ? <PanelResourceProvider><Focus /></PanelResourceProvider> : kind === 'book' || kind === 'book-pair' ? <PanelResourceProvider><Book pair={kind === 'book-pair'} /></PanelResourceProvider>
       : kind === 'aviation' ? <Aviation /> : kind === 'hazards' ? <Hazards /> : kind === 'dossier' ? <Dossier /> : kind === 'geometry' ? <Geometry /> : <Workspace />, root);
   },
   unmount: () => render(null, root),
@@ -99,10 +103,10 @@ function Infrastructure() {
   api.infrastructure=useMapInfrastructure(active,viewport);
   return <output>{api.infrastructure.events.length}</output>;
 }
-function Runtime({ cached = false, defaults = false, registered = false, observed = false, policy = false, batch = false }: { cached?: boolean; defaults?: boolean; registered?: boolean; observed?: boolean; policy?: boolean; batch?: boolean }) {
+function Runtime({ indexed = false, cached = false, defaults = false, registered = false, observed = false, policy = false, batch = false }: { indexed?: boolean; cached?: boolean; defaults?: boolean; registered?: boolean; observed?: boolean; policy?: boolean; batch?: boolean }) {
   const [ids, setIds] = useState(defaults ? ['fast', 'slow'] : registered ? ['price-implications', 'oracle-timeline', 'sample-chain-trades'] : policy ? ['frequent', 'blocked'] : ['shared']);
   api.setPanels = setIds;
-  api.runtime = usePanelRuntime({ panels: cached ? cachedModules : defaults ? defaultModules : registered ? RUNTIME_PANEL_MODULES : batch ? batchPolicyModules : policy ? policyModules : modules, activePanelIds: ids, waitForVisibility: observed });
+  api.runtime = usePanelRuntime({ panels: indexed ? indexedModules : cached ? cachedModules : defaults ? defaultModules : registered ? RUNTIME_PANEL_MODULES : batch ? batchPolicyModules : policy ? policyModules : modules, activePanelIds: ids, waitForVisibility: observed });
   return <output>runtime</output>;
 }
 function Dashboard() {

@@ -1,3 +1,4 @@
+import { mediaSnapshot } from '@/panels/shared/context-snapshots';
 import { publicSource } from '@/config/publicSources';
 import { scoreLabel } from '../../shared/formatters';
 import { openExternal } from '../../shared/renderers';
@@ -385,6 +386,7 @@ const renderers: PanelRenderMap = {
 };
 
 export const panel = runtimePanelFromRenderer(renderers, {
+  snapshot: mediaSnapshot('market-youtube-channels', 80),
   id: 'market-youtube-channels',
   title: 'YouTube Market TV',
   eyebrow: 'content',

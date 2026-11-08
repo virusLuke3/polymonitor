@@ -1,3 +1,4 @@
+import { weatherSnapshot } from '@/panels/shared/weather/snapshot';
 import { panelStatus } from '../../shared/formatters';
 import { statusBadge, num, tempLabel, currentWeatherTemp, highWeatherTemp, updatedLabel } from '@/panels/shared/weather/model';
 import { WeatherDataStatus } from '@/panels/shared/weather/WeatherDataStatus';
@@ -174,6 +175,7 @@ const renderers: PanelRenderMap<'selectedWeatherCityId' | 'setSelectedWeatherCit
 
 export const panel = runtimePanelFromRenderer(renderers, {
   contextKeys: ['selectedWeatherCityId', 'setSelectedWeatherCityId'],
+  snapshot: weatherSnapshot(60),
   id: 'global-temperature-monitor',
   title: 'Global Temp Monitor',
   eyebrow: 'weather',

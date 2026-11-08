@@ -8,6 +8,8 @@ import { lobMatchesTokens, timestampMillis } from './orderBook';
 export function orderBookResource(marketId: number | null, yes: string, no: string): PanelResource<LobPayload> {
   return {
     key: `market-book:v1:${marketId}:${yes}:${no}`, title: 'Market order book',
+    // Current book demand/eligibility is rechecked after reload.
+    cache: null,
     maxAgeMs: 30_000,
     refreshPolicy: { tier: 'fast', intervalMs: 2000, staleAfterMs: 30_000, requestTimeoutMs: 3500,
       retry: { attempts: 5, baseDelayMs: 2000, maxDelayMs: 60_000 } },

@@ -9,7 +9,11 @@ preserving the existing workspace runtime and batched transport.
 
 The panel directory owns parameters, parsing, source semantics and reading state.
 A `PanelResource<T>` declares the complete request key, fetch, parse,
-source timestamp, age limit, refresh policy and optional persistence promotion.
+source timestamp, age limit, refresh policy and an explicit persistence policy.
+`cache: { version, maxChars }` enables the common public cache; `cache: null`
+explicitly keeps a resource in memory. A missing policy is rejected, including
+for parameterized resources. Pure views reuse their data owner rather than
+registering another cache. See [registration and coverage](panel-runtime-lifecycle.md#registration-and-coverage).
 The explicit panel registry still owns composition. No sibling implementation
 imports are needed.
 

@@ -23,7 +23,7 @@ export const fixtureMarkets = [1, 2].map((id) => ({
 
 export function fixtureBundle(id: number) {
   const market = fixtureMarkets.find((item) => item.id === id)!;
-  const chart = { marketId: id, range: '1d', interval: '5m', kind: 'probability', points: Array.from({ length: 24 }, (_, i) => ({
+  const chart = { marketId: id, generatedAt: GENERATED_AT, range: '1d', interval: '5m', kind: 'probability', points: Array.from({ length: 24 }, (_, i) => ({
     timestamp: new Date(Date.parse(GENERATED_AT) - (23 - i) * 300_000).toISOString(),
     yesPrice: String(Number(market.latestPrice) + Math.sin(i) * 0.03),
   })) };
@@ -55,7 +55,7 @@ export async function installDashboard(page: Page, locale = 'en', panelIds = DAS
     if (path === '/auth/session') return json({ enabled: true, authenticated: true, user: { id: 1, username: 'fixture-user', role: 'admin', forcePasswordChange: false }, csrfToken: 'fixture-only', allowedScopes: [] });
     if (path === '/product/workspace-layout') return json({ exists: true, revision: 1, activePanelIds: panelIds, panelLayout: {}, preferences: { knownDefaultPanelIds: KNOWN_PANEL_IDS }, clientUpdatedAt: GENERATED_AT, updatedAt: GENERATED_AT });
     if (path === '/bootstrap') return json({ generatedAt: GENERATED_AT, defaultWorkspace: { name: 'Fixture', panels: panelIds }, featuredMarket: fixtureMarkets[0], activeMarketsPreview: fixtureMarkets, activeMarketGroupsPreview: [], globalTradesPreview: [], globalOraclePreview: [], latestContentPreview: [], recentTradesPreview: [], oraclePreview: [], contentPreview: [], pricePreview: null, systemHealth: { apiStatus: 'ok', database: 'fixture' } });
-    if (path === '/markets' || path === '/markets/search') return json({ items: fixtureMarkets, pagination: { page: 1, pageSize: 80, total: 2, totalPages: 1, hasMore: false } });
+    if (path === '/markets' || path === '/markets/search') return json({ generatedAt: GENERATED_AT, sort: url.searchParams.get('sort'), items: fixtureMarkets, pagination: { page: 1, pageSize: Number(url.searchParams.get('pageSize') || 50), total: 2, totalPages: 1, hasMore: false } });
     const marketMatch = path.match(/^\/markets\/(\d+)\/(focus-tile|workspace|detail|chart)$/);
     if (marketMatch) { const bundle = fixtureBundle(Number(marketMatch[1])); return json(marketMatch[2] === 'chart' ? bundle.chart : bundle); }
     if (path.startsWith('/runtime/lob/token/')) return json(fixtureBundle(Number(url.searchParams.get('marketId') || 1)).lob);

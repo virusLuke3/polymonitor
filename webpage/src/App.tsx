@@ -251,7 +251,6 @@ function WorldMonitorApp() {
   const runtimePayloadLoaded = (panelId: string) => runtime.getData(panelId) !== undefined && runtime.getData(panelId) !== null;
   const panelShouldShowLoading = (panelId: string) => {
     if (runtimePayloadLoaded(panelId)) return false;
-    if (loading && !bootstrap) return true;
     if (getPanelRuntimeStatus(panelId).phase === 'loading' && !runtimePayloadLoaded(panelId)) return true;
     return false;
   };

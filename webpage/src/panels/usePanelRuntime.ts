@@ -13,7 +13,7 @@ import {
 } from './types';
 import type { RuntimePanelMetadata } from '@/services/api';
 import { ApiHttpError } from '@/services/api';
-import { readResourceCache, readResourceCacheEntry, writeResourceCache, resourceIsCurrent, type RestoredResource } from './resource-cache';
+import { readResourceCache, readResourceCacheEntry, readIndexedResource, writeResourceCache, resourceIsCurrent, type RestoredResource } from './resource-cache';
 
 const DEFAULT_REFRESH_INTERVAL_MS: Record<PanelRefreshTier, number> = {
   bootstrap: 0, fast: 60_000, slow: 10 * 60_000, manual: 0,
@@ -127,6 +127,7 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
   const [statuses, setStatuses] = useState<Record<string, PanelRuntimeStatus>>(restoredState.statuses);
   const [documentHidden, setDocumentHidden] = useState(() => typeof document !== 'undefined' && document.hidden);
   const [, demandChanged] = useState(0);
+  const [hydrationVersion, hydrated] = useState(0);
   const consumers = useRef(new Map<string, Set<string>>());
   const visibility = useRef(new Map<string, boolean>());
   const dataRef = useRef(runtimeData);
@@ -135,6 +136,7 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
   const controllers = useRef(new Map<string, AbortController>());
   const retries = useRef(new Map<string, number>());
   const mounted = useRef(true);
+  const hydration = useRef(new Map<string, { pending: boolean }>());
   const runtimeSuspended = suspended || documentHidden;
   const suspendedRef = useRef(runtimeSuspended);
   suspendedRef.current = runtimeSuspended;
@@ -183,6 +185,22 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
     updateStatuses([panel.id], () => restoredStatus(panel, entry));
   }, [setRuntimeData, updateStatuses]);
 
+  useEffect(() => {
+    panels.forEach(panel => {
+      if (panel.snapshot?.cache?.storage !== 'indexeddb' || hydration.current.has(panel.id)) return;
+      const token = { pending: true };
+      hydration.current.set(panel.id, token);
+      void readIndexedResource(panel.snapshot).then(entry => {
+        if (!mounted.current || hydration.current.get(panel.id) !== token) return;
+        // A manual request may have started while storage was opening. Its
+        // accepted value/status must win over a late restore.
+        if (entry && statusesRef.current[panel.id]?.lastAttemptAt == null) restoreResource(panel, entry);
+        token.pending = false;
+        hydrated(version => version + 1);
+      });
+    });
+  }, [panels, restoreResource]);
+
   const refreshPanels = useCallback(async (requested: PanelModule[], options: RuntimeRefreshOptions = {}): Promise<PanelRuntimeData> => {
     if (!mounted.current || ((suspendedRef.current || document.hidden) && !options.force)) return {};
     const ids = options.panelIds ? new Set([...options.panelIds].flatMap((id) => [sourceId(id), ...(byId.get(id)?.dataDependencies || [])])) : demandRef.current;
@@ -194,6 +212,7 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
     })).values()];
     const eligible = owners.filter((panel) => {
       if (!panel.fetchData || !ids.has(panel.id)) return false;
+      if (!options.force && hydration.current.get(panel.id)?.pending) return false;
       const running = inflight.current.get(panel.id);
       if (running) { pending.add(running); return false; }
       const status = statusesRef.current[panel.id];
@@ -240,9 +259,10 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
           const checkedAt = Date.now();
           if (contract) {
             try {
-              const previous = contract.shouldPersist ? readResourceCache(contract, window.localStorage) : null;
+              const previous = contract.shouldPersist && contract.cache?.storage !== 'indexeddb' ? readResourceCache(contract, window.localStorage) : null;
               if (!retained && !['warming', 'invalid', 'unknown'].includes(String((value as { status?: string })?.status))
-                && (!contract.shouldPersist || contract.shouldPersist(value, previous))) writeResourceCache(contract, raw ?? value, window.localStorage, checkedAt);
+                && (!contract.shouldPersist || contract.shouldPersist(value, previous))) writeResourceCache(contract, raw ?? value,
+                  contract.cache?.storage === 'indexeddb' ? null : window.localStorage, checkedAt);
             } catch { /* A cache failure cannot fail the displayed snapshot. */ }
           }
           setRuntimeData(merged);
@@ -325,6 +345,7 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
       const now = Date.now();
       const due = panels.filter((panel) => {
         if (!demandRef.current.has(panel.id) || !panel.fetchData || inflight.current.has(panel.id) || retries.current.has(panel.id)) return false;
+        if (hydration.current.get(panel.id)?.pending) return false;
         const policy = panel.refreshPolicy;
         if (!policy || policy.tier === 'manual') return false;
         const status = statusesRef.current[panel.id];
@@ -364,7 +385,7 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
     tick();
     const timer = window.setInterval(tick, 1_000);
     return () => window.clearInterval(timer);
-  }, [demandKey, panels, refreshPanels, runtimeSuspended, updateStatuses, setRuntimeData]);
+  }, [demandKey, panels, refreshPanels, runtimeSuspended, updateStatuses, setRuntimeData, hydrationVersion]);
   useEffect(() => {
     if (runtimeSuspended) return;
     panels.forEach((panel) => {
@@ -409,6 +430,7 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
   const getData = useCallback((id: string) => runtimeData[sourceId(id)], [runtimeData, sourceId]);
   const forgetIds = useCallback((ids: string[]) => {
     ids.forEach(id => {
+      hydration.current.delete(id);
       const controller = controllers.current.get(id);
       controllers.current.delete(id); inflight.current.delete(id);
       controller?.abort();

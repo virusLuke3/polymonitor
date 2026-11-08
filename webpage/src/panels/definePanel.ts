@@ -1,4 +1,5 @@
 import type { PanelContextKey, PanelFetchContext, PanelInputs, PanelModule, PanelRenderMap } from './types';
+import type { PanelSnapshotContract } from './resource-cache';
 
 type PanelDefinition<K extends PanelContextKey> = Omit<PanelModule, 'render' | 'contextKeys'> & (
   [K] extends [never] ? { contextKeys?: never } : { contextKeys: readonly K[] }
@@ -40,7 +41,7 @@ export function panelFromRenderer<K extends PanelContextKey = never>(
 
 export function runtimePanelFromRenderer<K extends PanelContextKey = never>(
   renderers: PanelRenderMap<K>,
-  definition: PanelDefinition<K>,
+  definition: PanelDefinition<K> & { snapshot: PanelSnapshotContract<unknown> },
   runtime: RuntimeOptions,
 ): PanelModule {
   return panelFromRenderer(renderers, {

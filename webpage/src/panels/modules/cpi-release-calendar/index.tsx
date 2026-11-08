@@ -1,3 +1,4 @@
+import { calendarSnapshot } from '@/panels/shared/context-snapshots';
 import { probabilityLabel, PanelGlyph, RowGlyph, StatusBadge, signalToneClass, type PanelGlyphName } from '@/panels/shared/macro-intel';
 import { panelStatus as panelTone } from '@/panels/shared/formatters';
 import { useState } from 'preact/hooks';
@@ -154,6 +155,7 @@ const renderers: PanelRenderMap = {
 };
 
 export const panel = runtimePanelFromRenderer(renderers, {
+  snapshot: calendarSnapshot(8),
   id: 'cpi-release-calendar',
   dataDependencies: ['polymarket-macro-map'],
   title: 'CPI Release Calendar & Consensus Baseline',

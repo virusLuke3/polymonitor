@@ -7,6 +7,79 @@ import type {} from './fixtures/lifecycle';
 test.use({ baseURL: `http://127.0.0.1:${process.env.POLYMONITOR_E2E_PORT || 4174}` });
 const start = Date.parse(GENERATED_AT);
 
+async function indexedSnapshot(page: Page) {
+  return page.evaluate(async () => {
+    // Native browser IndexedDB, not a mock storage implementation.
+    const storage = await import('/src/panels/snapshot-storage.ts');
+    const raw = await storage.readLargeSnapshot('reload-indexed-fixture');
+    return raw ? JSON.parse(raw).checkedAt : null;
+  });
+}
+
+test('a multi-megabyte resource restores from IndexedDB before network and shared views reuse it', async ({ page }) => {
+  await installLocalAssets(page);
+  await page.goto('/e2e/lifecycle.html');
+  await page.waitForFunction(() => Boolean(window.frontendHarness));
+  await page.clock.install({ time: new Date(start) });
+  await page.evaluate(() => window.frontendHarness.mount('indexed-runtime'));
+  await page.clock.runFor(1100);
+  await expect.poll(() => page.evaluate(() => window.frontendHarness.requests.length)).toBe(1);
+  await page.evaluate(generatedAt => window.frontendHarness.requests[0].resolve({ generatedAt, items: ['large snapshot'], padding: 'x'.repeat(3_000_000) }), GENERATED_AT);
+  await page.clock.runFor(100);
+  await expect.poll(() => indexedSnapshot(page)).not.toBeNull();
+  const checkedAt = await indexedSnapshot(page);
+  expect(await page.evaluate(() => localStorage.getItem('polymonitor:panel-resource:reload-indexed-fixture'))).toBeNull();
+  await page.reload();
+  await page.waitForFunction(() => Boolean(window.frontendHarness));
+  await page.clock.install({ time: new Date(start + 2000) });
+  await page.evaluate(() => window.frontendHarness.mount('indexed-runtime'));
+  await expect.poll(() => page.evaluate(() => (window.frontendHarness.runtime?.getData('shared') as any)?.items[0])).toBe('large snapshot');
+  expect(await page.evaluate(() => window.frontendHarness.requests.length)).toBe(0);
+  expect(await page.evaluate(() => window.frontendHarness.runtime!.getStatus('shared'))).toMatchObject({ cacheMode: 'browser', checkedAt });
+  await page.evaluate(() => window.frontendHarness.setPanels(['shared-view']));
+  await page.clock.runFor(100);
+  expect(await page.evaluate(() => window.frontendHarness.runtime!.getData('shared-view') === window.frontendHarness.runtime!.getData('shared'))).toBe(true);
+  await page.clock.runFor(90_000);
+  expect(await page.evaluate(() => window.frontendHarness.runtime!.getData('shared'))).toBeUndefined();
+});
+
+test('large storage evicts the oldest resource within its shared budget and rejects invalid envelopes', async ({ page }) => {
+  await installLocalAssets(page);
+  await page.goto('/e2e/lifecycle.html');
+  const result = await page.evaluate(async () => {
+    const storage = await import('/src/panels/snapshot-storage.ts');
+    const cache = await import('/src/panels/resource-cache.ts');
+    const contract = { key: 'invalid-envelope', cache: { version: 1, storage: 'indexeddb' as const },
+      maxAgeMs: 60_000, parse: (v: any) => v, updatedAt: (v: any) => Date.parse(v.generatedAt) };
+    await storage.writeLargeSnapshot(contract.key, JSON.stringify({ key: contract.key, version: 2,
+      value: { generatedAt: new Date().toISOString() } }), Date.now());
+    const invalid = await cache.readIndexedResource(contract);
+    for (const [index, key] of ['oldest', 'middle', 'newest'].entries()) {
+      await storage.writeLargeSnapshot(key, 'x'.repeat(6_000_000), index + 1);
+    }
+    return { invalid, oldest: await storage.readLargeSnapshot('oldest'),
+      middle: (await storage.readLargeSnapshot('middle'))?.length,
+      newest: (await storage.readLargeSnapshot('newest'))?.length };
+  });
+  expect(result).toEqual({ invalid: null, oldest: null, middle: 6_000_000, newest: 6_000_000 });
+});
+
+test('blocked IndexedDB releases the request and cannot hold a panel in restoration', async ({ page }) => {
+  await installLocalAssets(page);
+  await page.goto('/e2e/lifecycle.html');
+  await page.waitForFunction(() => Boolean(window.frontendHarness));
+  await page.clock.install({ time: new Date(start) });
+  await page.evaluate(() => {
+    Object.defineProperty(window, 'indexedDB', { value: { open: () => ({}) }, configurable: true });
+    window.frontendHarness.mount('indexed-runtime');
+  });
+  await page.clock.runFor(1100);
+  await expect.poll(() => page.evaluate(() => window.frontendHarness.requests.length)).toBe(1);
+  await page.evaluate(generatedAt => window.frontendHarness.requests[0].resolve({ generatedAt, items: ['network recovered'] }), GENERATED_AT);
+  await page.clock.runFor(100);
+  expect(await page.evaluate(() => (window.frontendHarness.runtime!.getData('shared') as any)?.items)).toEqual(['network recovered']);
+});
+
 async function mountCached(page: Page, time = start) {
   await page.goto('/e2e/lifecycle.html');
   await page.waitForFunction(() => Boolean(window.frontendHarness));

@@ -74,6 +74,7 @@ export function PanelResourceProvider({ children }: { children: ComponentChildre
 }
 
 function resourcePanel<T>(contract: PanelResource<T>): PanelModule {
+  if (contract.cache === undefined) throw new Error(`Resource ${contract.key} must declare a cache policy`);
   return {
     id: contract.key, title: contract.title, eyebrow: 'resource', description: contract.title,
     batch: false, refreshPolicy: contract.refreshPolicy,
@@ -90,7 +91,7 @@ export function usePanelResource<T>(contract: PanelResource<T>, active?: boolean
   if (!owner) throw new Error('Panel resources require PanelResourceProvider');
   // Complete keys describe immutable request meaning. Fresh object literals in
   // a consumer render must not repeatedly register/cancel the same request.
-  const declaration = useMemo(() => contract, [contract.key, contract.maxAgeMs, contract.staleAgeMs, contract.acceptStale, contract.cache?.version, contract.cache?.maxChars,
+  const declaration = useMemo(() => contract, [contract.key, contract.maxAgeMs, contract.staleAgeMs, contract.acceptStale, contract.cache?.version, contract.cache?.maxChars, contract.cache?.storage,
     contract.refreshPolicy.tier, contract.refreshPolicy.intervalMs, contract.refreshPolicy.staleAfterMs,
     contract.refreshPolicy.requestTimeoutMs,
     contract.refreshPolicy.retry?.attempts, contract.refreshPolicy.retry?.baseDelayMs, contract.refreshPolicy.retry?.maxDelayMs]);

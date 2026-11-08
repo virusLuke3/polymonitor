@@ -1,3 +1,4 @@
+import { nowcastSnapshot } from '@/panels/shared/context-snapshots';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeInflationNowcast } from '@/services/api';
 import type { RuntimeInflationNowcastPayload, RuntimePolymarketMacroMapPayload } from '@/types';
@@ -102,6 +103,7 @@ const renderers: PanelRenderMap = {
 };
 
 export const panel = runtimePanelFromRenderer(renderers, {
+  snapshot: nowcastSnapshot,
   id: 'inflation-nowcast',
   dataDependencies: ['polymarket-macro-map'],
   title: 'Inflation Nowcast',

@@ -1,3 +1,4 @@
+import { transmissionSnapshot } from '@/panels/shared/context-snapshots';
 import { useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeCommodityEquityTransmission } from '@/services/api';
@@ -230,6 +231,7 @@ const renderers: PanelRenderMap = {
 };
 
 export const panel = runtimePanelFromRenderer(renderers, {
+  snapshot: transmissionSnapshot(8),
   id: 'commodity-equity-transmission',
   title: 'Commodity Equity Transmission',
   eyebrow: 'finance',

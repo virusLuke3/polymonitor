@@ -1,3 +1,4 @@
+import { newsSnapshot } from '@/panels/shared/context-snapshots';
 import { useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeWeatherNews } from '@/services/api';
@@ -146,6 +147,7 @@ const renderers: PanelRenderMap = {
 };
 
 export const panel = runtimePanelFromRenderer(renderers, {
+  snapshot: newsSnapshot('weather-news', 24),
   id: 'weather-news',
   title: 'Weather News',
   eyebrow: 'weather',

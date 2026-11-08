@@ -25,6 +25,9 @@ function assertUniquePanelIds(panels: PanelModule[]) {
     if (panel.fetchData && !panel.refreshPolicy?.tier) {
       throw new Error(`Runtime panel ${panel.id} must declare refreshPolicy.tier`);
     }
+    if (panel.fetchData && (!panel.snapshot || panel.snapshot.cache === undefined)) {
+      throw new Error(`Runtime panel ${panel.id} must declare a snapshot cache policy`);
+    }
     if (panel.dataSourceId && (panel.fetchData || !panels.find((owner) => owner.id === panel.dataSourceId)?.fetchData)) {
       throw new Error(`Panel ${panel.id} must consume one registered data owner`);
     }

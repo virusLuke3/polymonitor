@@ -1,6 +1,6 @@
 import type { PanelRenderMap } from '@/panels/types';
 import { runtimePanelFromRenderer } from '@/panels/definePanel';
-import { fetchInsightSnapshot } from '@/panels/shared/market-insights/data';
+import { fetchInsightSnapshot, insightSnapshot } from '@/panels/shared/market-insights/data';
 import { useI18n } from '@/services/i18n';
 import { insightView } from '@/panels/shared/market-insights/model';
 import { InsightFrame, InsightCards, InsightWatchlist } from '@/panels/shared/market-insights/components';
@@ -22,7 +22,7 @@ const renderers: PanelRenderMap = {
 export const panel = runtimePanelFromRenderer(renderers, {
   id: 'price-implications', title: 'AI Insights', eyebrow: 'agent',
   description: 'AI Insights from a saved market sample, with generation and freshness status.',
-  defaultEnabled: true,
+  defaultEnabled: true, snapshot: insightSnapshot('overview'),
 }, {
   tier: 'bootstrap', intervalMs: 15 * 60_000, staleAfterMs: 12 * 60 * 60_000, batch: false,
   fetchData: (context) => fetchInsightSnapshot('overview', context?.signal),

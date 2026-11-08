@@ -15,7 +15,7 @@ describe('runtime results', () => {
     const fetchData = vi.fn().mockResolvedValue({ generatedAt: new Date().toISOString(), items: ['source'] });
     const limited = (id: string, limit: number) => runtimePanelFromRenderer({
       [id]: { render: vi.fn() },
-    }, { id, title: id, description: '', eyebrow: '' }, { tier: 'slow', limit, fetchData });
+    }, { id, title: id, description: '', eyebrow: '', snapshot: { key: id, cache: null, maxAgeMs: 60_000, parse: value => value, updatedAt: value => Date.parse((value as {generatedAt: string}).generatedAt) } }, { tier: 'slow', limit, fetchData });
     const panels = [limited('a', 36), limited('b', 8)];
     const signal = new AbortController().signal;
     vi.mocked(fetchRuntimePanels).mockRejectedValue(new Error('Batch unavailable'));
@@ -121,7 +121,7 @@ describe('bounded independent resource lifecycles', () => {
   });
   it('applies domain validation to both batch responses and individual fallback', async () => {
     const entry = (id: string) => ({ ...panel(id), snapshot: {
-      key: id, maxAgeMs: 1000, updatedAt: (value: any) => Date.parse(value.generatedAt),
+      key: id, cache: null, maxAgeMs: 1000, updatedAt: (value: any) => Date.parse(value.generatedAt),
       parse: (value: any) => { if (value.panelId !== id) throw new Error('Wrong identity'); return value; },
     } } as PanelModule);
     const a = entry('a'), b = entry('b');

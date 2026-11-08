@@ -12,6 +12,8 @@ export function weatherQuoteResource(bins: RuntimeWeatherQuoteBin[]): PanelResou
   const tokens = [...new Set(bins.map(bin => String(bin.yesTokenId || '').trim()).filter(Boolean))].sort();
   return {
     key: `weather:books:v4:${tokens.join(',') || 'none'}`, title: 'Weather books',
+    // Current book demand/eligibility is rechecked after reload.
+    cache: null,
     maxAgeMs: 60_000, staleAgeMs: 120_000, acceptStale: true,
     refreshPolicy: { tier: 'fast', intervalMs: WEATHER_QUOTE_REFRESH_MS, staleAfterMs: 60_000, requestTimeoutMs: 10_000 },
     updatedAt: value => value.checkedAt,

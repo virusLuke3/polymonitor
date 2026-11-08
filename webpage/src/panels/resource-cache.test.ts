@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { readResourceCache, readResourceCacheEntry, resourceIsCurrent, writeResourceCache, type ResourceCacheContract } from './resource-cache';
+import { readResourceCache, readResourceCacheEntry, resourceIsCurrent, writeResourceCache, type PanelSnapshotContract } from './resource-cache';
 import { parseIntelPayload, type IntelPayload } from './modules/related-news/model';
 
 const now = Date.parse('2026-10-01T12:00:00Z');
-const contract: ResourceCacheContract<IntelPayload> = {
+const contract: PanelSnapshotContract<IntelPayload> = {
   key: 'related-news:global:all:7', maxAgeMs: 300_000, cache: { version: 1 },
   parse: value => parseIntelPayload(value, { marketId: null, scope: 'global', days: 7 }),
   updatedAt: value => value.generatedAt ? Date.parse(value.generatedAt) : null,

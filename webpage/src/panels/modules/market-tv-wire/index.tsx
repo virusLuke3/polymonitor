@@ -1,3 +1,4 @@
+import { mediaSnapshot } from '@/panels/shared/context-snapshots';
 import { scoreLabel } from '../../shared/formatters';
 import {
   panelStatus,
@@ -239,6 +240,7 @@ const renderers: PanelRenderMap = {
 };
 
 export const panel = runtimePanelFromRenderer(renderers, {
+  snapshot: mediaSnapshot('market-tv-wire', 60),
   id: 'market-tv-wire',
   title: 'Market TV Wire',
   eyebrow: 'content',

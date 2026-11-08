@@ -1,3 +1,4 @@
+import { energySnapshot } from '@/panels/shared/context-snapshots';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeEnergyGasolineShock } from '@/services/api';
 import type { RuntimeEnergyGasolineShockPayload, RuntimeEnergyShockItem, RuntimePolymarketMacroMapPayload } from '@/types';
@@ -89,6 +90,7 @@ const renderers: PanelRenderMap = {
 };
 
 export const panel = runtimePanelFromRenderer(renderers, {
+  snapshot: energySnapshot(6),
   id: 'energy-gasoline-shock',
   dataDependencies: ['polymarket-macro-map'],
   title: 'Energy & Gasoline Shock',

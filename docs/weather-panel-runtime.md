@@ -64,3 +64,24 @@ After correcting the service's explicit private environment-file path at 11:35:4
 Real public desktop (2518×1249) and mobile (390×844) screenshots show New York 11/11 current snapshot books. No API or map-tile substitution was used. Artifacts are `webpage/design-previews/market-domains/images/weather-official-snapshots-{desktop,mobile}-20261107.png`. Quote source timestamps remain separate from acquisition, catalog and forecast clocks; forecast collection stays hourly. The API's source-health summary is joined from the independent catalog/books as well, so the old hourly snapshot cannot incorrectly report the new quote source as empty.
 
 Validation includes the clean-commit backend tests, 32 frontend weather/resource tests, two browser refresh/expiry/recovery tests and the clean frontend build. The additional independent-source-health regression passed with the weather tests (50 total). Whole-project `make quality` remains blocked by the unrelated pre-existing personal-path finding in `docs/crypto-strategy-panels.md`; it is not claimed as passed.
+
+
+## Browser reload recovery
+
+The existing `global-temperature-monitor` owner and its seven `dataSourceId`
+views share one persistent public snapshot. The key includes the limit (60) and
+schema version. The existing forecast/catalog/books API chain and all collection
+cadences above are unchanged. Forecast retention is six hours from its original
+generation, with a two-hour fresh limit; city catalog selections expire after
+15 minutes or their city-local date rollover independently. Revalidation removes
+expired selections without changing forecast/catalog/source clocks. The existing
+quote validators still apply their own source event/observation clocks. The
+selected-token book resource explicitly stays memory-only.
+
+The roughly 3 MB joined snapshot uses the shared IndexedDB backend with a
+4,000,000 encoded-character entry cap, not a separate weather cache or poller.
+Blocked storage falls through to network within 800 ms; stale restores keep the
+original check and source clocks. Weather News and Transport use the same Runtime
+persistence contract and their existing source stores described above. Unit and
+browser checks exercise catalog expiry, shared ownership, large reload recovery
+and independent live quote expiry; production source health is reported separately.

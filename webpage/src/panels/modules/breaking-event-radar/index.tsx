@@ -1,3 +1,4 @@
+import { newsSnapshot } from '@/panels/shared/context-snapshots';
 import { scoreLabel as score, seededStatusBadge as statusBadge, alertSeverityClass as severityClass } from '../../shared/formatters';
 import { openExternal as openSource } from '../../shared/renderers';
 import { useMemo, useState } from 'preact/hooks';
@@ -161,6 +162,7 @@ const renderers: PanelRenderMap = {
 };
 
 export const panel = runtimePanelFromRenderer(renderers, {
+  snapshot: newsSnapshot('breaking-event-radar', 12),
   id: 'breaking-event-radar',
   title: 'Breaking Event Radar',
   eyebrow: 'evidence',

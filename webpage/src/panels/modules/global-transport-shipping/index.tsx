@@ -1,3 +1,4 @@
+import { transportSnapshot } from '@/panels/shared/context-snapshots';
 import { openExternal as openSource } from '../../shared/renderers';
 import { seededStatusBadge as statusBadge, alertSeverityClass as severityClass, formatCompact } from '../../shared/formatters';
 import { numericValue as numeric } from '@/panels/shared/formatters';
@@ -359,6 +360,7 @@ const renderers: PanelRenderMap = {
 };
 
 export const panel = runtimePanelFromRenderer(renderers, {
+  snapshot: transportSnapshot(14),
   id: 'global-transport-shipping',
   title: 'Global Transport / Shipping',
   eyebrow: 'transport',
