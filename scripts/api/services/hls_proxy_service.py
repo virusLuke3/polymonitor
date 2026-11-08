@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import re
-import os
+import time
 from dataclasses import dataclass
 from urllib.parse import quote, urljoin, urlparse
-from urllib.request import Request, urlopen
 
 from api.services.trusted_hls_sources import TRUSTED_HLS_SOURCES, trusted_hls_urls
-from api.clients.source_transport import source_session
+from api.clients.source_transport import source_session, read_with_retry, read_response_bytes
 
 
 DEFAULT_TIMEOUT_SECONDS = 12
@@ -47,6 +46,12 @@ def _rules() -> list[TrustedHlsRule]:
             continue
         rules.append(TrustedHlsRule(url=url, referer=str(source.get("hlsProxyReferer") or "").strip() or None,
                                    additional_paths=tuple(source.get("hlsProxyAdditionalPaths") or ())))
+        for alternate in (source.get("hlsAlternates") or [])[:2]:
+            alternate_url = str(alternate.get("url") or "").strip()
+            if alternate_url.startswith("https://"):
+                paths = tuple(path for path in alternate.get("additionalPaths", [])
+                              if isinstance(path, str) and path.startswith("/") and path.endswith("/") and path != "/")
+                rules.append(TrustedHlsRule(url=alternate_url, additional_paths=paths))
     return rules
 
 
@@ -124,34 +129,41 @@ def rewrite_manifest(manifest: str, *, manifest_url: str) -> str:
 
 def fetch_hls_resource(url: str, *, timeout: int = DEFAULT_TIMEOUT_SECONDS) -> tuple[bytes, str, int]:
     target = str(url or "").strip()
-    rule = select_rule(target)
-    if rule is None:
-        raise HlsProxyError("HLS URL is not in the trusted playback allowlist", 403)
+    deadline = time.monotonic() + timeout * 2 + 1
+    # HLS providers use legitimate 307 media beacons. Every hop must remain in
+    # explicitly configured broadcaster paths; never make this an open proxy.
+    with source_session() as session:
+        for hop in range(4):
+            rule = select_rule(target)
+            if rule is None:
+                raise HlsProxyError("HLS URL is not in the trusted playback allowlist", 403)
 
-    request = Request(target, headers=_headers_for(rule))
-    if os.environ.get("POLYMONITOR_SOURCE_ROUTES_FILE"):
-        with source_session() as session, session.get(target, headers=_headers_for(rule), timeout=timeout,
-                                                     stream=True, allow_redirects=False) as response:
-            status = response.status_code
-            if status != 200:
-                raise HlsProxyError(f"upstream returned HTTP {status}", 502)
-            content_type = str(response.headers.get("Content-Type") or "")
-            max_bytes = MAX_MANIFEST_BYTES if _is_manifest_url(target, content_type) else MAX_SEGMENT_BYTES
-            data = response.raw.read(max_bytes + 1, decode_content=True)
-    else:
-        with urlopen(request, timeout=timeout) as response:
-            status = int(getattr(response, "status", 200) or 200)
-            content_type = str(response.headers.get("Content-Type") or "")
-            if status >= 400:
-                raise HlsProxyError(f"upstream returned HTTP {status}", 502)
-            max_bytes = MAX_MANIFEST_BYTES if _is_manifest_url(target, content_type) else MAX_SEGMENT_BYTES
-            data = response.read(max_bytes + 1)
-    if len(data) > max_bytes:
-        raise HlsProxyError("upstream HLS resource is larger than the proxy limit", 502)
-    if _is_manifest_url(target, content_type):
-        rewritten = rewrite_manifest(data.decode("utf-8", errors="replace"), manifest_url=target)
-        return rewritten.encode("utf-8"), "application/vnd.apple.mpegurl; charset=utf-8", status
-    return data, content_type or "application/octet-stream", status
+            def read(response):
+                if response.status_code in {301, 302, 303, 307, 308}:
+                    return None, "", response.status_code, response.headers.get("Location")
+                response.raise_for_status()
+                if response.status_code != 200:
+                    raise HlsProxyError(f"upstream returned HTTP {response.status_code}", 502)
+                content_type = str(response.headers.get("Content-Type") or "")
+                max_bytes = MAX_MANIFEST_BYTES if _is_manifest_url(target, content_type) else MAX_SEGMENT_BYTES
+                data = read_response_bytes(response, max_bytes, deadline=deadline)
+                return data, content_type, response.status_code, None
+
+            data, content_type, status, redirect = read_with_retry(
+                session, target, read, attempts=2, deadline=deadline,
+                headers=_headers_for(rule), timeout=timeout, stream=True, allow_redirects=False,
+            )
+            if status in {301, 302, 303, 307, 308}:
+                if not redirect or hop == 3:
+                    raise HlsProxyError("HLS redirect limit or missing destination", 502)
+                target = urljoin(target, redirect)
+                select_rule(target)  # validate before the next network request
+                continue
+            if _is_manifest_url(target, content_type):
+                rewritten = rewrite_manifest(data.decode("utf-8", errors="replace"), manifest_url=target)
+                return rewritten.encode("utf-8"), "application/vnd.apple.mpegurl; charset=utf-8", status
+            return data, content_type or "application/octet-stream", status
+    raise HlsProxyError("HLS source unavailable", 502)
 
 
 def cache_control_for(content_type: str) -> str:

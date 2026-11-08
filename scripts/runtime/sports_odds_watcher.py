@@ -28,9 +28,10 @@ except ImportError:
     requests = None
 
 from api.config import load_api_settings
+from api.clients.source_transport import read_response_bytes, read_with_retry, source_session
 from api.services import sports_odds_service
 from runtime.market_search import build_market_search
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, retained_snapshot
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot, retained_snapshot
 from runtime.snapshot_store import SnapshotStore
 
 
@@ -79,11 +80,14 @@ class SportsOddsWatcher:
         self.limit = max(1, int(limit or DEFAULT_LIMIT))
         self.interval_seconds = max(60, int(interval_seconds or DEFAULT_INTERVAL_SECONDS))
         self.redis_prefix = str(redis_prefix or "")
-        self.redis_client = redis.from_url(redis_url, decode_responses=True)
+        self.redis_client = redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2)
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
-        self.requests = requests.Session()
+        self.requests = source_session(requests)
         self.requests.trust_env = False
+        proxy = os.environ.get("POLYDATA_API_HTTP_PROXY_URL", "").strip()
+        if proxy:
+            self.requests.proxies.update({"http": proxy, "https": proxy})
         self.last_http_quota: Dict[str, int] = {}
 
     def ttl_seconds(self) -> int:
@@ -102,22 +106,30 @@ class SportsOddsWatcher:
         return _redis_key(self.redis_prefix, self.namespace(), self.cache_key())
 
     def http_json_get(self, url: str, params: Optional[Dict[str, Any]] = None, timeout: int = 12, headers: Optional[Dict[str, str]] = None) -> Any:
-        response = self.requests.get(url, params=params, timeout=timeout, headers=headers)
-        response.raise_for_status()
-        quota = {}
-        for header, key in (
-            ("x-requests-used", "used"),
-            ("x-requests-remaining", "remaining"),
-            ("x-requests-last", "last"),
-        ):
-            try:
-                quota[key] = int(response.headers.get(header))
-            except (TypeError, ValueError):
-                continue
-        self.last_http_quota = quota
-        if not response.content:
-            return None
-        return response.json()
+        deadline = time.monotonic() + 90
+
+        def record_quota(response):
+            quota = {}
+            for header, key in (("x-requests-used", "used"), ("x-requests-remaining", "remaining"), ("x-requests-last", "last")):
+                try:
+                    quota[key] = int(response.headers.get(header))
+                except (TypeError, ValueError):
+                    continue
+            if quota:
+                self.last_http_quota = quota
+
+        def read(response):
+            record_quota(response)
+            body = read_response_bytes(response, 8 * 1024 * 1024, deadline=deadline)
+            return json.loads(body) if body else None
+
+        try:
+            return read_with_retry(self.requests, url, read, attempts=2, deadline=deadline,
+                                   timeout=timeout, params=params, headers=headers, stream=True)
+        except requests.exceptions.HTTPError as exc:
+            if exc.response is not None:
+                record_quota(exc.response)
+            raise
 
     def get_http_quota(self) -> Dict[str, int]:
         return dict(self.last_http_quota)
@@ -158,8 +170,9 @@ class SportsOddsWatcher:
 
     def store_payload(self, payload: Dict[str, Any]) -> None:
         ttl_seconds = self.ttl_seconds()
-        self.snapshot_store.set(self.namespace(), self.cache_key(), payload, ttl_seconds)
-        self.redis_client.set(self.redis_key(), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl_seconds)
+        publish_snapshot(snapshot_store=self.snapshot_store, namespace=self.namespace(), cache_key=self.cache_key(),
+                         payload=payload, ttl_seconds=ttl_seconds, redis_client=self.redis_client,
+                         redis_cache_key=self.redis_key())
 
     def store_seed_meta(
         self,
@@ -184,7 +197,7 @@ class SportsOddsWatcher:
             expected_interval_seconds=self.interval_seconds,
             status=status,
             last_attempt_at=attempted_at,
-            last_success_at=last_success_at or attempted_at,
+            last_success_at=last_success_at,
             record_count=record_count,
             source_states=source_states,
             error_summary=error_summary,
@@ -192,6 +205,7 @@ class SportsOddsWatcher:
             payload_status=status,
             metadata={"result": "stored", "limit": self.limit, **(metadata or {})},
         )
+        payload["lastSuccessAt"] = last_success_at
         self.seed_meta_store.store(SEED_META_NAMESPACE, SEED_META_CACHE_KEY, payload)
 
     def run_once(self) -> Dict[str, Any]:
@@ -201,9 +215,9 @@ class SportsOddsWatcher:
         except Exception as exc:
             if previous:
                 self.store_payload(retained_snapshot(previous))
-                self.store_seed_meta(status="preserved", record_count=len(previous.get("items") or []), source_states={"theOddsApi": "error"}, error_summary=str(exc), preserve_last_success=True)
+                self.store_seed_meta(status="preserved", record_count=len(previous.get("items") or []), source_states={"theOddsApi": "error"}, error_summary=type(exc).__name__, preserve_last_success=True)
                 return {"status": "preserved", "payload": previous}
-            self.store_seed_meta(status="error", record_count=0, source_states={"theOddsApi": "error"}, error_summary=str(exc), preserve_last_success=True)
+            self.store_seed_meta(status="error", record_count=0, source_states={"theOddsApi": "error"}, error_summary=type(exc).__name__, preserve_last_success=True)
             raise
 
         record_count = len(payload.get("items") or [])

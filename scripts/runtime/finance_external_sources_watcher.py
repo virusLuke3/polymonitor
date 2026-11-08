@@ -10,6 +10,7 @@ import os
 import sys
 import time
 from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -27,11 +28,12 @@ try:
 except ImportError:
     requests = None
 
-from api.clients.source_transport import source_session
+from api.clients.source_transport import read_response_bytes, read_with_retry, source_session
 from api.config import load_api_settings
+from api.context import RuntimeResources
 from api.clients import market_data_client
 from api.services import finance_external_sources_service
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, retained_snapshot
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot, SnapshotPublicationError, retained_snapshot
 from runtime.snapshot_store import SnapshotStore
 
 
@@ -89,18 +91,16 @@ class FinanceExternalSourcesWatcher:
         settings: Any,
         interval_seconds: int = DEFAULT_INTERVAL_SECONDS,
     ) -> None:
-        if redis is None:
-            raise RuntimeError("redis package is required. Install scripts/requirements.txt")
         if requests is None:
             raise RuntimeError("requests package is required. Install scripts/requirements.txt")
-        if not str(redis_url or "").strip():
-            raise RuntimeError("POLYDATA_REDIS_URL is required for finance external source watcher")
         self.settings = settings
         self.interval_seconds = max(300, int(interval_seconds or DEFAULT_INTERVAL_SECONDS))
         self.redis_prefix = str(redis_prefix or "")
-        self.redis_client = redis.from_url(redis_url, decode_responses=True)
+        self.redis_client = redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2) if redis is not None and str(redis_url or "").strip() else None
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
+        self._resources = RuntimeResources()
+        self._source_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="finance-external-yahoo")
         self.requests = source_session()
         self.requests.trust_env = str(os.environ.get("POLYDATA_RUNTIME_TRUST_ENV", "0")).lower() in {"1", "true", "yes", "on"}
 
@@ -119,10 +119,16 @@ class FinanceExternalSourcesWatcher:
             return configured
         return max(900, self.interval_seconds * 3)
 
+    def begin_source(self, name: str) -> None:
+        self.source_name = name
+        self.source_deadline = time.monotonic() + (180 if name == "okxTradfiPerps" else 90)
+
     def http_json_get(self, url: str, params: Optional[Dict[str, Any]] = None, timeout: int = 12, headers: Optional[Dict[str, str]] = None) -> Any:
-        response = self.requests.get(url, params=params, timeout=timeout, headers=headers)
-        response.raise_for_status()
-        return response.json() if response.content else None
+        deadline = getattr(self, "source_deadline", None) or time.monotonic() + 90
+        return read_with_retry(self.requests, url,
+            lambda response: json.loads(read_response_bytes(response, 8 * 1024 * 1024, deadline=deadline)),
+            attempts=2, deadline=deadline, params=params, timeout=timeout, headers=headers, stream=True,
+            require_full_attempt=getattr(self, "source_name", None) == "okxTradfiPerps")
 
     def http_json_post(self, url: str, json_payload: Dict[str, Any], timeout: int = 12, headers: Optional[Dict[str, str]] = None) -> Any:
         response = self.requests.post(url, json=json_payload, timeout=timeout, headers=headers)
@@ -138,10 +144,18 @@ class FinanceExternalSourcesWatcher:
             ttl_seconds=ttl_seconds,
         )
 
+    def map_yahoo(self, fetch, values):
+        return list(self._source_executor.map(fetch, values))
+
     def service_context(self) -> Dict[str, Any]:
         return {
             "SETTINGS": self.settings,
-            "requests": self.requests,
+            "SNAPSHOT_STORE": self.snapshot_store,
+            "begin_source": self.begin_source,
+            "external_source_deadline": getattr(self, "source_deadline", None),
+            "requests": requests,
+            "_resources": getattr(self, "_resources", None),
+            "map_yahoo": self.map_yahoo,
             "FINANCE_RUNTIME_TTL_SECONDS": self.settings.finance_runtime_ttl_seconds,
             "_safe_float": _safe_float,
             "_clob_price_cache": {},
@@ -167,6 +181,9 @@ class FinanceExternalSourcesWatcher:
         return payload
 
     def load_previous_payload(self) -> Dict[str, Any]:
+        stale = self.snapshot_store.get_stale(self.namespace(), self.cache_key())
+        if isinstance(stale, dict):
+            return stale
         try:
             raw = self.redis_client.get(self.redis_key())
             if raw:
@@ -175,13 +192,18 @@ class FinanceExternalSourcesWatcher:
                     return payload
         except Exception:
             print("[finance-external] WARN redis read failed", file=sys.stderr)
-        stale = self.snapshot_store.get_stale(self.namespace(), self.cache_key())
-        return stale if isinstance(stale, dict) else {}
+        return {}
 
     def store_payload(self, payload: Dict[str, Any]) -> None:
-        ttl_seconds = self.ttl_seconds()
-        self.snapshot_store.set(self.namespace(), self.cache_key(), payload, ttl_seconds)
-        self.redis_client.set(self.redis_key(), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl_seconds)
+        try:
+            publish_snapshot(snapshot_store=self.snapshot_store, namespace=self.namespace(),
+                             cache_key=self.cache_key(), payload=payload, ttl_seconds=self.ttl_seconds(),
+                             redis_client=self.redis_client, redis_cache_key=self.redis_key())
+        except SnapshotPublicationError as exc:
+            self.store_seed_meta(status="error", record_count=0,
+                                 source_states={"publication": "error"}, error_summary=str(exc),
+                                 preserve_last_success=True)
+            raise
 
     def store_seed_meta(self, *, status: str, record_count: int, source_states: Dict[str, Any], error_summary: str | None, preserve_last_success: bool = False) -> None:
         previous = self.seed_meta_store.load(SEED_META_NAMESPACE, SEED_META_CACHE_KEY) or {}
@@ -205,6 +227,7 @@ class FinanceExternalSourcesWatcher:
             payload_status=status,
             metadata={"result": "stored"},
         )
+        payload["lastSuccessAt"] = last_success_at
         self.seed_meta_store.store(SEED_META_NAMESPACE, SEED_META_CACHE_KEY, payload)
 
     def run_once(self) -> Dict[str, Any]:
@@ -268,20 +291,24 @@ def main() -> int:
         settings=settings,
         interval_seconds=args.interval,
     )
-    watcher.redis_client.ping()
-    print(f"[finance-external] redis_key={watcher.redis_key()} sqlite={settings.snapshot_sqlite_path}", file=sys.stderr)
-    if not args.watch:
-        print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
-        return 0
-    while True:
-        started_at = time.monotonic()
-        try:
+    try:
+        print(f"[finance-external] redis_key={watcher.redis_key()} sqlite={settings.snapshot_sqlite_path}", file=sys.stderr)
+        if not args.watch:
             print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
-        except KeyboardInterrupt:
             return 0
-        except Exception as exc:
-            print(f"[finance-external] ERROR watch loop failed: {exc}", file=sys.stderr)
-        time.sleep(max(30, watcher.interval_seconds - (time.monotonic() - started_at)))
+        while True:
+            started_at = time.monotonic()
+            try:
+                print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
+            except KeyboardInterrupt:
+                return 0
+            except Exception as exc:
+                print(f"[finance-external] ERROR watch loop failed: {exc}", file=sys.stderr)
+            time.sleep(max(30, watcher.interval_seconds - (time.monotonic() - started_at)))
+    finally:
+        watcher._source_executor.shutdown(wait=True, cancel_futures=True)
+        watcher._resources.close()
+        watcher.requests.close()
 
 
 if __name__ == "__main__":

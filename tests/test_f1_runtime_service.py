@@ -87,11 +87,31 @@ class F1RuntimeServiceTestCase(unittest.TestCase):
         self.assertEqual(payload["cards"][0]["url"], "fixture-bwenews-item-99999")
         self.assertIn("Binance 合约将上线 OPGUSDT 永续合约", payload["cards"][0]["summary"])
 
-    def test_get_f1_panel_snapshot_returns_empty_when_requests_unavailable(self):
+    def test_get_f1_panel_snapshot_reports_error_when_requests_unavailable(self):
         ctx = self.make_context()
         ctx["requests"] = None
 
         payload = f1_runtime_service.get_f1_panel_snapshot(ctx, limit=8)
 
-        self.assertEqual(payload["status"], "empty")
+        self.assertEqual(payload["status"], "error")
+        self.assertEqual(payload["sources"]["bwenewsRss"], "unavailable")
         self.assertEqual(payload["cards"], [])
+
+    def test_only_valid_rss_empty_is_a_successful_empty_source(self):
+        for body, expected in [("<rss><channel/></rss>", "empty"), ("<html/>", "error"),
+                               ("<rss>", "error"), ("<rss><channel><item/></channel></rss>", "error")]:
+            with self.subTest(body=body):
+                ctx = self.make_context()
+                ctx["requests"] = SimpleNamespace(get=lambda *a, **kw: FakeResponse(text=body))
+                payload = f1_runtime_service.fetch_live_f1_panel_payload(ctx)
+                self.assertEqual(expected, payload["status"])
+                self.assertEqual(expected, payload["sources"]["bwenewsRss"])
+
+    def test_source_timeout_remains_error_and_does_not_expose_request_details(self):
+        def fail(*args, **kwargs):
+            raise TimeoutError("private request details")
+        ctx = self.make_context()
+        ctx["requests"] = SimpleNamespace(get=fail)
+        payload = f1_runtime_service.fetch_live_f1_panel_payload(ctx)
+        self.assertEqual("error", payload["status"])
+        self.assertEqual({"bwenewsRss": "TimeoutError"}, payload["sourceErrors"])

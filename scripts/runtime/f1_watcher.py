@@ -28,8 +28,9 @@ except ImportError:
     requests = None
 
 from api.config import load_api_settings
+from api.clients.source_transport import source_session
 from api.services import f1_runtime_service
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot, retained_snapshot
 from runtime.snapshot_store import SnapshotStore
 
 
@@ -83,15 +84,18 @@ class F1Watcher:
         self.limit = max(1, int(limit or DEFAULT_LIMIT))
         self.interval_seconds = max(60, int(interval_seconds or DEFAULT_INTERVAL_SECONDS))
         self.redis_prefix = str(redis_prefix or "")
-        self.redis_client = redis.from_url(redis_url, decode_responses=True)
+        self.redis_client = redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2)
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(
             redis_client=self.redis_client,
             redis_prefix=self.redis_prefix,
             snapshot_store=self.snapshot_store,
         )
-        self.requests = requests.Session()
+        self.requests = source_session(requests)
         self.requests.trust_env = False
+        proxy = os.environ.get("POLYDATA_API_HTTP_PROXY_URL", "").strip()
+        if proxy:
+            self.requests.proxies.update({"http": proxy, "https": proxy})
 
     def namespace(self) -> str:
         return f1_runtime_service.F1_SNAPSHOT_NAMESPACE
@@ -133,7 +137,7 @@ class F1Watcher:
         previous = self.load_seed_meta()
         attempted_at = utc_now_iso()
         last_success_at = previous.get("lastSuccessAt")
-        if not preserve_last_success and str(status or "").strip().lower() in {"ok", "degraded", "preserved"}:
+        if not preserve_last_success and str(status or "").strip().lower() in {"ok", "empty", "degraded"}:
             last_success_at = attempted_at
         payload = build_seed_meta_payload(
             panel_id="f1-trackside",
@@ -143,7 +147,7 @@ class F1Watcher:
             expected_interval_seconds=self.interval_seconds,
             status=status,
             last_attempt_at=attempted_at,
-            last_success_at=last_success_at or attempted_at,
+            last_success_at=last_success_at,
             record_count=record_count,
             source_states=source_states,
             error_summary=error_summary,
@@ -151,6 +155,7 @@ class F1Watcher:
             payload_status=payload_status,
             metadata=metadata,
         )
+        payload["lastSuccessAt"] = last_success_at
         return self.seed_meta_store.store(self.seed_meta_namespace(), self.seed_meta_cache_key(), payload)
 
     def load_previous_payload(self) -> Dict[str, Any]:
@@ -176,36 +181,42 @@ class F1Watcher:
 
     def store_payload(self, payload: Dict[str, Any]) -> None:
         ttl_seconds = self.ttl_seconds()
-        self.snapshot_store.set(self.namespace(), self.cache_key(), payload, ttl_seconds)
-        self.redis_client.set(self.redis_key(), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl_seconds)
+        publish_snapshot(snapshot_store=self.snapshot_store, namespace=self.namespace(), cache_key=self.cache_key(),
+                         payload=payload, ttl_seconds=ttl_seconds, redis_client=self.redis_client,
+                         redis_cache_key=self.redis_key())
 
     def run_once(self) -> Dict[str, Any]:
         previous = self.load_previous_payload()
         payload = self.build_payload()
-        if previous and not _cards(payload):
-            self.store_payload(previous)
+        sources = payload.get("sources") or {"bwenewsRss": "unknown"}
+        healthy_empty = (payload.get("status") == "empty" and bool(sources)
+                         and all(state in {"ok", "empty"} for state in sources.values()))
+        if previous and not _cards(payload) and not healthy_empty:
+            retained = retained_snapshot(previous, sources=sources)
+            retained["sourceErrors"] = payload.get("sourceErrors") or {}
+            self.store_payload(retained)
             self.store_seed_meta(
                 status="preserved",
                 record_count=len(_cards(previous)),
-                source_states={"bwenewsRss": "empty"},
-                error_summary="Preserved previous snapshot because new F1 payload was empty",
+                source_states=sources,
+                error_summary="Preserved previous snapshot because F1 source refresh was not verified",
                 cache_mode=previous.get("cacheMode"),
-                payload_status=previous.get("status"),
+                payload_status=retained.get("status"),
                 metadata={"result": "preserved"},
                 preserve_last_success=True,
             )
-            return {"status": "preserved", "payload": previous}
+            return {"status": "preserved", "payload": retained}
 
         card_count = len(_cards(payload))
         payload_status = str(payload.get("status") or "unknown").strip().lower()
-        status = "ok" if payload_status == "ok" and card_count > 0 else "degraded"
-        error_summary = None if status == "ok" else "F1 payload contained no cards"
+        status = "empty" if healthy_empty else "ok" if payload_status == "ok" and card_count > 0 else "degraded" if card_count else "error"
+        error_summary = None if status in {"ok", "empty"} else "F1 sources unavailable or partial"
         payload = {**payload, "cacheMode": "seeded"}
         self.store_payload(payload)
         self.store_seed_meta(
             status=status,
             record_count=card_count,
-            source_states={"bwenewsRss": "ok" if card_count > 0 else "empty"},
+            source_states=payload.get("sources") or {"bwenewsRss": "ok" if card_count > 0 else "error"},
             error_summary=error_summary,
             cache_mode=payload.get("cacheMode"),
             payload_status=payload.get("status"),
@@ -214,6 +225,7 @@ class F1Watcher:
                 "limit": self.limit,
                 "rssUrlConfigured": bool(str(self.settings.f1_bwenews_rss_url or "").strip()),
             },
+            preserve_last_success=status == "error",
         )
         return {"status": "stored", "payload": payload}
 

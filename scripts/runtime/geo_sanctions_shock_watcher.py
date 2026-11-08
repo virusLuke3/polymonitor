@@ -33,8 +33,9 @@ except ImportError:
     requests = None
 
 from api.config import load_api_settings
+from api.clients.source_transport import read_response_bytes, read_with_retry, source_session
 from api.services import geo_sanctions_shock_service
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot
 from runtime.snapshot_store import SnapshotStore
 
 
@@ -80,18 +81,15 @@ class GeoSanctionsShockWatcher:
         snapshot_sqlite_path: str,
         settings: Any,
     ) -> None:
-        if redis is None:
-            raise RuntimeError("redis package is required. Install scripts/requirements.txt")
         if requests is None:
             raise RuntimeError("requests package is required. Install scripts/requirements.txt")
-        if not str(redis_url or "").strip():
-            raise RuntimeError("POLYDATA_REDIS_URL is required for geo shock watcher")
         self.settings = settings
         self.redis_prefix = str(redis_prefix or "")
-        self.redis_client = redis.from_url(redis_url, decode_responses=True)
+        self.redis_client = (redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2)
+                             if redis is not None and redis_url else None)
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
-        self.requests = requests.Session()
+        self.requests = source_session(requests)
         self.requests.trust_env = False
         self.requests.headers.update({"User-Agent": "polyData-geo-shock-watcher/1.0"})
         self._acled_auth_state: Dict[str, Any] | None = None
@@ -138,7 +136,7 @@ class GeoSanctionsShockWatcher:
     ) -> Dict[str, Any]:
         previous = self.load_seed_meta()
         attempted_at = utc_now_iso()
-        success_statuses = {"ok", "degraded", "preserved"}
+        success_statuses = {"ok", "empty", "degraded"}
         last_success_at = previous.get("lastSuccessAt")
         if not preserve_last_success and str(status or "").strip().lower() in success_statuses:
             last_success_at = attempted_at
@@ -150,7 +148,7 @@ class GeoSanctionsShockWatcher:
             expected_interval_seconds=DEFAULT_INTERVAL_SECONDS,
             status=status,
             last_attempt_at=attempted_at,
-            last_success_at=last_success_at or attempted_at,
+            last_success_at=last_success_at,
             record_count=record_count,
             source_states=source_states,
             error_summary=error_summary,
@@ -158,14 +156,19 @@ class GeoSanctionsShockWatcher:
             payload_status=payload_status,
             metadata=metadata,
         )
+        payload["lastSuccessAt"] = last_success_at
         return self.seed_meta_store.store(self.seed_meta_namespace(), self.seed_meta_cache_key(), payload)
 
-    def _http_json_get(self, url: str, params: Optional[Dict[str, Any]] = None, timeout: int = 15, headers: Optional[Dict[str, str]] = None) -> Any:
-        response = self.requests.get(url, params=params, timeout=timeout, headers=headers)
-        response.raise_for_status()
-        if not response.content:
-            return {}
-        return response.json()
+    def _http_json_get(self, url: str, params: Optional[Dict[str, Any]] = None, timeout: int = 15,
+                       headers: Optional[Dict[str, str]] = None, *, retry_attempts=1,
+                       retry_deadline=None, max_response_bytes=8 * 1024**2) -> Any:
+        deadline = retry_deadline if retry_deadline is not None else time.monotonic() + timeout
+        def read(response):
+            if 300 <= response.status_code < 400:
+                raise ValueError("Geo source redirected; source URL requires review")
+            return json.loads(read_response_bytes(response, max_response_bytes, deadline=deadline))
+        return read_with_retry(self.requests, url, read, attempts=retry_attempts, deadline=deadline,
+                               params=params, timeout=timeout, headers=headers, stream=True, allow_redirects=False)
 
     def load_acled_auth_state(self) -> Optional[Dict[str, Any]]:
         if isinstance(self._acled_auth_state, dict):
@@ -201,9 +204,17 @@ class GeoSanctionsShockWatcher:
         self._acled_auth_state = normalized
         ttl_seconds = geo_sanctions_shock_service.ACLED_AUTH_TTL_SECONDS
         self.snapshot_store.set(self.acled_auth_namespace(), self.acled_auth_cache_key(), normalized, ttl_seconds)
-        self.redis_client.set(self.acled_auth_redis_key(), json.dumps(normalized, ensure_ascii=True, default=str), ex=ttl_seconds)
+        # Authentication cache is independent of accepting a business snapshot.
+        if self.redis_client is not None:
+            try:
+                self.redis_client.set(self.acled_auth_redis_key(), json.dumps(normalized, ensure_ascii=True, default=str), ex=ttl_seconds)
+            except Exception:
+                _AppAdapter.logger.exception("optional acled auth mirror write failed")
 
     def load_previous_payload(self) -> Dict[str, Any]:
+        stale = self.snapshot_store.get_stale(self.namespace(), self.cache_key())
+        if isinstance(stale, dict):
+            return stale
         try:
             raw = self.redis_client.get(self.redis_key())
             if raw:
@@ -212,13 +223,13 @@ class GeoSanctionsShockWatcher:
                     return payload
         except Exception:
             _AppAdapter.logger.exception("geo shock watcher redis read failed")
-        stale = self.snapshot_store.get_stale(self.namespace(), self.cache_key())
-        return stale if isinstance(stale, dict) else {}
+        return {}
 
     def build_payload(self) -> Dict[str, Any]:
         previous = self.load_previous_payload()
         ctx = {
             "SETTINGS": self.settings,
+            "SNAPSHOT_STORE": self.snapshot_store,
             "app": _AppAdapter(),
             "requests": self.requests,
             "http_json_get": self._http_json_get,
@@ -230,8 +241,9 @@ class GeoSanctionsShockWatcher:
 
     def store_payload(self, payload: Dict[str, Any]) -> None:
         ttl_seconds = _cache_ttl_seconds(self.settings)
-        self.snapshot_store.set(self.namespace(), self.cache_key(), payload, ttl_seconds)
-        self.redis_client.set(self.redis_key(), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl_seconds)
+        publish_snapshot(snapshot_store=self.snapshot_store, namespace=self.namespace(), cache_key=self.cache_key(),
+                         payload=payload, ttl_seconds=ttl_seconds, redis_client=self.redis_client,
+                         redis_cache_key=self.redis_key())
 
     def run_once(self) -> Dict[str, Any]:
         previous = self.load_previous_payload()
@@ -242,18 +254,22 @@ class GeoSanctionsShockWatcher:
             and not geo_sanctions_shock_service.payload_has_source_success(payload)
         ):
             _AppAdapter.logger.warning("geo shock watcher preserved previous snapshot because new payload had no material signal")
-            self.store_payload(previous)
+            # Keep observed content/clocks, but persist the failed attempt and
+            # per-term cooldowns so a restart cannot retry a rate-limited query.
+            retained = {**previous, "status": "stale", "sources": payload.get("sources") or {},
+                        "federalRegisterSources": payload.get("federalRegisterSources") or {}}
+            self.store_payload(retained)
             self.store_seed_meta(
                 status="preserved",
                 record_count=len(previous.get("items") or []),
                 source_states=payload.get("sources"),
                 error_summary="Preserved previous snapshot because new payload had no material signal",
                 cache_mode=previous.get("cacheMode"),
-                payload_status=previous.get("status"),
+                payload_status=retained.get("status"),
                 metadata={"result": "preserved"},
                 preserve_last_success=True,
             )
-            return {"status": "preserved", "payload": previous}
+            return {"status": "preserved", "payload": retained}
         self.store_payload(payload)
         self.store_seed_meta(
             status=payload.get("status") or "unknown",
@@ -263,6 +279,7 @@ class GeoSanctionsShockWatcher:
             cache_mode=payload.get("cacheMode"),
             payload_status=payload.get("status"),
             metadata={"result": "stored"},
+            preserve_last_success=not geo_sanctions_shock_service.payload_has_source_success(payload),
         )
         return {"status": "stored", "payload": payload}
 
@@ -291,7 +308,6 @@ def main() -> int:
         snapshot_sqlite_path=settings.snapshot_sqlite_path,
         settings=settings,
     )
-    watcher.redis_client.ping()
     print(
         f"[geo-shock] redis_key={watcher.redis_key()} sqlite={settings.snapshot_sqlite_path}",
         file=sys.stderr,

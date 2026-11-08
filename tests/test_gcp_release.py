@@ -237,7 +237,7 @@ socket.socket.connect = no_network
 from api.app import create_app
 app = create_app(connection_factory=no_network)
 try:
-    assert app.test_client().get('/health').status_code == 200
+    assert app.test_client().get('/health/live').status_code == 200
     for path in pathlib.Path('scripts/runtime').glob('*.py'):
         importlib.import_module('runtime.' + path.stem)
     import telegram.bot.poller, telegram.topics.publisher, agent.gateway.app

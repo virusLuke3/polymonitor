@@ -46,3 +46,9 @@ for credential_name in (
 
 def missing_route_dependency(*args, **kwargs):
     raise AssertionError("Test invoked an unconfigured route dependency")
+
+
+@pytest.fixture
+def legacy_orderfilled_store(monkeypatch):
+    """Canonical-table SQL fixtures declare their storage layout explicitly."""
+    monkeypatch.setenv("POLYDATA_ORDERFILLED_PRIMARY_STORE", "0")

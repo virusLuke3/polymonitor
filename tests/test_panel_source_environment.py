@@ -56,7 +56,7 @@ def test_youtube_missing_source_is_explicit(monkeypatch):
 
 def test_production_sources_have_no_literal_endpoint_defaults():
     root = Path(__file__).resolve().parents[1]
-    namespaces = ("http://www.w3.org/", "http://www.youtube.com/xml/", "http://purl.org/", "http://www.opengis.net/")
+    namespaces = ("http://www.w3.org/", "http://www.youtube.com/xml/", "http://purl.org/", "http://www.opengis.net/", "http://www.loc.gov/mods/v3")
     findings = []
     for directory in ("scripts/api", "scripts/runtime", "agent/common"):
         for path in (root / directory).rglob("*.py"):

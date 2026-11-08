@@ -13,6 +13,9 @@ from api import cache
 from api.read_budget import ReadPermit, try_permit
 
 NAMESPACE = "snapshot:market-panels-v2"
+# Keep expensive siblings and their nested evidence reads out of each other's
+# striped lock pools. Data/cache keys and database admission remain shared.
+LOCK_POOLS = {"record": 1, "semantics-v2": 2, "flow": 3, "chart": 4}
 
 
 def utc_now():
@@ -24,7 +27,7 @@ class PanelReadCache:
         self.runtime = runtime
         self.store = runtime.SNAPSHOT_STORE
 
-    def get(self, layer, identity, builder, *, ttl, max_age, admit=True, background=True):
+    def get(self, layer, identity, builder, *, ttl, max_age, admit=True, background=True, wait_seconds=0):
         key = json.dumps([layer, identity], sort_keys=True, separators=(",", ":"))
         value = cache.get_cached_runtime_payload(self.runtime.cache, NAMESPACE, key)
         if value is None:
@@ -41,7 +44,8 @@ class PanelReadCache:
         def build():
             with permit:
                 try:
-                    with self.store.fetch_lock(NAMESPACE, key, timeout=0):
+                    with self.store.fetch_lock(NAMESPACE, key, timeout=min(1.0, max(0, wait_seconds)),
+                                               lock_pool=LOCK_POOLS.get(layer, 0)):
                         # Another worker may have finished while admission was pending.
                         existing = self.store.get(NAMESPACE, key)
                         if existing is not None:

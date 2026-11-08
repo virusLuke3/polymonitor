@@ -30,7 +30,6 @@ Wants=polydata-market-group-seed.service
 Wants=polydata-market-tv-wire-seed.service
 Wants=polydata-nba-seed.service
 Wants=polydata-new-market-signal.service
-Wants=polydata-polysignal-feed-seed.service
 Wants=polydata-polymarket-macro-map-seed.service
 Wants=polydata-sports-odds-seed.service
 Wants=polydata-suspicious-trades-seed.service

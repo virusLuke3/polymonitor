@@ -24,14 +24,20 @@ class SnapshotStore:
         self._initialized = False
 
     @contextmanager
-    def fetch_lock(self, namespace: str, cache_key: str, *, timeout: float = 6):
+    def fetch_lock(self, namespace: str, cache_key: str, *, timeout: float = 6, lock_pool: int = 0):
         """Bounded cross-worker acquisition ownership; no SQLite transaction during HTTP.
 
-        64 striped lock files bound filesystem use even for moving viewports.
+        64 stripes per bounded pool limit filesystem use even for moving
+        viewports. Nested dependencies can select distinct pools so a hash
+        collision cannot make a builder contend with its own dependency.
         Process exit releases flock; a waiting caller never starts a second
         acquisition after its budget expires.
         """
+        if not isinstance(lock_pool, int) or not 0 <= lock_pool < 8:
+            raise ValueError("snapshot lock pool must be between 0 and 7")
         lock_dir = Path(self.db_path).parent / (Path(self.db_path).name + ".fetch-locks")
+        if lock_pool:
+            lock_dir = lock_dir / f"pool-{lock_pool}"
         lock_dir.mkdir(parents=True, exist_ok=True)
         stripe = int.from_bytes(hashlib.sha256(f"{namespace}:{cache_key}".encode()).digest()[:2], "big") % 64
         deadline = time.monotonic() + max(0, timeout)

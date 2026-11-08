@@ -64,3 +64,90 @@ def test_filing_amendment_and_evidence():
     assert len(rows) == 2 and rows[0]['amendment']
     assert rows[0]['period'] == '2026-09-30'
     assert rows[0]['url'].endswith('/000032019326002/b.htm')
+
+
+def test_failure_status_and_observation_clock_do_not_affect_sec(tmp_path, monkeypatch):
+    now = datetime.now(timezone.utc).timestamp()
+    store = SnapshotStore(str(tmp_path / 'snapshots.sqlite'))
+    for cik in service.WATCHLIST.values():
+        for kind in ('submissions', 'facts'):
+            store.set(service.SOURCES, f'sec:{cik}:{kind}', {
+                'lastSuccessAt': now, 'lastAttemptAt': now, 'data': [] if kind == 'submissions' else {}}, 1000)
+    state = {'lastSuccessAt': now - 60, 'lastAttemptAt': now, 'error': 'ReadTimeout',
+             'nextAttemptAt': now + 300, 'data': {'items': [{'id': 'rule'}]}}
+    store.set(service.SOURCES, 'federal-register', state, 1000)
+    service.publish(store, now)
+    failed = service.get_snapshot(store, 'policy-progress')
+    assert failed['status'] == 'degraded' and failed['items'] == [{'id': 'rule'}]
+    assert failed['generatedAt'] == service.iso(now - 60)
+    assert failed['source']['lastSuccessAt'] == service.iso(now - 60)
+    assert service.get_snapshot(store, 'company-events')['status'] == 'ok'
+    monkeypatch.setattr(service.time, 'time', lambda: now + 2 * 86400)
+    old = service.get_snapshot(store, 'company-events')
+    assert old['status'] == 'degraded' and old['sources']['AAPL']['facts']['stale']
+    assert not service.source_meta({}, 1000)['usable']
+
+
+def test_rate_limit_is_persisted_without_secrets_or_success(tmp_path):
+    import requests
+    store = SnapshotStore(str(tmp_path / 'snapshots.sqlite'))
+    response = requests.Response()
+    response.status_code = 429
+    response.headers['Retry-After'] = '7200'
+    def limited(_):
+        raise requests.HTTPError('secret query token', response=response)
+    state = service.collect_source(store, 'x', 'source', lambda x: x, limited, 1800, now=1000)
+    assert state['error'] == 'HTTP 429' and state['nextAttemptAt'] == 8200
+    assert state.get('lastSuccessAt') is None
+
+
+def test_disclosure_transport_retries_full_body_budget_and_stops_on_429(monkeypatch):
+    import requests
+    from api.clients import source_transport
+    from runtime.official_disclosures_watcher import Transport
+    calls = []
+    class Response:
+        status_code = 200
+        def raise_for_status(self): pass
+        def close(self): pass
+        def iter_content(self, chunk_size):
+            if len(calls) == 1:
+                raise requests.exceptions.ChunkedEncodingError('body stalled')
+            yield b'{"results": [], "count": 0}'
+    class Session:
+        def request(self, method, url, **kwargs):
+            calls.append(kwargs)
+            return Response()
+    monkeypatch.setattr(source_transport.time, 'sleep', lambda _: None)
+    import time
+    transport = Transport(Session(), deadline=time.monotonic() + 1100, user_agent='contact')
+    assert transport.fetch('https://www.federalregister.gov/api') == {'results': [], 'count': 0}
+    assert len(calls) == 2 and all(call['timeout'] == 45 and call['stream'] for call in calls)
+    class LimitedSession:
+        def request(self, method, url, **kwargs):
+            calls.append(kwargs)
+            response = requests.Response()
+            response.status_code = 429
+            response._content = b''
+            response._content_consumed = True
+            return response
+    import pytest
+    calls.clear()
+    with pytest.raises(requests.HTTPError):
+        Transport(LimitedSession(), deadline=time.monotonic() + 1100, user_agent='').fetch('https://www.federalregister.gov/api')
+    assert len(calls) == 1
+
+
+def test_retry_after_starts_when_response_arrives_not_when_request_started(tmp_path, monkeypatch):
+    import requests
+    clock = [1000]
+    monkeypatch.setattr(service.time, 'time', lambda: clock[0])
+    store = SnapshotStore(str(tmp_path / 'snapshots.sqlite'))
+    def fetch(_):
+        clock[0] = 1090
+        response = requests.Response()
+        response.status_code = 429
+        response.headers['Retry-After'] = '600'
+        raise requests.HTTPError(response=response)
+    state = service.collect_source(store, 'slow', 'url', lambda x: x, fetch, 1800)
+    assert state['lastAttemptAt'] == 1000 and state['nextAttemptAt'] == 1690

@@ -190,20 +190,75 @@ def _orderfilled_projection_sql(*, include_time: bool = True) -> str:
 
 
 def _table_sql(ctx: dict) -> str:
-    return _settings(ctx).table
+    table = _settings(ctx).table
+    return 'orderfilled_fact_primary_v1' if _primary_table(table) else table
+
+
+def _primary_table(table):
+    return table == 'orderfilled_fact_primary_v1' or (
+        table == DEFAULT_TABLE and os.environ.get('POLYDATA_ORDERFILLED_PRIMARY_STORE', '1') == '1')
+
+
+def _physical_table(table):
+    return 'orderfilled_events_v1' if _primary_table(table) else table
+
+
+def _fact_block_column(ctx: dict) -> str:
+    # Source custody proves block coordinates are immutable. Predicate pushdown
+    # uses that physical coordinate while result columns retain source values.
+    return 'canonical_block_number' if _primary_table(_table_sql(ctx)) else 'block_number'
+
+
+def _primary_latest_fact_block(ctx: dict) -> int:
+    """Seek partition aggregates, including a newest partition with only raw events."""
+    settings = _settings(ctx)
+    key = str(uuid.uuid5(uuid.NAMESPACE_URL, f'{settings.http_url}/{settings.database}/primary-watermark'))
+    cached = ctx.get('get_cached_json')
+    value = cached('orderfilled:primary-watermark', key) if callable(cached) else None
+    if isinstance(value, dict) and 'latest_block' in value:
+        return int(value['latest_block'])
+    deadline = time.monotonic() + 5.0
+
+    def read(sql):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError('Primary fact watermark read budget exhausted')
+        rows = _query_json_rows(ctx, sql + ' FORMAT JSONEachRow', timeout_seconds=min(3.0, remaining))
+        if rows is None:
+            raise TimeoutError('Primary fact watermark unavailable')
+        return rows
+
+    partitions = read("SELECT DISTINCT toUInt64(partition) AS partition FROM system.parts "
+        f"WHERE active AND database='{settings.database}' AND table='orderfilled_events_v1' "
+        'ORDER BY partition DESC')
+    latest = 0
+    for part in partitions:
+        rows = read('SELECT maxIf(block_number,fact_variant_count>0) AS latest_block '
+            'FROM orderfilled_events_v1 WHERE intDiv(block_number,1000000)=' + str(int(part['partition'])))
+        if len(rows) != 1 or rows[0].get('latest_block') is None:
+            raise TimeoutError('Primary fact watermark response is incomplete')
+        latest = int(rows[0]['latest_block'])
+        if latest:
+            break
+    cache = ctx.get('set_cached_json')
+    if callable(cache):
+        cache('orderfilled:primary-watermark', key, {'latest_block': latest}, ttl_seconds=5)
+    return latest
 
 
 def _latest_fact_block_sql(ctx: dict) -> str:
     settings = _settings(ctx)
-    table = settings.table
-    if table != DEFAULT_TABLE:
+    table = _table_sql(ctx)
+    if _primary_table(table):
+        return f'SELECT toUInt64({_primary_latest_fact_block(ctx)})'
+    if table != DEFAULT_TABLE and not _primary_table(table):
         return f"SELECT ifNull(max(block_number), 0) FROM {table}"
     # The canonical fact table partitions by intDiv(block_number, 1000000).
     # Locate its newest partition before reading the actual chain watermark.
     return f"""SELECT ifNull(max(block_number), 0) FROM {table}
-        PREWHERE intDiv(block_number, 1000000) = (
+        {'WHERE' if _primary_table(table) else 'PREWHERE'} intDiv(block_number, 1000000) = (
             SELECT max(toUInt64(partition)) FROM system.parts
-            WHERE active AND database = '{settings.database}' AND table = '{table}'
+            WHERE active AND database = '{settings.database}' AND table = '{_physical_table(table)}'
         )"""
 
 
@@ -293,8 +348,8 @@ def _attach_post_signal_metrics(ctx: dict, rows: List[Dict[str, Any]]) -> List[D
         FROM {_table_sql(ctx)}
         WHERE market_id IN ({market_csv})
           AND outcome_code IN (1, 2)
-          AND block_number >= {min_block}
-          AND block_number <= {max_block + max(horizon_blocks.values()) + 90}
+          AND {_fact_block_column(ctx)} >= {min_block}
+          AND {_fact_block_column(ctx)} <= {max_block + max(horizon_blocks.values()) + 90}
         ORDER BY market_id ASC, block_number ASC, log_index ASC
         FORMAT JSONEachRow
         """,
@@ -450,9 +505,10 @@ def _fetch_fact_rows(read, table, chosen):
         for r in chosen
     )
     partitions = ", ".join(str(p) for p in sorted({int(r["block_number"]) // 1000000 for r in chosen}))
+    prefix = 'canonical_' if _primary_table(table) else ''
     rows = read(f"""SELECT {_orderfilled_projection_sql(include_time=False)} FROM (
-        SELECT * FROM {table} PREWHERE intDiv(block_number, 1000000) IN ({partitions})
-        AND (market_id, token_id, block_number, log_index, tx_hash) IN ({identities})
+        SELECT * FROM {table} {'WHERE' if _primary_table(table) else 'PREWHERE'} intDiv({prefix}block_number, 1000000) IN ({partitions})
+        AND ({prefix}market_id, {prefix}token_id, {prefix}block_number, {prefix}log_index, {prefix}tx_hash) IN ({identities})
         ) f ORDER BY f.block_number DESC, f.log_index DESC, f.tx_hash DESC FORMAT JSONEachRow""")
     if rows is None:
         raise TimeoutError("Trade facts unavailable")
@@ -484,14 +540,14 @@ def _read_fact_trades(ctx, selector, *, limit, offset=0, before=None):
         return rows
 
     settings = _settings(ctx)
-    cache_key = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{settings.http_url}/{settings.database}/{settings.table}"))
+    cache_key = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{settings.http_url}/{settings.database}/{_table_sql(ctx)}"))
     cached = ctx.get("get_cached_json")
     bounds = cached("orderfilled:read-bounds", cache_key) if callable(cached) else None
     if not bounds:
         rows = read(f"""
             SELECT ({_latest_fact_block_sql(ctx)}) AS latest_block,
                 (SELECT min(toUInt64(partition)) * 1000000 FROM system.parts
-                 WHERE active AND database = '{settings.database}' AND table = '{settings.table}') AS first_block
+                 WHERE active AND database = '{settings.database}' AND table = '{_physical_table(settings.table)}') AS first_block
             FORMAT JSONEachRow
         """)
         if not rows:
@@ -518,11 +574,12 @@ def _read_fact_trades(ctx, selector, *, limit, offset=0, before=None):
                 SELECT tx_hash, log_index, market_id, maker, taker, price, size,
                        side_code, outcome_code, token_id, block_number, order_hash,
                        maker_amount, taker_amount, fee, contract
-                FROM {settings.table}
-                PREWHERE intDiv(block_number, 1000000) BETWEEN {lower // 1000000} AND {upper // 1000000}
-                  AND block_number BETWEEN {lower} AND {upper}
+                FROM {_table_sql(ctx)}
+                {'WHERE' if _primary_table(settings.table) else 'PREWHERE'} intDiv({_fact_block_column(ctx)}, 1000000) BETWEEN {lower // 1000000} AND {upper // 1000000}
+                  AND {_fact_block_column(ctx)} BETWEEN {lower} AND {upper}
                   AND {selector}
-                WHERE 1 {cursor}
+                  {('AND '+selector.replace('token_id','canonical_token_id')) if _primary_table(settings.table) else ''}
+                {'AND' if _primary_table(settings.table) else 'WHERE'} 1 {cursor}
                 ORDER BY block_number DESC, log_index DESC, tx_hash DESC
                 LIMIT {offset + limit - len(rows)}
             ) f
@@ -583,9 +640,9 @@ def get_recent_trades(ctx: dict, *, limit: int = 24) -> Optional[List[Dict[str, 
         f"""
         SELECT market_id, token_id, block_number, log_index, tx_hash FROM (
             SELECT market_id, token_id, block_number, log_index, tx_hash FROM {_table_sql(ctx)}
-            PREWHERE intDiv(block_number, 1000000) BETWEEN {first // 1000000} AND {last // 1000000}
-              AND block_number BETWEEN {first} AND {last}
-            WHERE market_id != 0
+            {'WHERE' if _primary_table(_table_sql(ctx)) else 'PREWHERE'} intDiv({_fact_block_column(ctx)}, 1000000) BETWEEN {first // 1000000} AND {last // 1000000}
+              AND {_fact_block_column(ctx)} BETWEEN {first} AND {last}
+            {'AND' if _primary_table(_table_sql(ctx)) else 'WHERE'} market_id != 0
             ORDER BY block_number DESC, log_index DESC, tx_hash DESC LIMIT {limit}
         ) f ORDER BY f.block_number DESC, f.log_index DESC, f.tx_hash DESC
         FORMAT JSONEachRow
@@ -663,9 +720,9 @@ def get_volume_whale_rows(
                 quantilesTDigest(0.99, 0.995, 0.999)(notional) OVER () AS thresholds,
                 sum(notional) OVER (PARTITION BY market_id) AS market_window_notional
             FROM {_table_sql(ctx)}
-            PREWHERE intDiv(block_number, 1000000) BETWEEN {first // 1000000} AND {last // 1000000}
-              AND block_number BETWEEN {first} AND {last}
-            WHERE market_id != 0
+            {'WHERE' if _primary_table(_table_sql(ctx)) else 'PREWHERE'} intDiv({_fact_block_column(ctx)}, 1000000) BETWEEN {first // 1000000} AND {last // 1000000}
+              AND {_fact_block_column(ctx)} BETWEEN {first} AND {last}
+            {'AND' if _primary_table(_table_sql(ctx)) else 'WHERE'} market_id != 0
         ) f
         WHERE f.price BETWEEN {min_price} AND {max_price}
           AND (f.notional >= greatest({min_watch}, thresholds[1])
@@ -737,7 +794,7 @@ def get_alpha_volume_signal_rows(ctx: dict, *, limit: int = 8) -> Optional[List[
                     FROM {_table_sql(ctx)}
                     WHERE market_id != 0
                       AND outcome_code IN (1, 2)
-                      AND block_number >= max_fact_block - window_blocks
+                      AND {_fact_block_column(ctx)} >= max_fact_block - window_blocks
                       AND toFloat64(price) >= {min_price:.6f}
                       AND toFloat64(price) <= {max_price:.6f}
                     GROUP BY market_id, outcome_code, side_code
@@ -854,12 +911,12 @@ def get_alpha_volume_signal_rows(ctx: dict, *, limit: int = 8) -> Optional[List[
             FROM {_table_sql(ctx)}
             WHERE market_id != 0
               AND outcome_code IN (1, 2)
-              AND block_number >= max_fact_block - baseline_blocks
+              AND {_fact_block_column(ctx)} >= max_fact_block - baseline_blocks
             GROUP BY market_id
         ) mv ON mv.market_id = f.market_id
         WHERE f.market_id != 0
           AND f.outcome_code IN (1, 2)
-          AND f.block_number >= max_fact_block - window_blocks
+          AND f.{_fact_block_column(ctx)} >= max_fact_block - window_blocks
           AND toFloat64(f.price) >= {min_price:.6f}
           AND toFloat64(f.price) <= {max_price:.6f}
         GROUP BY f.market_id, mv.market_baseline_notional
@@ -1009,7 +1066,7 @@ def get_market_stats(ctx: dict, market_ids: Iterable[int], *, hours: int = 24) -
             max(f.block_number) AS latest_trade_block
         FROM {_table_sql(ctx)} f
         WHERE f.market_id IN ({id_csv})
-          AND f.block_number >= max_fact_block - {block_window}
+          AND f.{_fact_block_column(ctx)} >= max_fact_block - {block_window}
         GROUP BY f.market_id
         FORMAT JSONEachRow
         """,
@@ -1071,7 +1128,7 @@ def get_recent_market_activity(ctx: dict, *, limit: int = 1000, hours: int = 24)
             GROUP BY block_number
         ) bt ON bt.block_number = f.block_number
         WHERE f.market_id != 0
-          AND f.block_number >= max_fact_block - {hours * 1800}
+          AND f.{_fact_block_column(ctx)} >= max_fact_block - {hours * 1800}
         GROUP BY f.market_id
         HAVING (trade_count_24h > 0 OR toDecimal128(volume_24h, 10) > 0)
            AND toDecimal128(latest_token_price, 10) >= 0.05

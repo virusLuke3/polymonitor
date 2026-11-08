@@ -51,6 +51,72 @@ def test_cold_parallel_read_has_one_builder_and_no_waiting_workers(runtime):
     assert cache.get("catalog", 1, builder, ttl=20, max_age=60)["items"] == [1]
 
 
+@pytest.mark.parametrize('kind', ['record', 'semantics'])
+def test_sibling_panels_join_cold_identity_read_without_false_503(runtime, kind):
+    reader = MarketPanelReader(runtime)
+    started, release = Event(), Event()
+    def build(*args, **kwargs):
+        started.set()
+        assert release.wait(2)
+        return [{'id': 7}]
+    query = Mock(side_effect=build)
+    if kind == 'record':
+        reader._rows = query
+        read = lambda: reader.record(7)
+        expected = {'id': 7}
+    else:
+        reader.query = query
+        read = lambda: reader.semantic_query('SELECT evidence', (7,))
+        expected = [{'id': 7}]
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        first = executor.submit(read)
+        assert started.wait(1)
+        siblings = [executor.submit(read) for _ in range(3)]
+        time.sleep(0.1)
+        assert not any(f.done() for f in siblings)
+        release.set()
+        assert [f.result(2) for f in [first, *siblings]] == [expected] * 4
+    query.assert_called_once()
+
+
+def test_identity_wait_is_bounded_and_does_not_record_source_failure(runtime):
+    cache = PanelReadCache(runtime)
+    key = json.dumps(['record', 7], separators=(',', ':'))
+    with runtime.SNAPSHOT_STORE.fetch_lock(NAMESPACE, key, lock_pool=1):
+        started = time.monotonic()
+        result = cache.get('record', 7, Mock(side_effect=AssertionError),
+                           ttl=60, max_age=0, admit=False, wait_seconds=0.05)
+        assert result['status'] == 'warming'
+        assert time.monotonic() - started < 0.5
+    assert runtime.SNAPSHOT_STORE.get(NAMESPACE + ':errors', key) is None
+
+
+def test_flow_and_chart_hash_collision_does_not_block_sibling_panel(runtime):
+    # These real cache identities collide in the original global 64 stripes.
+    import hashlib
+    flow = ['indexed-keys-v2', 18179941, 50, None, None]
+    chart = ['indexed-keys-v2', 18179941, 600, None, '1d']
+    def stripe(layer, identity):
+        key = json.dumps([layer, identity], separators=(',', ':'))
+        return int.from_bytes(hashlib.sha256(f'{NAMESPACE}:{key}'.encode()).digest()[:2], 'big') % 64
+    assert stripe('flow', flow) == stripe('chart', chart)
+    cache = PanelReadCache(runtime)
+    started, release = Event(), Event()
+    def build_flow():
+        started.set()
+        assert release.wait(2)
+        return {'items': ['trade']}
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(cache.get, 'flow', flow, build_flow, ttl=8, max_age=60)
+        assert started.wait(1)
+        try:
+            result = cache.get('chart', chart, lambda: {'points': [0.4]}, ttl=90, max_age=300)
+            assert result['status'] == 'ok' and result['points'] == [0.4]
+        finally:
+            release.set()
+        assert first.result(1)['items'] == ['trade']
+
+
 def test_failure_cooldown_and_stale_age_do_not_overwrite_last_good(runtime):
     cache = PanelReadCache(runtime)
     key = json.dumps(["flow", 1], separators=(",", ":"))
@@ -137,6 +203,26 @@ def test_empty_flow_is_a_fixed_window_not_an_expanding_scan(runtime, monkeypatch
     assert result["coverage"]["globalCompleteness"] == "NOT_PROVEN"
 
 
+def test_selected_market_read_waits_for_rate_token_without_raising_source_load(runtime, monkeypatch):
+    assert take_read_token('panel-clickhouse', per_second=1, burst=2)
+    assert take_read_token('panel-clickhouse', per_second=1, burst=2)
+    reader = MarketPanelReader(runtime)
+    reader.record = Mock(return_value={'yes_token_id': '1', 'no_token_id': '2'})
+    runtime.market_context = {'app': runtime.app}
+    query = Mock(side_effect=[
+        [{'block_number': 90000000, 'timestamp': '2026-11-03T00:00:00Z'}], [],
+    ])
+    monkeypatch.setattr(panel_trade_reader.ch, '_query_json_rows', query)
+    monkeypatch.setattr(panel_trade_reader.semantics, 'annotate_raw_trade_rows', lambda _, rows: rows)
+    started = time.monotonic()
+    result = reader.flow(7)
+    assert result['status'] == 'ok' and result['items'] == []
+    assert time.monotonic() - started >= 0.9
+    assert query.call_count == 2
+    # The wait consumed one real token rather than increasing the burst/rate.
+    assert not take_read_token('panel-clickhouse', per_second=1, burst=2)
+
+
 def test_trade_keys_are_resolved_to_exact_source_facts_within_total_budget(runtime, monkeypatch):
     reader = MarketPanelReader(runtime)
     reader.record = Mock(return_value={"yes_token_id": "1", "no_token_id": "2"})
@@ -144,13 +230,20 @@ def test_trade_keys_are_resolved_to_exact_source_facts_within_total_budget(runti
     budgets = []
     def query(ctx, sql, **kwargs):
         budgets.append(ctx['_resources'].clickhouse.max_bytes_to_read)
+        assert ctx['_resources'].clickhouse.max_execution_seconds == 4
+        assert kwargs['timeout_seconds'] <= 5
         if len(budgets) == 1:
             return [{"block_number": 90000000, "timestamp": "2026-11-03T00:00:00Z"}]
         if len(budgets) == 2:
+            assert sql.count('fact_variant_count > 0') == 2
+            assert sql.count('LIMIT 51') == 3
+            assert 'ORDER BY token_id DESC, block_number DESC' in sql
             return [key]
         if len(budgets) == 3:
             assert 'orderfilled_fact_primary_v1' in sql
             assert 'canonical_log_index,canonical_tx_hash)' in sql and key['tx_hash'] in sql
+            assert 'canonical_token_id IN' in sql
+            assert 'canonical_block_number BETWEEN 90000000 AND 90000000' in sql
             return [{**key, 'token_id': '0x' + key['token_id'], 'price': '0.42', 'size': '10'}]
         return [{"block_number": 90000000, "timestamp": "2026-11-03T00:00:00Z"}]
     monkeypatch.setattr(panel_trade_reader.ch, '_query_json_rows', query)

@@ -10,6 +10,8 @@ import os
 import sys
 import threading
 import time
+from contextlib import nullcontext
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -29,10 +31,12 @@ except ImportError:
     requests = None
 
 from api.clients import market_data_client
-from api.clients.source_transport import source_session
+from api.clients.source_transport import SourceSession, source_session, read_with_retry, read_response_bytes
 from api.config import load_api_settings
+from api.context import RuntimeResources
 from api.services import tech_panels_service
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, retained_snapshot
+from api.services.seed_recovery import bounded_rows
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot, SnapshotPublicationError, retained_snapshot
 from runtime.snapshot_store import SnapshotStore
 
 
@@ -45,6 +49,9 @@ SEED_META_SERVICE_NAME = "polydata-tech-panels-seed.service"
 class _LoggerAdapter:
     def exception(self, message: str, *args: Any, **kwargs: Any) -> None:
         print(f"[tech-panels] ERROR {message % args if args else message}", file=sys.stderr)
+        error = sys.exc_info()[1]
+        if error is not None:
+            print(type(error).__name__ + ": " + str(error)[:400], file=sys.stderr)
 
     def warning(self, message: str, *args: Any, **kwargs: Any) -> None:
         print(f"[tech-panels] WARN {message % args if args else message}", file=sys.stderr)
@@ -73,23 +80,22 @@ class TechPanelsWatcher:
         interval_seconds: int = DEFAULT_INTERVAL_SECONDS,
         limit: int = DEFAULT_LIMIT,
     ) -> None:
-        if redis is None:
-            raise RuntimeError("redis package is required. Install scripts/requirements.txt")
         if requests is None:
             raise RuntimeError("requests package is required. Install scripts/requirements.txt")
-        if not str(redis_url or "").strip():
-            raise RuntimeError("POLYDATA_REDIS_URL is required for tech panels watcher")
         self.settings = settings
         self.interval_seconds = max(300, int(interval_seconds or DEFAULT_INTERVAL_SECONDS))
         self.limit = max(6, min(36, int(limit or DEFAULT_LIMIT)))
         self.redis_prefix = str(redis_prefix or "")
-        self.redis_client = redis.from_url(redis_url, decode_responses=True)
+        self.redis_client = redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2) if redis is not None and str(redis_url or "").strip() else None
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
         self.requests = source_session()
         trust_env_proxy = str(os.environ.get("POLYDATA_TECH_PANELS_TRUST_ENV_PROXY") or "").strip().lower()
         self.requests.trust_env = trust_env_proxy in {"1", "true", "yes", "on"}
         self._runtime_cache: Dict[str, Dict[str, Any]] = {}
+        self._yahoo_resources = RuntimeResources()
+        self._source_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="panel-yahoo")
+        self._yahoo_context = {**self.service_context(), "requests": requests, "_resources": self._yahoo_resources}
 
     def ttl_seconds(self) -> int:
         configured = int(os.environ.get("POLYDATA_TECH_PANELS_SEED_TTL_SECONDS", "0") or 0)
@@ -100,27 +106,39 @@ class TechPanelsWatcher:
     def redis_key(self, panel_id: str) -> str:
         return _redis_key(self.redis_prefix, tech_panels_service.tech_panel_namespace(panel_id), tech_panels_service.TECH_PANEL_CACHE_KEY)
 
+    def deadline_options(self):
+        deadline = getattr(self, "source_deadline", None)
+        if deadline is not None and time.monotonic() >= deadline:
+            raise TimeoutError("external panel collection deadline exhausted")
+        return {"source_deadline": deadline} if deadline is not None and isinstance(self.requests, SourceSession) else {}
+
     def http_json_get(self, url: str, params: Optional[Dict[str, Any]] = None, timeout: int = 12, headers: Optional[Dict[str, str]] = None) -> Any:
-        response = self.requests.get(url, params=params, timeout=timeout, headers=headers)
-        response.raise_for_status()
-        return response.json() if response.content else None
+        deadline = min(getattr(self, "source_deadline", time.monotonic() + 90), time.monotonic() + 90)
+        return read_with_retry(self.requests, url,
+            lambda response: json.loads(read_response_bytes(response, 8 * 1024 * 1024, deadline=deadline)),
+            attempts=2, deadline=deadline, params=params, timeout=max(30, timeout), headers=headers, stream=True)
 
     def http_text_get(self, url: str, timeout: int = 12, headers: Optional[Dict[str, str]] = None) -> str:
-        response = self.requests.get(url, timeout=timeout, headers=headers)
-        response.raise_for_status()
-        return response.text
+        deadline = min(getattr(self, "source_deadline", time.monotonic() + 90), time.monotonic() + 90)
+        return read_with_retry(self.requests, url,
+            lambda response: read_response_bytes(response, 8 * 1024 * 1024, deadline=deadline).decode(response.encoding or "utf-8"),
+            attempts=2, deadline=deadline, timeout=max(30, timeout), headers=headers, stream=True)
 
     def get_cached_json(self, namespace: str, cache_key: str) -> Optional[Dict[str, Any]]:
-        raw = self.redis_client.get(_redis_key(self.redis_prefix, namespace, cache_key))
-        if not raw:
-            payload = self.snapshot_store.get(namespace, cache_key)
+        payload = self.snapshot_store.get(namespace, cache_key)
+        if isinstance(payload, dict):
+            return payload
+        try:
+            raw = self.redis_client.get(_redis_key(self.redis_prefix, namespace, cache_key))
+            payload = json.loads(raw) if raw else None
             return payload if isinstance(payload, dict) else None
-        payload = json.loads(raw)
-        return payload if isinstance(payload, dict) else None
+        except Exception:
+            return None
 
     def set_cached_json(self, namespace: str, cache_key: str, payload: Dict[str, Any], ttl_seconds: int) -> Dict[str, Any]:
-        self.snapshot_store.set(namespace, cache_key, payload, ttl_seconds)
-        self.redis_client.set(_redis_key(self.redis_prefix, namespace, cache_key), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl_seconds)
+        publish_snapshot(snapshot_store=self.snapshot_store, namespace=namespace, cache_key=cache_key,
+                         payload=payload, ttl_seconds=ttl_seconds, redis_client=self.redis_client,
+                         redis_cache_key=_redis_key(self.redis_prefix, namespace, cache_key))
         return payload
 
     def get_cached_runtime_payload(self, namespace: str, cache_key: str) -> Optional[Dict[str, Any]]:
@@ -150,12 +168,29 @@ class TechPanelsWatcher:
 
     def get_yahoo_market_snapshot(self, symbol: str, interval: str = "30m", range_name: str = "5d", ttl_seconds: Optional[int] = None) -> Optional[Dict[str, Any]]:
         return market_data_client.get_yahoo_market_snapshot(
-            self.service_context(),
+            self.yahoo_context(),
             symbol,
             interval=interval,
             range_name=range_name,
             ttl_seconds=ttl_seconds,
         )
+
+    def yahoo_context(self) -> Dict[str, Any]:
+        # One worker owns the pool; RuntimeResources provides one Session per
+        # thread, reused across symbols/rounds. Each call captures its deadline.
+        return {**self._yahoo_context, "external_source_deadline": getattr(self, "source_deadline", None)}
+
+    def get_nasdaq_market_cap(self, symbol: str) -> Optional[Dict[str, Any]]:
+        return market_data_client.get_nasdaq_market_cap(self.yahoo_context(), symbol)
+
+    def map_yahoo(self, fetch, values):
+        # Domain lists are bounded (at most 24); join before the next panel/round.
+        return list(self._source_executor.map(fetch, values))
+
+    def close(self):
+        self._source_executor.shutdown(wait=True, cancel_futures=True)
+        self._yahoo_resources.close()
+        self.requests.close()
 
     def service_context(self) -> Dict[str, Any]:
         return {
@@ -174,11 +209,16 @@ class TechPanelsWatcher:
             "http_json_get": self.http_json_get,
             "http_text_get": self.http_text_get,
             "get_yahoo_market_snapshot": self.get_yahoo_market_snapshot,
+            "get_nasdaq_market_cap": self.get_nasdaq_market_cap,
+            "map_yahoo": self.map_yahoo,
             "utc_now_iso": utc_now_iso,
             "requests": requests,
         }
 
     def load_previous_payload(self, panel_id: str) -> Dict[str, Any]:
+        stale = self.snapshot_store.get_stale(tech_panels_service.tech_panel_namespace(panel_id), tech_panels_service.TECH_PANEL_CACHE_KEY)
+        if isinstance(stale, dict):
+            return stale
         try:
             raw = self.redis_client.get(self.redis_key(panel_id))
             if raw:
@@ -187,15 +227,15 @@ class TechPanelsWatcher:
                     return payload
         except Exception:
             print(f"[tech-panels] WARN redis read failed panel={panel_id}", file=sys.stderr)
-        stale = self.snapshot_store.get_stale(tech_panels_service.tech_panel_namespace(panel_id), tech_panels_service.TECH_PANEL_CACHE_KEY)
-        return stale if isinstance(stale, dict) else {}
+        return {}
 
     def store_payload(self, panel_id: str, payload: Dict[str, Any]) -> None:
-        ttl_seconds = self.ttl_seconds()
         namespace = tech_panels_service.tech_panel_namespace(panel_id)
         payload = {**payload, "cacheMode": "stale-seed" if payload.get("status") == "stale" else "seeded"}
-        self.snapshot_store.set(namespace, tech_panels_service.TECH_PANEL_CACHE_KEY, payload, ttl_seconds)
-        self.redis_client.set(self.redis_key(panel_id), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl_seconds)
+        publish_snapshot(snapshot_store=self.snapshot_store, namespace=namespace,
+                         cache_key=tech_panels_service.TECH_PANEL_CACHE_KEY, payload=payload,
+                         ttl_seconds=self.ttl_seconds(), redis_client=self.redis_client,
+                         redis_cache_key=self.redis_key(panel_id))
 
     def store_seed_meta(self, panel_id: str, *, status: str, record_count: int, source_states: Dict[str, Any], error_summary: str | None, preserve_last_success: bool = False) -> None:
         previous = self.seed_meta_store.load(SEED_META_NAMESPACE, panel_id) or {}
@@ -219,44 +259,60 @@ class TechPanelsWatcher:
             payload_status=status,
             metadata={"result": "stored", "limit": self.limit},
         )
+        payload["lastSuccessAt"] = last_success_at
         self.seed_meta_store.store(SEED_META_NAMESPACE, panel_id, payload)
 
     def run_once(self) -> Dict[str, Any]:
         ctx = self.service_context()
         result: Dict[str, Any] = {"status": "ok", "panels": {}}
         for panel_id in tech_panels_service.TECH_PANEL_IDS:
+            store = getattr(self, "snapshot_store", None)
+            lock = store.fetch_lock(tech_panels_service.tech_panel_namespace(panel_id), tech_panels_service.TECH_PANEL_CACHE_KEY, timeout=0) if hasattr(store, "fetch_lock") else nullcontext()
             try:
-                payload = tech_panels_service.build_tech_panel_payload(ctx, panel_id, limit=self.limit)
-            except Exception as exc:
-                payload = tech_panels_service._payload(panel_id, title=panel_id.upper(), items=[], status="error", sources={"builder": "error"}, summary={"error": str(exc)})
-            previous = self.load_previous_payload(panel_id)
-            previous_count = len(previous.get("items") or []) if isinstance(previous, dict) else 0
-            previous_status = str(previous.get("status") or "") if isinstance(previous, dict) else ""
-            record_count = len(payload.get("items") or []) if isinstance(payload, dict) else 0
-            status = str(payload.get("status") or ("ok" if record_count else "empty")) if isinstance(payload, dict) else "error"
-            sources = payload.get("sources") or {}
-            healthy_empty = status == "empty" and bool(sources) and all(value in {"ok", "empty", "disabled"} for value in sources.values())
-            if previous and previous_count > 0 and previous_status != "error" and (status == "error" or (record_count <= 0 and not healthy_empty)):
-                self.store_payload(panel_id, retained_snapshot(previous, sources=payload.get("sources")))
-                self.store_seed_meta(
-                    panel_id,
-                    status="preserved",
-                    record_count=previous_count,
-                    source_states={"techPanels": status},
-                    error_summary=(payload.get("summary") or {}).get("error") if isinstance(payload.get("summary"), dict) else "empty payload",
-                    preserve_last_success=True,
-                )
-                result["panels"][panel_id] = "preserved"
-                continue
-            self.store_payload(panel_id, payload)
-            self.store_seed_meta(
-                panel_id,
-                status=status if status in {"ok", "partial", "degraded"} else ("degraded" if record_count else "empty"),
-                record_count=record_count,
-                source_states=payload.get("sources") if isinstance(payload.get("sources"), dict) else {},
-                error_summary=(payload.get("summary") or {}).get("error") if isinstance(payload.get("summary"), dict) else None,
-            )
-            result["panels"][panel_id] = status
+                with lock:
+                    self.source_deadline = time.monotonic() + 180
+                    try:
+                        payload = tech_panels_service.build_tech_panel_payload(ctx, panel_id, limit=self.limit)
+                    except Exception as exc:
+                        payload = tech_panels_service._payload(panel_id, title=panel_id.upper(), items=[], status="error", sources={"builder": "error"}, summary={"error": str(exc)})
+                    previous = bounded_rows(self.load_previous_payload(panel_id), utc_now_iso())
+                    if panel_id == "big-tech-market-cap":
+                        previous = tech_panels_service.bounded_big_tech_caps(previous)
+                    previous_count = len(previous.get("items") or []) if isinstance(previous, dict) else 0
+                    previous_status = str(previous.get("status") or "") if isinstance(previous, dict) else ""
+                    record_count = len(payload.get("items") or []) if isinstance(payload, dict) else 0
+                    status = str(payload.get("status") or ("ok" if record_count else "empty")) if isinstance(payload, dict) else "error"
+                    sources = payload.get("sources") or {}
+                    healthy_empty = status == "empty" and bool(sources) and all(value in {"ok", "empty", "disabled"} for value in sources.values())
+                    if previous and previous_count > 0 and previous_status != "error" and (status == "error" or (record_count <= 0 and not healthy_empty)):
+                        self.store_payload(panel_id, retained_snapshot(previous, sources=payload.get("sources")))
+                        self.store_seed_meta(
+                            panel_id,
+                            status="preserved",
+                            record_count=previous_count,
+                            source_states={"techPanels": status},
+                            error_summary=(payload.get("summary") or {}).get("error") if isinstance(payload.get("summary"), dict) else "empty payload",
+                            preserve_last_success=True,
+                        )
+                        result["panels"][panel_id] = "preserved"
+                        continue
+                    self.store_payload(panel_id, payload)
+                    self.store_seed_meta(
+                        panel_id,
+                        status=status if status in {"ok", "partial", "degraded"} else ("degraded" if record_count else "empty"),
+                        record_count=record_count,
+                        source_states=payload.get("sources") if isinstance(payload.get("sources"), dict) else {},
+                        error_summary=(payload.get("summary") or {}).get("error") if isinstance(payload.get("summary"), dict) else None,
+                    )
+                    result["panels"][panel_id] = status
+            except TimeoutError:
+                result["panels"][panel_id] = "refresh-in-progress"
+            except SnapshotPublicationError as exc:
+                self.store_seed_meta(panel_id, status="error", record_count=0,
+                                     source_states={"publication": "error"}, error_summary=str(exc),
+                                     preserve_last_success=True)
+                result["panels"][panel_id] = "publication-failed"
+                result["status"] = "partial"
         return result
 
 
@@ -281,17 +337,20 @@ def main() -> int:
         interval_seconds=args.interval,
         limit=args.limit,
     )
-    print(f"[tech-panels] panels={','.join(tech_panels_service.TECH_PANEL_IDS)} sqlite={settings.snapshot_sqlite_path}", file=sys.stderr)
-    if not args.watch:
-        print(json.dumps(watcher.run_once(), ensure_ascii=True, default=str))
-        return 0
-    while True:
-        started_at = time.monotonic()
-        try:
-            print(json.dumps(watcher.run_once(), ensure_ascii=True, default=str), flush=True)
-        except Exception as exc:
-            print(f"[tech-panels] ERROR run failed: {exc}", file=sys.stderr)
-        time.sleep(max(5, watcher.interval_seconds - (time.monotonic() - started_at)))
+    try:
+        print(f"[tech-panels] panels={','.join(tech_panels_service.TECH_PANEL_IDS)} sqlite={settings.snapshot_sqlite_path}", file=sys.stderr)
+        if not args.watch:
+            print(json.dumps(watcher.run_once(), ensure_ascii=True, default=str))
+            return 0
+        while True:
+            started_at = time.monotonic()
+            try:
+                print(json.dumps(watcher.run_once(), ensure_ascii=True, default=str), flush=True)
+            except Exception as exc:
+                print(f"[tech-panels] ERROR run failed: {exc}", file=sys.stderr)
+            time.sleep(max(5, watcher.interval_seconds - (time.monotonic() - started_at)))
+    finally:
+        watcher.close()
 
 
 if __name__ == "__main__":

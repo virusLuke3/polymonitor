@@ -177,6 +177,36 @@ class SportsOddsWatcherTestCase(unittest.TestCase):
             )
         return watcher, fake_redis, snapshot_dir
 
+    def test_read_retries_timeout_with_full_budget_and_keeps_quota_denial(self):
+        import requests
+        from api.clients import source_transport
+        watcher, _, _ = self.make_watcher()
+        calls = []
+        response = requests.Response()
+        response.status_code = 200
+        response._content = b"[]"
+        response._content_consumed = True
+        response.headers["x-requests-remaining"] = "490"
+        def request(method, url, **kwargs):
+            calls.append(kwargs["timeout"])
+            if len(calls) == 1:
+                raise requests.ReadTimeout()
+            return response
+        watcher.requests = SimpleNamespace(request=request)
+        with patch.object(source_transport.time, "sleep", lambda _: None):
+            self.assertEqual([], watcher.http_json_get("fixture", timeout=45))
+        self.assertEqual([45, 45], calls)
+        self.assertEqual(490, watcher.last_http_quota["remaining"])
+        calls.clear()
+        response.status_code = 429
+        response.headers["x-requests-remaining"] = "0"
+        watcher.requests = SimpleNamespace(request=lambda *a, **kw: (calls.append(1), response)[1])
+        with self.assertRaises(requests.HTTPError):
+            watcher.http_json_get("fixture", timeout=45)
+        self.assertEqual([1], calls)
+        self.assertEqual(0, watcher.last_http_quota["remaining"])
+        self.assertEqual(86400, watcher.next_interval_seconds())
+
     def test_watcher_stores_payload_snapshot_and_seed_meta(self):
         watcher, fake_redis, _ = self.make_watcher()
         payload = {"generatedAt": "2026-05-12T18:00:00Z", "status": "ok", "sources": {"theOddsApi": "ok"}, "items": [{"id": "event-1"}]}

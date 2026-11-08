@@ -413,14 +413,6 @@ SEED_META_SPECS = [
         "defaultIntervalSeconds": 120,
     },
     {
-        "panelId": "polysignal-feed",
-        "namespace": "seed-meta:signals",
-        "cacheKey": "polysignal-feed",
-        "serviceName": "polydata-polysignal-feed-seed.service",
-        "intervalEnv": "POLYDATA_SIGNAL_WATCH_INTERVAL_SECONDS",
-        "defaultIntervalSeconds": 120,
-    },
-    {
         "panelId": "whale-trades",
         "namespace": "seed-meta:signals",
         "cacheKey": "whale-trades",

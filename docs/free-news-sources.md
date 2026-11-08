@@ -10,6 +10,12 @@
 - 采集器首次运行通过现有 schema 初始化追加 `content_source_state`、`content_versions`、`content_discoveries` 与 provider/time 索引；原表字段复用，额外出处、许可、时间、版本保存在 raw_payload。
 - USGS/NWS 正常采集只读 `snapshot:world:natural-hazards` 中的现有快照，不重复联网；`--probe` 才直接请求种子接口验证技术状态。地图快照是有边界的来源子集，不代表完整上游或历史覆盖。
 
+FRASER 三源仍每六小时检查目录及最新条目。对相同条目、相同 PDF URL 且本地 PDF 哈希和正文文件完整的归档，24 小时内复用原件；独立 `pdf_checked_at` / `pdf_http` 写入现有 `content_source_state`，复用不会推进这个 PDF 核验时钟或原 `receivedAt`。每日继续请求原 URL 检查修订；服务器未提供 ETag/Last-Modified 时用响应哈希识别原件，内容相同则不重复提取正文。新条目、归档损坏、显式 force/probe 均会重新取得 PDF。域名互斥等待不扣减其后的 45 秒 I/O 预算，既有内容进程的 90 秒整轮硬预算继续生效。
+
+独立的 Breaking Event Radar 继续由现有五分钟 watcher 与 `snapshot:evidence:breaking-event-radar / panel-v1` 提供数据；HTTP Session 使用共享 SourceSession 读取已配置路由，GDELT 的 `state:content / gdelt-backoff` 持久退避保持不变。Wikimedia 仅请求已结束 UTC 日，保留 `sourceDay` 和获取时间；缺失 observations 是错误，不能转成零访问量。所有来源失败而仅沿用旧主题时，不推进 seed 的成功时间或快照 `generatedAt`，用 `lastAttemptAt` 记录本轮尝试并标记 `stale`；主题轮转仍继续。
+
+2026-11-06 只读核验：三份生产 BLS 原件与归档哈希一致、正文存在；两个指定出口的三个 FRASER 目录请求均读超时，直连 CPI 连接超时，Wikimedia 的本机请求也读超时。缓存与失败处理的回归测试不代表这些生产连接已恢复，仍需有效内容请求、正式入库和 API 消费证据。
+
 ## 来源登记
 
 配置文件：`scripts/runtime/free_news_sources.json`。每源分别记录技术探测、保存字段、标题/摘要展示、许可依据、署名、限制及核验时间。以下地址均为官方；所有源免账号、免 Key。

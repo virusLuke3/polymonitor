@@ -233,3 +233,8 @@ def test_trade_watermark_reuses_existing_cache_without_repeating_fact_scan():
         assert clickhouse_orderfilled_service.get_market_trades(context, 7) == []
         assert clickhouse_orderfilled_service.get_market_trades(context, 7) == []
     assert sum("AS latest_block" in call.args[1] for call in read.call_args_list) == 1
+
+
+# These SQL fixtures model the canonical store; primary tests opt in explicitly.
+import pytest
+pytestmark = pytest.mark.usefixtures("legacy_orderfilled_store")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -131,7 +132,7 @@ def _find_broker_symbol(text: str) -> Optional[tuple[str, str, str]]:
         if re.search(rf"(?<![A-Z0-9]){re.escape(symbol)}(?![A-Z0-9])", normalized):
             return symbol, name, theme
         name_tokens = [token for token in re.split(r"\W+", name.upper()) if len(token) >= 4]
-        if name_tokens and all(token in normalized for token in name_tokens[:2]):
+        if name_tokens and all(re.search(rf"(?<![A-Z0-9]){re.escape(token)}(?![A-Z0-9])", normalized) for token in name_tokens[:2]):
             return symbol, name, theme
     return None
 
@@ -343,6 +344,10 @@ def _is_original_research_url(url: str, *, allowed_domains: tuple[str, ...] = ()
     if not url.startswith(("http://", "https://")):
         return False
     host = (urlparse(url).netloc or "").lower()
+    # SCR publishes its own company research. Its official RSS links must not
+    # inherit the exclusion for syndicated commentary on the parent domain.
+    if host == "scr.zacks.com" and urlparse(url).path.startswith(("/news/news-details/", "/files/news/")):
+        return True
     if allowed_domains and any(host == domain or host.endswith(f".{domain}") for domain in allowed_domains):
         return True
     return not _is_news_or_aggregator_url(url)
@@ -447,11 +452,12 @@ def _broker_research_row(
     explicit_analyst: str = "",
 ) -> Optional[Dict[str, Any]]:
     text = f"{title} {summary} {explicit_symbol}"
-    match = _find_broker_symbol(text)
+    source_symbol = _normalize_security_code(explicit_symbol) or _symbol_from_text(title)
+    match = next((spec for spec in BROKER_RESEARCH_SYMBOLS if spec[0] == source_symbol), None) if source_symbol else _find_broker_symbol(text)
     if match:
         symbol, company, theme = match
     else:
-        symbol = _normalize_security_code(explicit_symbol) or _symbol_from_text(f"{explicit_symbol} {title} {summary}")
+        symbol = source_symbol or _symbol_from_text(f"{title} {summary}")
         if not symbol:
             return None
         company = explicit_company or symbol
@@ -485,7 +491,7 @@ def _broker_research_row(
     if previous_target is not None:
         summary_bits.append(f"from {_format_price(previous_target)}")
     return {
-        "id": f"broker-research:{symbol}:{abs(hash(report_url or title))}",
+        "id": f"broker-research:{symbol}:{hashlib.sha256((report_url or title).encode()).hexdigest()[:24]}",
         "label": symbol,
         "symbol": company.upper()[:16],
         "title": title,
@@ -843,6 +849,7 @@ def build_broker_research_payload(
     limit: int,
 ) -> Dict[str, Any]:
     rows, sources = _build_broker_rows_from_configured_sources(ctx, limit)
+    source_failed = any(value in {"error", "parse-error", "missing"} for value in sources.values())
     if rows:
         upgrades = sum(1 for row in rows if "UPGRADE" in (row.get("tags") or []))
         cuts = sum(1 for row in rows if any(tag in {"DOWNGRADE", "PT CUT"} for tag in (row.get("tags") or [])))
@@ -850,6 +857,7 @@ def build_broker_research_payload(
             "broker-research-watch",
             title="BROKER RESEARCH",
             items=rows,
+            status="partial" if source_failed else "ok",
             summary={"upgrades": upgrades, "cuts": cuts, "topSymbol": rows[0]["label"], "rankBy": "original report + target revision + recency"},
             sources=sources or {"brokerResearchFeeds": "empty"},
         )
@@ -859,7 +867,7 @@ def build_broker_research_payload(
         "broker-research-watch",
         title="BROKER RESEARCH",
         items=[],
-        status="empty",
+        status="error" if source_failed or not sources else "empty",
         summary={
             "reason": "No original broker research metadata source produced rows",
             "requiredEnv": "POLYDATA_FINANCE_BROKER_RESEARCH_FEED_URLS or POLYDATA_FINANCE_BROKER_RESEARCH_EASTMONEY_URL / POLYDATA_FINANCE_BROKER_RESEARCH_CHOICE_URL",

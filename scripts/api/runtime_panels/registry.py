@@ -70,7 +70,6 @@ from .modules import (
     nba_intel,
     nba_scoreboard,
     onchain_tradfi_perp_radar,
-    polysignal_feed,
     polymarket_macro_map,
     shelter_rent_oer_pressure,
     supply_tariff_import_watch,
@@ -159,7 +158,6 @@ _MODULES: List[ModuleType] = [
     labor_wage_services_pressure,
     growth_demand_recession_tracker,
     fed_rates_polymarket_gap,
-    polysignal_feed,
     alpha_signal,
     whale_tracker,
     suspicious_flow,
@@ -213,7 +211,6 @@ DEFAULT_WORKSPACE_PANEL_IDS: List[str] = [
     "market-youtube-channels",
     "breaking-event-radar",
     "alpha-signal",
-    "polysignal-feed",
     "whale-tracker",
     "suspicious-flow",
     "commodities-watch",
@@ -274,17 +271,12 @@ _assert_unique(RUNTIME_PANEL_MODULES)
 _PANELS_BY_ROUTE: Dict[str, RuntimePanelModule] = {panel.route: panel for panel in RUNTIME_PANEL_MODULES}
 _PANELS_BY_ID: Dict[str, RuntimePanelModule] = {panel.panel_id: panel for panel in RUNTIME_PANEL_MODULES}
 
-# Compatibility only: old open tabs and stored layouts use the previous name.
-LEGACY_PANEL_IDS = {"polybeats-feed": "polysignal-feed"}
-LEGACY_PANEL_ROUTES = {"/runtime/signals/polybeats": "/runtime/signals/polysignal"}
-
-
 def get_panel_by_route(route: str) -> Optional[RuntimePanelModule]:
-    return _PANELS_BY_ROUTE.get(LEGACY_PANEL_ROUTES.get(route, route))
+    return _PANELS_BY_ROUTE.get(route)
 
 
 def get_panel_by_id(panel_id: str) -> Optional[RuntimePanelModule]:
-    return _PANELS_BY_ID.get(LEGACY_PANEL_IDS.get(panel_id, panel_id))
+    return _PANELS_BY_ID.get(panel_id)
 
 
 def get_panel_routes() -> List[str]:

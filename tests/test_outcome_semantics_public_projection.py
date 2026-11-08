@@ -1041,3 +1041,7 @@ def test_catalog_quote_keeps_source_first_labels_without_claiming_yes_no(install
     assert result['primaryOutcomePrice'] == '0.3000000000'
     assert result['sourcePrices'][0]['sourceLabel'] == 'Away'
     assert result['latestPrice'] is None and not result['supportsYesNoWording']
+
+
+# These SQL fixtures model the canonical store; primary tests opt in explicitly.
+pytestmark = pytest.mark.usefixtures("legacy_orderfilled_store")

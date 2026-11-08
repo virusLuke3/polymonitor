@@ -179,7 +179,7 @@ def _parse_bea_schedule(
     dependencies = _dependencies(ctx)
     html = dependencies.http_text_get(
         url,
-        timeout=12,
+        timeout=45,
         headers={
             "Accept": "text/html",
             "User-Agent": "polydata-cpi-calendar/1.0",
@@ -222,7 +222,9 @@ def _parse_bea_schedule(
                 "marketRelevance": "PCE / Core PCE / Fed",
             }
         )
-    return items, "ok" if items else "empty"
+    if not items:
+        raise ValueError("bea-calendar-no-valid-releases")
+    return items, "ok"
 
 
 def _parse_fomc_schedule(
@@ -233,7 +235,7 @@ def _parse_fomc_schedule(
     dependencies = _dependencies(ctx)
     html = dependencies.http_text_get(
         url,
-        timeout=12,
+        timeout=45,
         headers={
             "Accept": "text/html",
             "User-Agent": "polydata-cpi-calendar/1.0",
@@ -282,7 +284,9 @@ def _parse_fomc_schedule(
                 "marketRelevance": "Fed decision / rates",
             }
         )
-    return items, "ok" if items else "empty"
+    if not items:
+        raise ValueError("fomc-calendar-no-valid-meetings")
+    return items, "ok"
 
 
 def _baseline_from_macro_map(
@@ -384,7 +388,8 @@ def build_cpi_release_calendar_payload(
     now = datetime.fromisoformat(now_iso.replace("Z", "+00:00"))
     previous = dependencies.snapshot_store.get_stale(CPI_CALENDAR_SNAPSHOT_NAMESPACE, CPI_CALENDAR_CACHE_KEY) if dependencies.snapshot_store else {}
     events, source_states, source_errors, conflicts = bls_calendar.build(
-        dependencies.http_text_get, dependencies.snapshot_store, now, previous)
+        dependencies.http_text_get, dependencies.snapshot_store, now, previous,
+        checked_at=lambda: _utc_now_iso(dependencies))
 
     source_jobs = (
         ("beaPce", lambda: _parse_bea_schedule(ctx, url=settings.cpi_calendar_bea_schedule_url)),
@@ -393,13 +398,15 @@ def build_cpi_release_calendar_payload(
     for key, builder in source_jobs:
         try:
             rows, state = builder()
-            events.extend(rows)
+            verified_at = _utc_now_iso(dependencies)
+            events.extend({**row, "verifiedAt": verified_at} for row in rows)
             source_states[key] = state
         except Exception as exc:
             source_states[key] = "error"
+            source_errors[key] = bls_calendar.source_error(exc)
             logger = getattr(dependencies.application, "logger", None)
             if logger is not None:
-                logger.exception("cpi release calendar source failed source=%s error=%s", key, exc)
+                logger.exception("cpi release calendar source failed source=%s error=%s", key, source_errors[key])
 
     baseline = _baseline_from_macro_map(dependencies)
     source_states["pmktBaseline"] = str(baseline.get("status") or "unknown")
@@ -409,13 +416,19 @@ def build_cpi_release_calendar_payload(
     items = sorted(unique_events.values(), key=lambda event: _parse_iso_ts(event.get("releaseAt")))
     calendar_states = [value for key, value in source_states.items() if key != "pmktBaseline"]
     status = "ok" if items and all(value == "ok" for value in calendar_states) else ("degraded" if items else "warming")
+    verified = [str(row["verifiedAt"]) for row in items if row.get("verifiedAt") and not row.get("retained")]
     return {
-        "generatedAt": now_iso,
+        "generatedAt": max(verified) if verified else (previous or {}).get("generatedAt"),
+        "projectedAt": now_iso,
         "source": "FRED / New York Fed / BLS via FRASER / BEA / Federal Reserve / Polymarket",
         "sourceUrl": bls_calendar.NYFED_URL,
         "status": status,
         "sources": source_states,
         "sourceErrors": source_errors,
+        "failedSources": sorted(key for key in ("nyFed", *bls_calendar.SOURCE_KEYS.values(), "beaPce", "fomc")
+                                if source_states.get(key) != "ok"),
+        "freshCount": len(verified),
+        "retainedCount": len(items) - len(verified),
         "scheduleConflicts": conflicts,
         "summary": _summary(items, baseline, now_ts),
         "baseline": baseline,

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from api.context import resolve_optional_service_callable, resolve_service_callable
+from api.services.seed_recovery import age_seconds
 
 
 DEFI_TOKEN_WATCH_NAMESPACE = "snapshot:finance:defi-token-watch"
@@ -20,7 +21,7 @@ DEFAULT_DEFI_TOKEN_IDS = (
     "ethena",
     "curve-dao-token",
     "compound-governance-token",
-    "synthetix-network-token",
+    "havven",
     "rocket-pool",
 )
 
@@ -210,14 +211,22 @@ def fetch_live_defi_token_watch_payload(
         headers={"User-Agent": "polydata-runtime/1.0", "Accept": "application/json"},
     ) or []
     rows = [_normalize_item(item) for item in payload if isinstance(item, dict)]
+    if not rows:
+        raise ValueError("CoinGecko returned no configured token prices")
+    fetched_at = _now(dependencies)
+    rows = [{**row, "fetchedAt": fetched_at} for row in rows if row.get("price") is not None]
+    if not rows:
+        raise ValueError("CoinGecko returned no valid configured token prices")
+    missing = sorted(set(ids) - {row["id"] for row in rows})
     configured_order = {token_id: index for index, token_id in enumerate(ids)}
     rows.sort(key=lambda row: configured_order.get(str(row.get("id")), 999))
     return normalize_defi_token_watch_payload(
         {
-            "generatedAt": _now(dependencies),
-            "status": "ok" if rows else "empty",
+            "generatedAt": fetched_at,
+            "status": "partial" if missing else "ok",
             "cacheMode": "live-build",
-            "sources": {"coingecko": "ok" if rows else "empty"},
+            "sources": {"coingecko": "partial" if missing else "ok"},
+            "summary": {"expectedCount": len(ids), "receivedCount": len(rows), "missingIds": missing},
             "items": rows,
         },
         settings=settings,
@@ -235,50 +244,24 @@ def _read_seeded_snapshot(
     cache_key: str,
     ttl_seconds: int,
 ) -> Optional[Dict[str, Any]]:
-    if dependencies.get_cached_json is not None:
-        redis_payload = dependencies.get_cached_json(
-            DEFI_TOKEN_WATCH_NAMESPACE,
-            cache_key,
-        )
-        if isinstance(redis_payload, dict):
-            if dependencies.snapshot_store is not None:
-                dependencies.snapshot_store.set(
-                    DEFI_TOKEN_WATCH_NAMESPACE,
-                    cache_key,
-                    redis_payload,
-                    ttl_seconds,
-                )
-            return _with_cache_mode(redis_payload, "redis-seed")
-
-    if dependencies.snapshot_store is None:
+    payload = None
+    if dependencies.snapshot_store is not None:
+        payload = dependencies.snapshot_store.get(DEFI_TOKEN_WATCH_NAMESPACE, cache_key)
+        if not isinstance(payload, dict):
+            payload = dependencies.snapshot_store.get_stale(DEFI_TOKEN_WATCH_NAMESPACE, cache_key)
+    if not isinstance(payload, dict) and dependencies.get_cached_json is not None:
+        try:
+            payload = dependencies.get_cached_json(DEFI_TOKEN_WATCH_NAMESPACE, cache_key)
+        except Exception:
+            payload = None
+    if not isinstance(payload, dict):
         return None
-    sqlite_payload = dependencies.snapshot_store.get(
-        DEFI_TOKEN_WATCH_NAMESPACE,
-        cache_key,
-    )
-    if isinstance(sqlite_payload, dict):
-        if dependencies.set_cached_json is not None:
-            dependencies.set_cached_json(
-                DEFI_TOKEN_WATCH_NAMESPACE,
-                cache_key,
-                sqlite_payload,
-                ttl_seconds,
-            )
-        return _with_cache_mode(sqlite_payload, "sqlite-seed")
-    stale_payload = dependencies.snapshot_store.get_stale(
-        DEFI_TOKEN_WATCH_NAMESPACE,
-        cache_key,
-    )
-    if isinstance(stale_payload, dict):
-        if dependencies.set_cached_json is not None:
-            dependencies.set_cached_json(
-                DEFI_TOKEN_WATCH_NAMESPACE,
-                cache_key,
-                stale_payload,
-                min(30, ttl_seconds),
-            )
-        return _with_cache_mode(stale_payload, "stale-seed")
-    return None
+    age = age_seconds(payload.get("generatedAt"), _now(dependencies))
+    if age >= 1800:
+        return None
+    stale = age >= 900 or payload.get("status") == "stale"
+    return {**payload, "cacheMode": "stale-seed" if stale else "seeded",
+            **({"status": "stale"} if stale else {})}
 
 
 def _store_seed_fallback(
@@ -333,23 +316,7 @@ def get_defi_token_watch_snapshot(
             generated_at=_now(dependencies),
         )
 
-    def _builder() -> Dict[str, Any]:
-        return fetch_live_defi_token_watch_payload(
-            dependencies,
-            limit=limit,
-        )
-
-    if dependencies.get_snapshot_payload is not None:
-        return dependencies.get_snapshot_payload(
-            DEFI_TOKEN_WATCH_NAMESPACE,
-            cache_key,
-            _builder,
-            ttl_seconds=ttl_seconds,
-        )
-    payload = _builder()
-    return _store_seed_fallback(
-        dependencies,
-        cache_key=cache_key,
-        payload=payload,
-        ttl_seconds=ttl_seconds,
-    )
+    # The periodic owner is the only producer; cold GETs do not start another
+    # CoinGecko request or give an expired seed a new cache lifetime.
+    return {"generatedAt": "", "status": "warming", "cacheMode": "warming",
+            "items": [], "summary": {"count": 0}, "sources": {"coingecko": "warming"}}

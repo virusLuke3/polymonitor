@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import json
 from typing import Any, Dict
 
+from api.services.worldcup.cache import store_payload
 from api.services.worldcup.payload import normalize_payload
 
 WORLDCUP_PANEL_NAMESPACE = "snapshot:sports:worldcup-panel"
@@ -138,17 +138,8 @@ def build_worldcup_panel_payloads(dashboard_payload: Dict[str, Any]) -> Dict[str
 
 def store_worldcup_panel_payloads(ctx: Dict[str, Any], dashboard_payload: Dict[str, Any], *, core_ttl: int, live_ttl: int) -> Dict[str, Dict[str, Any]]:
     panels = build_worldcup_panel_payloads(dashboard_payload)
-    store = ctx.get("SNAPSHOT_STORE")
-    setter = ctx.get("set_cached_json")
     for panel_id, payload in panels.items():
         ttl_seconds = panel_ttl_seconds(panel_id, core_ttl, live_ttl)
-        if store is not None:
-            store.set(WORLDCUP_PANEL_NAMESPACE, panel_id, payload, ttl_seconds)
-        if callable(setter):
-            setter(WORLDCUP_PANEL_NAMESPACE, panel_id, payload, ttl_seconds)
-        else:
-            redis_client = ctx.get("redis_client") or ctx.get("REDIS_CLIENT")
-            redis_prefix = str(ctx.get("redis_prefix") or ctx.get("REDIS_PREFIX") or "")
-            if redis_client is not None:
-                redis_client.set(f"{redis_prefix}{WORLDCUP_PANEL_NAMESPACE}:{panel_id}", json.dumps(payload, ensure_ascii=True, default=str), ex=ttl_seconds)
+        store_payload(ctx, namespace=WORLDCUP_PANEL_NAMESPACE, cache_key=panel_id,
+                      payload=payload, ttl_seconds=ttl_seconds)
     return panels

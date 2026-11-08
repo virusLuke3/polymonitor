@@ -167,7 +167,7 @@ def test_big_tech_market_cap_payload_ranks_by_market_cap():
     assert payload["summary"]["tracked"] >= 20
 
 
-def test_big_tech_market_cap_estimates_when_yahoo_omits_cap():
+def test_big_tech_missing_cap_keeps_quotes_without_inventing_cap_or_rank():
     ctx = _ctx()
 
     def yahoo_without_cap(symbol, interval="30m", range_name="5d", ttl_seconds=None):
@@ -181,10 +181,70 @@ def test_big_tech_market_cap_estimates_when_yahoo_omits_cap():
     ctx["get_yahoo_market_snapshot"] = yahoo_without_cap
     payload = tech_panels_service.build_tech_panel_payload(ctx, "big-tech-market-cap", limit=2)
 
-    assert payload["status"] == "ok"
+    assert payload["status"] == "partial"
     assert payload["items"][0]["symbol"] == "NVDA"
-    assert payload["items"][0]["marketCap"] == 4_860_000_000_000
-    assert payload["items"][0]["marketCapEstimated"] is True
+    assert payload["items"][0]["marketCap"] is None
+    assert payload["items"][0]["marketCapEstimated"] is False
+    assert payload["items"][0]["rank"] is None
+    assert payload["items"][0]["metricLabel"] == "--"
+    assert payload["items"][0]["price"] == 200.
+    assert payload["summary"]["marketCapCount"] == 0
+    assert len(payload["summary"]["missingMarketCapSymbols"]) == 24
+    assert payload["sources"]["yahooMarketCap"] == "unavailable"
+
+
+def test_big_tech_cap_failure_retains_its_original_clock_while_quote_refreshes():
+    from datetime import datetime, timedelta, timezone
+    old_at = (datetime.now(timezone.utc) - timedelta(minutes=15)).isoformat()
+    previous = {"items": [{"id": "NVDA", "symbol": "NVDA", "marketCap": 4_500_000_000_000,
+                            "marketCapSource": "nasdaq-stock-summary", "marketCapFetchedAt": old_at,
+                            "marketCapQuoteAt": None, "marketCapCurrency": "USD"}]}
+    ctx = _ctx()
+    ctx["SNAPSHOT_STORE"] = SimpleNamespace(get_stale=lambda *args: previous)
+    def failed_cap(symbol):
+        raise TimeoutError("source failed")
+    ctx["get_nasdaq_market_cap"] = failed_cap
+    result = tech_panels_service.build_big_tech_market_cap_payload(ctx, 24)
+    row = next(row for row in result["items"] if row["symbol"] == "NVDA")
+    assert row["price"] == 180.
+    assert row["marketCap"] == 4_500_000_000_000
+    assert row["marketCapFetchedAt"] == old_at
+    assert row["marketCapStatus"] == "stale"
+    assert row["fetchedAt"] != old_at
+    assert result["status"] == "partial"
+    previous["items"][0]["marketCapFetchedAt"] = (datetime.now(timezone.utc) - timedelta(minutes=31)).isoformat()
+    expired = tech_panels_service.build_big_tech_market_cap_payload(ctx, 24)
+    assert all(row["marketCap"] is None for row in expired["items"])
+
+
+def test_big_tech_real_cap_survives_quote_failure_and_rejects_estimated_last_good():
+    ctx = _ctx()
+    ctx["get_yahoo_market_snapshot"] = lambda *a, **k: None
+    ctx["get_nasdaq_market_cap"] = lambda symbol: {
+        "marketCap": 1000., "marketCapSource": "nasdaq-stock-summary", "marketCapSymbol": symbol,
+        "marketCapCurrency": "USD", "marketCapFetchedAt": "2026-11-06T04:00:00Z", "marketCapQuoteAt": None}
+    result = tech_panels_service.build_big_tech_market_cap_payload(ctx, 24)
+    assert result["status"] == "partial"
+    assert result["summary"]["marketCapCount"] == 24
+    assert len(result["summary"]["failedSymbols"]) == 24
+    assert all(row["price"] is None and row["quoteAt"] is None for row in result["items"])
+    assert all(row["marketCapStatus"] == "available" for row in result["items"])
+    previous = {"items": [{**result["items"][0], "marketCapEstimated": True}]}
+    ctx["SNAPSHOT_STORE"] = SimpleNamespace(get_stale=lambda *a: previous)
+    ctx["get_yahoo_market_snapshot"] = _ctx()["get_yahoo_market_snapshot"]
+    ctx["get_nasdaq_market_cap"] = lambda symbol: None
+    assert all(row["marketCap"] is None for row in tech_panels_service.build_big_tech_market_cap_payload(ctx, 24)["items"])
+
+
+def test_big_tech_whole_snapshot_fallback_never_restores_estimated_or_expired_cap():
+    payload = {"items": [
+        {"symbol": "NVDA", "marketCap": 9e12, "marketCapEstimated": True, "price": 180.},
+        {"symbol": "TSM", "marketCap": 2e12, "marketCapSource": "nasdaq-stock-summary", "marketCapFetchedAt": "2000-01-01T00:00:00Z"},
+    ]}
+    result = tech_panels_service.bounded_big_tech_caps(payload)
+    assert all(row["marketCap"] is None and row["rank"] is None for row in result["items"])
+    assert result["items"][0]["price"] == 180.
+    assert payload["items"][0]["marketCap"] == 9e12
 
 
 def test_consumer_app_pulse_combines_app_store_and_news():
@@ -202,6 +262,24 @@ def test_consumer_app_pulse_combines_app_store_and_news():
     assert categories.count("GAMES") == 10
     assert categories.count("NEWS") == 10
     assert categories.count("GROSSING") == 10
+
+
+def test_app_chart_failures_are_not_healthy_empty():
+    ctx = _ctx()
+    def failed(*args, **kwargs):
+        raise TimeoutError("source timeout")
+    ctx["http_json_get"] = failed
+    result = tech_panels_service.build_consumer_app_pulse_payload(ctx, 40)
+    assert result["status"] == "error"
+    assert result["sources"]["appStoreCharts"] == "error"
+    assert len(result["summary"]["appStoreFailures"]) == len(tech_panels_service.APP_STORE_CHART_FEEDS)
+
+
+def test_app_chart_wrong_schema_is_not_a_valid_empty_chart():
+    ctx = _ctx()
+    ctx["http_json_get"] = lambda *args, **kwargs: {"error": "upstream failure"}
+    result = tech_panels_service.build_consumer_app_pulse_payload(ctx, 40)
+    assert result["sources"]["appStoreCharts"] == "error"
 
 
 @pytest.mark.parametrize("html", ["<html>Server Action unavailable</html>", rankings_html("day"), rankings_html(rows=[{"wrong": 1}])])
@@ -243,6 +321,25 @@ def test_partial_big_tech_keeps_original_quote_clock(monkeypatch):
     row = next(row for row in result['items'] if row['id'] == 'NVDA')
     assert row['fetchedAt'] == '2026-11-04T08:40:00Z' and row['retained']
     assert row['quoteAt'] == '2026-11-03T21:00:00Z'
+
+
+def test_big_tech_does_not_retain_legacy_estimated_market_cap(monkeypatch):
+    ctx = _ctx()
+    quote = ctx['get_yahoo_market_snapshot']
+    ctx['get_yahoo_market_snapshot'] = lambda symbol, **kw: None if symbol == 'NVDA' else quote(symbol, **kw)
+    previous = {'generatedAt': '2026-11-04T08:50:00Z', 'items': [{
+        'id': 'NVDA', 'label': 'Nvidia', 'symbol': 'NVDA', 'marketCap': 9e12,
+        'marketCapEstimated': True, 'metric': 9e12, 'metricLabel': '$9.00T',
+        'fetchedAt': '2026-11-04T08:40:00Z', 'quoteAt': '2026-11-03T21:00:00Z', 'tags': ['CHIPS'],
+    }]}
+    ctx['SNAPSHOT_STORE'] = SimpleNamespace(get_stale=lambda *a: previous)
+    monkeypatch.setattr(tech_panels_service, 'utc_now_iso', lambda: '2026-11-04T09:00:00Z')
+    result = tech_panels_service.build_big_tech_market_cap_payload(ctx, 24)
+    row = next(row for row in result['items'] if row['id'] == 'NVDA')
+    assert row['marketCap'] is None and row['metric'] is None and row['rank'] is None
+    assert row['metricLabel'] == '--'
+    assert row['fetchedAt'] == '2026-11-04T08:40:00Z'
+    assert result['summary']['missingMarketCapSymbols'] == ['NVDA']
 
 
 def test_ai_partial_source_retention_expires_from_original_fetch(monkeypatch):

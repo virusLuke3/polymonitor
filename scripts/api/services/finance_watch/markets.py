@@ -198,24 +198,31 @@ def build_tradfi_perps_payload(
     for item in source.get("items") or []:
         if not isinstance(item, dict):
             continue
-        mark = _safe_float(item.get("markPx"))
+        mark = _safe_float(item.get("lastPx") if item.get("lastPx") is not None else item.get("markPx"))
         oracle = _safe_float(item.get("oraclePx"))
         basis_bps = _safe_float(item.get("basisBps"))
-        change = _safe_float(item.get("changePercent") if item.get("changePercent") is not None else item.get("funding"))
-        if basis_bps is None and mark is not None and oracle not in (None, 0):
-            basis_bps = ((mark - float(oracle)) / float(oracle)) * 10000
+        change = _safe_float(item.get("changePercent"))
+        # The source computes basis from aligned mark/index clocks. A last
+        # trade or a delayed reference quote is never a replacement mark.
+        if basis_bps is None and item.get("source") != "okx-swap" and item.get("markPx") is not None and oracle not in (None, 0):
+            basis_bps = ((float(item["markPx"]) - float(oracle)) / float(oracle)) * 10000
         asset_class = str(item.get("assetClass") or "perp").upper()
         venue = str(item.get("venue") or item.get("source") or "PERP").upper()
         rows.append(
             {
                 "id": str(item.get("symbol") or item.get("display")),
+                "fetchedAt": item.get("fetchedAt") or source.get("fetchedAt") or external.get("generatedAt"),
+                "retained": bool(item.get("retained")),
+                "sourceStatus": item.get("sourceStatus") or source.get("status"),
+                "sourceObservedAt": item.get("sourceObservedAt"),
+                "details": _tradfi_details(item),
                 "label": str(item.get("display") or f"{item.get('symbol')}-PERP"),
                 "symbol": asset_class,
                 "metric": mark,
                 "metricLabel": _format_price(mark),
-                "metricUnit": "MARK",
+                "metricUnit": "PRICE" if item.get("priceType") in {"last", "reference"} else "MARK",
                 "secondary": basis_bps,
-                "secondaryLabel": f"{basis_bps:+.0f} bps" if basis_bps is not None and abs(basis_bps) > 0 else (_format_usd(item.get("dayNotional")) if item.get("dayNotional") is not None else "--"),
+                "secondaryLabel": f"{basis_bps:+.1f} bps" if basis_bps is not None else "Basis N/A" if item.get("instrumentType") == "FUTURES_REFERENCE" else "Basis --",
                 "change": change,
                 "changeLabel": _format_pct(change),
                 "tags": [venue[:8], asset_class],
@@ -230,7 +237,37 @@ def build_tradfi_perps_payload(
         ),
         reverse=True,
     )
-    return _payload("tradfi-perp-radar", title="TRADFI PERPS", items=rows[:limit], sources={"financeExternal": source.get("status") or "seed"})
+    return _payload("tradfi-perp-radar", title="TRADFI PERPS", items=rows[:limit], sources={"financeExternal": source.get("status") or "unavailable"}, status=source.get("status") or "warming", generated_at=external.get("generatedAt"))
+
+
+def _tradfi_details(item: Dict[str, Any]) -> List[Dict[str, Any]]:
+    reference = item.get("instrumentType") == "FUTURES_REFERENCE"
+    states, clocks = item.get("metricStatus", {}), item.get("metricObservedAt", {})
+    currency = item.get("quoteCurrency") or ""
+    details = []
+    def add(label, value, unit="", group=None, applicable=True):
+        number = _safe_float(value)
+        text = (f"{number:,.6f}".rstrip("0").rstrip(".") + (f" {unit}" if unit else "")) if number is not None else "--" if applicable else "N/A"
+        details.append({"label": label, "value": text,
+                        "status": states.get(group) if group else "not-applicable" if not applicable else None,
+                        "observedAt": clocks.get(group) if group else item.get("sourceObservedAt"),
+                        "fetchedAt": item.get("metricFetchedAt", {}).get(group) if group else item.get("fetchedAt")})
+    add("Mark", item.get("markPx"), currency, "mark", not reference)
+    add("Index", item.get("oraclePx"), currency, "index", not reference)
+    funding = _safe_float(item.get("funding"))
+    hours = item.get("fundingIntervalHours")
+    add("Funding forecast", funding * 100 if funding is not None else None,
+        f"% / {hours:g}h" if isinstance(hours, (int, float)) else "%", "funding", not reference)
+    if item.get("fundingAt"):
+        details.append({"label": "Next settlement", "value": item["fundingAt"], "status": states.get("funding"), "observedAt": clocks.get("funding")})
+    add("Open interest", item.get("openInterestUsd"), "USD", "openInterest", not reference)
+    add("24h volume", item.get("volumeContracts24h") if not reference else item.get("volume24h"), "contracts")
+    if not reference:
+        add("24h underlying", item.get("volumeBase24h"), item.get("volumeBaseCurrency") or "base units")
+        add("Contract size", item.get("contractValue"), item.get("contractValueCurrency") or "", "instrument")
+        add("24h mark valuation", item.get("volumeMarkEquivalent24h"), currency, "mark")
+        add("24h traded turnover", item.get("dayNotional"), "USD")
+    return details
 
 
 def build_global_indices_payload(
@@ -239,12 +276,14 @@ def build_global_indices_payload(
 ) -> Dict[str, Any]:
     rows: List[Dict[str, Any]] = []
     failed = []
-    for label, symbol, region in GLOBAL_INDEX_SYMBOLS[:limit]:
+    def fetch(spec):
         try:
-            snapshot = _fetch_yahoo_snapshot(ctx, symbol, interval="30m", range_name="5d")
+            return _fetch_yahoo_snapshot(ctx, spec[1], interval="30m", range_name="5d")
         except Exception:
-            failed.append(symbol)
-            continue
+            return None
+    specs = GLOBAL_INDEX_SYMBOLS[:limit]
+    mapper = _dependencies(ctx).map_yahoo or map
+    for (label, symbol, region), snapshot in zip(specs, mapper(fetch, specs)):
         if not isinstance(snapshot, dict):
             failed.append(symbol)
             continue
@@ -301,6 +340,9 @@ def build_crypto_etf_payload(
                 "label": symbol,
                 "symbol": _short_etf_issuer(issuer),
                 "issuer": issuer,
+                "fetchedAt": item.get("fetchedAt") or source.get("fetchedAt") or external.get("generatedAt"),
+                "retained": bool(item.get("retained")),
+                "sourceStatus": item.get("sourceStatus") or source.get("status"),
                 "metric": flow,
                 "metricLabel": _format_usd(flow),
                 "metricUnit": "FLOW",
@@ -315,7 +357,7 @@ def build_crypto_etf_payload(
     total_volume = sum(_safe_float(row.get("secondary")) or 0.0 for row in rows)
     inflows = sum(1 for row in rows if (_safe_float(row.get("metric")) or 0.0) > 0)
     outflows = sum(1 for row in rows if (_safe_float(row.get("metric")) or 0.0) < 0)
-    return _payload("crypto-etf-flow", title="CRYPTO ETF", items=rows[:limit], summary={"netFlowProxyUsd": source.get("netFlowProxyUsd"), "totalVolume": total_volume, "inflowCount": inflows, "outflowCount": outflows}, sources={"financeExternal": source.get("status") or "seed"})
+    return _payload("crypto-etf-flow", title="CRYPTO ETF", items=rows[:limit], summary={"netFlowProxyUsd": source.get("netFlowProxyUsd"), "totalVolume": total_volume, "inflowCount": inflows, "outflowCount": outflows}, sources={"financeExternal": source.get("status") or "unavailable"}, status=source.get("status") or "warming", generated_at=external.get("generatedAt"))
 
 
 def build_stablecoin_payload(
@@ -335,6 +377,9 @@ def build_stablecoin_payload(
                 "id": str(item.get("symbol") or item.get("name")),
                 "label": str(item.get("symbol") or "Stablecoin"),
                 "symbol": str(item.get("name") or "SUPPLY")[:18],
+                "fetchedAt": item.get("fetchedAt") or source.get("fetchedAt") or external.get("generatedAt"),
+                "retained": bool(item.get("retained")),
+                "sourceStatus": item.get("sourceStatus") or source.get("status"),
                 "metric": item.get("price"),
                 "metricLabel": f"{_format_price(item.get('price'), digits=4)}  SUPPLY {_format_usd(item.get('supplyUsd'))}",
                 "metricUnit": "PEG",
@@ -346,7 +391,7 @@ def build_stablecoin_payload(
                 "tone": "down" if abs(deviation or 0.0) >= 20 else _tone(change),
             }
         )
-    return _payload("stablecoin-monitor", title="STABLECOINS", items=rows[:limit], summary={"totalSupplyUsd": source.get("totalSupplyUsd"), "supplyChange7dPct": source.get("supplyChange7dPct"), "stressedCount": source.get("stressedCount")}, sources={"financeExternal": source.get("status") or "seed"})
+    return _payload("stablecoin-monitor", title="STABLECOINS", items=rows[:limit], summary={"totalSupplyUsd": source.get("totalSupplyUsd"), "supplyChange7dPct": source.get("supplyChange7dPct"), "stressedCount": source.get("stressedCount")}, sources={"financeExternal": source.get("status") or "unavailable"}, status=source.get("status") or "warming", generated_at=external.get("generatedAt"))
 
 
 def _format_usd(value: Any) -> str:

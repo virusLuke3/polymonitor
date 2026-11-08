@@ -85,7 +85,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_arg_parser().parse_args()
     watcher = WorldCupCoreWatcher(interval_seconds=args.interval)
-    watcher.redis_client.ping()
     print(
         f"[worldcup-core] redis_key={watcher.redis_prefix}{worldcup_dashboard_service.WORLDCUP_CORE_NAMESPACE}:{worldcup_dashboard_service.WORLDCUP_CORE_CACHE_KEY} sqlite={watcher.settings.snapshot_sqlite_path}",
         file=sys.stderr,

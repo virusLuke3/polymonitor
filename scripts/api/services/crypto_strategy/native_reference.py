@@ -25,7 +25,7 @@ def _get(url):
 def current_references():
     global _cached, _expires, _url
     url = os.environ.get("POLYDATA_CRYPTO_REFERENCE_READER_URL", "")
-    missing = {a: {"status": "unsupported" if a not in ("BTC", "ETH") else "unavailable",
+    missing = {a: {"status": "unavailable",
                    "error": "REFERENCE_READER_UNCONFIGURED"} for a in ASSETS}
     if not url:
         return missing
@@ -42,7 +42,7 @@ def current_references():
             _cached, _url, _expires = data, url, time.monotonic() + 1
         except (OSError, ValueError, TypeError, KeyError):
             previous = _cached if _url == url and _cached else missing
-            _cached = {a: {**ref, "status": "unsupported" if a not in ("BTC", "ETH") else "stale" if ref.get("latest") else "unavailable",
+            _cached = {a: {**ref, "status": "stale" if ref.get("latest") else "unavailable",
                           "error": "REFERENCE_READ_FAILED"} for a, ref in previous.items()}
             _url, _expires = url, time.monotonic() + 3
         return _cached

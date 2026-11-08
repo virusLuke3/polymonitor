@@ -24,9 +24,10 @@ except ImportError:
     requests = None
 
 from api.config import load_api_settings
+from api.clients.source_transport import read_response_bytes, read_with_retry, source_session
 from api.context import RuntimeResources
 from api.services import global_transport_shipping_service
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, utc_now_iso
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, utc_now_iso, publish_snapshot, retained_snapshot
 from runtime.snapshot_store import SnapshotStore
 from runtime.telegram_panel_publish import publish_cached_panel_snapshot
 
@@ -57,20 +58,17 @@ def _redis_key(prefix: str, namespace: str, cache_key: str) -> str:
 class GlobalTransportShippingWatcher:
     def __init__(self, *, redis_url: str, redis_prefix: str, snapshot_sqlite_path: str, settings: Any, limit: int, interval_seconds: int) -> None:
         self.resources = RuntimeResources()
-        if redis is None:
-            raise RuntimeError("redis package is required. Install scripts/requirements.txt")
         if requests is None:
             raise RuntimeError("requests package is required. Install scripts/requirements.txt")
-        if not str(redis_url or "").strip():
-            raise RuntimeError("POLYDATA_REDIS_URL is required for Global Transport watcher")
         self.settings = settings
         self.limit = max(1, int(limit or DEFAULT_LIMIT))
         self.interval_seconds = max(300, int(interval_seconds or DEFAULT_INTERVAL_SECONDS))
         self.redis_prefix = str(redis_prefix or "")
-        self.redis_client = redis.from_url(redis_url, decode_responses=True)
+        self.redis_client = (redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2)
+                             if redis is not None and str(redis_url or "").strip() else None)
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
-        self.requests = requests.Session()
+        self.requests = source_session(requests_lib=requests)
         self.requests.trust_env = str(os.environ.get("POLYDATA_RUNTIME_TRUST_ENV", "0")).strip().lower() in {"1", "true", "yes", "on"}
         self.requests.headers.update({"User-Agent": "polydata-global-transport/1.0"})
 
@@ -87,10 +85,18 @@ class GlobalTransportShippingWatcher:
             global_transport_shipping_service.GLOBAL_TRANSPORT_CACHE_KEY,
         )
 
-    def http_text_get(self, url: str, timeout: int = 18, headers: Optional[Dict[str, str]] = None) -> str:
-        response = self.requests.get(url, timeout=timeout, headers=headers)
-        response.raise_for_status()
-        return response.text
+    def http_text_get(self, url: str, timeout: int = 45, headers: Optional[Dict[str, str]] = None) -> str:
+        now = time.monotonic()
+        deadline = min(now + 90, getattr(self, "_collection_deadline", now + 90))
+        if deadline - now < 45:
+            raise requests.exceptions.Timeout("transport collection budget exhausted")
+
+        def read(response):
+            body = read_response_bytes(response, 12 * 1024 * 1024, deadline=deadline)
+            return body.decode(response.encoding or "utf-8", errors="replace")
+
+        return read_with_retry(self.requests, url, read, attempts=2, deadline=deadline,
+                               timeout=45, headers=headers, stream=True)
 
     def http_json_get(self, url: str, params: Optional[Dict[str, Any]] = None, timeout: int = 18, headers: Optional[Dict[str, str]] = None) -> Any:
         response = self.requests.get(url, params=params, timeout=timeout, headers=headers)
@@ -103,19 +109,35 @@ class GlobalTransportShippingWatcher:
         return response.json()
 
     def get_cached_json(self, namespace: str, cache_key: str) -> Optional[Dict[str, Any]]:
-        raw = self.redis_client.get(_redis_key(self.redis_prefix, namespace, cache_key))
-        if not raw:
+        cached = self.snapshot_store.get(namespace, cache_key)
+        if isinstance(cached, dict):
+            return cached
+        if self.redis_client is None:
             return None
-        payload = json.loads(str(raw))
-        return payload if isinstance(payload, dict) else None
+        try:
+            raw = self.redis_client.get(_redis_key(self.redis_prefix, namespace, cache_key))
+            payload = json.loads(str(raw)) if raw else None
+            return payload if isinstance(payload, dict) else None
+        except Exception:
+            return None
 
     def set_cached_json(self, namespace: str, cache_key: str, payload: Dict[str, Any], ttl_seconds: int) -> None:
-        self.redis_client.set(_redis_key(self.redis_prefix, namespace, cache_key), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl_seconds)
+        # Source caches are best effort; formal snapshots use store_payload.
+        try:
+            self.snapshot_store.set(namespace, cache_key, payload, ttl_seconds)
+        except Exception:
+            pass
+        if self.redis_client is not None:
+            try:
+                self.redis_client.set(_redis_key(self.redis_prefix, namespace, cache_key), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl_seconds)
+            except Exception:
+                pass
 
     def close(self) -> None:
         self.resources.close()
         self.requests.close()
-        self.redis_client.close()
+        if self.redis_client is not None:
+            self.redis_client.close()
 
     def context(self) -> Dict[str, Any]:
         return {
@@ -132,32 +154,34 @@ class GlobalTransportShippingWatcher:
         }
 
     def previous(self) -> Dict[str, Any]:
+        stale = self.snapshot_store.get_stale(
+            global_transport_shipping_service.GLOBAL_TRANSPORT_SNAPSHOT_NAMESPACE,
+            global_transport_shipping_service.GLOBAL_TRANSPORT_CACHE_KEY,
+        )
+        if isinstance(stale, dict):
+            return stale
         cached = self.get_cached_json(
             global_transport_shipping_service.GLOBAL_TRANSPORT_SNAPSHOT_NAMESPACE,
             global_transport_shipping_service.GLOBAL_TRANSPORT_CACHE_KEY,
         )
         if cached:
             return cached
-        stale = self.snapshot_store.get_stale(
-            global_transport_shipping_service.GLOBAL_TRANSPORT_SNAPSHOT_NAMESPACE,
-            global_transport_shipping_service.GLOBAL_TRANSPORT_CACHE_KEY,
-        )
-        return stale if isinstance(stale, dict) else {}
+        return {}
 
     def store_payload(self, payload: Dict[str, Any]) -> None:
         ttl = self.ttl_seconds()
-        self.snapshot_store.set(
-            global_transport_shipping_service.GLOBAL_TRANSPORT_SNAPSHOT_NAMESPACE,
-            global_transport_shipping_service.GLOBAL_TRANSPORT_CACHE_KEY,
-            payload,
-            ttl,
+        publish_snapshot(
+            snapshot_store=self.snapshot_store, namespace=global_transport_shipping_service.GLOBAL_TRANSPORT_SNAPSHOT_NAMESPACE,
+            cache_key=global_transport_shipping_service.GLOBAL_TRANSPORT_CACHE_KEY, payload=payload, ttl_seconds=ttl,
+            redis_client=self.redis_client, redis_cache_key=self.redis_key(),
         )
-        self.redis_client.set(self.redis_key(), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl)
 
     def store_meta(self, *, status: str, record_count: int, source_states: Dict[str, Any] | None = None, error_summary: str | None = None, cache_mode: str | None = None, payload_status: str | None = None, preserve: bool = False) -> None:
         previous = self.seed_meta_store.load(SEED_META_NAMESPACE, SEED_META_CACHE_KEY) or {}
         attempted = utc_now_iso()
-        last_success = previous.get("lastSuccessAt") if preserve else attempted
+        last_success = previous.get("lastSuccessAt")
+        if not preserve and (status in {"ok", "empty"} or (status == "degraded" and record_count > 0)):
+            last_success = attempted
         payload = build_seed_meta_payload(
             panel_id=SEED_META_CACHE_KEY,
             namespace=SEED_META_NAMESPACE,
@@ -166,7 +190,7 @@ class GlobalTransportShippingWatcher:
             expected_interval_seconds=self.interval_seconds,
             status=status,
             last_attempt_at=attempted,
-            last_success_at=last_success or attempted,
+            last_success_at=last_success,
             record_count=record_count,
             source_states=source_states,
             error_summary=error_summary,
@@ -175,13 +199,24 @@ class GlobalTransportShippingWatcher:
         )
         self.seed_meta_store.store(SEED_META_NAMESPACE, SEED_META_CACHE_KEY, payload)
 
+    def store_meta_fail_soft(self, **kwargs: Any) -> bool:
+        try:
+            self.store_meta(**kwargs)
+            return True
+        except Exception as exc:
+            print(f"[global_transport_shipping] WARN seed meta write failed: {exc.__class__.__name__}", file=sys.stderr)
+            return False
+
     def run_once(self) -> Dict[str, Any]:
         previous = self.previous()
+        self._collection_deadline = time.monotonic() + 240
         try:
             payload = global_transport_shipping_service.build_global_transport_shipping_payload(self.context(), limit=self.limit)
         except Exception as exc:
             if previous:
-                preserved = {**previous, "cacheMode": "preserved-seed"}
+                preserved = {**retained_snapshot(previous), "freshness": "stale",
+                             "sourceHealth": {key: "stale" if value == "fresh" else value
+                                              for key, value in (previous.get("sourceHealth") or {}).items()}}
                 self.store_payload(preserved)
                 self.store_meta(status="preserved", record_count=len(preserved.get("items") or []), source_states={"transport": "error"}, error_summary=str(exc), preserve=True)
                 return {"status": "preserved", "payload": preserved, "error": str(exc)}
@@ -215,7 +250,6 @@ def main() -> int:
         interval_seconds=args.interval,
     )
     try:
-        watcher.redis_client.ping()
         print(f"[global-transport-shipping] redis_key={watcher.redis_key()} sqlite={settings.snapshot_sqlite_path}", file=sys.stderr)
         if not args.watch:
             print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
@@ -226,7 +260,7 @@ def main() -> int:
             except KeyboardInterrupt:
                 return 0
             except Exception as exc:
-                watcher.store_meta(status="error", record_count=0, source_states={"transport": "error"}, error_summary=str(exc), preserve=True)
+                watcher.store_meta_fail_soft(status="error", record_count=0, source_states={"transport": "error"}, error_summary=str(exc), preserve=True)
                 print(f"[global-transport-shipping] ERROR {exc}", file=sys.stderr)
             time.sleep(max(300, args.interval))
     finally:

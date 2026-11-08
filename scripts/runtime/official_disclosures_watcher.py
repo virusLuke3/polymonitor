@@ -9,49 +9,39 @@ import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode, urlsplit
 
-import requests
-from api.clients.source_transport import source_session
+from api.clients.source_transport import read_response_bytes, read_with_retry, source_session
 from api.services.official_disclosures_service import WATCHLIST, collect_source, facts, filings, policies, presidential_documents, publish
 from runtime.snapshot_store import SnapshotStore
+
+
+class Transport:
+    def __init__(self, session, *, deadline, user_agent):
+        self.session, self.deadline, self.user_agent = session, deadline, user_agent
+
+    def fetch(self, url, *, deadline=None):
+        is_sec = urlsplit(url).hostname == "data.sec.gov"
+        if is_sec and not self.user_agent:
+            raise ValueError("SEC contact User-Agent is not configured")
+        request_deadline = min(self.deadline, deadline if deadline is not None else time.monotonic() + 100)
+        proxy = os.environ.get("POLYMONITOR_DISCLOSURES_SEC_PROXY_URL", "") if is_sec else ""
+        def read(response):
+            if 300 <= response.status_code < 400:
+                raise ValueError("Disclosure endpoint redirected; source URL requires review")
+            return json.loads(read_response_bytes(response, 24 * 1024**2, deadline=request_deadline))
+        return read_with_retry(self.session, url, read, attempts=2, deadline=request_deadline,
+                               timeout=45, stream=True, allow_redirects=False,
+                               proxies={"http": proxy, "https": proxy},
+                               headers={"User-Agent": self.user_agent if is_sec else "Polymonitor",
+                                        "Accept": "application/json"})
 
 
 def run():
     store = SnapshotStore(os.environ["POLYDATA_SNAPSHOT_SQLITE_PATH"])
     session = source_session()
     session.trust_env = False
-    user_agent = os.environ.get("POLYMONITOR_SEC_USER_AGENT", "")
     deadline = time.monotonic() + 1100
-    def fetch(url):
-        is_sec = urlsplit(url).hostname == "data.sec.gov"
-        if is_sec and not user_agent:
-            raise ValueError("SEC contact User-Agent is not configured")
-        request_deadline = min(deadline, time.monotonic() + 100)
-        proxy = os.environ.get("POLYMONITOR_DISCLOSURES_SEC_PROXY_URL", "") if is_sec else ""
-        request_user_agent = user_agent if is_sec else "Polymonitor"
-        for attempt in range(2):
-            try:
-                remaining = request_deadline - time.monotonic()
-                if remaining <= 0:
-                    raise TimeoutError("Disclosure acquisition deadline")
-                with session.get(url, timeout=(min(15, remaining), min(45, remaining)), stream=True,
-                                 allow_redirects=False,
-                                 proxies={"http": proxy, "https": proxy},
-                                 headers={"User-Agent": request_user_agent, "Accept": "application/json"}) as response:
-                    response.raise_for_status()
-                    if 300 <= response.status_code < 400:
-                        raise ValueError("Disclosure endpoint redirected; source URL requires review")
-                    chunks, size = [], 0
-                    for chunk in response.iter_content(65536):
-                        size += len(chunk)
-                        if size > 24 * 1024 * 1024 or time.monotonic() > request_deadline:
-                            raise ValueError("Disclosure response exceeds byte/time budget")
-                        chunks.append(chunk)
-                    return json.loads(b"".join(chunks))
-            except requests.RequestException as exc:
-                status = exc.response.status_code if exc.response is not None else None
-                if attempt or status is not None and status not in {502, 503, 504}:
-                    raise
-                time.sleep(2)
+    transport = Transport(session, deadline=deadline, user_agent=os.environ.get("POLYMONITOR_SEC_USER_AGENT", ""))
+    fetch = transport.fetch
     try:
         with store.fetch_lock("owner:official-disclosures", "seed", timeout=1):
             since = (datetime.now(timezone.utc) - timedelta(days=30)).date().isoformat()
@@ -67,14 +57,16 @@ def run():
                     "raw_text_url", "correction_of", "executive_order_notes"]}
             presidential_url = source_value('POLYMONITOR_URL_WWW_FEDERALREGISTER_GOV_API_V1_DOCUMENTS_JSON_C2538A') + urlencode(presidential_params, doseq=True)
             def presidential_fetch(first_url):
-                first = fetch(first_url)
+                # Pagination shares one source budget; FR cannot consume five SEC slots.
+                source_deadline = min(deadline, time.monotonic() + 100)
+                first = fetch(first_url, deadline=source_deadline)
                 rows, next_url = first["results"], first.get("next_page_url")
                 for _ in range(4):
                     if not next_url:
                         break
                     if urlsplit(next_url).hostname != "www.federalregister.gov":
                         raise ValueError("Unexpected Federal Register continuation host")
-                    page = fetch(next_url)
+                    page = fetch(next_url, deadline=source_deadline)
                     rows.extend(page["results"])
                     next_url = page.get("next_page_url")
                 return {**first, "results": rows, "next_page_url": next_url}

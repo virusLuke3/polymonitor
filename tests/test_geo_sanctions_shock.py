@@ -81,6 +81,12 @@ class FakeResponse:
         if self.status_code >= 400:
             raise RuntimeError(f"http {self.status_code}")
 
+    def close(self):
+        pass
+
+    def iter_content(self, chunk_size):
+        yield self.content
+
     def json(self) -> Any:
         if self._json_data is not None:
             return self._json_data
@@ -93,7 +99,7 @@ class FakeRequests:
         self.last_get_url: str | None = None
 
     def get(
-        self, url: str, params: Dict[str, Any] | None = None, timeout: int = 20, headers: Dict[str, str] | None = None
+        self, url: str, params: Dict[str, Any] | None = None, timeout: int = 20, headers: Dict[str, str] | None = None, stream=False
     ):
         self.last_get_url = url
         self.last_get_headers = headers
@@ -206,7 +212,7 @@ class GeoSanctionsShockSeedBuilderTestCase(unittest.TestCase):
             geo_shock_ttl_seconds=900,
         )
 
-        def http_json_get(url, params=None, timeout=12, headers=None):
+        def http_json_get(url, params=None, timeout=12, headers=None, **kwargs):
             if url == "fr-url":
                 term = str((params or {}).get("conditions[term]") or "")
                 if term == "Iran sanctions":
@@ -293,7 +299,7 @@ class GeoSanctionsShockSeedBuilderTestCase(unittest.TestCase):
         self.assertEqual([], payload["linkedMarkets"])
 
     def test_seed_builder_returns_renderable_degraded_payload_when_sources_fail(self):
-        def broken_http_json_get(url, params=None, timeout=12, headers=None):
+        def broken_http_json_get(url, params=None, timeout=12, headers=None, **kwargs):
             raise RuntimeError("upstream down")
 
         ctx = self.make_context(requests_lib=None, conflict_url="", acled_enabled=False)
@@ -342,7 +348,7 @@ class GeoSanctionsShockSeedBuilderTestCase(unittest.TestCase):
         self.assertTrue(any(item.get("source") == "UCDP" for item in payload["items"]))
 
     def test_seed_builder_marks_gdelt_rate_limited_and_preserves_previous_conflict_items(self):
-        def rate_limited_http_json_get(url, params=None, timeout=12, headers=None):
+        def rate_limited_http_json_get(url, params=None, timeout=12, headers=None, **kwargs):
             if url == "fr-url":
                 return {"results": []}
             if url == "gdelt-url":
@@ -562,7 +568,7 @@ class GeoSanctionsShockWatcherTestCase(unittest.TestCase):
         )
         watcher.requests = FakeRequests()
         watcher._acled_auth_state = None
-        watcher._http_json_get = lambda url, params=None, timeout=15, headers=None: {
+        watcher._http_json_get = lambda url, params=None, timeout=15, headers=None, **kwargs: {
             "fr-url": {"results": []},
             "conflict-url": {
                 "items": [
@@ -671,3 +677,98 @@ def test_country_risk_uses_native_country_not_combined_topic():
     result = geo_sanctions_shock_service._build_country_risk_breakdown(rows)
     assert [(row["label"], row["count"]) for row in result] == [("Israel", 2), ("Palestine", 1)]
     assert result[0]["latestHeadline"] == "C"
+
+
+def test_federal_register_partial_preserves_term_clock_and_failure_backoff():
+    import requests
+    ctx = GeoSanctionsShockSeedBuilderTestCase().make_context()
+    terms = geo_sanctions_shock_service.DEFAULT_FEDERAL_REGISTER_TERMS
+    previous = {'federalRegisterSources': {terms[0]: {'state': 'ok', 'lastSuccessAt': '2026-04-27T00:00:00Z'}}}
+    calls = []
+    def fetch(url, **kwargs):
+        term = kwargs['params']['conditions[term]']
+        calls.append((term, kwargs))
+        if term == terms[0]:
+            response = requests.Response()
+            response.status_code = 429
+            response.headers['Retry-After'] = '7200'
+            raise requests.HTTPError('credential URL', response=response)
+        return {'results': []}
+    ctx['http_json_get'] = fetch
+    result = geo_sanctions_shock_service._fetch_federal_register_snapshot(ctx, previous=previous)
+    assert result['state'] == 'partial' and result['items'] == []
+    failed = result['sources'][terms[0]]
+    assert failed['error'] == 'HTTP 429' and failed['lastSuccessAt'] == '2026-04-27T00:00:00Z'
+    assert failed['nextAttemptAt'] == '2026-04-28T02:00:00+00:00'
+    assert all(kwargs['timeout'] == 45 and kwargs['max_response_bytes'] == 2 * 1024**2 for _, kwargs in calls)
+    calls.clear()
+    result = geo_sanctions_shock_service._fetch_federal_register_snapshot(
+        ctx, previous={'federalRegisterSources': result['sources']})
+    assert len(calls) == 5 and all(term != terms[0] for term, _ in calls)
+    assert result['sources'][terms[0]] == failed
+
+
+def test_federal_register_rejects_invalid_schema_and_defers_short_budget(monkeypatch):
+    service = geo_sanctions_shock_service
+    ctx = GeoSanctionsShockSeedBuilderTestCase().make_context()
+    ctx['http_json_get'] = lambda *args, **kwargs: {}
+    result = service._fetch_federal_register_snapshot(ctx)
+    assert result['state'] == 'error'
+    assert all(meta['error'] == 'ValueError' and not meta.get('lastSuccessAt') for meta in result['sources'].values())
+    clock = [0.0]
+    monkeypatch.setattr(service.time, 'monotonic', lambda: clock[0])
+    calls = []
+    def fetch(url, **kwargs):
+        calls.append(kwargs)
+        clock[0] += 50
+        return {'results': []}
+    ctx['http_json_get'] = fetch
+    result = service._fetch_federal_register_snapshot(ctx)
+    assert len(calls) == 3 and result['state'] == 'partial'
+    assert [call['retry_attempts'] for call in calls] == [2, 2, 1]
+    deferred = [meta for meta in result['sources'].values() if meta['state'] == 'deferred']
+    assert len(deferred) == 3 and all(not meta.get('lastAttemptAt') for meta in deferred)
+
+
+def test_geo_http_body_retry_preserves_complete_attempt_timeout(monkeypatch):
+    import requests
+    from api.clients import source_transport
+    from runtime import geo_sanctions_shock_watcher as module
+    watcher = GeoSanctionsShockWatcher.__new__(GeoSanctionsShockWatcher)
+    calls = []
+    class Response:
+        status_code = 200
+        def raise_for_status(self): pass
+        def close(self): pass
+        def iter_content(self, chunk_size):
+            if len(calls) == 1:
+                raise requests.exceptions.ChunkedEncodingError('stalled')
+            yield b'{"results": []}'
+    class Session:
+        def request(self, method, url, **kwargs):
+            calls.append(kwargs)
+            return Response()
+    watcher.requests = Session()
+    monkeypatch.setattr(source_transport.time, 'sleep', lambda _: None)
+    result = watcher._http_json_get('https://www.federalregister.gov/api', timeout=45, retry_attempts=2,
+                                    retry_deadline=module.time.monotonic() + 91)
+    assert result == {'results': []}
+    assert len(calls) == 2 and all(call['timeout'] == 45 and call['stream'] for call in calls)
+
+
+def test_geo_all_failed_persists_source_cooldown_without_refreshing_snapshot():
+    watcher = GeoSanctionsShockWatcher.__new__(GeoSanctionsShockWatcher)
+    previous = {'generatedAt': '2026-04-27T00:00:00Z', 'status': 'ok',
+                'items': [{'id': 'fr:old', 'collectedAt': '2026-04-27T00:00:00Z'}]}
+    attempts = {'term': {'state': 'error', 'error': 'HTTP 429', 'nextAttemptAt': '2026-04-28T02:00:00Z',
+                         'lastSuccessAt': '2026-04-27T00:00:00Z'}}
+    watcher.load_previous_payload = lambda: previous
+    watcher.build_payload = lambda: {'status': 'degraded', 'items': [], 'sources': {'federalRegister': 'error'},
+                                     'federalRegisterSources': attempts}
+    written, metadata = [], []
+    watcher.store_payload = written.append
+    watcher.store_seed_meta = lambda **kwargs: metadata.append(kwargs)
+    result = watcher.run_once()
+    assert result['status'] == 'preserved' and written[0]['status'] == 'stale'
+    assert written[0]['generatedAt'] == previous['generatedAt'] and written[0]['items'] == previous['items']
+    assert written[0]['federalRegisterSources'] == attempts and metadata[0]['preserve_last_success']

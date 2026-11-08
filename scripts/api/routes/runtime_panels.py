@@ -11,7 +11,6 @@ from flask import Blueprint, Response, current_app, jsonify, request
 
 from api.contracts import api_envelope, api_error, runtime_panel_metadata
 from api.runtime_panels import RUNTIME_PANEL_MODULES, get_panel_by_id
-from api.runtime_panels.registry import LEGACY_PANEL_ROUTES
 from api.runtime_panels.types import RuntimePanelContext
 from api.services import hls_proxy_service, youtube_embed_service, youtube_live_probe_service
 
@@ -474,8 +473,5 @@ def create_runtime_panels_blueprint(dependencies: RuntimePanelRouteDependencies)
             return jsonify(payload)
 
         bp.add_url_rule(panel.route, endpoint, _handler, methods=["GET"])
-        for legacy_route, canonical_route in LEGACY_PANEL_ROUTES.items():
-            if panel.route == canonical_route:
-                bp.add_url_rule(legacy_route, endpoint + "_legacy", _handler, methods=["GET"])
 
     return bp

@@ -26,7 +26,12 @@ class Store:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("CREATE TABLE IF NOT EXISTS snapshot (id INTEGER PRIMARY KEY, payload TEXT NOT NULL)")
         self.conn.execute("CREATE TABLE IF NOT EXISTS samples (series TEXT, t INTEGER, v REAL, PRIMARY KEY(series,t))")
+        self.conn.execute("CREATE TABLE IF NOT EXISTS source_cache (key TEXT PRIMARY KEY, payload TEXT NOT NULL)")
         self.conn.commit()
+
+    def source_entries(self):
+        return {key: json.loads(payload) for key, payload in
+                self.conn.execute("SELECT key,payload FROM source_cache LIMIT 64")}
 
     def sample(self, series, at, value):
         if at is not None and value is not None:
@@ -36,9 +41,15 @@ class Store:
         rows = self.conn.execute("SELECT t,v FROM samples WHERE series=? AND t>=? ORDER BY t DESC LIMIT 300", (series, since)).fetchall()
         return [{"t": t, "v": v} for t, v in reversed(rows)]
 
-    def publish(self, value, now):
+    def publish(self, value, now, source_entries=None):
         self.conn.execute("DELETE FROM samples WHERE t < ?", (now - 7 * 86400000,))
         self.conn.execute("INSERT OR REPLACE INTO snapshot VALUES(1,?)", (json.dumps(value, allow_nan=False),))
+        if source_entries is not None:
+            if len(source_entries) > 64:
+                raise ValueError("CRYPTO_SOURCE_CACHE_LIMIT")
+            self.conn.execute("DELETE FROM source_cache")
+            self.conn.executemany("INSERT INTO source_cache VALUES(?,?)",
+                                  [(key, json.dumps(entry, allow_nan=False)) for key, entry in source_entries.items()])
         self.conn.commit()
 
 

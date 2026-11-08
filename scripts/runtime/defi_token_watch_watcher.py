@@ -30,7 +30,9 @@ except ImportError:
 from api.clients.source_transport import source_session
 from api.config import load_api_settings
 from api.services import defi_token_watch_service
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
+from api.services.seed_recovery import bounded_rows, retain_failed_rows
+from runtime.seed_meta import retained_snapshot
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot, SnapshotPublicationError
 from runtime.snapshot_store import SnapshotStore
 
 
@@ -69,17 +71,13 @@ class DefiTokenWatchWatcher:
         limit: int = DEFAULT_LIMIT,
         interval_seconds: int = DEFAULT_INTERVAL_SECONDS,
     ) -> None:
-        if redis is None:
-            raise RuntimeError("redis package is required. Install scripts/requirements.txt")
         if requests is None:
             raise RuntimeError("requests package is required. Install scripts/requirements.txt")
-        if not str(redis_url or "").strip():
-            raise RuntimeError("POLYDATA_REDIS_URL is required for DeFi token watcher")
         self.settings = settings
         self.limit = max(3, int(limit or DEFAULT_LIMIT))
         self.interval_seconds = max(60, int(interval_seconds or DEFAULT_INTERVAL_SECONDS))
         self.redis_prefix = str(redis_prefix or "")
-        self.redis_client = redis.from_url(redis_url, decode_responses=True)
+        self.redis_client = redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2) if redis is not None and str(redis_url or "").strip() else None
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
         self.requests = source_session()
@@ -117,6 +115,9 @@ class DefiTokenWatchWatcher:
         }
 
     def load_previous_payload(self) -> Dict[str, Any]:
+        stale = self.snapshot_store.get_stale(self.namespace(), self.cache_key())
+        if isinstance(stale, dict):
+            return stale
         try:
             raw = self.redis_client.get(self.redis_key())
             if raw:
@@ -125,13 +126,18 @@ class DefiTokenWatchWatcher:
                     return payload
         except Exception:
             print("[defi-token-watch] WARN redis read failed", file=sys.stderr)
-        stale = self.snapshot_store.get_stale(self.namespace(), self.cache_key())
-        return stale if isinstance(stale, dict) else {}
+        return {}
 
     def store_payload(self, payload: Dict[str, Any]) -> None:
-        ttl_seconds = self.ttl_seconds()
-        self.snapshot_store.set(self.namespace(), self.cache_key(), payload, ttl_seconds)
-        self.redis_client.set(self.redis_key(), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl_seconds)
+        try:
+            publish_snapshot(snapshot_store=self.snapshot_store, namespace=self.namespace(),
+                             cache_key=self.cache_key(), payload=payload, ttl_seconds=self.ttl_seconds(),
+                             redis_client=self.redis_client, redis_cache_key=self.redis_key())
+        except SnapshotPublicationError as exc:
+            self.store_seed_meta(status="error", record_count=0,
+                                 source_states={"publication": "error"}, error_summary=str(exc),
+                                 preserve_last_success=True)
+            raise
 
     def store_seed_meta(self, *, status: str, record_count: int, source_states: Dict[str, Any], error_summary: str | None, preserve_last_success: bool = False) -> None:
         previous = self.seed_meta_store.load(SEED_META_NAMESPACE, SEED_META_CACHE_KEY) or {}
@@ -155,14 +161,16 @@ class DefiTokenWatchWatcher:
             payload_status=status,
             metadata={"result": "stored", "limit": self.limit},
         )
+        payload["lastSuccessAt"] = last_success_at
         self.seed_meta_store.store(SEED_META_NAMESPACE, SEED_META_CACHE_KEY, payload)
 
     def run_once(self) -> Dict[str, Any]:
-        previous = self.load_previous_payload()
+        previous = bounded_rows(self.load_previous_payload(), utc_now_iso())
         try:
             payload = defi_token_watch_service.fetch_live_defi_token_watch_payload(self.service_context(), limit=self.limit)
         except Exception as exc:
-            if previous:
+            if previous.get("items"):
+                previous = retained_snapshot(previous, sources={"coingecko": "error"})
                 self.store_payload(previous)
                 self.store_seed_meta(
                     status="preserved",
@@ -175,7 +183,11 @@ class DefiTokenWatchWatcher:
             self.store_seed_meta(status="error", record_count=0, source_states={"coingecko": "error"}, error_summary=str(exc), preserve_last_success=True)
             raise
 
+        missing = (payload.get("summary") or {}).get("missingIds") or []
+        payload["items"] = (payload.get("items") or []) + retain_failed_rows(previous, missing, utc_now_iso())
         record_count = len(payload.get("items") or [])
+        payload["summary"] = {**payload.get("summary", {}), "count": record_count,
+                              "retainedCount": sum(bool(row.get("retained")) for row in payload.get("items", []))}
         if previous and record_count <= 0:
             self.store_payload(previous)
             self.store_seed_meta(
@@ -220,7 +232,6 @@ def main() -> int:
         limit=args.limit,
         interval_seconds=args.interval,
     )
-    watcher.redis_client.ping()
     print(f"[defi-token-watch] redis_key={watcher.redis_key()} sqlite={settings.snapshot_sqlite_path}", file=sys.stderr)
     if not args.watch:
         print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)

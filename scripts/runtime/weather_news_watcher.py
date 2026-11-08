@@ -14,13 +14,17 @@ _scripts_root = Path(__file__).resolve().parents[1]
 if str(_scripts_root) not in sys.path:
     sys.path.insert(0, str(_scripts_root))
 
-import redis
+try:
+    import redis
+except ImportError:
+    redis = None
 import requests
 
+from api.clients.source_transport import read_response_bytes, read_with_retry, source_session
 from api.config import load_api_settings
 from api.context import RuntimeResources
 from api.services import weather_news_service
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot, retained_snapshot
 from runtime.snapshot_store import SnapshotStore
 from runtime.telegram_panel_publish import publish_cached_panel_snapshot
 
@@ -50,12 +54,11 @@ def _redis_key(prefix: str, namespace: str, cache_key: str) -> str:
 class WeatherNewsWatcher:
     def __init__(self, *, redis_url: str, redis_prefix: str, snapshot_sqlite_path: str, settings: Any, interval_seconds: int) -> None:
         self.resources = RuntimeResources()
-        if not redis_url:
-            raise RuntimeError("POLYDATA_REDIS_URL is required for weather news watcher")
         self.settings = settings
         self.redis_prefix = redis_prefix or ""
         self.interval_seconds = max(300, int(interval_seconds or DEFAULT_INTERVAL_SECONDS))
-        self.redis_client = redis.from_url(redis_url, decode_responses=True)
+        self.redis_client = (redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2)
+                             if redis is not None and str(redis_url or "").strip() else None)
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
 
@@ -71,17 +74,25 @@ class WeatherNewsWatcher:
     def ttl_seconds(self) -> int:
         return max(300, int(getattr(self.settings, "weather_news_ttl_seconds", 900) or 900))
 
-    def _http_text_get(self, url: str, *, timeout: int = 12, headers: Dict[str, str] | None = None) -> str:
-        with requests.Session() as session:
+    def _http_text_get(self, url: str, *, timeout: int = 45, headers: Dict[str, str] | None = None) -> str:
+        now = time.monotonic()
+        deadline = min(now + 90, getattr(self, "_collection_deadline", now + 90))
+        if deadline - now < 45:
+            raise requests.exceptions.Timeout("weather news collection budget exhausted")
+        with source_session(requests_lib=requests) as session:
             session.trust_env = False
-            response = session.get(url, timeout=timeout, headers=headers)
-            response.raise_for_status()
-            return response.text
+
+            def read(response):
+                body = read_response_bytes(response, 2_500_000, deadline=deadline)
+                return body.decode(response.encoding or "utf-8", errors="replace")
+
+            return read_with_retry(session, url, read, attempts=2, deadline=deadline,
+                                   timeout=45, headers=headers, stream=True)
 
     def close(self) -> None:
         self.resources.close()
-        self.requests.close()
-        self.redis_client.close()
+        if self.redis_client is not None:
+            self.redis_client.close()
 
     def context(self) -> Dict[str, Any]:
         return {
@@ -96,31 +107,53 @@ class WeatherNewsWatcher:
         }
 
     def _get_cached_json(self, namespace: str, cache_key: str) -> Dict[str, Any] | None:
-        raw = self.redis_client.get(_redis_key(self.redis_prefix, namespace, cache_key))
-        if not raw:
+        cached = self.snapshot_store.get(namespace, cache_key)
+        if isinstance(cached, dict):
+            return cached
+        if self.redis_client is None:
             return None
-        payload = json.loads(str(raw))
-        return payload if isinstance(payload, dict) else None
+        try:
+            raw = self.redis_client.get(_redis_key(self.redis_prefix, namespace, cache_key))
+            payload = json.loads(str(raw)) if raw else None
+            return payload if isinstance(payload, dict) else None
+        except Exception:
+            return None
 
     def _set_cached_json(self, namespace: str, cache_key: str, payload: Dict[str, Any], ttl: int) -> None:
-        self.redis_client.set(_redis_key(self.redis_prefix, namespace, cache_key), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl)
+        # Source caches are best effort; formal snapshots use store_payload.
+        try:
+            self.snapshot_store.set(namespace, cache_key, payload, ttl)
+        except Exception:
+            pass
+        if self.redis_client is not None:
+            try:
+                self.redis_client.set(_redis_key(self.redis_prefix, namespace, cache_key), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl)
+            except Exception:
+                pass
 
     def previous(self) -> Dict[str, Any]:
+        stale = self.snapshot_store.get_stale(self.namespace(), self.cache_key())
+        if isinstance(stale, dict):
+            return stale
         cached = self._get_cached_json(self.namespace(), self.cache_key())
         if cached:
             return cached
-        stale = self.snapshot_store.get_stale(self.namespace(), self.cache_key())
-        return stale if isinstance(stale, dict) else {}
+        return {}
 
     def store_payload(self, payload: Dict[str, Any]) -> None:
         ttl = self.ttl_seconds()
-        self.snapshot_store.set(self.namespace(), self.cache_key(), payload, ttl)
-        self.redis_client.set(self.redis_key(), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl)
+        publish_snapshot(
+            snapshot_store=self.snapshot_store, namespace=self.namespace(),
+            cache_key=self.cache_key(), payload=payload, ttl_seconds=ttl,
+            redis_client=self.redis_client, redis_cache_key=self.redis_key(),
+        )
 
     def store_meta(self, *, status: str, record_count: int, source_states: Dict[str, Any] | None = None, error_summary: str | None = None, cache_mode: str | None = None, payload_status: str | None = None, preserve: bool = False) -> None:
         previous = self.seed_meta_store.load(SEED_META_NAMESPACE, SEED_META_CACHE_KEY) or {}
         attempted = utc_now_iso()
-        last_success = previous.get("lastSuccessAt") if preserve else attempted
+        last_success = previous.get("lastSuccessAt")
+        if not preserve and (status in {"ok", "empty"} or (status == "degraded" and record_count > 0)):
+            last_success = attempted
         payload = build_seed_meta_payload(
             panel_id=SEED_META_CACHE_KEY,
             namespace=SEED_META_NAMESPACE,
@@ -129,7 +162,7 @@ class WeatherNewsWatcher:
             expected_interval_seconds=self.interval_seconds,
             status=status,
             last_attempt_at=attempted,
-            last_success_at=last_success or attempted,
+            last_success_at=last_success,
             record_count=record_count,
             source_states=source_states,
             error_summary=error_summary,
@@ -151,19 +184,27 @@ class WeatherNewsWatcher:
 
     def run_once(self) -> Dict[str, Any]:
         previous = self.previous()
+        self._collection_deadline = time.monotonic() + 240
         try:
             payload = weather_news_service.build_weather_news_payload(self.context(), limit=int(getattr(self.settings, "weather_news_limit", 40) or 40))
         except Exception as exc:
             if previous:
-                self.store_payload(previous)
+                self.store_payload(retained_snapshot(previous))
                 self.store_meta(status="preserved", record_count=len(previous.get("items") or []), source_states={"googleNews": "error"}, error_summary=str(exc), preserve=True)
                 return {"status": "preserved", "payload": previous, "error": str(exc)}
             self.store_meta(status="error", record_count=0, source_states={"googleNews": "error"}, error_summary=str(exc), preserve=True)
             return {"status": "error", "error": str(exc)}
-        if previous and not payload.get("items"):
-            self.store_payload(previous)
-            self.store_meta(status="preserved", record_count=len(previous.get("items") or []), source_states=payload.get("sources"), error_summary="Preserved previous snapshot because new weather news payload was empty", preserve=True)
-            return {"status": "preserved", "payload": previous}
+        source_states = payload.get("sources") or {}
+        source_errors = payload.get("sourceErrors") or {}
+        if not payload.get("items") and any(state == "error" for state in source_states.values()):
+            error_summary = f"Weather news refresh failed for {sum(state == 'error' for state in source_states.values())}/{len(source_states)} queries"
+            if previous:
+                preserved = {**retained_snapshot(previous, sources=source_states), "sourceErrors": source_errors}
+                self.store_payload(preserved)
+                self.store_meta(status="preserved", record_count=len(previous.get("items") or []), source_states=source_states, error_summary=error_summary, preserve=True)
+                return {"status": "preserved", "payload": preserved}
+            self.store_meta(status="error", record_count=0, source_states=source_states, error_summary=error_summary, preserve=True)
+            return {"status": "error", "payload": payload}
         payload = {**payload, "cacheMode": "seeded"}
         self.store_payload(payload)
         telegram_sent = publish_cached_panel_snapshot(SEED_META_CACHE_KEY, payload)
@@ -201,7 +242,6 @@ def main() -> int:
     settings = load_api_settings()
     watcher = WeatherNewsWatcher(redis_url=settings.redis_url, redis_prefix=settings.redis_prefix, snapshot_sqlite_path=settings.snapshot_sqlite_path, settings=settings, interval_seconds=args.interval)
     try:
-        watcher.redis_client.ping()
         print(f"[weather-news] redis_key={watcher.redis_key()} sqlite={settings.snapshot_sqlite_path}", file=sys.stderr)
         if not args.watch:
             print(json.dumps(_result_summary(watcher.run_once()), ensure_ascii=False), file=sys.stderr)

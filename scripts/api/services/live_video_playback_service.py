@@ -112,8 +112,14 @@ def attach_playback_sources(items: list[dict[str, Any]], resolved: dict[str, Any
         if item.get("sourceType") != "hls":
             continue
         channel, pinned, youtube_first, _ = CHANNELS.get(item.get("id"), ("", item.get("fallbackVideoId") or "", False, ()))
-        hls = {"kind": "hls", "url": item.get("hlsUrl"), "proxy": bool(item.get("hlsProxyRequired")),
-               "proxyFallback": item.get("playbackTier") == "trusted-hls"}
+        hls = [{"kind": "hls", "url": item.get("hlsUrl"), "proxy": bool(item.get("hlsProxyRequired")),
+                "proxyFallback": item.get("playbackTier") == "trusted-hls"}]
+        # Only reviewed, configured alternatives for this exact broadcaster.
+        # Discovery of similarly named IPTV channels is not identity evidence.
+        for alternate in (item.get("hlsAlternates") or [])[:2]:
+            if isinstance(alternate, dict) and str(alternate.get("url") or "").startswith("https://"):
+                hls.append({"kind": "hls", "url": alternate["url"], "proxy": bool(alternate.get("proxy")),
+                            "proxyFallback": item.get("playbackTier") == "trusted-hls"})
         videos: list[dict[str, Any]] = []
         info = resolved.get(channel) or {}
         # Keep the last success's own time; a failed refresh never renews it.
@@ -127,7 +133,7 @@ def attach_playback_sources(items: list[dict[str, Any]], resolved: dict[str, Any
         if item.get("id") in YOUTUBE_ONLY_CHANNELS:
             item["playbackSources"] = videos
         else:
-            item["playbackSources"] = videos + [hls] if youtube_first else [hls] + videos
+            item["playbackSources"] = videos + hls if youtube_first else hls + videos
         if item.get("id") in CHANNELS:
             item["displayName"] = str(item.get("displayName") or "").removesuffix(" HLS")
 

@@ -8,7 +8,8 @@ from flask import Flask
 from api.cache import CacheState, get_snapshot_payload
 from api.context import RuntimeResources
 from api.db_pool import ApiPostgresConnectionPool
-from api.readiness import CachedProbe
+from api.readiness import CachedProbe, probe_database
+from api.read_budget import try_permit
 from api.routes.system import SystemRouteDependencies, create_system_blueprint
 
 
@@ -29,13 +30,30 @@ def test_unreachable_database_does_not_reconnect_on_each_request():
 def test_blocked_probe_does_not_accumulate_threads():
     release = Event()
     check = Mock(side_effect=lambda: release.wait(2))
-    probe = CachedProbe(check)
+    probe = CachedProbe(check, timeout=.1)
     try:
         with ThreadPoolExecutor(max_workers=16) as executor:
             assert not any(executor.map(lambda _: probe(), range(32)))
         assert check.call_count == 1
     finally:
         release.set()
+
+
+def test_probe_waits_for_a_healthy_database_over_a_remote_link():
+    from threading import Timer
+
+    release = Event()
+    check = Mock(side_effect=lambda: release.wait(1))
+    probe = CachedProbe(check)
+    timer = Timer(.2, release.set)
+    timer.start()
+    try:
+        assert probe() is True
+        assert probe() is True
+        assert check.call_count == 1
+    finally:
+        release.set()
+        timer.join()
 
 
 def test_health_requires_a_real_probe_and_keeps_liveness_independent():
@@ -48,6 +66,40 @@ def test_health_requires_a_real_probe_and_keeps_liveness_independent():
     assert b'private' not in response.data
     assert response.headers['Retry-After'] == '15'
     assert app.test_client().get('/health/live').status_code == 200
+
+
+def test_dependency_probe_has_bounded_capacity_separate_from_display_reads(tmp_path, monkeypatch):
+    monkeypatch.setenv("POLYDATA_READ_BUDGET_DIR", str(tmp_path))
+    display = [try_permit("postgres-connections", 4) for _ in range(4)]
+    connection = Mock()
+    connection.cursor.return_value.fetchone.return_value = (1,)
+    connect = Mock(return_value=connection)
+    try:
+        assert probe_database(connect) is True
+        connection.close.assert_called_once()
+        health = [try_permit("postgres-readiness", 2) for _ in range(2)]
+        try:
+            assert probe_database(connect) is False
+            assert connect.call_count == 1
+        finally:
+            for permit in health:
+                permit.close()
+    finally:
+        for permit in display:
+            permit.close()
+
+
+def test_failed_dependency_query_closes_connection_and_releases_capacity(tmp_path, monkeypatch):
+    monkeypatch.setenv("POLYDATA_READ_BUDGET_DIR", str(tmp_path))
+    connection = Mock()
+    connection.cursor.return_value.execute.side_effect = ConnectionError("disconnected")
+    with pytest.raises(ConnectionError):
+        probe_database(Mock(return_value=connection))
+    connection.close.assert_called_once()
+    permits = [try_permit("postgres-readiness", 2) for _ in range(2)]
+    assert all(permits)
+    for permit in permits:
+        permit.close()
 
 
 def test_cold_snapshot_singleflight_and_failure_cooldown():

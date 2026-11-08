@@ -6,13 +6,13 @@ import json
 import os
 import threading
 import time
-from data_sources import source_value
 from urllib.parse import urlsplit
 
 import requests
 from urllib3.util import Timeout
 
 from runtime.snapshot_store import SnapshotStore
+from data_sources import source_value
 
 _LOCK = threading.Lock()
 _COOLDOWNS: dict[str, float] = {}
@@ -49,6 +49,18 @@ def _retry_seconds(value: str | None) -> float:
             return max(60, email.utils.parsedate_to_datetime(value).timestamp() - time.time())
         except (ValueError, TypeError):
             return 60
+
+
+def _connection_route_failure(exc):
+    # urllib3 body timeouts can be wrapped as Requests ConnectionError.
+    # A closed/stalled response is local to that request, not proof of a dead exit.
+    if isinstance(exc, (requests.exceptions.ReadTimeout, requests.exceptions.ChunkedEncodingError)):
+        return False
+    if isinstance(exc, (requests.exceptions.ConnectTimeout, requests.exceptions.ProxyError)):
+        return True
+    message = str(exc).lower()
+    return isinstance(exc, requests.exceptions.ConnectionError) and any(
+        phrase in message for phrase in ("connection refused", "failed to establish a new connection", "network is unreachable"))
 
 
 class SourceSession(requests.Session):
@@ -93,10 +105,15 @@ class SourceSession(requests.Session):
             self.route_store.set(_NAMESPACE, key, {"retryAt": 0}, 1)
 
     def request(self, method, url, **kwargs):
+        source_deadline = kwargs.pop("source_deadline", None)
         host = urlsplit(url).hostname or ""
         routes = self.routes.get(host)
-        # Only idempotent public reads are eligible; local and market-data are excluded.
-        if not routes or method.upper() not in {"GET", "HEAD"} or host in {"localhost", "127.0.0.1", "::1"} or "polymarket" in host:
+        # This one documented POST is a public market-data read. Trading,
+        # account reads and every other POST retain their original transport.
+        info_url = urlsplit(source_value("POLYDATA_FINANCE_HYPERLIQUID_INFO_URL"))
+        public_info_read = (bool(info_url.hostname) and host == info_url.hostname and urlsplit(url).path == info_url.path
+                            and method.upper() == "POST" and kwargs.get("json") == {"type": "metaAndAssetCtxs"})
+        if not routes or (method.upper() not in {"GET", "HEAD"} and not public_info_read) or host in {"localhost", "127.0.0.1", "::1"} or "polymarket" in host:
             return super().request(method, url, **kwargs)
         if not self._due(host + ":rate-limit"):
             raise requests.exceptions.RetryError(f"{host}: upstream Retry-After active")
@@ -104,20 +121,31 @@ class SourceSession(requests.Session):
         if not eligible:
             raise requests.exceptions.RetryError(f"{host}: source routes cooling down")
         timeout = kwargs.get("timeout") or 12
-        budget = float(max(timeout) if isinstance(timeout, tuple) else timeout)
-        # Tiny legacy probes should not halve an already short TLS budget.
-        if budget < 8:
-            eligible = eligible[:1]
-        deadline = time.monotonic() + budget
+        if isinstance(timeout, Timeout):
+            budget = float(timeout.total or timeout.read_timeout or timeout.connect_timeout or 12)
+            connect = min(budget, float(timeout.connect_timeout or budget))
+        else:
+            budget = float(max(timeout) if isinstance(timeout, tuple) else timeout)
+            connect = budget
+        # timeout belongs to one complete attempt, not to a fraction of an
+        # attempt per exit. Domain deadlines still cap the whole operation.
+        deadline = time.monotonic() + budget * len(eligible)
+        if source_deadline is not None:
+            deadline = min(deadline, source_deadline)
         for position, (index, proxy) in enumerate(eligible):
-            remaining = max(0.1, deadline - time.monotonic())
-            allowance = remaining / (len(eligible) - position)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise requests.exceptions.Timeout("source collection budget exhausted")
+            allowance = min(budget, remaining)
             options = {**kwargs, "proxies": {"http": proxy or "", "https": proxy or ""},
-                       "timeout": Timeout(total=allowance, connect=allowance)}
+                       "timeout": Timeout(total=allowance, connect=min(connect, allowance))}
             try:
                 response = super().request(method, url, **options)
-            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
-                self._route_failed(f"{host}:{index}")
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+                # A slow body/local read allowance is not evidence that the
+                # exit is broken for every other collector using this host.
+                if _connection_route_failure(exc):
+                    self._route_failed(f"{host}:{index}")
                 if position + 1 == len(eligible):
                     raise
                 continue
@@ -129,7 +157,7 @@ class SourceSession(requests.Session):
                 if position + 1 < len(eligible):
                     response.close()
                     continue
-            if 200 <= response.status_code < 300:
+            if 200 <= response.status_code < 300 and not kwargs.get("stream"):
                 self._route_succeeded(f"{host}:{index}")
             # Preserve status/response semantics: domain owners validate and publish.
             response.headers["X-Polymonitor-Source-Route"] = str(index)
@@ -194,3 +222,82 @@ def source_session(requests_lib=requests):
     if requests_lib is requests and (source_value("POLYMONITOR_SOURCE_ROUTES_JSON") or source_value("POLYMONITOR_SOURCE_ROUTES_FILE")):
         return SourceSession()
     return requests_lib.Session()
+
+
+def read_response_bytes(response, max_bytes, *, deadline=None, sample=False):
+    """Validate and bound the body inside the retry, not after route success."""
+    response.raise_for_status()
+    body = bytearray()
+    for chunk in response.iter_content(chunk_size=min(65536, max_bytes)):
+        if deadline is not None and time.monotonic() >= deadline:
+            raise requests.exceptions.Timeout("source body deadline exhausted")
+        body.extend(chunk)
+        if sample and len(body) >= max_bytes:
+            return bytes(body[:max_bytes])
+        if len(body) > max_bytes:
+            raise ValueError("SOURCE_RESPONSE_TOO_LARGE")
+    return bytes(body)
+
+
+def read_with_retry(session, url, read_response, *, attempts=4, deadline=None,
+                    require_full_attempt=False, **kwargs):
+    """Collector-only retries, including body reads, with an intact attempt timeout.
+
+    The normal request path keeps its original budget. Slow collectors opt in;
+    they try an approved exit twice before moving once to its approved backup.
+    """
+    attempts = max(1, min(4, attempts))
+    host = urlsplit(url).hostname or ""
+    routed = isinstance(session, SourceSession) and host in session.routes
+    if host in {"localhost", "127.0.0.1", "::1"} or "polymarket" in host:
+        return read_response(session.get(url, **kwargs))
+    if routed and not session._due(host + ":rate-limit"):
+        raise requests.exceptions.RetryError(f"{host}: upstream Retry-After active")
+    routes = [(i, proxy) for i, proxy in enumerate(session.routes[host][:3])
+              if session._due(f"{host}:{i}")][:2] if routed else [(None, None)]
+    if not routes:
+        raise requests.exceptions.RetryError(f"{host}: source routes cooling down")
+    request = super(SourceSession, session).request if isinstance(session, SourceSession) else session.request
+    for attempt in range(attempts):
+        per_route = 2 if attempts > 2 else 1
+        index, proxy = routes[min(attempt // per_route, len(routes) - 1)]
+        options = dict(kwargs)
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            requested_timeout = float(options.get("timeout", 45))
+            if remaining <= 0 or (require_full_attempt and remaining < requested_timeout):
+                raise requests.exceptions.Timeout("source collection budget exhausted")
+            options["timeout"] = requested_timeout if require_full_attempt else min(requested_timeout, remaining)
+        if routed:
+            options["proxies"] = {"http": proxy or "", "https": proxy or ""}
+        response = None
+        try:
+            response = request("GET", url, **options)
+            if response.status_code == 429:
+                if isinstance(session, SourceSession):
+                    session._cool(host + ":rate-limit", _retry_seconds(response.headers.get("Retry-After")))
+                response.raise_for_status()
+            value = read_response(response)
+            if routed:
+                session._route_succeeded(f"{host}:{index}")
+            return value
+        except requests.exceptions.HTTPError as exc:
+            if exc.response is None or exc.response.status_code not in {500, 502, 503, 504}:
+                raise
+            if routed:
+                session._route_failed(f"{host}:{index}")
+            if attempt + 1 == attempts:
+                raise
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout,
+                requests.exceptions.ChunkedEncodingError) as exc:
+            if routed and _connection_route_failure(exc):
+                session._route_failed(f"{host}:{index}")
+            if attempt + 1 == attempts:
+                raise
+        finally:
+            if response is not None:
+                response.close()
+        delay = 2 ** attempt
+        if deadline is not None and time.monotonic() + delay >= deadline:
+            raise requests.exceptions.Timeout("source collection budget exhausted")
+        time.sleep(delay)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import hashlib
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any, Dict, List
@@ -17,9 +18,9 @@ from api.services.finance_watch.common import (
 )
 
 NEWS_QUERIES = {
-    "defi-security-watch": '("DeFi" OR "crypto protocol") (exploit OR hack OR vulnerability OR attack OR audit OR governance risk)',
+    "defi-security-watch": 'DeFi hack',
     "ipo-news-watch": 'IPO OR "S-1" OR "F-1" OR "files for listing" OR "public listing" OR "listing rumor"',
-    "blockchain-policy-news": '("crypto bill" OR "stablecoin legislation" OR "SEC crypto" OR "CFTC crypto" OR "exchange enforcement" OR "tokenization regulation")',
+    "blockchain-policy-news": 'crypto regulation',
 }
 
 
@@ -53,7 +54,7 @@ def _parse_rss_items(xml_text: str, *, panel_id: str, limit: int) -> List[Dict[s
         tags = _news_tags(panel_id, title, description)
         rows.append(
             {
-                "id": f"{panel_id}:{len(rows)}:{hash(title)}",
+                "id": f"{panel_id}:{hashlib.sha256((link or title).encode()).hexdigest()[:24]}",
                 "label": _headline_entity(title, source),
                 "symbol": source.upper()[:14],
                 "title": title,
@@ -112,7 +113,10 @@ def build_news_payload(
     title: str,
     limit: int,
 ) -> Dict[str, Any]:
-    query = f"({NEWS_QUERIES[panel_id]}) when:7d"
+    # Search RSS does not implement the nested Boolean grammar previously used
+    # here: it returns a valid, empty channel rather than a query error. These
+    # plain topic searches have been verified against the configured provider.
+    query = f"{NEWS_QUERIES[panel_id]} when:7d"
     xml_text = _http_text_get(ctx, _news_url(ctx, query), timeout=16)
     rows = _parse_rss_items(xml_text, panel_id=panel_id, limit=limit)
     return _payload(panel_id, title=title, items=rows, summary={"query": query}, sources={"googleNewsRss": "ok" if rows else "empty"})

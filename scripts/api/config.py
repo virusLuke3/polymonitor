@@ -196,6 +196,12 @@ class ApiSettings:
     finance_broker_research_choice_url: str
     finance_hyperliquid_info_url: str
     finance_okx_market_ticker_url: str
+    finance_okx_market_tickers_url: str
+    finance_okx_instruments_url: str
+    finance_okx_mark_price_url: str
+    finance_okx_index_tickers_url: str
+    finance_okx_open_interest_url: str
+    finance_okx_funding_rate_url: str
     finance_defillama_stablecoins_url: str
     finance_cftc_legacy_cot_url: str
     tech_runtime_ttl_seconds: int
@@ -260,6 +266,15 @@ class ApiSettings:
     food_basket_ttl_seconds: int
     macro_cpi_panel_ttl_seconds: int
     macro_cpi_registry_ttl_seconds: int
+    macro_cpi_round_budget_seconds: int
+    food_basket_round_budget_seconds: int
+    macro_cpi_registry_round_budget_seconds: int
+    polymarket_macro_map_round_budget_seconds: int
+    macro_cpi_max_display_age_seconds: int
+    food_basket_max_display_age_seconds: int
+    macro_cpi_registry_max_display_age_seconds: int
+    macro_cpi_registry_actual_max_display_age_seconds: int
+    polymarket_macro_map_max_display_age_seconds: int
     geo_shock_ofac_sdn_url: str
     geo_shock_ofac_consolidated_url: str
     geo_shock_federal_register_api_url: str
@@ -364,6 +379,12 @@ def load_api_settings() -> ApiSettings:
         finance_broker_research_choice_url=_get_str("POLYDATA_FINANCE_BROKER_RESEARCH_CHOICE_URL", ("")),
         finance_hyperliquid_info_url=source_value('POLYDATA_FINANCE_HYPERLIQUID_INFO_URL'),
         finance_okx_market_ticker_url=source_value('POLYDATA_FINANCE_OKX_MARKET_TICKER_URL'),
+        finance_okx_market_tickers_url=source_value('POLYDATA_FINANCE_OKX_MARKET_TICKERS_URL'),
+        finance_okx_instruments_url=source_value('POLYDATA_FINANCE_OKX_INSTRUMENTS_URL'),
+        finance_okx_mark_price_url=source_value('POLYDATA_FINANCE_OKX_MARK_PRICE_URL'),
+        finance_okx_index_tickers_url=source_value('POLYDATA_FINANCE_OKX_INDEX_TICKERS_URL'),
+        finance_okx_open_interest_url=source_value('POLYDATA_FINANCE_OKX_OPEN_INTEREST_URL'),
+        finance_okx_funding_rate_url=source_value('POLYDATA_FINANCE_OKX_FUNDING_RATE_URL'),
         finance_defillama_stablecoins_url=source_value('POLYDATA_FINANCE_DEFILLAMA_STABLECOINS_URL'),
         finance_cftc_legacy_cot_url=source_value('POLYDATA_FINANCE_CFTC_LEGACY_COT_URL'),
         tech_runtime_ttl_seconds=_get_int("POLYDATA_TECH_RUNTIME_TTL_SECONDS", 600),
@@ -464,7 +485,7 @@ def load_api_settings() -> ApiSettings:
                 "ethena",
                 "curve-dao-token",
                 "compound-governance-token",
-                "synthetix-network-token",
+                "havven",
                 "rocket-pool",
             ),
         ),
@@ -492,6 +513,15 @@ def load_api_settings() -> ApiSettings:
         food_basket_ttl_seconds=_get_int("POLYDATA_FOOD_BASKET_TTL_SECONDS", 21600),
         macro_cpi_panel_ttl_seconds=_get_int("POLYDATA_MACRO_CPI_PANEL_TTL_SECONDS", 21600),
         macro_cpi_registry_ttl_seconds=_get_int("POLYDATA_MACRO_CPI_REGISTRY_TTL_SECONDS", 21600),
+        macro_cpi_round_budget_seconds=_get_int("POLYDATA_MACRO_CPI_ROUND_BUDGET_SECONDS", 900),
+        food_basket_round_budget_seconds=_get_int("POLYDATA_FOOD_BASKET_ROUND_BUDGET_SECONDS", 720),
+        macro_cpi_registry_round_budget_seconds=_get_int("POLYDATA_MACRO_CPI_REGISTRY_ROUND_BUDGET_SECONDS", 450),
+        polymarket_macro_map_round_budget_seconds=_get_int("POLYDATA_POLYMARKET_MACRO_MAP_ROUND_BUDGET_SECONDS", 30),
+        macro_cpi_max_display_age_seconds=_get_int("POLYDATA_MACRO_CPI_MAX_DISPLAY_AGE_SECONDS", 64800),
+        food_basket_max_display_age_seconds=_get_int("POLYDATA_FOOD_BASKET_MAX_DISPLAY_AGE_SECONDS", 64800),
+        macro_cpi_registry_max_display_age_seconds=_get_int("POLYDATA_MACRO_CPI_REGISTRY_MAX_DISPLAY_AGE_SECONDS", 64800),
+        macro_cpi_registry_actual_max_display_age_seconds=_get_int("POLYDATA_MACRO_CPI_REGISTRY_ACTUAL_MAX_DISPLAY_AGE_SECONDS", 5400),
+        polymarket_macro_map_max_display_age_seconds=_get_int("POLYDATA_POLYMARKET_MACRO_MAP_MAX_DISPLAY_AGE_SECONDS", 7200),
         geo_shock_ofac_sdn_url=source_value('POLYDATA_GEO_SHOCK_OFAC_SDN_URL'),
         geo_shock_ofac_consolidated_url=source_value('POLYDATA_GEO_SHOCK_OFAC_CONSOLIDATED_URL'),
         geo_shock_federal_register_api_url=source_value('POLYDATA_GEO_SHOCK_FEDERAL_REGISTER_API_URL'),

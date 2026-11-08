@@ -5,6 +5,8 @@ from data_sources import source_value
 import io
 import json
 import math
+import time
+import zipfile
 from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -13,6 +15,8 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 from xml.etree import ElementTree as ET
 
 from api.context import resolve_optional_service_callable, resolve_service_callable
+from api.clients.source_transport import read_response_bytes
+from api.services.seed_recovery import age_seconds
 
 GEO_SHOCK_SNAPSHOT_NAMESPACE = "snapshot:world:geo-sanctions-shock"
 GEO_SHOCK_CACHE_KEY = "panel-v1"
@@ -271,29 +275,19 @@ def _copy_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _seeded_payload_from_cache(ctx: GeoSanctionsShockContext) -> Optional[Dict[str, Any]]:
+    snapshot_store = _dependencies(ctx).snapshot_store
+    if snapshot_store is not None:
+        payload = snapshot_store.get(GEO_SHOCK_SNAPSHOT_NAMESPACE, GEO_SHOCK_CACHE_KEY)
+        if isinstance(payload, dict):
+            return payload
+        payload = snapshot_store.get_stale(GEO_SHOCK_SNAPSHOT_NAMESPACE, GEO_SHOCK_CACHE_KEY)
+        if isinstance(payload, dict):
+            return payload
     getter = _dependencies(ctx).get_cached_json
     if callable(getter):
         payload = getter(GEO_SHOCK_SNAPSHOT_NAMESPACE, GEO_SHOCK_CACHE_KEY)
         if isinstance(payload, dict):
-            snapshot_store = _dependencies(ctx).snapshot_store
-            if snapshot_store is not None:
-                snapshot_store.set(
-                    GEO_SHOCK_SNAPSHOT_NAMESPACE,
-                    GEO_SHOCK_CACHE_KEY,
-                    payload,
-                    _seed_cache_ttl_seconds(ctx),
-                )
             return payload
-
-    snapshot_store = _dependencies(ctx).snapshot_store
-    if snapshot_store is None:
-        return None
-    payload = snapshot_store.get(GEO_SHOCK_SNAPSHOT_NAMESPACE, GEO_SHOCK_CACHE_KEY)
-    if isinstance(payload, dict):
-        setter = _dependencies(ctx).set_cached_json
-        if callable(setter):
-            setter(GEO_SHOCK_SNAPSHOT_NAMESPACE, GEO_SHOCK_CACHE_KEY, payload, _seed_cache_ttl_seconds(ctx))
-        return payload
     return None
 
 
@@ -477,20 +471,50 @@ def _fetch_ofac_snapshot(ctx: GeoSanctionsShockContext) -> Dict[str, Any]:
         if not url:
             source_states[name] = "missing-url"
             continue
-        try:
-            response = requests_lib.get(url, timeout=20, headers=_ofac_headers())
-            response.raise_for_status()
-            parsed = _parse_ofac_xml(response.content, list_name="OFAC SDN" if name == "ofacSdn" else "OFAC Consolidated")
-            source_states[name] = "ok"
-            combined_entries.extend(parsed["focusEntries"])
-            record_count_total += int(parsed["recordCount"] or 0)
-            if parsed.get("publishDate"):
-                publish_dates.append(parsed["publishDate"])
-            for target, score in (parsed.get("targetScores") or {}).items():
-                target_scores[target] += int(score or 0)
-        except Exception:
-            _dependencies(ctx).application.logger.exception("geo shock ofac fetch failed source=%s", name)
-            source_states[name] = "error"
+        store = _dependencies(ctx).snapshot_store
+        namespace = "source:world:ofac"
+        cached = store.get(namespace, url) if callable(getattr(store, "get", None)) else None
+        parsed = cached if isinstance(cached, dict) else None
+        source_states[name] = "ok"
+        if parsed is None:
+            try:
+                # Same official publication, compressed for SDN's 29 MB XML.
+                download_url = url.replace("/exports/SDN.XML", "/exports/SDN_XML.ZIP")
+                compressed = download_url != url
+                deadline = time.monotonic() + 90
+                response = requests_lib.get(download_url, timeout=(6, 20), headers=_ofac_headers(), stream=True)
+                try:
+                    raw = read_response_bytes(response, 8_000_000 if compressed else 64_000_000, deadline=deadline)
+                finally:
+                    response.close()
+                if compressed:
+                    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                        members = [info for info in archive.infolist() if info.filename.lower().endswith(".xml")]
+                        if len(members) != 1 or members[0].file_size > 64_000_000:
+                            raise ValueError("OFAC_ARCHIVE_INVALID")
+                        raw = archive.read(members[0])
+                parsed = _parse_ofac_xml(raw, list_name="OFAC SDN" if name == "ofacSdn" else "OFAC Consolidated")
+                if not parsed.get("recordCount"):
+                    raise ValueError("OFAC_EMPTY_PUBLICATION")
+                parsed["fetchedAt"] = _dependencies(ctx).utc_now_iso()
+                parsed["focusEntries"] = [{**row, "collectedAt": parsed["fetchedAt"]} for row in parsed["focusEntries"]]
+                if store is not None:
+                    store.set(namespace, url, parsed, 3600)
+            except Exception:
+                _dependencies(ctx).application.logger.exception("geo shock ofac fetch failed source=%s", name)
+                old = store.get_stale(namespace, url) if callable(getattr(store, "get_stale", None)) else None
+                if isinstance(old, dict) and age_seconds(old.get("fetchedAt"), _dependencies(ctx).utc_now_iso()) < 86400:
+                    parsed = old
+                    source_states[name] = "stale"
+                else:
+                    source_states[name] = "error"
+                    continue
+        combined_entries.extend(parsed["focusEntries"])
+        record_count_total += int(parsed["recordCount"] or 0)
+        if parsed.get("publishDate"):
+            publish_dates.append(parsed["publishDate"])
+        for target, score in (parsed.get("targetScores") or {}).items():
+            target_scores[target] += int(score or 0)
     return {
         "states": source_states,
         "recordCountTotal": record_count_total,
@@ -523,7 +547,7 @@ def _normalize_notice(doc: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     }
 
 
-def _fetch_federal_register_snapshot(ctx: GeoSanctionsShockContext) -> Dict[str, Any]:
+def _fetch_federal_register_snapshot(ctx: GeoSanctionsShockContext, *, previous=None) -> Dict[str, Any]:
     url = _dependencies(ctx).settings.geo_shock_federal_register_api_url
     if not url:
         return {"state": "missing-url", "items": [], "targetScores": {}}
@@ -534,8 +558,26 @@ def _fetch_federal_register_snapshot(ctx: GeoSanctionsShockContext) -> Dict[str,
     seen: set[str] = set()
     items: List[Dict[str, Any]] = []
     target_scores: Dict[str, int] = defaultdict(int)
-    any_ok = False
-    for term in DEFAULT_FEDERAL_REGISTER_TERMS:
+    previous_sources = (previous or {}).get("federalRegisterSources") or {}
+    term_sources = {}
+    deadline = time.monotonic() + 180
+    now = _parse_datetime(_dependencies(ctx).utc_now_iso()).timestamp()
+    # Resume least-recently attempted terms first when a slow host exhausts the budget.
+    terms = sorted(DEFAULT_FEDERAL_REGISTER_TERMS,
+                   key=lambda term: previous_sources.get(term, {}).get("lastAttemptAt") or "")
+    for term in terms:
+        before = previous_sources.get(term, {})
+        meta = {**before}
+        next_attempt = _parse_datetime(before.get("nextAttemptAt"))
+        if next_attempt and next_attempt.timestamp() > now:
+            term_sources[term] = meta
+            continue
+        remaining = deadline - time.monotonic()
+        if remaining < 45:
+            term_sources[term] = {**meta, "state": "deferred", "error": "SourceBudgetExhausted"}
+            continue
+        attempted_at = _dependencies(ctx).utc_now_iso()
+        meta.update(lastAttemptAt=attempted_at)
         try:
             payload = http_json_get(
                 url,
@@ -544,14 +586,35 @@ def _fetch_federal_register_snapshot(ctx: GeoSanctionsShockContext) -> Dict[str,
                     "order": "newest",
                     "conditions[term]": term,
                 },
-                timeout=15,
+                timeout=45,
+                retry_attempts=2 if remaining >= 91 else 1,
+                retry_deadline=min(deadline, time.monotonic() + 91),
+                max_response_bytes=2 * 1024**2,
                 headers={"Accept": "application/json", "User-Agent": "polydata-runtime/1.0"},
             )
-            any_ok = True
-        except Exception:
+            if not isinstance(payload, dict) or not isinstance(payload.get("results"), list):
+                raise ValueError("Federal Register results schema invalid")
+            rows = payload["results"]
+            if any(not isinstance(row, dict) or not all(row.get(field) for field in
+                   ("document_number", "title", "publication_date", "html_url")) for row in rows):
+                raise ValueError("Federal Register document identity missing")
+        except Exception as exc:
+            failures = int(before.get("failures") or 0) + 1
+            code = _exception_http_status(exc)
+            delay = min(1800, 300 * 2 ** min(failures - 1, 3))
+            if code == 429:
+                from api.clients.source_transport import _retry_seconds
+                delay = max(delay, _retry_seconds(getattr(getattr(exc, "response", None), "headers", {}).get("Retry-After")))
+            failed_at = _parse_datetime(_dependencies(ctx).utc_now_iso()).timestamp()
+            meta.update(state="error", error=f"HTTP {code}" if code else type(exc).__name__, failures=failures,
+                        nextAttemptAt=datetime.fromtimestamp(failed_at + delay, timezone.utc).isoformat())
+            term_sources[term] = meta
             _dependencies(ctx).application.logger.exception("geo shock federal register fetch failed term=%s", term)
             continue
-        for raw in (payload or {}).get("results") or []:
+        meta.update(state="ok", error=None, failures=0, nextAttemptAt=None,
+                    lastSuccessAt=_dependencies(ctx).utc_now_iso(), recordCount=len(rows))
+        term_sources[term] = meta
+        for raw in rows:
             key = str(raw.get("document_number") or raw.get("html_url") or raw.get("title") or "")
             if not key or key in seen:
                 continue
@@ -559,13 +622,15 @@ def _fetch_federal_register_snapshot(ctx: GeoSanctionsShockContext) -> Dict[str,
             item = _normalize_notice(raw)
             if item is None:
                 continue
+            item["collectedAt"] = meta["lastSuccessAt"]
             items.append(item)
             for target in item.get("targetLabels") or []:
                 target_scores[target] += 2
     if items:
         items.sort(key=lambda item: (_parse_datetime(item.get("occurredAt")) or datetime.min.replace(tzinfo=timezone.utc)), reverse=True)
-    state = "ok" if any_ok else "error"
-    return {"state": state, "items": items[:10], "targetScores": dict(target_scores)}
+    successes = sum(meta.get("state") == "ok" for meta in term_sources.values())
+    state = "ok" if successes == len(DEFAULT_FEDERAL_REGISTER_TERMS) else "partial" if successes else "error"
+    return {"state": state, "items": items[:10], "targetScores": dict(target_scores), "sources": term_sources}
 
 
 def _coerce_conflict_rows(payload: Any) -> List[Dict[str, Any]]:
@@ -1462,7 +1527,7 @@ def build_geo_sanctions_shock_seed_payload(
     previous_payload = previous or {}
     payload = _empty_payload(dependencies, status="degraded")
     ofac_snapshot = _fetch_ofac_snapshot(dependencies)
-    notices_snapshot = _fetch_federal_register_snapshot(dependencies)
+    notices_snapshot = _fetch_federal_register_snapshot(dependencies, previous=previous_payload)
     conflict_snapshot = _fetch_conflict_snapshot(
         dependencies,
         previous=previous_payload,
@@ -1479,7 +1544,7 @@ def build_geo_sanctions_shock_seed_payload(
         *(notices_snapshot.get("items") or []),
     ]
     policy_collected_at = dependencies.utc_now_iso()
-    panel_sanctions = [{**item, "collectedAt": policy_collected_at} for item in sanctions_items if isinstance(item, dict)]
+    panel_sanctions = [{**item, "collectedAt": item.get("collectedAt") or policy_collected_at} for item in sanctions_items if isinstance(item, dict)]
     present_policy_ids = {item.get("id") for item in panel_sanctions}
     source_keys = {"OFAC SDN": "ofacSdn", "OFAC Consolidated": "ofacConsolidated", "Federal Register": "federalRegister"}
     for item in previous_payload.get("sanctionsItems") or []:
@@ -1518,6 +1583,7 @@ def build_geo_sanctions_shock_seed_payload(
             "sourceUrl": dependencies.settings.geo_shock_source_url,
             "status": _payload_status(source_states, items),
             "sources": source_states,
+            "federalRegisterSources": notices_snapshot.get("sources") or {},
             "conflictProvider": conflict_snapshot.get("provider"),
             "conflictState": conflict_snapshot.get("state"),
             "summary": {

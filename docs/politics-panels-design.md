@@ -1,6 +1,6 @@
 # Politics：8 类 Market 的数据补齐与 Panel 设计
 
-设计日期：2026-11-06。状态：**公开来源版本已部署，九个新增面板和升级后的 Policy Progress 接入原工作台。完整目标和剩余覆盖见 §9；不能将公开来源版本解释为全部政治数据已补齐。**
+设计日期：2026-11-06。状态：**公开来源版本已部署，九个新增面板和升级后的 Policy Progress 接入原工作台。§9 保留首版发布证据；四项证据字段的后续实现、范围与部署界限见 §10。不能将公开来源版本解释为全部政治数据已补齐。**
 
 用户要求把上一轮政治数据缺口全部纳入，并先设计 Panel。本文件覆盖所有缺口，不把访问权限、来源覆盖、模型或历史缺口删除后称为完成。设计原型的政治实体、数值与事件全部是虚构样例。
 
@@ -227,6 +227,9 @@ API：只读快照，单请求2s读取预算、最多200行/512KiB；历史详�
 - 同数据根的 `politics.sqlite3/evidence` 按 `(source,revision)` 去重，压缩保存原始字节和规范结果及首次/最近实际取得时刻；先归档成功再发布快照。当前保守保留全部已归档版本，2GiB容量阻塞保护；没有实现自动90天删除、完整事件查询表或市场映射表。不能把定时重取当成来源发布新版本。
 - Federal Register仍只有 `official-disclosures` 一个owner，`source:official-disclosures/federal-register:presidential` 保存新增总统文件投影，原件元数据进入既有 `official_disclosures.sqlite3`。总统文件最多5页/500条，真实本轮70/70；超上限标记 truncated，不声称已完成游标续扫。原监管页仍明确最近30天100条限制。
 - `/runtime/politics/{election,early-vote,nomination,seats,campaign-finance,government,executive,appointments,funding,legislation}` 全部只读，无HTTP上游访问。公开前缀为 `/wm-api`。P7继续 `/runtime/disclosures/policy-progress`，附带只读 legislation 投影。API按来源重新计算过期，不把GET时间变为成功时间。
+- 政治采集使用共享来源传输：单次45秒、至多两次、每个来源120秒总预算（FEC允许的GovCloud重定向共用预算）、8 MiB响应上限。读取完整响应失败亦在有限重试内；429/401/403不轮换出口重复请求。GovInfo BILLSTATUS的404按1/2/4/6小时持久退避，仍保留目标身份、旧成功数据和原成功时间。每轮最多五个详情请求及既有owner锁不变。
+- 法案索引分别记录近期目标 `targetIds` 和历史尝试身份 `ids`；API的 `acquiredCount` 只计当前目标中真实取得的详情，公开失败数/待取得数与各来源的下次尝试时间。`generatedAt` 只取实际成功时间，尝试时间另列 `lastAttemptAt`；有失败、过期或尚未取得的依赖返回degraded，无可用依赖返回unavailable。拨款投影仅把拨款相关详情/明确拨款目标当作依赖，不因无关决议404而降级；法案总览继续如实显示该失败。
+- 法案详情沿用每5分钟检查、每轮最多5项和最短30分钟重取，API声明的实际期望轮转为 `max(1800, ceil(targetCount/5)*300)` 秒，过期阈值为该轮转的三倍，复用政治领域“三个采集周期”规则。101个目标对应105分钟期望轮转、315分钟过期阈值；这不改变请求频率或并发。来源错误仍立即显示，失败的Retry-After/404退避不延长新鲜度，超过三轮仍标stale；API同时返回 `expectedIntervalSeconds/staleAfterSeconds`，不能再把所有详情统一承诺为90分钟内必刷新。
 - 普通列表最多200；**435席位索引是明确例外**，每项仅成员身份/党派/链接，单响应仍限制512KiB。法案详情最多40份、每份60个行动；界面注明有限观察范围。当前不接受虚假的 asOf/revision 查询参数，也不声称已建立自动 Market Rules 映射。
 - 定时模板 `polydata-politics@.timer/service`：三个owner实例 elections / campaign-finance / government，每5分钟检查到期；民调/北卡大选邮寄与票数1h、已结束初选每日、FEC6h、成员名册/白宫/GovInfo30min、所跟踪法律每日。还没有启用选举夜60s或自动活动窗口。
 - 浏览器公共Runtime：普通面板10min、资金30min、拨款5min；15s请求截止、最多1次重试。刷新仅重新读正式数据。数据源失败保留最后成功值与原时间，不清空；401/403不换出口绕过，429遵守Retry-After。
@@ -265,3 +268,46 @@ API：只读快照，单请求2s读取预算、最多200行/512KiB；历史详�
 前端29项针对性单元测试、6项浏览器用例通过；类型、语言与边界检查通过。浏览器覆盖初选、行政文件、任命、拨款的首次503、重试恢复、再次失败保留；另验证成功空列表替换旧列表，以及FEC 5h、历史初选23h的正常展示与重载缓存恢复。生产是否生效需另核对实际版本与桌面/手机页面；上述故障注入仅用于本地测试，不替换生产API。全仓 `make quality` 因本机缺少开发 `.venv` 无法启动，不记为通过。
 
 生产前端提交 `dd2a700899e64f077be01ed219285d7b58b394ea` 已从干净的提交导出构建，并发布到迁移后的腾讯静态站点；两个域名的 `release-sha` 均匹配。2026-11-06 16:33（北京时间）真实 www 首页桌面2518px逐个读取九个政治面板，均为 ready、有实际内容；手机390px核验初选、FEC、行政文件、任命、拨款五个面板，均为 ready，无横向溢出。截图保存在本地 `webpage/artifacts/politics-data-state/`；没有替换生产API或瓦片。生产瞬时核验不能代替完整6h/24h采集周期的持续验收；本次未修改后端采集周期、数据源或代理。
+
+## 10. 四项证据字段扩展（2026-11-07）
+
+这是已有政治 owner 的增量契约；末尾的首次采集记录只证明当次观察。没有新增 Panel、worker、浏览器轮询或缓存。三个 owner、五分钟到期检查、各领域公共 GET 和默认布局保持原入口。
+
+| 消费者 | 新来源及归档 identity | 字段与真实覆盖 | 不能据此成立的推论 |
+| --- | --- | --- | --- |
+| Election Watch | NCSBE 官方选后程序公告；`nc-certification-20261103` | 2026-11-03 NC 联邦选举的州级 canvass 预定 11-24 11:00 America/New_York，`certifications[].status=pending`，有官方证据链接 | 票数不是认证；到了预定时间只转为 `outcome-unverified`，不能自动标 certified。后续认证决定、重计票和法院事项仍需新官方证据 |
+| Nomination Path | DNC 官方 2024 全国虚拟 roll-call 结果；`dnc-roll-call-2024` | `delegateContests` 单独标历史、全国、2024、DEM、实际代表票及口径。2026 NC congressional primary 明确 `delegateApplicability=not-applicable-congressional-primary` | 不把历史党代会移植到当前初选；不由普通选票推算代表票。该结果页没有数值门槛、未分配票或机器可读逐州全表，保持未知 |
+| Campaign Finance | FEC 当届 24/48 小时独立支出 CSV；`fec-independent-{cycle}` | 支持/反对、spender、candidate、金额、支出/传播/接收日期、filing/transaction ID、AMN_IND、PREV_FILE_NUM。按同一申报家族保留最新整份申报，保存修订关系及前序是否存在 | 原报告与修订不重复相加；通知不是全部周期报告；不输出误导的全局金额总和。候选人 weball 财务汇总与独立通知修订分开 |
+| Appointments | US Courts 确认名单 `judicial-confirmations`；GovInfo CHRG RSS `nomination-hearings` → `hearing:{packageId}` MODS | 司法职位的真实提交/确认日期；近期已出版提名听证的原生 package、届次、heldDate、委员会与证人。确认、听证和白宫提交各自保留源时钟 | 法院名单不是全行政任命；确认不是就任；GovInfo 出版/收录时间不是听证日；不按姓名猜 PN 关联；未来议程、逐名票仍不可用 |
+
+### 获取、存储与读取
+
+- 来源入口只由 `.env` / `data_sources.source_value` 注入：`POLYMONITOR_POLITICS_NC_CERTIFICATION_URL`、`POLYMONITOR_POLITICS_DNC_ROLL_CALL_URL`、`POLYMONITOR_POLITICS_FEC_IE_URL_TEMPLATE`（仅 `{cycle}` 替换）、`POLYMONITOR_POLITICS_JUDICIAL_CONFIRMATIONS_URL`、`POLYMONITOR_POLITICS_HEARINGS_FEED_URL`。示例配置不写真实值；沿用统一 loader 与已授权显式来源路由。AP / Congress / OpenFEC 可选凭据能力保留，本次不需要它们。
+- `politics/collector.py` 仍持有 `owner:politics / elections|campaign-finance|government` 跨进程锁。完整请求45秒、最多两次尝试；含官方 FEC 重定向的单来源120秒上限。owner 总预算900秒，低于既有 unit 1200秒；剩余不足完整45秒时 defer，未开始的来源不推进尝试/成功时钟。
+- 默认响应8 MiB，仅 FEC IE 经真实大小核验允许32 MiB。GovInfo 详情只允许 RSS 返回的同发布者 HTTPS `/metadata/pkg/{原生ID}/mods.xml`，每轮最多三件，不按网页请求触发。403不换出口规避，429继续原退避。缺配置明确失败并隔离其他来源。
+- 沿用 SQLite `panel_snapshots / source:politics:v1 / sourceId` 保存当前解析与独立 lastAttempt/lastSuccess/nextAttempt；同目录 `politics.sqlite3 / evidence` 以原始SHA256归档原文、解析、首次/最近接收时间，容量上限2 GiB。先确认原文归档和 source state 写入，再返回成功。网页GET只读，禁止取源和写回。
+- FEC完整CSV全部归档；业务源保存最新200条可展示通知和200条修订，API最多各100，保留原文件、当前可展示、修订排除、方向未知隔离及修订分母。缺方向不补成支持/反对，不将整源判空；来源元数据与面板保留 `partial/degraded`。
+- NC公告每小时，DNC已结束党代会每天，FEC IE六小时，法院名单三十分钟，CHRG出版目录一小时、已出版详情每天；浏览器仍 Election/Nomination/Appointments十分钟、Finance三十分钟。源 stale 提醒沿用三倍对应周期；没有把历史事件日期续成“今天发生”。
+- 资源key、schemaVersion 1保持兼容，新增字段为可选扩展；公共Runtime复用原来源成功时钟、7天有界浏览器恢复、220,000字符每资源上限。失败保留原值/原时钟；首次失败无成功时间；合法空通知/目录替换旧列表；坏schema不覆盖最后成功。
+- 只读API沿用 `/runtime/politics/election`、`/nomination`、`/campaign-finance`、`/appointments`；各来源隔离，没有把某一部分成功当其他部分成功。
+
+### 首次真实采集与验收边界
+
+2026-11-07 UTC 08:03–08:05，限定五个新增source与三份听证详情，在既有owner锁下完成正式SQLite首次写入和evidence归档；没有重采旧源或另启常驻进程：
+
+- NC一项pending州级canvass；DNC一项明确为历史的2024全国roll-call，Harris 4,567代表票。
+- FEC 51,082原始行、10,012申报，整份被后续修订排除4,209行；当前可展示46,864行，9条当前通知方向未知（原文件共12条）；696个修订申报。API各展示最近100条通知/修订并保留分母。该源为partial。
+- 法院名单57条司法确认，名单更新日2026-11-06，最新实际确认日2026-09-23。GovInfo最近100件出版物里有3件提名听证，2件119届、1件118届历史；三份MODS取得真实heldDate，未用出版时间替代事件时间。
+- 正式SQLite的四份新投影通过前端各模块模型；响应约97/9/130/68 KB，低于公共持久缓存预算。后端针对性回归29项通过；前端政治契约、TypeScript、语言及边界检查随最终任务继续核验。
+- Senate主站XML/HTML、Judiciary公开页本轮直连403，未换出口规避。US Courts/GovInfo成功不是Senate访问恢复。
+- **首次采集使用工作区新代码，不能据此声称后端代码已安装、生产API已加载、前端已发布或真实UI已验收。** 一次成功也不是完整六小时/每日自动周期的连续成功证明。
+
+### 安装与公网消费复核（2026-11-07）
+
+后续已按变更前哈希核对，将四个本任务后端文件安装至既有 backend；`store.py` 未改。真实公网首页已展示待认证日程、明确标为历史的代表票、独立支出及修订、司法确认与已出版听证，没有替换 API 或瓦片。桌面与390px手机截图在 `webpage/design-previews/politics/production-*-20261107.png`；版本与完整任务验收分别记录，首次写入本身仍不能替代这些检查。
+
+16:43:51（北京时间）四条公网政治 API 均返回真实字段。13项来源引用均可用、未过期且无采集错误；FEC IE仍为partial，保留9条方向未知，未改成零或任意党派。NC认证仍pending、`certifiedAt=null`；当前国会初选仍N/A；听证仍按真实heldDate标注历史。正式定时器已将法院确认源推进至16:35:16，而不在读取API时更新时间；FEC六小时与DNC每日完整周期尚未到期，未宣称跨周期连续验收。
+
+17:00:56 的前端正式版本为 `b4d321fef2f937bd7a223bf2ec169ae4bc735624`。用真实 Chrome、继承的浏览器出口，在普通首页分别等待六个新页签的数据后截图：Certification、Delegates、Independent、Amendments、Judicial confirmations、Hearings；没有拦截或替换API/瓦片。390px手机页面宽390、各政治面板宽382，无横向溢出，无脚本错误；桌面为2560×1440。未来听证仍明确unavailable，历史听证日期与司法确认日期可读，FEC的partial仍显示DEGRADED。相邻非本任务面板的已有stale/degraded状态未掩盖，也不据此宣称全站健康。
+
+最终 `e806a43dd66eeab4c587073257d78fd149780db4` 进一步让历史代表票复用 `partyTone`，避免给民主党候选人使用紫色。两域名版本一致；生产代表票DOM为 `pol-blue`，实际颜色 `rgb(100, 164, 255)`。桌面/手机截图已更新，390px仍无溢出，无脚本错误；其余字段与数据链路不变。

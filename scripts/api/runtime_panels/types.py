@@ -178,7 +178,6 @@ class RuntimePanelContext:
     """Typed dependencies for runtime panels during the module migration."""
 
     get_alpha_signal_snapshot: Callable[..., PanelPayload]
-    get_polysignal_snapshot: Callable[..., PanelPayload]
     get_whale_trades_snapshot: Callable[..., PanelPayload]
     get_suspicious_trades_snapshot: Callable[..., PanelPayload]
     get_world_cup_match_ops_snapshot: Callable[..., PanelPayload]
@@ -204,7 +203,6 @@ class RuntimePanelContext:
     def from_context(cls, context: Mapping[str, Any]) -> RuntimePanelContext:
         return cls(
             get_alpha_signal_snapshot=resolve_route_callable(context, "get_alpha_signal_snapshot"),
-            get_polysignal_snapshot=resolve_route_callable(context, "get_polysignal_snapshot"),
             get_whale_trades_snapshot=resolve_route_callable(context, "get_whale_trades_snapshot"),
             get_suspicious_trades_snapshot=resolve_route_callable(context, "get_suspicious_trades_snapshot"),
             get_world_cup_match_ops_snapshot=resolve_route_callable(context, "get_world_cup_match_ops_snapshot"),

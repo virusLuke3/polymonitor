@@ -5,7 +5,7 @@ from enum import Enum
 from typing import Iterable
 
 
-CATALOG_VERSION = "telegram-delivery-2026-08-26.v1"
+CATALOG_VERSION = "telegram-delivery-2026-11-08.v2"
 
 
 class DeliveryMode(str, Enum):
@@ -36,7 +36,7 @@ FRONTEND_PANEL_IDS = (
     "active-markets", "global-orderfilled", "oracle-feed", "market-summary",
     "featured-market", "price-implications", "price-chart", "sample-chain-trades",
     "oracle-timeline", "related-news", "breaking-event-radar", "market-tv-wire",
-    "market-youtube-channels", "alpha-signal", "polybeats-feed", "whale-tracker",
+    "market-youtube-channels", "alpha-signal", "whale-tracker",
     "suspicious-flow", "commodities-watch", "crypto-watch", "ai-model-race",
     "big-tech-market-cap", "consumer-app-pulse", "crypto-funding-watch",
     "defi-token-watch", "defi-yield-monitor", "defi-security-watch",
@@ -56,6 +56,22 @@ FRONTEND_PANEL_IDS = (
     "inflation-nowcast", "fed-rates-polymarket-gap", "nba-scoreboard", "nba-intel",
     "espn-matchup-predictor", "esports-intel", "sports-odds", "jin10-flash",
     "new-market-signals", "lob-depth", "f1-trackside",
+    'company-events',
+    'crypto-exchange-inflow',
+    'crypto-oracle-reference',
+    'crypto-order-flow',
+    'options-implied-probability',
+    'policy-progress',
+    'politics-appointments',
+    'politics-campaign-finance',
+    'politics-early-vote',
+    'politics-election',
+    'politics-executive',
+    'politics-funding',
+    'politics-government',
+    'politics-nomination',
+    'politics-seats',
+
 )
 
 
@@ -80,7 +96,7 @@ _GENERIC_TOPIC_GROUPS = {
         "crypto-watch", "crypto-funding-watch", "defi-token-watch",
         "defi-yield-monitor", "defi-security-watch", "crypto-perp-funding",
         "tradfi-perp-radar", "crypto-fear-greed", "crypto-etf-flow",
-        "stablecoin-monitor", "onchain-tradfi-perp-radar", "polybeats-feed",
+        "stablecoin-monitor", "onchain-tradfi-perp-radar",
         "whale-tracker", "suspicious-flow",
     ),
     "macro": (
@@ -102,6 +118,23 @@ _GENERIC_TOPIC_GROUPS = {
     "intel": (
         "equity-event-command", "global-transport-shipping", "esports-intel",
         "sports-odds", "f1-trackside", "geo-sanctions-shock",
+        'company-events',
+        'crypto-exchange-inflow',
+        'crypto-oracle-reference',
+        'crypto-order-flow',
+        'options-implied-probability',
+        'policy-progress',
+        'politics-appointments',
+        'politics-campaign-finance',
+        'politics-early-vote',
+        'politics-election',
+        'politics-executive',
+        'politics-funding',
+        'politics-government',
+        'politics-legislation',
+        'politics-nomination',
+        'politics-seats',
+
     ),
     "monitor": ("natural-hazards",),
 }

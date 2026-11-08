@@ -164,6 +164,9 @@ def fetch_jin10_panel_payload(
     if client is None or hasattr(client, "Session"):
         client = requests.Session()
         client.trust_env = False
+        proxy_url = os.environ.get("POLYDATA_API_HTTP_PROXY_URL", "").strip()
+        if proxy_url:
+            client.proxies.update({"http": proxy_url, "https": proxy_url})
         close_client = True
 
     try:

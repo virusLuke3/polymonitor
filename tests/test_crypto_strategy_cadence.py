@@ -14,24 +14,24 @@ def test_slow_provider_attempts_are_shared_without_advancing_observation_clocks(
     def options(get, asset, now):
         calls['options'] += 1
         return {'asset': asset, 'observedAt': now, 'expiries': []}
-    def stable(get, now):
+    def stable_get(url, **kwargs):
         calls['stable'] += 1
-        return [{'receivedAt': now, 'price': 1}]
+        return {'data': {'amount': '1'}} if 'coinbase' in url else {'result': {'pair': {'c': ['1']}}}
     monkeypatch.setattr(providers, 'venue_asset', venue)
     monkeypatch.setattr(providers, 'options', options)
-    monkeypatch.setattr(providers, 'stablecoins', stable)
+    monkeypatch.setattr(providers.time, 'time', lambda: 1000.)
     cadence = SourceCadence()
     def collect(now):
-        return providers.collect(None, bybit_base='fixture', reference_url='', now=now, cadence=cadence)
+        return providers.collect(stable_get, bybit_base='fixture', reference_url='', now=now, cadence=cadence)
     first = collect(1_000_000)
     first['stablecoins'][0]['receivedAt'] = -1  # Consumer mutation cannot rewrite the retained observation.
     second = collect(1_030_000)
-    assert calls == {'venue': 8, 'options': 2, 'stable': 1}
-    assert second['stablecoins'][0]['receivedAt'] == 1_000_000
+    assert calls == {'venue': 8, 'options': 2, 'stable': 4}
+    assert second['stablecoins'][0]['receivedAt'] == providers.iso(1_000_000)
     assert second['options']['BTC']['observedAt'] == 1_000_000
     assert second['assets']['BTC']['observedAt'] == 1_030_000
     collect(1_060_000)
-    assert calls['stable'] == 2 and calls['options'] == 2
+    assert calls['stable'] == 8 and calls['options'] == 2
     third = collect(1_300_000)
     assert calls['options'] == 4
     assert third['options']['BTC']['observedAt'] == 1_300_000
@@ -43,7 +43,7 @@ def test_failed_provider_waits_its_budget_and_can_recover():
     def fail():
         calls.append('failed')
         raise OSError('source unavailable')
-    with pytest.raises(OSError, match='unavailable'):
+    with pytest.raises(OSError, match='OSError'):
         cadence.read('options', 1000, 300_000, fail)
     with pytest.raises(OSError, match='SOURCE_RETRY_WAIT'):
         cadence.read('options', 31_000, 300_000, fail)

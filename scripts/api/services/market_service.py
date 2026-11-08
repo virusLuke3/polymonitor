@@ -113,7 +113,9 @@ class MarketPanelReader:
             if not rows:
                 return {"_status": 404, "error": "Market identity not available", "marketId": int(market_id)}
             return {"row": rows[0]}
-        value = self.cache.get("record", ["gamma-quotes-v1", int(market_id)], build, ttl=60, max_age=300, admit=False, background=False)
+        # Sibling panels need the same registry row. Join its short in-flight
+        # read instead of turning normal cold-cache contention into a 503.
+        value = self.cache.get("record", ["gamma-quotes-v1", int(market_id)], build, ttl=60, max_age=300, admit=False, background=False, wait_seconds=1)
         if value.get("_status") == 404:
             raise LookupError("Market identity not available")
         if not value.get("row"):
@@ -142,7 +144,7 @@ class MarketPanelReader:
                         documents.append(value)
                     row[field] = indexes[encoded]
             return {"rows": rows, "documents": documents}
-        payload = self.cache.get("semantics-v2", key, build, ttl=30, max_age=0, admit=False)
+        payload = self.cache.get("semantics-v2", key, build, ttl=30, max_age=0, admit=False, wait_seconds=1)
         if payload.get("status") != "ok":
             raise TimeoutError("Source outcome evidence unavailable")
         for row in payload["rows"]:

@@ -14,13 +14,16 @@ _scripts_root = Path(__file__).resolve().parents[1]
 if str(_scripts_root) not in sys.path:
     sys.path.insert(0, str(_scripts_root))
 
-import redis
+try:
+    import redis
+except ImportError:
+    redis = None
 import requests
 import xlrd
 
 from api.config import load_api_settings
 from api.services import energy_gasoline_shock_service
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot, retained_snapshot
 from runtime.snapshot_store import SnapshotStore
 
 DEFAULT_INTERVAL_SECONDS = 21600
@@ -48,12 +51,11 @@ def _redis_key(prefix: str, namespace: str, cache_key: str) -> str:
 
 class EnergyGasolineShockWatcher:
     def __init__(self, *, redis_url: str, redis_prefix: str, snapshot_sqlite_path: str, settings: Any, interval_seconds: int) -> None:
-        if not redis_url:
-            raise RuntimeError("POLYDATA_REDIS_URL is required for energy gasoline shock watcher")
         self.settings = settings
         self.redis_prefix = redis_prefix or ""
         self.interval_seconds = max(1800, int(interval_seconds or DEFAULT_INTERVAL_SECONDS))
-        self.redis_client = redis.from_url(redis_url, decode_responses=True)
+        self.redis_client = (redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2)
+                             if redis is not None and str(redis_url or "").strip() else None)
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
         self.requests = requests.Session()
@@ -89,31 +91,53 @@ class EnergyGasolineShockWatcher:
         }
 
     def _get_cached_json(self, namespace: str, cache_key: str) -> Dict[str, Any] | None:
-        raw = self.redis_client.get(_redis_key(self.redis_prefix, namespace, cache_key))
-        if not raw:
+        cached = self.snapshot_store.get(namespace, cache_key)
+        if isinstance(cached, dict):
+            return cached
+        if self.redis_client is None:
             return None
-        payload = json.loads(str(raw))
-        return payload if isinstance(payload, dict) else None
+        try:
+            raw = self.redis_client.get(_redis_key(self.redis_prefix, namespace, cache_key))
+            payload = json.loads(str(raw)) if raw else None
+            return payload if isinstance(payload, dict) else None
+        except Exception:
+            return None
 
     def _set_cached_json(self, namespace: str, cache_key: str, payload: Dict[str, Any], ttl: int) -> None:
-        self.redis_client.set(_redis_key(self.redis_prefix, namespace, cache_key), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl)
+        # Source caches are best effort; formal snapshots use store_payload.
+        try:
+            self.snapshot_store.set(namespace, cache_key, payload, ttl)
+        except Exception:
+            pass
+        if self.redis_client is not None:
+            try:
+                self.redis_client.set(_redis_key(self.redis_prefix, namespace, cache_key), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl)
+            except Exception:
+                pass
 
     def previous(self) -> Dict[str, Any]:
+        stale = self.snapshot_store.get_stale(self.namespace(), self.cache_key())
+        if isinstance(stale, dict):
+            return stale
         cached = self._get_cached_json(self.namespace(), self.cache_key())
         if cached:
             return cached
-        stale = self.snapshot_store.get_stale(self.namespace(), self.cache_key())
-        return stale if isinstance(stale, dict) else {}
+        return {}
 
     def store_payload(self, payload: Dict[str, Any]) -> None:
         ttl = self.ttl_seconds()
-        self.snapshot_store.set(self.namespace(), self.cache_key(), payload, ttl)
-        self.redis_client.set(self.redis_key(), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl)
+        publish_snapshot(
+            snapshot_store=self.snapshot_store, namespace=self.namespace(),
+            cache_key=self.cache_key(), payload=payload, ttl_seconds=ttl,
+            redis_client=self.redis_client, redis_cache_key=self.redis_key(),
+        )
 
     def store_meta(self, *, status: str, record_count: int, source_states: Dict[str, Any] | None = None, error_summary: str | None = None, cache_mode: str | None = None, payload_status: str | None = None, preserve: bool = False) -> None:
         previous = self.seed_meta_store.load(SEED_META_NAMESPACE, SEED_META_CACHE_KEY) or {}
         attempted = utc_now_iso()
-        last_success = previous.get("lastSuccessAt") if preserve else attempted
+        last_success = previous.get("lastSuccessAt")
+        if not preserve and (status in {"ok", "empty"} or (status == "degraded" and record_count > 0)):
+            last_success = attempted
         payload = build_seed_meta_payload(
             panel_id=SEED_META_CACHE_KEY,
             namespace=SEED_META_NAMESPACE,
@@ -122,7 +146,7 @@ class EnergyGasolineShockWatcher:
             expected_interval_seconds=self.interval_seconds,
             status=status,
             last_attempt_at=attempted,
-            last_success_at=last_success or attempted,
+            last_success_at=last_success,
             record_count=record_count,
             source_states=source_states,
             error_summary=error_summary,
@@ -132,19 +156,27 @@ class EnergyGasolineShockWatcher:
         )
         self.seed_meta_store.store(SEED_META_NAMESPACE, SEED_META_CACHE_KEY, payload)
 
+    def store_meta_fail_soft(self, **kwargs: Any) -> bool:
+        try:
+            self.store_meta(**kwargs)
+            return True
+        except Exception as exc:
+            print(f"[energy_gasoline_shock] WARN seed meta write failed: {exc.__class__.__name__}", file=sys.stderr)
+            return False
+
     def run_once(self) -> Dict[str, Any]:
         previous = self.previous()
         try:
             payload = energy_gasoline_shock_service.build_energy_gasoline_shock_payload(self.context())
         except Exception as exc:
             if previous:
-                self.store_payload(previous)
+                self.store_payload(retained_snapshot(previous))
                 self.store_meta(status="preserved", record_count=len(previous.get("items") or []), source_states={"eia": "error"}, error_summary=str(exc), preserve=True)
                 return {"status": "preserved", "payload": previous, "error": str(exc)}
             self.store_meta(status="error", record_count=0, source_states={"eia": "error"}, error_summary=str(exc), preserve=True)
             return {"status": "error", "error": str(exc)}
         if previous and not payload.get("items"):
-            self.store_payload(previous)
+            self.store_payload(retained_snapshot(previous))
             self.store_meta(status="preserved", record_count=len(previous.get("items") or []), source_states=payload.get("sources"), error_summary="Preserved previous snapshot because new energy payload was empty", preserve=True)
             return {"status": "preserved", "payload": previous}
         payload = {**payload, "cacheMode": "seeded"}
@@ -163,7 +195,6 @@ def main() -> int:
     args = parser.parse_args()
     settings = load_api_settings()
     watcher = EnergyGasolineShockWatcher(redis_url=settings.redis_url, redis_prefix=settings.redis_prefix, snapshot_sqlite_path=settings.snapshot_sqlite_path, settings=settings, interval_seconds=args.interval)
-    watcher.redis_client.ping()
     print(f"[energy-shock] redis_key={watcher.redis_key()} sqlite={settings.snapshot_sqlite_path}", file=sys.stderr)
     if not args.watch:
         print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
@@ -174,7 +205,7 @@ def main() -> int:
         except KeyboardInterrupt:
             return 0
         except Exception as exc:
-            watcher.store_meta(status="error", record_count=0, source_states={"eia": "error"}, error_summary=str(exc), preserve=True)
+            watcher.store_meta_fail_soft(status="error", record_count=0, source_states={"eia": "error"}, error_summary=str(exc), preserve=True)
             print(f"[energy-shock] ERROR {exc}", file=sys.stderr)
         time.sleep(max(1800, args.interval))
 

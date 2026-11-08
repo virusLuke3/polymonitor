@@ -52,3 +52,8 @@ class QueryServiceClickHouseTestCase(unittest.TestCase):
             service, '_query_json_rows', side_effect=[[], None]
         ):
             self.assertIsNone(service.get_recent_trades({}))
+
+
+# These SQL fixtures model the canonical store; primary tests opt in explicitly.
+import pytest
+pytestmark = pytest.mark.usefixtures("legacy_orderfilled_store")

@@ -273,6 +273,7 @@ def fetch(
     previous_events: list[Dict[str, Any]] | None = None,
     snapshot_store=None,
     deadline: float | None = None,
+    connect_timeout_seconds: float = 2.0,
     now: datetime | None = None,
 ) -> ProviderResult:
     deadline = deadline if deadline is not None else monotonic() + PROVIDER_FETCH_BUDGET_SECONDS
@@ -283,7 +284,7 @@ def fetch(
     payload = http_json_get(
         url,
         params={"status": "actual", "message_type": "alert,update,cancel"},
-        timeout=Timeout(total=max(0.1, deadline - monotonic() - 0.25), connect=2.0, read=max(0.1, deadline - monotonic() - 0.25)),
+        timeout=Timeout(total=max(0.1, deadline - monotonic() - 0.25), connect=connect_timeout_seconds, read=max(0.1, deadline - monotonic() - 0.25)),
         headers={
             "Accept": "application/geo+json",
             "User-Agent": "polymonitor-world-event-map/1.0",

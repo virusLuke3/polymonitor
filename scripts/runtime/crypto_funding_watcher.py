@@ -32,7 +32,7 @@ except ImportError:
 from api.clients.source_transport import source_session
 from api.config import load_api_settings
 from api.services import crypto_funding_service
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot, SnapshotPublicationError
 from runtime.snapshot_store import SnapshotStore
 
 
@@ -71,17 +71,13 @@ class CryptoFundingWatcher:
         limit: int = DEFAULT_LIMIT,
         interval_seconds: int = DEFAULT_INTERVAL_SECONDS,
     ) -> None:
-        if redis is None:
-            raise RuntimeError("redis package is required. Install scripts/requirements.txt")
         if requests is None:
             raise RuntimeError("requests package is required. Install scripts/requirements.txt")
-        if not str(redis_url or "").strip():
-            raise RuntimeError("POLYDATA_REDIS_URL is required for crypto funding watcher")
         self.settings = settings
         self.limit = max(1, int(limit or DEFAULT_LIMIT))
         self.interval_seconds = max(15, int(interval_seconds or DEFAULT_INTERVAL_SECONDS))
         self.redis_prefix = str(redis_prefix or "")
-        self.redis_client = redis.from_url(redis_url, decode_responses=True)
+        self.redis_client = redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2) if redis is not None and str(redis_url or "").strip() else None
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
         self.http_local = threading.local()
@@ -90,6 +86,7 @@ class CryptoFundingWatcher:
         self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="funding-venue")
         self.market_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="funding-market")
         self.market_jobs = {}
+        self.venue_jobs = {}
 
     def ttl_seconds(self) -> int:
         configured = int(os.environ.get("POLYDATA_CRYPTO_FUNDING_SEED_TTL_SECONDS", "0") or 0)
@@ -111,6 +108,9 @@ class CryptoFundingWatcher:
         if session is None:
             session = source_session()
             session.trust_env = False
+            proxy_url = os.environ.get("POLYDATA_API_HTTP_PROXY_URL", "").strip()
+            if proxy_url:
+                session.proxies.update({"http": proxy_url, "https": proxy_url})
             self.http_local.session = session
             with self.http_lock:
                 self.http_sessions.append(session)
@@ -132,14 +132,23 @@ class CryptoFundingWatcher:
             "funding_executor": self.executor,
             "funding_market_executor": self.market_executor,
             "funding_market_jobs": self.market_jobs,
+            "funding_venue_jobs": self.venue_jobs,
         }
 
     def get_cached_json(self, namespace: str, key: str) -> dict | None:
-        raw = self.redis_client.get(_redis_key(self.redis_prefix, namespace, key))
-        return json.loads(raw) if raw else None
+        payload = self.snapshot_store.get(namespace, key)
+        if isinstance(payload, dict):
+            return payload
+        try:
+            raw = self.redis_client.get(_redis_key(self.redis_prefix, namespace, key))
+            return json.loads(raw) if raw else None
+        except Exception:
+            return None
 
     def set_cached_json(self, namespace: str, key: str, value: dict, ttl: int) -> None:
-        self.redis_client.set(_redis_key(self.redis_prefix, namespace, key), json.dumps(value, allow_nan=False), ex=ttl)
+        publish_snapshot(snapshot_store=self.snapshot_store, namespace=namespace, cache_key=key,
+                         payload=value, ttl_seconds=ttl, redis_client=self.redis_client,
+                         redis_cache_key=_redis_key(self.redis_prefix, namespace, key))
 
     def close(self) -> None:
         self.executor.shutdown(wait=True, cancel_futures=True)
@@ -148,6 +157,9 @@ class CryptoFundingWatcher:
             session.close()
 
     def load_previous_payload(self) -> Dict[str, Any]:
+        stale = self.snapshot_store.get_stale(self.namespace(), self.cache_key())
+        if isinstance(stale, dict):
+            return stale
         try:
             raw = self.redis_client.get(self.redis_key())
             if raw:
@@ -156,13 +168,18 @@ class CryptoFundingWatcher:
                     return payload
         except Exception:
             print("[crypto-funding] WARN redis read failed", file=sys.stderr)
-        stale = self.snapshot_store.get_stale(self.namespace(), self.cache_key())
-        return stale if isinstance(stale, dict) else {}
+        return {}
 
     def store_payload(self, payload: Dict[str, Any]) -> None:
-        ttl_seconds = self.ttl_seconds()
-        self.snapshot_store.set(self.namespace(), self.cache_key(), payload, ttl_seconds)
-        self.redis_client.set(self.redis_key(), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl_seconds)
+        try:
+            publish_snapshot(snapshot_store=self.snapshot_store, namespace=self.namespace(),
+                             cache_key=self.cache_key(), payload=payload, ttl_seconds=self.ttl_seconds(),
+                             redis_client=self.redis_client, redis_cache_key=self.redis_key())
+        except SnapshotPublicationError as exc:
+            self.store_seed_meta(status="error", record_count=0,
+                                 source_states={"publication": "error"}, error_summary=str(exc),
+                                 preserve_last_success=True)
+            raise
 
     def store_seed_meta(self, *, status: str, record_count: int, source_states: Dict[str, Any], error_summary: str | None, preserve_last_success: bool = False) -> None:
         previous = self.seed_meta_store.load(SEED_META_NAMESPACE, SEED_META_CACHE_KEY) or {}
@@ -247,7 +264,6 @@ def main() -> int:
         limit=args.limit,
         interval_seconds=args.interval,
     )
-    watcher.redis_client.ping()
     print(f"[crypto-funding] redis_key={watcher.redis_key()} sqlite={settings.snapshot_sqlite_path}", file=sys.stderr)
     try:
         if not args.watch:

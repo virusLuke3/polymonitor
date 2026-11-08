@@ -64,7 +64,7 @@ class F1SeedWatcherTestCase(unittest.TestCase):
         fake_redis = FakeRedis()
         settings = make_settings(str(Path(snapshot_dir.name) / "snapshots.sqlite3"))
         redis_module = SimpleNamespace(from_url=lambda *args, **kwargs: fake_redis)
-        requests_module = SimpleNamespace(Session=lambda: SimpleNamespace(trust_env=False))
+        requests_module = SimpleNamespace(Session=lambda: SimpleNamespace(trust_env=False, proxies={}))
         with patch.object(f1_watcher, "redis", redis_module), patch.object(f1_watcher, "requests", requests_module):
             watcher = f1_watcher.F1Watcher(
                 redis_url=settings.redis_url,
@@ -106,6 +106,38 @@ class F1SeedWatcherTestCase(unittest.TestCase):
         meta = json.loads(fake_redis.get("polydata:seed-meta:sports:f1-trackside") or "{}")
         self.assertEqual("preserved", meta["status"])
         self.assertIn("Preserved previous snapshot", meta["errorSummary"])
+
+    def test_verified_empty_retires_previous_news(self):
+        watcher, fake_redis, _ = self.make_watcher()
+        watcher.store_payload(sample_payload(card_id="ended"))
+        empty = {**sample_payload(), "cards": [], "items": [], "status": "empty", "sources": {"bwenewsRss": "empty"}}
+        with patch.object(f1_runtime_service, "build_f1_panel_payload", return_value=empty):
+            watcher.run_once()
+        stored = watcher.snapshot_store.get_stale(watcher.namespace(), watcher.cache_key())
+        self.assertEqual([], stored["cards"])
+        self.assertEqual("empty", stored["status"])
+        meta = json.loads(fake_redis.get("polydata:seed-meta:sports:f1-trackside"))
+        self.assertEqual("empty", meta["status"])
+        self.assertIsNotNone(meta["lastSuccessAt"])
+
+    def test_failure_retains_original_clock_and_reports_stale(self):
+        watcher, fake_redis, _ = self.make_watcher()
+        with patch.object(f1_runtime_service, "build_f1_panel_payload", return_value=sample_payload()):
+            watcher.run_once()
+        previous_success = watcher.load_seed_meta()["lastSuccessAt"]
+        failed = {"generatedAt": "2026-11-06T12:00:00Z", "status": "error", "cards": [],
+                  "sources": {"bwenewsRss": "error"}, "sourceErrors": {"bwenewsRss": "ReadTimeout"}}
+        with patch.object(f1_runtime_service, "build_f1_panel_payload", return_value=failed):
+            result = watcher.run_once()
+        self.assertEqual("stale", result["payload"]["status"])
+        self.assertEqual(sample_payload()["generatedAt"], result["payload"]["generatedAt"])
+        self.assertEqual(previous_success, watcher.load_seed_meta()["lastSuccessAt"])
+
+    def test_first_failure_does_not_invent_last_success(self):
+        watcher, _, _ = self.make_watcher()
+        with patch.object(f1_runtime_service, "build_f1_panel_payload", return_value={"status": "error", "cards": [], "sources": {"bwenewsRss": "error"}}):
+            watcher.run_once()
+        self.assertIsNone(watcher.load_seed_meta()["lastSuccessAt"])
 
     def test_api_reads_seeded_sqlite_snapshot_without_live_fetch(self):
         with tempfile.TemporaryDirectory() as snapshot_dir:

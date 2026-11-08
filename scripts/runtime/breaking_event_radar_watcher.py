@@ -28,7 +28,7 @@ except ImportError:
 from api.config import load_api_settings
 from api.services import breaking_event_radar_service
 from runtime.market_search import build_market_search
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, utc_now_iso
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, utc_now_iso, publish_snapshot, retained_snapshot
 from runtime.snapshot_store import SnapshotStore
 
 
@@ -57,20 +57,18 @@ def _redis_key(prefix: str, namespace: str, cache_key: str) -> str:
 
 class BreakingEventRadarWatcher:
     def __init__(self, *, redis_url: str, redis_prefix: str, snapshot_sqlite_path: str, settings: Any, limit: int, interval_seconds: int) -> None:
-        if redis is None:
-            raise RuntimeError("redis package is required. Install scripts/requirements.txt")
         if requests is None:
             raise RuntimeError("requests package is required. Install scripts/requirements.txt")
-        if not str(redis_url or "").strip():
-            raise RuntimeError("POLYDATA_REDIS_URL is required for breaking event radar watcher")
         self.settings = settings
         self.limit = max(1, int(limit or DEFAULT_LIMIT))
         self.interval_seconds = max(60, int(interval_seconds or DEFAULT_INTERVAL_SECONDS))
         self.redis_prefix = str(redis_prefix or "")
-        self.redis_client = redis.from_url(redis_url, decode_responses=True)
+        self.redis_client = (redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2)
+                             if redis is not None and str(redis_url or "").strip() else None)
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
-        self.requests = requests.Session()
+        from api.clients.source_transport import source_session
+        self.requests = source_session(requests)
         self.requests.trust_env = str(os.environ.get("POLYDATA_RUNTIME_TRUST_ENV", "0")).strip().lower() in {"1", "true", "yes", "on"}
         self.requests.headers.update({"User-Agent": "polydata-breaking-event-radar/1.0"})
 
@@ -126,6 +124,14 @@ class BreakingEventRadarWatcher:
         return context
 
     def load_previous_payload(self) -> Dict[str, Any]:
+        stale = self.snapshot_store.get_stale(
+            breaking_event_radar_service.BREAKING_EVENT_RADAR_SNAPSHOT_NAMESPACE,
+            breaking_event_radar_service.BREAKING_EVENT_RADAR_CACHE_KEY,
+        )
+        if isinstance(stale, dict):
+            return stale
+        if self.redis_client is None:
+            return {}
         try:
             raw = self.redis_client.get(self.redis_key())
             if raw:
@@ -134,27 +140,21 @@ class BreakingEventRadarWatcher:
                     return payload
         except Exception:
             print("[breaking-event-radar] WARN redis read failed", file=sys.stderr)
-        stale = self.snapshot_store.get_stale(
-            breaking_event_radar_service.BREAKING_EVENT_RADAR_SNAPSHOT_NAMESPACE,
-            breaking_event_radar_service.BREAKING_EVENT_RADAR_CACHE_KEY,
-        )
-        return stale if isinstance(stale, dict) else {}
+        return {}
 
     def store_payload(self, payload: Dict[str, Any]) -> None:
         ttl_seconds = self.ttl_seconds()
-        self.snapshot_store.set(
-            breaking_event_radar_service.BREAKING_EVENT_RADAR_SNAPSHOT_NAMESPACE,
-            breaking_event_radar_service.BREAKING_EVENT_RADAR_CACHE_KEY,
-            payload,
-            ttl_seconds,
+        publish_snapshot(
+            snapshot_store=self.snapshot_store, namespace=breaking_event_radar_service.BREAKING_EVENT_RADAR_SNAPSHOT_NAMESPACE,
+            cache_key=breaking_event_radar_service.BREAKING_EVENT_RADAR_CACHE_KEY, payload=payload, ttl_seconds=ttl_seconds,
+            redis_client=self.redis_client, redis_cache_key=self.redis_key(),
         )
-        self.redis_client.set(self.redis_key(), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl_seconds)
 
     def store_seed_meta(self, *, status: str, record_count: int, source_states: Dict[str, Any], error_summary: str | None, preserve_last_success: bool = False) -> None:
         previous = self.seed_meta_store.load(SEED_META_NAMESPACE, SEED_META_CACHE_KEY) or {}
         attempted_at = utc_now_iso()
         last_success_at = previous.get("lastSuccessAt")
-        if not preserve_last_success and status in {"ok", "degraded", "preserved"}:
+        if not preserve_last_success and (status == "ok" or (status == "degraded" and record_count > 0)):
             last_success_at = attempted_at
         payload = build_seed_meta_payload(
             panel_id=SEED_META_CACHE_KEY,
@@ -164,7 +164,7 @@ class BreakingEventRadarWatcher:
             expected_interval_seconds=self.interval_seconds,
             status=status,
             last_attempt_at=attempted_at,
-            last_success_at=last_success_at or attempted_at,
+            last_success_at=last_success_at,
             record_count=record_count,
             source_states=source_states,
             error_summary=error_summary,
@@ -172,6 +172,7 @@ class BreakingEventRadarWatcher:
             payload_status=status,
             metadata={"workerVersion": "v1", "limit": self.limit},
         )
+        payload["lastSuccessAt"] = last_success_at
         self.seed_meta_store.store(SEED_META_NAMESPACE, SEED_META_CACHE_KEY, payload)
 
     def store_seed_meta_fail_soft(self, **kwargs: Any) -> bool:
@@ -219,7 +220,7 @@ class BreakingEventRadarWatcher:
             )
         except Exception as exc:
             if previous:
-                preserved = {**previous, "cacheMode": "preserved"}
+                preserved = retained_snapshot(previous)
                 self.store_payload(preserved)
                 self.store_seed_meta(status="preserved", record_count=len(previous.get("items") or []), source_states={"breakingEventRadar": "error"}, error_summary=str(exc), preserve_last_success=True)
                 return {"status": "preserved", "payload": preserved}
@@ -228,7 +229,7 @@ class BreakingEventRadarWatcher:
 
         record_count = len(payload.get("items") or [])
         if previous and record_count <= 0:
-            preserved = {**previous, "cacheMode": "preserved"}
+            preserved = retained_snapshot(previous)
             self.store_payload(preserved)
             self.store_seed_meta(
                 status="preserved",
@@ -239,7 +240,8 @@ class BreakingEventRadarWatcher:
             )
             return {"status": "preserved", "payload": preserved}
 
-        payload = {**payload, "cacheMode": "seeded", "freshness": "seeded"}
+        stale = payload.get("status") == "stale"
+        payload = {**payload, "cacheMode": "stale-seed" if stale else "seeded", "freshness": "stale" if stale else "seeded"}
         self.store_payload(payload)
         status = str(payload.get("status") or ("ok" if record_count else "degraded"))
         self.store_seed_meta(
@@ -247,6 +249,9 @@ class BreakingEventRadarWatcher:
             record_count=record_count,
             source_states=payload.get("sources") if isinstance(payload.get("sources"), dict) else {},
             error_summary="; ".join(payload.get("errors") or []) or None,
+            preserve_last_success=bool(payload.get("errors")) and not any(
+                int(value.get("count") or 0) > 0 for value in (payload.get("sources") or {}).values()
+                if isinstance(value, dict)),
         )
         return {"status": status, "payload": payload}
 
@@ -285,7 +290,6 @@ def main() -> int:
         limit=args.limit,
         interval_seconds=args.interval,
     )
-    watcher.redis_client.ping()
     print(f"[breaking-event-radar] redis_key={watcher.redis_key()} sqlite={settings.snapshot_sqlite_path}", file=sys.stderr)
     if not args.watch:
         print(json.dumps(_result_summary(watcher.run_once()), ensure_ascii=False), file=sys.stderr)

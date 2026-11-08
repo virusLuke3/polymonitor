@@ -28,9 +28,10 @@ except ImportError:
     requests = None
 
 from api.config import load_api_settings
+from api.clients.source_transport import read_response_bytes
 from api.services import grid_esports_service
 from runtime.market_search import build_market_search
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot, retained_snapshot
 from runtime.snapshot_store import SnapshotStore
 
 
@@ -79,11 +80,11 @@ class GridEsportsWatcher:
         self.limit = max(1, int(limit or DEFAULT_LIMIT))
         self.interval_seconds = max(30, int(interval_seconds or DEFAULT_INTERVAL_SECONDS))
         self.redis_prefix = str(redis_prefix or "")
-        self.redis_client = redis.from_url(redis_url, decode_responses=True)
+        self.redis_client = redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2)
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
         self.requests = requests.Session()
-        self.requests.trust_env = str(os.environ.get("POLYDATA_RUNTIME_TRUST_ENV", "0")).lower() in {"1", "true", "yes", "on"}
+        self.requests.trust_env = str(os.environ.get("POLYDATA_GRID_ESPORTS_TRUST_ENV_PROXY", os.environ.get("POLYDATA_RUNTIME_TRUST_ENV", "0"))).lower() in {"1", "true", "yes", "on"}
 
     def ttl_seconds(self) -> int:
         configured = int(os.environ.get("POLYDATA_GRID_ESPORTS_SEED_TTL_SECONDS", "0") or 0)
@@ -101,11 +102,12 @@ class GridEsportsWatcher:
         return _redis_key(self.redis_prefix, self.namespace(), self.cache_key())
 
     def http_json_post(self, url: str, payload: Dict[str, Any], timeout: int = 15, headers: Dict[str, str] | None = None) -> Any:
-        response = self.requests.post(url, json=payload, timeout=timeout, headers=headers)
-        response.raise_for_status()
-        if not response.content:
-            return None
-        return response.json()
+        from urllib3.util import Timeout
+        deadline = time.monotonic() + timeout
+        with self.requests.post(url, json=payload, timeout=Timeout(total=timeout, connect=min(12, timeout), read=timeout),
+                                headers=headers, stream=True) as response:
+            body = read_response_bytes(response, 8 * 1024 * 1024, deadline=deadline)
+            return json.loads(body) if body else None
 
     def service_context(self) -> Dict[str, Any]:
         context = {
@@ -132,8 +134,9 @@ class GridEsportsWatcher:
 
     def store_payload(self, payload: Dict[str, Any]) -> None:
         ttl_seconds = self.ttl_seconds()
-        self.snapshot_store.set(self.namespace(), self.cache_key(), payload, ttl_seconds)
-        self.redis_client.set(self.redis_key(), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl_seconds)
+        publish_snapshot(snapshot_store=self.snapshot_store, namespace=self.namespace(), cache_key=self.cache_key(),
+                         payload=payload, ttl_seconds=ttl_seconds, redis_client=self.redis_client,
+                         redis_cache_key=self.redis_key())
 
     def store_seed_meta(
         self,
@@ -147,7 +150,7 @@ class GridEsportsWatcher:
         previous = self.seed_meta_store.load(SEED_META_NAMESPACE, SEED_META_CACHE_KEY) or {}
         attempted_at = utc_now_iso()
         last_success_at = previous.get("lastSuccessAt")
-        if not preserve_last_success and status in {"ok", "degraded", "preserved"}:
+        if not preserve_last_success and status in {"ok", "empty", "degraded"}:
             last_success_at = attempted_at
         payload = build_seed_meta_payload(
             panel_id="esports-intel",
@@ -157,7 +160,7 @@ class GridEsportsWatcher:
             expected_interval_seconds=self.interval_seconds,
             status=status,
             last_attempt_at=attempted_at,
-            last_success_at=last_success_at or attempted_at,
+            last_success_at=last_success_at,
             record_count=record_count,
             source_states=source_states,
             error_summary=error_summary,
@@ -165,6 +168,7 @@ class GridEsportsWatcher:
             payload_status=status,
             metadata={"result": "stored", "limit": self.limit},
         )
+        payload["lastSuccessAt"] = last_success_at
         self.seed_meta_store.store(SEED_META_NAMESPACE, SEED_META_CACHE_KEY, payload)
 
     def run_once(self) -> Dict[str, Any]:
@@ -173,21 +177,25 @@ class GridEsportsWatcher:
             payload = grid_esports_service.fetch_live_grid_esports_payload(self.service_context(), limit=self.limit)
         except Exception as exc:
             if previous:
-                self.store_payload(previous)
+                retained = retained_snapshot(previous, sources={"gridCentralData": "error"})
+                self.store_payload(retained)
                 self.store_seed_meta(
                     status="preserved",
                     record_count=len(previous.get("items") or []),
                     source_states={"grid": "error"},
-                    error_summary=str(exc),
+                    error_summary=type(exc).__name__,
                     preserve_last_success=True,
                 )
-                return {"status": "preserved", "payload": previous}
+                return {"status": "preserved", "payload": retained}
             self.store_seed_meta(status="error", record_count=0, source_states={"grid": "error"}, error_summary=str(exc), preserve_last_success=True)
             raise
 
         record_count = len(payload.get("items") or [])
-        if previous and record_count <= 0:
-            self.store_payload(previous)
+        healthy_empty = (payload.get("status") == "empty"
+                         and (payload.get("sources") or {}).get("gridCentralData") == "ok")
+        if previous and record_count <= 0 and not healthy_empty:
+            retained = retained_snapshot(previous, sources=payload.get("sources") or {"gridCentralData": "error"})
+            self.store_payload(retained)
             self.store_seed_meta(
                 status="preserved",
                 record_count=len(previous.get("items") or []),
@@ -195,16 +203,17 @@ class GridEsportsWatcher:
                 error_summary="Preserved previous GRID esports snapshot because new payload was empty",
                 preserve_last_success=True,
             )
-            return {"status": "preserved", "payload": previous}
+            return {"status": "preserved", "payload": retained}
 
         payload = {**payload, "cacheMode": "seeded"}
         self.store_payload(payload)
         status = str(payload.get("status") or ("ok" if record_count else "degraded"))
         self.store_seed_meta(
-            status=status if status in {"ok", "degraded"} else "degraded",
+            status=status if status in {"ok", "empty", "degraded"} else "degraded",
             record_count=record_count,
             source_states=payload.get("sources") if isinstance(payload.get("sources"), dict) else {},
-            error_summary=None if record_count else "GRID esports payload contained no series",
+            error_summary=None if record_count or healthy_empty else "GRID esports payload contained no series",
+            preserve_last_success=not record_count and not healthy_empty,
         )
         return {"status": status, "payload": payload}
 

@@ -38,6 +38,7 @@ Thumbs.db
 
 # 日志与临时
 *.log
+*.pid
 wget-log
 .cache/
 .codex/
@@ -55,6 +56,10 @@ data/telegram_bot_state.json
 runtime_logs/
 logs/
 artifacts/
+test-results/
+playwright-report/
+/node_modules/
+data/*.fetch-locks/
 
 # PnL research scripts and outputs are still experimental.
 pnl/

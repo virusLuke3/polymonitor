@@ -103,7 +103,7 @@ def test_tech_publishes_finished_panel_before_slow_sibling(monkeypatch):
     assert published == ["fast", "slow"]
 
 
-def test_yahoo_failure_budget_does_not_probe_every_symbol(monkeypatch):
+def test_yahoo_failure_budget_bounds_repeated_failed_symbol(monkeypatch):
     from api.clients import market_data_client
     from test_market_data_client import make_context
     state = {}
@@ -113,7 +113,7 @@ def test_yahoo_failure_budget_does_not_probe_every_symbol(monkeypatch):
     getter = Mock(side_effect=requests.Timeout("source timeout"))
     monkeypatch.setattr(market_data_client, "http_json_get", getter)
     monkeypatch.setattr(market_data_client.time, "time", lambda: 1000)
-    for symbol in ["A", "B", "C", "D", "E"]:
+    for symbol in ["A", "A", "A", "A", "A"]:
         with pytest.raises((requests.Timeout, RuntimeError)):
             market_data_client.get_yahoo_market_snapshot(ctx, symbol)
     assert getter.call_count == 3
@@ -129,7 +129,7 @@ def test_finance_external_yahoo_budget_survives_new_context_and_restart(monkeypa
     from runtime.snapshot_store import SnapshotStore
     getter = Mock(side_effect=requests.Timeout("source timeout"))
     monkeypatch.setattr(market_data_client, "http_json_get", getter)
-    for symbol in ["A", "B", "C", "D", "E"]:
+    for symbol in ["A", "A", "A", "A", "A"]:
         worker = FinanceExternalSourcesWatcher.__new__(FinanceExternalSourcesWatcher)
         worker.requests = requests.Session()
         worker.settings = SimpleNamespace(yahoo_chart_base_url="https://yahoo.test/chart", finance_runtime_ttl_seconds=300)

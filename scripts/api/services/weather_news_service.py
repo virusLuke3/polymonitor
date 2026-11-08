@@ -187,6 +187,8 @@ def fetch_google_news_rss(
         headers={"Accept": "application/rss+xml,application/xml,text/xml", "User-Agent": "polydata-weather-news/1.0"},
     )
     root = ElementTree.fromstring(xml_text)
+    if root.tag != "rss" or root.find("channel") is None:
+        raise ValueError("WEATHER_NEWS_INVALID_RSS")
     items: List[Dict[str, Any]] = []
     for item in root.findall("./channel/item"):
         title = _text(item, "title")
@@ -259,6 +261,7 @@ def build_weather_news_payload(
     cities = [*load_weather_cities(), *WEATHER_TOPIC_QUERIES]
     articles: List[Dict[str, Any]] = []
     source_states: Dict[str, str] = {}
+    source_errors: Dict[str, str] = {}
 
     def fetch_city(city: Dict[str, Any]) -> tuple[Dict[str, Any], List[Dict[str, Any]], Exception | None]:
         try:
@@ -281,6 +284,7 @@ def build_weather_news_payload(
                 source_states[str(city["city_id"])] = "ok" if city_articles else "empty"
                 continue
             source_states[str(city["city_id"])] = "error"
+            source_errors[str(city["city_id"])] = type(error).__name__
             logger = getattr(dependencies.application, "logger", None)
             if logger is not None:
                 logger.exception("weather news rss fetch failed city=%s error=%s", city.get("city"), error)
@@ -294,6 +298,7 @@ def build_weather_news_payload(
         "sourceUrl": getattr(dependencies.settings, "google_news_rss_url", source_value('POLYDATA_GOOGLE_NEWS_RSS_URL')),
         "status": status,
         "sources": source_states,
+        "sourceErrors": source_errors,
         "summary": build_news_summary(ranked),
         "items": ranked[: max(1, int(limit or DEFAULT_NEWS_LIMIT))],
     }

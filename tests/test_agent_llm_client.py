@@ -8,7 +8,7 @@ from agent.common.llm_client import OpenAICompatibleClient
 
 @pytest.mark.parametrize("model", [None, "qwen3.5-9b", "Qwen3.8-27B"])
 def test_qwen_returns_json_without_spending_output_budget_on_thinking(model):
-    env = {"POLYDATA_AGENT_API_KEY": "EMPTY", "POLYDATA_AGENT_RUNTIME": "chat"}
+    env = {"POLYDATA_DISABLE_DOTENV": "1", "POLYDATA_AGENT_API_BASE": "http://127.0.0.1:18003/v1", "POLYDATA_AGENT_API_KEY": "EMPTY", "POLYDATA_AGENT_RUNTIME": "chat"}
     if model:
         env["POLYDATA_AGENT_MODEL"] = model
     response = Mock()
@@ -32,6 +32,7 @@ def test_qwen_returns_json_without_spending_output_budget_on_thinking(model):
 
 def test_explicit_provider_settings_remain_supported():
     with patch.dict("os.environ", {
+        "POLYDATA_DISABLE_DOTENV": "1",
         "POLYDATA_AGENT_API_KEY": "test-key",
         "POLYDATA_AGENT_API_BASE": "http://127.0.0.1:9999/v1",
         "POLYDATA_AGENT_MODEL": "custom-model",
@@ -42,7 +43,7 @@ def test_explicit_provider_settings_remain_supported():
 
 
 def test_qwen_agents_sdk_uses_the_same_non_thinking_request_contract():
-    with patch.dict("os.environ", {"POLYDATA_AGENT_MODEL": "qwen3.5-9b"}, clear=True), patch(
+    with patch.dict("os.environ", {"POLYDATA_DISABLE_DOTENV": "1", "POLYDATA_AGENT_MODEL": "qwen3.5-9b"}, clear=True), patch(
         "agent.common.llm_client.ModelSettings", SimpleNamespace,
     ):
         settings = OpenAICompatibleClient()._model_settings(180)

@@ -18,6 +18,7 @@ if str(_scripts_root) not in sys.path:
 import requests
 
 from api.config import load_api_settings
+from api.clients.source_transport import source_session
 from api.context import RuntimeResources
 from api.services import natural_hazards
 from runtime.snapshot_store import SnapshotStore
@@ -50,10 +51,13 @@ class NaturalHazardsWatcher:
         # must not keep the 60-second USGS/NWS snapshots expired for half a cycle.
         self.interval_seconds = max(1, min(10, int(interval_seconds or DEFAULT_INTERVAL_SECONDS)))
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
-        self.session = requests.Session()
+        self.session = source_session(requests)
         # Production collectors must not inherit an operator's workstation or
         # shell proxy settings.
         self.session.trust_env = False
+        proxy_url = os.environ.get("POLYDATA_API_HTTP_PROXY_URL", "").strip()
+        if proxy_url:
+            self.session.proxies.update({"http": proxy_url, "https": proxy_url})
 
     def _http_json_get(
         self,
@@ -99,6 +103,7 @@ class NaturalHazardsWatcher:
         return {
             "_resources": self.resources,
             "SETTINGS": self.settings,
+            "NWS_COLLECTOR_FETCH_BUDGET_SECONDS": 20,
             "SNAPSHOT_STORE": self.snapshot_store,
             "app": _App(),
             "http_json_get": self._http_json_get,

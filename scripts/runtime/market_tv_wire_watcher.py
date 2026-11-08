@@ -13,13 +13,16 @@ _scripts_root = Path(__file__).resolve().parents[1]
 if str(_scripts_root) not in sys.path:
     sys.path.insert(0, str(_scripts_root))
 
-import redis
+try:
+    import redis
+except ImportError:
+    redis = None
 import requests
 
 from api.clients.source_transport import source_session
 from api.config import load_api_settings
 from api.services import live_video_source_service
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, retained_snapshot, utc_now_iso
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, retained_snapshot, utc_now_iso, publish_snapshot
 from runtime.snapshot_store import SnapshotStore
 
 
@@ -50,12 +53,11 @@ def _redis_key(prefix: str, namespace: str, cache_key: str) -> str:
 
 class MarketTvWireWatcher:
     def __init__(self, *, redis_url: str, redis_prefix: str, snapshot_sqlite_path: str, settings: Any, interval_seconds: int) -> None:
-        if not redis_url:
-            raise RuntimeError("POLYDATA_REDIS_URL is required for market TV wire watcher")
         self.settings = settings
         self.redis_prefix = redis_prefix or ""
         self.interval_seconds = max(60, int(interval_seconds or DEFAULT_INTERVAL_SECONDS))
-        self.redis_client = redis.from_url(redis_url, decode_responses=True)
+        self.redis_client = (redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2)
+                             if redis is not None and str(redis_url or "").strip() else None)
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
         self.requests = source_session()
@@ -82,14 +84,29 @@ class MarketTvWireWatcher:
         return response.json()
 
     def _get_cached_json(self, namespace: str, cache_key: str) -> Dict[str, Any] | None:
-        raw = self.redis_client.get(_redis_key(self.redis_prefix, namespace, cache_key))
-        if not raw:
+        cached = self.snapshot_store.get(namespace, cache_key)
+        if isinstance(cached, dict):
+            return cached
+        if self.redis_client is None:
             return None
-        payload = json.loads(str(raw))
-        return payload if isinstance(payload, dict) else None
+        try:
+            raw = self.redis_client.get(_redis_key(self.redis_prefix, namespace, cache_key))
+            payload = json.loads(str(raw)) if raw else None
+            return payload if isinstance(payload, dict) else None
+        except Exception:
+            return None
 
     def _set_cached_json(self, namespace: str, cache_key: str, payload: Dict[str, Any], ttl: int) -> None:
-        self.redis_client.set(_redis_key(self.redis_prefix, namespace, cache_key), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl)
+        # Source caches are best effort; formal snapshots use store_payload.
+        try:
+            self.snapshot_store.set(namespace, cache_key, payload, ttl)
+        except Exception:
+            pass
+        if self.redis_client is not None:
+            try:
+                self.redis_client.set(_redis_key(self.redis_prefix, namespace, cache_key), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl)
+            except Exception:
+                pass
 
     def _youtube_rss_refresh_seconds(self) -> int:
         try:
@@ -98,13 +115,21 @@ class MarketTvWireWatcher:
             return DEFAULT_YOUTUBE_RSS_REFRESH_SECONDS
 
     def _youtube_rss_refresh_due(self) -> bool:
-        return not bool(self.redis_client.get(_redis_key(self.redis_prefix, YOUTUBE_RSS_REFRESH_STATE_NAMESPACE, YOUTUBE_RSS_REFRESH_STATE_KEY)))
+        if self.snapshot_store.get(YOUTUBE_RSS_REFRESH_STATE_NAMESPACE, YOUTUBE_RSS_REFRESH_STATE_KEY):
+            return False
+        if self.redis_client is not None:
+            try:
+                return not bool(self.redis_client.get(_redis_key(self.redis_prefix, YOUTUBE_RSS_REFRESH_STATE_NAMESPACE, YOUTUBE_RSS_REFRESH_STATE_KEY)))
+            except Exception:
+                pass
+        return True
 
     def _mark_youtube_rss_refresh_attempted(self) -> None:
-        self.redis_client.set(
-            _redis_key(self.redis_prefix, YOUTUBE_RSS_REFRESH_STATE_NAMESPACE, YOUTUBE_RSS_REFRESH_STATE_KEY),
-            utc_now_iso(),
-            ex=self._youtube_rss_refresh_seconds(),
+        publish_snapshot(
+            snapshot_store=self.snapshot_store, namespace=YOUTUBE_RSS_REFRESH_STATE_NAMESPACE,
+            cache_key=YOUTUBE_RSS_REFRESH_STATE_KEY, payload={"attemptedAt": utc_now_iso()},
+            ttl_seconds=self._youtube_rss_refresh_seconds(), redis_client=self.redis_client,
+            redis_cache_key=_redis_key(self.redis_prefix, YOUTUBE_RSS_REFRESH_STATE_NAMESPACE, YOUTUBE_RSS_REFRESH_STATE_KEY),
         )
 
     def context(self, *, youtube_rss_refresh_due: bool = False) -> Dict[str, Any]:
@@ -122,16 +147,21 @@ class MarketTvWireWatcher:
         }
 
     def previous(self) -> Dict[str, Any]:
+        stale = self.snapshot_store.get_stale(self.namespace(), self.cache_key())
+        if isinstance(stale, dict):
+            return stale
         cached = self._get_cached_json(self.namespace(), self.cache_key())
         if cached:
             return cached
-        stale = self.snapshot_store.get_stale(self.namespace(), self.cache_key())
-        return stale if isinstance(stale, dict) else {}
+        return {}
 
     def store_payload(self, payload: Dict[str, Any]) -> None:
         ttl = max(60, int(os.environ.get("POLYDATA_MARKET_TV_WIRE_TTL_SECONDS", live_video_source_service.MARKET_TV_WIRE_TTL_SECONDS)))
-        self.snapshot_store.set(self.namespace(), self.cache_key(), payload, ttl)
-        self.redis_client.set(self.redis_key(), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl)
+        publish_snapshot(
+            snapshot_store=self.snapshot_store, namespace=self.namespace(),
+            cache_key=self.cache_key(), payload=payload, ttl_seconds=ttl,
+            redis_client=self.redis_client, redis_cache_key=self.redis_key(),
+        )
 
     def store_meta(
         self,
@@ -146,7 +176,9 @@ class MarketTvWireWatcher:
     ) -> None:
         prev = self.seed_meta_store.load(SEED_META_NAMESPACE, SEED_META_CACHE_KEY) or {}
         attempt = utc_now_iso()
-        success = prev.get("lastSuccessAt") if preserve else attempt
+        success = prev.get("lastSuccessAt")
+        if not preserve and (status in {"ok", "empty"} or (status == "degraded" and record_count > 0)):
+            success = attempt
         payload = build_seed_meta_payload(
             panel_id=SEED_META_CACHE_KEY,
             namespace=SEED_META_NAMESPACE,
@@ -155,7 +187,7 @@ class MarketTvWireWatcher:
             expected_interval_seconds=self.interval_seconds,
             status=status,
             last_attempt_at=attempt,
-            last_success_at=success or attempt,
+            last_success_at=success,
             record_count=record_count,
             source_states=source_states,
             error_summary=error_summary,
@@ -179,6 +211,8 @@ class MarketTvWireWatcher:
     def run_once(self) -> Dict[str, Any]:
         previous = self.previous()
         youtube_rss_refresh_due = self._youtube_rss_refresh_due()
+        if youtube_rss_refresh_due:
+            self._mark_youtube_rss_refresh_attempted()
         try:
             payload = live_video_source_service.build_market_tv_wire_payload(
                 self.context(youtube_rss_refresh_due=youtube_rss_refresh_due),
@@ -211,8 +245,6 @@ class MarketTvWireWatcher:
 
         stored_payload = {**payload, "cacheMode": "seeded"}
         self.store_payload(stored_payload)
-        if youtube_rss_refresh_due:
-            self._mark_youtube_rss_refresh_attempted()
         payload_status = str(stored_payload.get("status") or "degraded")
         meta_status = "ok" if payload_status == "ok" else payload_status
         self.store_meta(
@@ -253,7 +285,6 @@ def main() -> int:
         settings=settings,
         interval_seconds=args.interval,
     )
-    watcher.redis_client.ping()
     print(f"[market-tv-wire] redis_key={watcher.redis_key()} sqlite={settings.snapshot_sqlite_path}", file=sys.stderr)
     if not args.watch:
         print(json.dumps(_result_summary(watcher.run_once()), ensure_ascii=False), file=sys.stderr)

@@ -91,6 +91,8 @@ def test_query_keeps_exact_tokens_and_never_infers_outcome_codes():
     sql = query.call_args.args[1]
     assert 'outcome_code' not in sql
     assert 'GROUP BY market_id, token_id' in sql and 'LIMIT 96' in sql
+    # Seed queries must allow the configured server budget and tunnel overhead;
+    # short interactive deadlines caused successful refreshes to be cancelled.
     assert all(call.kwargs['timeout_seconds'] >= 8.0 for call in query.call_args_list)
 
 
@@ -210,7 +212,7 @@ def test_cold_verification_failure_does_not_trust_seed_attestation():
     assert data['readIntegrity'] == 'unavailable' and data['status'] == 'degraded'
 
 
-def test_alpha_query_connection_is_isolated_and_sql_budget_is_scoped(tmp_path):
+def test_alpha_query_reuses_supplied_connection_factory_and_releases_lease(tmp_path):
     from dataclasses import replace
     from api.config import load_api_settings
     from api.runtime import ServiceRuntime
@@ -220,10 +222,17 @@ def test_alpha_query_connection_is_isolated_and_sql_budget_is_scoped(tmp_path):
     connection.cursor.return_value.fetchall.return_value = []
     settings = replace(load_api_settings(), database=DatabaseSettings('postgres', '', {}),
                        snapshot_sqlite_path=str(tmp_path / 'snapshots.sqlite3'))
-    with ServiceRuntime(settings, connection_factory=lambda *args, **kwargs: connection) as runtime:
+    factory = Mock(return_value=connection)
+    with ServiceRuntime(settings, connection_factory=factory) as runtime:
         runtime.api_db_context['get_connection'] = lambda *args: (_ for _ in ()).throw(TimeoutError('shared pool occupied'))
         assert runtime.alpha_signal_context['query_all']('SELECT 1') == []
-        assert runtime._alpha_database.connection['statement_timeout_ms'] == 3000
+        factory.assert_called_once_with(runtime.api_db_context['DB_PATH'])
+        assert not hasattr(runtime, '_alpha_database')
         sql_calls = connection.cursor.return_value.execute.call_args_list
         assert sql_calls[0].args == ('SELECT 1', ())
     connection.close.assert_called_once()
+
+
+# These SQL fixtures model the canonical store; primary tests opt in explicitly.
+import pytest
+pytestmark = pytest.mark.usefixtures("legacy_orderfilled_store")

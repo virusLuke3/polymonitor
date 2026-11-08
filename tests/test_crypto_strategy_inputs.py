@@ -46,10 +46,10 @@ def test_options_use_two_sided_quotes_and_actual_instrument_expiry():
 
 
 def reference_fixture():
-    market = dict(asset="BTC", market_id="123", condition_id="0xabc", slug="btc-updown-test", starts_at_ms=NOW-60000,
-                  ends_at_ms=NOW+240000, outcomes={"UP":"123456"}, rule_version="twap60", rule_url="https://data.chain.link/streams/btc-usd-twap-60s-streams",
-                  price_kind="twap", window_seconds=60, comparator=">=", anchor=dict(value="100", condition_id="0xabc"))
-    price = dict(value="101", event_at_ms=NOW-1000, received_at_ms=NOW, feed_id="rtds:crypto_prices_twap_sixty:btc/usd",
+    market = dict(asset="BTC", market_id="123", condition_id="0x" + "a" * 64, slug=f"btc-updown-5m-{NOW // 1000}", starts_at_ms=NOW,
+                  ends_at_ms=NOW+300000, outcomes={"UP":"123456", "DOWN":"654321"}, rule_version="twap60", rule_url="https://data.chain.link/streams/btc-usd-twap-60s-streams",
+                  price_kind="twap", window_seconds=60, comparator=">=", anchor=dict(value="100", condition_id="0x" + "a" * 64, event_at_ms=NOW, published_at_ms=NOW, received_at_ms=NOW, feed_id="rtds:crypto_prices_twap_sixty:btc/usd", price_kind="twap", window_seconds=60, quote_currency="USD", full_accuracy_value="100000000000000000000"))
+    price = dict(value="101", event_at_ms=NOW-1000, published_at_ms=NOW, received_at_ms=NOW, feed_id="rtds:crypto_prices_twap_sixty:btc/usd",
                  price_kind="twap", window_seconds=60, quote_currency="USD", full_accuracy_value="101000000000000000000")
     return {"source":"market-data", "schemaVersion":1, "assets":{"BTC":{"market":market, "prices":[price], "quotes":{}}}}
 
@@ -72,7 +72,7 @@ def test_oracle_identity_future_staleness_and_anchor_binding():
 def test_reference_owner_route_snapshot_quality_and_unknown_assets():
     raw = reference_fixture()
     calls = []
-    raw['assets']['BTC']['quotes']['123456'] = dict(condition_id='0xabc',asset_id='123456',
+    raw['assets']['BTC']['quotes']['123456'] = dict(condition_id='0x' + 'a' * 64,asset_id='123456',
         best_bid=.4,best_ask=.5,received_at_ms=NOW,book_observed_at=None,quality='snapshot',upstream_completeness='UNKNOWN')
     def get(url):
         calls.append(url)
@@ -81,10 +81,30 @@ def test_reference_owner_route_snapshot_quality_and_unknown_assets():
     assert calls == ['http://existing-market-data/crypto/reference']
     assert data['BTC']['quotes']['UP']['quality'] == 'snapshot'
     assert data['BTC']['quotes']['UP']['upstreamCompleteness'] == 'UNKNOWN'
-    assert data['SOL']['status'] == 'unsupported'
+    assert data['SOL']['status'] == 'unavailable'
     raw['source'] = 'workbench'
     with pytest.raises(ValueError, match='IDENTITY'):
         references(get,'http://existing-market-data',NOW)
+
+
+@pytest.mark.parametrize('asset', ['SOL', 'XRP'])
+def test_reference_four_asset_current_round_and_exact_anchor(asset):
+    raw = reference_fixture()
+    item = raw['assets'].pop('BTC')
+    raw['assets'][asset] = item
+    market = item['market']
+    market.update(asset=asset, slug=f'{asset.lower()}-updown-5m-{NOW // 1000}',
+                  rule_url=f'https://data.chain.link/streams/{asset.lower()}-usd-twap-60s-streams')
+    for p in [item['prices'][0], market['anchor']]:
+        p['feed_id'] = f'rtds:crypto_prices_twap_sixty:{asset.lower()}/usd'
+    read = lambda: references(lambda *_: raw, 'http://owner', NOW)[asset]
+    assert read()['status'] == 'ok' and read()['market']['anchor']['event_at_ms'] == NOW
+    market['anchor']['event_at_ms'] -= 1
+    assert read()['market']['anchor'] is None
+    market['rule_url'] = 'https://data.chain.link/streams/btc-usd-twap-60s-streams'
+    assert read()['market'] is None
+    item['prices'][0]['full_accuracy_value'] = '1'
+    assert read()['latest'] == {} and read()['status'] == 'unavailable'
 
 
 def test_native_reference_refresh_retains_original_times_when_reader_fails(monkeypatch):
@@ -103,7 +123,7 @@ def test_native_reference_refresh_retains_original_times_when_reader_fails(monke
     assert retained['BTC']['latest']==first['BTC']['latest']
     assert retained['BTC']['status']=='stale'
     assert retained['BTC']['error']=='REFERENCE_READ_FAILED'
-    assert retained['SOL']['status']=='unsupported'
+    assert retained['SOL']['status']=='unavailable'
 
 
 def test_reference_resource_works_without_venue_snapshot(tmp_path,monkeypatch):

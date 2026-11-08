@@ -1,17 +1,16 @@
 from __future__ import annotations
+from api.services.macro_data_policy import bounded_rows, display_age, read_seeded, row_clock
 
 from data_sources import source_value
 
-import csv
-import io
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from api.context import resolve_optional_service_callable, resolve_service_callable
+from api.clients.fred_csv import fetch_fred_observations
 from api.services.macro_data_contract import describe_series, month_key
 from api.services.seed_recovery import age_seconds
 
@@ -151,6 +150,7 @@ class MacroCpiPanelsDependencies:
     snapshot_store: Any
     get_cached_json: Callable[..., Any] | None
     set_cached_json: Callable[..., Any] | None
+    fred_text_get: Callable[..., str] | None = None
 
     @classmethod
     def from_context(
@@ -162,6 +162,7 @@ class MacroCpiPanelsDependencies:
         return cls(
             settings=context.get("SETTINGS"),
             application=context.get("app"),
+            fred_text_get=context.get("fred_text_get"),
             http_text_get=resolve_service_callable(
                 context,
                 "http_text_get",
@@ -240,13 +241,7 @@ def _fred_url(
         "finance_fred_csv_url_template",
         getattr(settings, "food_basket_fred_csv_url_template", source_value('POLYDATA_FINANCE_FRED_CSV_URL_TEMPLATE')),
     )
-    url = str(template).format(series_id=series_id)
-    lookback_years = int(getattr(settings, "fred_csv_lookback_years", FRED_CSV_LOOKBACK_YEARS) or FRED_CSV_LOOKBACK_YEARS)
-    start_date = f"{max(1900, datetime.now(timezone.utc).year - lookback_years)}-01-01"
-    parts = urlsplit(url)
-    query = dict(parse_qsl(parts.query, keep_blank_values=True))
-    query.setdefault("cosd", start_date)
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+    return str(template).format(series_id=series_id)
 
 
 def _fred_row_date(row: Dict[str, Any]) -> str:
@@ -260,20 +255,10 @@ def _fetch_fred_series(
     dependencies = _dependencies(ctx)
     series_id = spec["seriesId"]
     url = _fred_url(dependencies, series_id)
-    text = dependencies.http_text_get(
-        url,
-        timeout=15,
-        headers={"User-Agent": "Polymonitor/1.0"},
+    rows = fetch_fred_observations(
+        dependencies.fred_text_get or dependencies.http_text_get, url, series_id,
+        lookback_years=int(getattr(dependencies.settings, "fred_csv_lookback_years", FRED_CSV_LOOKBACK_YEARS) or FRED_CSV_LOOKBACK_YEARS),
     )
-    rows: List[Dict[str, Any]] = []
-    reader = csv.DictReader(io.StringIO(str(text or "")))
-    for row in reader:
-        value = _float(row.get(series_id))
-        date = _fred_row_date(row)
-        if value is None or month_key(date) is None:
-            continue
-        rows.append({"date": date, "value": value})
-    rows.sort(key=lambda item: item["date"])
     if len(rows) < 2:
         raise ValueError(f"not enough observations for {series_id}")
     latest = rows[-1]
@@ -340,6 +325,7 @@ def _fetch_federal_register_items(
                 "metric": "event",
                 "unit": None,
                 "date": doc.get("publication_date"),
+                "fetchedAt": _utc_now_iso(dependencies),
                 "value": None,
                 "change": None,
                 "changePct": None,
@@ -410,7 +396,7 @@ def build_macro_cpi_panel_payload(
             sources[key] = "ok"
         except Exception as exc:
             sources[key] = "error"
-            if key in prior_items and age_seconds(previous.get("fetchedAt"), _utc_now_iso(dependencies)) < DEFAULT_TTL_SECONDS * 3:
+            if key in prior_items and age_seconds(previous.get("fetchedAt"), _utc_now_iso(dependencies)) < display_age(dependencies.settings, "macro_cpi_max_display_age_seconds", 64800):
                 items.append({**prior_items[key], "retained": True, "sourceStatus": "error"})
             logger = getattr(dependencies.application, "logger", None)
             if logger is not None:
@@ -471,9 +457,10 @@ def normalize_macro_cpi_panel_payload(
         return _empty(dependencies, panel_id, "invalid")
     result = json.loads(json.dumps(payload, ensure_ascii=True, default=str))
     config = PANEL_CONFIGS[panel_id]
-    items = [item for item in (result.get("items") or []) if isinstance(item, dict)]
+    items = bounded_rows(result, now=_utc_now_iso(dependencies),
+        max_age=display_age(dependencies.settings, "macro_cpi_max_display_age_seconds", 64800))
     result["items"] = items[: max(1, min(int(limit or DEFAULT_ITEM_LIMIT), MAX_ITEM_LIMIT))]
-    result["summary"] = result.get("summary") if isinstance(result.get("summary"), dict) else _summary(panel_id, config, result["items"], result.get("sources") or {})
+    result["summary"] = _summary(panel_id, config, result["items"], result.get("sources") or {})
     result["generatedAt"] = str(
         result.get("generatedAt")
         or _utc_now_iso(dependencies)
@@ -489,24 +476,8 @@ def _with_mode(payload: Dict[str, Any], mode: str) -> Dict[str, Any]:
     return {**payload, "cacheMode": mode}
 
 
-def _read_seeded(
-    dependencies: MacroCpiPanelsDependencies,
-    panel_id: str,
-) -> Optional[Dict[str, Any]]:
-    namespace = _snapshot_namespace(panel_id)
-    if dependencies.get_cached_json is not None:
-        payload = dependencies.get_cached_json(namespace, CACHE_KEY)
-        if isinstance(payload, dict):
-            return _with_mode(payload, "redis-seed")
-    store = dependencies.snapshot_store
-    if store is not None:
-        payload = store.get(namespace, CACHE_KEY)
-        if isinstance(payload, dict):
-            return _with_mode(payload, "sqlite-seed")
-        stale = store.get_stale(namespace, CACHE_KEY)
-        if isinstance(stale, dict):
-            return _with_mode(stale, "stale-seed")
-    return None
+def _read_seeded(dependencies: MacroCpiPanelsDependencies, panel_id: str) -> Optional[Dict[str, Any]]:
+    return read_seeded(dependencies.snapshot_store, dependencies.get_cached_json, _snapshot_namespace(panel_id), CACHE_KEY)
 
 
 def _store_live(
@@ -518,12 +489,14 @@ def _store_live(
 ) -> None:
     namespace = _snapshot_namespace(panel_id)
     if dependencies.snapshot_store is not None:
-        dependencies.snapshot_store.set(
+        accepted = dependencies.snapshot_store.set(
             namespace,
             CACHE_KEY,
             payload,
             ttl,
         )
+        if accepted is not True:
+            raise RuntimeError("SQLite macro snapshot publication rejected")
     if dependencies.set_cached_json is not None:
         dependencies.set_cached_json(
             namespace,

@@ -469,8 +469,10 @@ def _clickhouse_runtime_probe(
 
     market_id = _positive_int(entry.get("marketId"), field="entry.marketId")
     table = clickhouse_orderfilled_service._table_sql(dict(query_context or {}))
-    if table != "orderfilled_fact":
+    primary=table=='orderfilled_fact_primary_v1'
+    if table not in ("orderfilled_fact","orderfilled_fact_primary_v1"):
         return None
+    physical='orderfilled_events_v1' if primary else 'orderfilled_fact'
     mapping_predicate = _mapping_predicate(entry)
     query = f"""
         SELECT
@@ -497,7 +499,7 @@ def _clickhouse_runtime_probe(
                 SELECT count()
                 FROM system.mutations
                 WHERE database = currentDatabase()
-                  AND table IN ('orderfilled_fact', 'address_trade_cashflows')
+                  AND table IN ('{physical}', 'address_trade_cashflows')
                   AND is_done = 0
             ) AS active_mutation_count,
             (
@@ -509,7 +511,7 @@ def _clickhouse_runtime_probe(
                 SELECT count() FROM orderfilled_fact_buffer WHERE market_id = {market_id}
             )) - toInt64(count()) AS scoped_buffer_rows
         FROM {table}
-        PREWHERE market_id = {market_id}
+        {'WHERE' if primary else 'PREWHERE'} market_id = {market_id}
         FORMAT JSONEachRow
     """
     rows = clickhouse_orderfilled_service._query_json_rows(

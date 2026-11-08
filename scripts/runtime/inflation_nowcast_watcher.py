@@ -33,8 +33,9 @@ except ImportError:
     BeautifulSoup = None
 
 from api.config import load_api_settings
+from api.clients.source_transport import source_session
 from api.services import runtime_service
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot, retained_snapshot
 from runtime.snapshot_store import SnapshotStore
 
 
@@ -75,21 +76,18 @@ class InflationNowcastWatcher:
         settings: Any,
         interval_seconds: int = DEFAULT_INTERVAL_SECONDS,
     ) -> None:
-        if redis is None:
-            raise RuntimeError("redis package is required. Install scripts/requirements.txt")
         if requests is None:
             raise RuntimeError("requests package is required. Install scripts/requirements.txt")
         if BeautifulSoup is None:
             raise RuntimeError("beautifulsoup4 package is required. Install scripts/requirements.txt")
-        if not str(redis_url or "").strip():
-            raise RuntimeError("POLYDATA_REDIS_URL is required for inflation nowcast watcher")
         self.settings = settings
         self.interval_seconds = max(300, int(interval_seconds or DEFAULT_INTERVAL_SECONDS))
         self.redis_prefix = str(redis_prefix or "")
-        self.redis_client = redis.from_url(redis_url, decode_responses=True)
+        self.redis_client = (redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2)
+                             if redis is not None and str(redis_url or "").strip() else None)
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
-        self.requests = requests.Session()
+        self.requests = source_session(requests_lib=requests)
         self.requests.trust_env = False
 
     def ttl_seconds(self) -> int:
@@ -118,6 +116,11 @@ class InflationNowcastWatcher:
         }
 
     def load_previous_payload(self) -> Dict[str, Any]:
+        stale = self.snapshot_store.get_stale(self.namespace(), self.cache_key())
+        if isinstance(stale, dict):
+            return stale
+        if self.redis_client is None:
+            return {}
         try:
             raw = self.redis_client.get(self.redis_key())
             if raw:
@@ -126,19 +129,21 @@ class InflationNowcastWatcher:
                     return payload
         except Exception:
             print("[inflation-nowcast] WARN redis read failed", file=sys.stderr)
-        stale = self.snapshot_store.get_stale(self.namespace(), self.cache_key())
-        return stale if isinstance(stale, dict) else {}
+        return {}
 
     def store_payload(self, payload: Dict[str, Any]) -> None:
         ttl_seconds = self.ttl_seconds()
-        self.snapshot_store.set(self.namespace(), self.cache_key(), payload, ttl_seconds)
-        self.redis_client.set(self.redis_key(), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl_seconds)
+        publish_snapshot(
+            snapshot_store=self.snapshot_store, namespace=self.namespace(),
+            cache_key=self.cache_key(), payload=payload, ttl_seconds=ttl_seconds,
+            redis_client=self.redis_client, redis_cache_key=self.redis_key(),
+        )
 
     def store_seed_meta(self, *, status: str, record_count: int, source_states: Dict[str, Any], error_summary: str | None, preserve_last_success: bool = False) -> None:
         previous = self.seed_meta_store.load(SEED_META_NAMESPACE, SEED_META_CACHE_KEY) or {}
         attempted_at = utc_now_iso()
         last_success_at = previous.get("lastSuccessAt")
-        if not preserve_last_success and status in {"ok", "degraded", "preserved"}:
+        if not preserve_last_success and (status == "ok" or (status == "degraded" and record_count > 0)):
             last_success_at = attempted_at
         payload = build_seed_meta_payload(
             panel_id="inflation-nowcast",
@@ -148,7 +153,7 @@ class InflationNowcastWatcher:
             expected_interval_seconds=self.interval_seconds,
             status=status,
             last_attempt_at=attempted_at,
-            last_success_at=last_success_at or attempted_at,
+            last_success_at=last_success_at,
             record_count=record_count,
             source_states=source_states,
             error_summary=error_summary,
@@ -158,13 +163,21 @@ class InflationNowcastWatcher:
         )
         self.seed_meta_store.store(SEED_META_NAMESPACE, SEED_META_CACHE_KEY, payload)
 
+    def store_seed_meta_fail_soft(self, **kwargs: Any) -> bool:
+        try:
+            self.store_seed_meta(**kwargs)
+            return True
+        except Exception as exc:
+            print(f"[inflation_nowcast] WARN seed meta write failed: {exc.__class__.__name__}", file=sys.stderr)
+            return False
+
     def run_once(self) -> Dict[str, Any]:
         previous = self.load_previous_payload()
         try:
             payload = runtime_service.fetch_live_inflation_nowcast_payload(self.service_context())
         except Exception as exc:
             if previous:
-                self.store_payload(previous)
+                self.store_payload(retained_snapshot(previous))
                 self.store_seed_meta(
                     status="preserved",
                     record_count=1 if _has_nowcast_data(previous) else 0,
@@ -177,7 +190,7 @@ class InflationNowcastWatcher:
             raise
 
         if previous and not _has_nowcast_data(payload):
-            self.store_payload(previous)
+            self.store_payload(retained_snapshot(previous))
             self.store_seed_meta(
                 status="preserved",
                 record_count=1 if _has_nowcast_data(previous) else 0,
@@ -219,7 +232,6 @@ def main() -> int:
         settings=settings,
         interval_seconds=args.interval,
     )
-    watcher.redis_client.ping()
     print(f"[inflation-nowcast] redis_key={watcher.redis_key()} sqlite={settings.snapshot_sqlite_path}", file=sys.stderr)
     if not args.watch:
         print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
@@ -231,6 +243,8 @@ def main() -> int:
         except KeyboardInterrupt:
             return 0
         except Exception as exc:
+            watcher.store_seed_meta_fail_soft(status="error", record_count=0, source_states={"clevelandFed": "error"},
+                                              error_summary=str(exc), preserve_last_success=True)
             print(f"[inflation-nowcast] ERROR watch loop failed: {exc}", file=sys.stderr)
         time.sleep(interval_seconds)
 

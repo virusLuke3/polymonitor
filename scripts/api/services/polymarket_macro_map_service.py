@@ -1,18 +1,22 @@
 from __future__ import annotations
+from api.services.macro_data_policy import bounded_rows, display_age, read_seeded, row_clock
 
 import json
+import math
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from api.context import resolve_optional_service_callable, resolve_service_callable
+from api.services import market_service, outcome_semantics_service
 
 
 MACRO_MAP_SNAPSHOT_NAMESPACE = "snapshot:macro:polymarket-macro-map"
 MACRO_MAP_CACHE_KEY = "panel-v1"
 DEFAULT_ITEM_LIMIT = 12
+CATALOG_MARKET_LIMIT = 100
 DEFAULT_SEARCH_TERMS = (
     "cpi",
     "inflation",
@@ -72,11 +76,12 @@ MACRO_CATEGORIES = (
 class PolymarketMacroMapDependencies:
     settings: Any
     application: Any
-    http_json_get: Callable[..., Any]
+    http_json_get: Callable[..., Any] | None
     utc_now_iso: Callable[..., Any]
     get_cached_json: Callable[..., Any] | None
     set_cached_json: Callable[..., Any] | None
     snapshot_store: Any
+    read_market_catalog: Callable[..., Any] | None = None
 
     @classmethod
     def from_context(
@@ -88,7 +93,7 @@ class PolymarketMacroMapDependencies:
         return cls(
             settings=context.get("SETTINGS"),
             application=context.get("app"),
-            http_json_get=resolve_service_callable(
+            http_json_get=resolve_optional_service_callable(
                 context,
                 "http_json_get",
             ),
@@ -105,6 +110,7 @@ class PolymarketMacroMapDependencies:
                 "set_cached_json",
             ),
             snapshot_store=context.get("SNAPSHOT_STORE"),
+            read_market_catalog=context.get("read_market_catalog"),
         )
 
 
@@ -147,7 +153,7 @@ def _float_value(value: Any) -> Optional[float]:
         numeric = float(value)
     except (TypeError, ValueError):
         return None
-    if numeric != numeric:
+    if not math.isfinite(numeric):
         return None
     return numeric
 
@@ -217,106 +223,53 @@ def _classify_event(event: Dict[str, Any]) -> List[Dict[str, Any]]:
     return hits
 
 
-def _is_event_ended(event: Dict[str, Any], now_iso: str) -> bool:
-    if event.get("closed") is True or event.get("active") is False:
-        return True
-    end_date = event.get("endDate") or event.get("end_date")
-    if not end_date:
-        return False
-    end_ts = _parse_timestamp(end_date)
-    now_ts = _parse_timestamp(now_iso)
-    return bool(end_ts and now_ts and end_ts < now_ts)
+def _iso(value: Any) -> Optional[str]:
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return str(value) if value else None
 
 
-def _market_active(market: Dict[str, Any]) -> bool:
-    if market.get("closed") is True:
-        return False
-    if market.get("active") is False:
-        return False
-    if market.get("acceptingOrders") is False:
-        return False
-    return True
-
-
-def _market_prices(market: Dict[str, Any]) -> tuple[Optional[float], Optional[float]]:
-    prices = _as_list(market.get("outcomePrices") or market.get("outcome_prices"))
-    yes_price = _float_value(prices[0]) if prices else None
-    no_price = _float_value(prices[1]) if len(prices) > 1 else None
-    if no_price is None and yes_price is not None:
-        no_price = max(0.0, min(1.0, 1.0 - yes_price))
-    return yes_price, no_price
-
-
-def _normalize_outcome_key(label: Any, fallback: Any = "") -> str:
-    source = str(label or fallback or "").strip().lower()
-    cleaned = re.sub(r"[^a-z0-9]+", "-", source).strip("-")
-    return cleaned or "outcome"
-
-
-def _label_for_market(event_title: str, market: Dict[str, Any]) -> str:
-    label = str(market.get("groupItemTitle") or market.get("group_item_title") or "").strip()
-    if label:
-        return label
-    question = str(market.get("question") or market.get("title") or "").strip()
-    if event_title and question.startswith(event_title):
-        candidate = question[len(event_title) :].strip(" -:·")
-        if candidate:
-            return candidate
-    return question or str(market.get("slug") or market.get("id") or "Outcome")
-
-
-def _fetch_gamma_events(ctx: PolymarketMacroMapContext, *, order: str, target_events: int = 300, max_pages: int = 4) -> List[Dict[str, Any]]:
-    base_url = str(_dependencies(ctx).settings.gamma_api_base or "").rstrip("/")
-    if not base_url:
-        raise RuntimeError("gamma api base missing")
-    events: List[Dict[str, Any]] = []
-    seen: set[str] = set()
-    limit = 100
-    for page in range(max(1, int(max_pages))):
-        payload = _dependencies(ctx).http_json_get(
-            f"{base_url}/events",
-            params={
-                "active": "true",
-                "closed": "false",
-                "limit": limit,
-                "offset": page * limit,
-                "order": order,
-                "ascending": "false",
-            },
-            timeout=12,
-            headers={"Accept": "application/json", "User-Agent": "polydata-macro-map/1.0"},
-        )
-        page_events = payload if isinstance(payload, list) else ((payload or {}).get("events") or (payload or {}).get("data") or [])
-        if not isinstance(page_events, list):
-            raise ValueError("gamma events payload is not a list")
-        if not page_events:
-            break
-        for event in page_events:
-            if not isinstance(event, dict):
-                continue
-            identity = str(event.get("id") or event.get("slug") or "").strip()
-            if not identity or identity in seen:
-                continue
-            seen.add(identity)
-            events.append(event)
-            if len(events) >= target_events:
-                return events
-        if len(page_events) < limit:
-            break
-    return events
-
-
-def _merge_unique_events(event_lists: Iterable[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
-    merged: List[Dict[str, Any]] = []
-    seen: set[str] = set()
-    for events in event_lists:
-        for event in events:
-            identity = str(event.get("id") or event.get("slug") or "").strip()
-            if not identity or identity in seen:
-                continue
-            seen.add(identity)
-            merged.append(event)
-    return merged
+def read_macro_market_catalog(query: Callable[..., Any], *, terms: tuple[str, ...], backend: str) -> Dict[str, Any]:
+    """Bounded projection of the existing owner; no HTTP or additional cache."""
+    if backend.lower() not in {"postgres", "postgresql"}:
+        raise RuntimeError("macro catalog requires the existing PostgreSQL owner")
+    tokens = [re.findall(r"[a-z0-9]+", term.lower()) for term in terms]
+    expression = " | ".join("(" + " & ".join(words) + ")" for words in tokens if words)
+    if not expression:
+        raise ValueError("macro catalog search terms missing")
+    # Match the existing registry search index. Event titles/tags remain part
+    # of classification, but are not an unbounded second discovery scan.
+    rows = market_service.market_rows(query,
+        "m.active IS TRUE AND m.closed IS FALSE "
+        "AND (m.end_date IS NULL OR m.end_date >= now()) "
+        "AND NULLIF(m.event_id, '') IS NOT NULL AND q.observed_at IS NOT NULL "
+        "AND q.active AND NOT q.closed "
+        "AND to_tsvector('simple', coalesce(m.title,'') || ' ' || coalesce(m.slug,'') || ' ' || coalesce(m.category,'')) "
+        "@@ to_tsquery('simple', ?)", (expression,),
+        limit=CATALOG_MARKET_LIMIT + 1, sort="volume", search=True)
+    candidates = []
+    for row in rows[:CATALOG_MARKET_LIMIT]:
+        item = market_service.MarketPanelReader._item(row)
+        item.update(eventId=row.get("event_id"), eventTitle=row.get("event_title"),
+                    eventSlug=row.get("event_slug"),
+                    sourceObservedAt=_iso(row.get("quote_observed_at")),
+                    sourceUpdatedAt=_iso(row.get("quote_updated_at")))
+        candidates.append(item)
+    projected = outcome_semantics_service.sanitize_public_market_payload(
+        {"query_all": query, "get_backend": lambda: backend}, {"items": candidates})
+    items = projected.get("items", [])
+    if any(row.get("outcomeSemanticsStatus") in {"semantics_query_failed", "semantics_database_unavailable"}
+           for row in items):
+        raise TimeoutError("macro catalog outcome evidence unavailable")
+    return {"items": items, "coverage": {
+        "scope": "recently-observed-macro-markets", "completeness": "NOT_PROVEN",
+        "marketLimit": CATALOG_MARKET_LIMIT, "candidateCount": len(candidates),
+        "truncated": len(rows) > CATALOG_MARKET_LIMIT,
+        "searchFields": ["marketTitle", "marketSlug", "category"],
+        "searchTerms": list(terms), "quoteMaxAgeSeconds": 7200,
+        "eventMembership": "observed-matching-markets-only",
+        "universeCount": None,
+    }}
 
 
 def _search_terms(ctx: PolymarketMacroMapContext) -> tuple[str, ...]:
@@ -330,55 +283,67 @@ def _event_matches_terms(event: Dict[str, Any], terms: tuple[str, ...]) -> bool:
     return any(_matches_term(haystack, term) for term in terms)
 
 
-def _normalize_event(event: Dict[str, Any], categories: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    markets = [market for market in (event.get("markets") or []) if isinstance(market, dict) and _market_active(market)]
-    if not markets:
-        return None
-    event_title = str(event.get("title") or "").strip() or "Untitled macro market"
-    outcomes: List[Dict[str, Any]] = []
-    for market in markets:
-        yes_price, no_price = _market_prices(market)
-        label = _label_for_market(event_title, market)
-        volume_24h = _float_value(market.get("volume24hr") or market.get("volume_24hr") or market.get("volume24h"))
-        outcomes.append(
-            {
-                "outcomeKey": _normalize_outcome_key(label, market.get("id")),
-                "gammaMarketId": market.get("id"),
-                "label": label,
-                "title": market.get("question") or market.get("title") or event_title,
-                "yesPrice": yes_price,
-                "noPrice": no_price,
-                "volume24h": volume_24h,
-                "conditionId": market.get("conditionId") or market.get("condition_id"),
-                "slug": market.get("slug") or market.get("market_slug"),
-            }
-        )
-    top_outcomes = sorted(
-        [outcome for outcome in outcomes if outcome.get("yesPrice") is not None],
-        key=lambda outcome: float(outcome.get("yesPrice") or 0),
-        reverse=True,
-    )[:3]
-    volume_24h = _float_value(event.get("volume24hr") or event.get("volume_24hr") or event.get("volume24h"))
-    if volume_24h is None:
-        volume_24h = sum(float(outcome.get("volume24h") or 0) for outcome in outcomes) or None
+def _normalize_event(event: Dict[str, Any], categories: List[Dict[str, Any]]) -> Dict[str, Any]:
+    outcomes = []
+    for market in event["markets"]:
+        valid = market.get("priceProjectionValid") is True
+        yes_no = valid and market.get("supportsYesNoWording") is True
+        source_outcomes = []
+        for outcome in market.get("outcomePrices") or []:
+            price = _float_value(outcome.get("price"))
+            if (valid and outcome.get("tokenId") and outcome.get("sourceLabel")
+                    and isinstance(outcome.get("sourceIndex"), int)
+                    and price is not None and 0 <= price <= 1):
+                source_outcomes.append({"tokenId": str(outcome["tokenId"]),
+                    "sourceLabel": outcome["sourceLabel"], "sourceIndex": outcome["sourceIndex"],
+                    "price": price})
+        source_outcomes.sort(key=lambda row: row["sourceIndex"])
+        primary = source_outcomes[0] if source_outcomes else {}
+        outcomes.append({
+            "outcomeKey": str(market["id"]), "marketId": market["id"],
+            "gammaMarketId": market.get("gammaMarketId"), "label": market.get("title"),
+            "title": market.get("title"), "slug": market.get("slug"),
+            "conditionId": market.get("conditionId"),
+            "yesPrice": _float_value(market.get("latestYesPrice")) if yes_no else None,
+            "noPrice": _float_value(market.get("latestNoPrice")) if yes_no else None,
+            "sourceOutcomes": source_outcomes,
+            "tokenId": primary.get("tokenId"), "sourceLabel": primary.get("sourceLabel"),
+            "sourceIndex": primary.get("sourceIndex"), "price": primary.get("price"),
+            "priceSelection": "source-order-first" if primary else None,
+            "semanticMode": market.get("semanticMode"),
+            "volume24h": _float_value(market.get("volume24h")),
+            "endDate": _iso(market.get("endDate")),
+            "sourceObservedAt": market.get("sourceObservedAt"),
+            "sourceUpdatedAt": market.get("sourceUpdatedAt"),
+            "outcomeSemanticsStatus": market.get("outcomeSemanticsStatus"),
+            "priceUnavailableReason": None if primary else (
+                "source-outcome-binding-unavailable" if valid else market.get("outcomeSemanticsStatus") or "unverified-price"),
+        })
+    observed = sorted(row["sourceObservedAt"] for row in outcomes if row.get("sourceObservedAt"))
+    updated = sorted(row["sourceUpdatedAt"] for row in outcomes if row.get("sourceUpdatedAt"))
+    ends = sorted(row["endDate"] for row in outcomes if row.get("endDate"))
+    volumes = [row["volume24h"] for row in outcomes if row["volume24h"] is not None]
     return {
-        "eventId": event.get("id"),
-        "slug": event.get("slug"),
-        "title": event_title,
+        "eventId": event["id"], "slug": event.get("slug"), "title": event["title"],
         "categoryIds": [category["id"] for category in categories],
         "categoryLabels": [category["label"] for category in categories],
         "marketTypes": [category["marketType"] for category in categories],
-        "endDate": event.get("endDate") or event.get("end_date"),
-        "createdAt": event.get("startDate") or event.get("createdAt") or event.get("created_at"),
-        "volume24h": volume_24h,
-        "liquidity": _float_value(event.get("liquidity") or event.get("liquidityNum")),
-        "outcomeCount": len(outcomes),
-        "topOutcomes": top_outcomes,
+        "endDate": ends[0] if ends else None, "endDateScope": "earliest-observed-market",
+        "createdAt": None, "volume24h": None, "liquidity": None,
+        "observedMarketVolume24h": sum(volumes) if volumes else None,
+        "volumeScope": "observed-matching-markets-only", "eventMembershipComplete": False,
+        "outcomeCount": len(outcomes), "outcomeCountScope": "observed-matching-markets-only",
+        "unpricedOutcomeCount": sum(row["price"] is None for row in outcomes),
+        "sourceObservedAt": observed[0] if observed else None,
+        "newestSourceObservedAt": observed[-1] if observed else None,
+        "sourceUpdatedAt": updated[-1] if updated else None,
+        "topOutcomes": sorted(outcomes, key=lambda row: row["price"] if row["price"] is not None else -1,
+                              reverse=True)[:3],
     }
 
 
 def _score_item(item: Dict[str, Any], now_ts: float) -> tuple[float, float, float]:
-    volume = _float_value(item.get("volume24h")) or 0.0
+    volume = _float_value(item.get("observedMarketVolume24h")) or 0.0
     liquidity = _float_value(item.get("liquidity")) or 0.0
     end_ts = _parse_timestamp(item.get("endDate"))
     if end_ts and now_ts:
@@ -394,7 +359,7 @@ def _category_breakdown(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     for category in MACRO_CATEGORIES:
         matched = [item for item in items if category["id"] in (item.get("categoryIds") or [])]
-        top = max(matched, key=lambda item: _float_value(item.get("volume24h")) or 0.0) if matched else None
+        top = max(matched, key=lambda item: _float_value(item.get("observedMarketVolume24h")) or 0.0) if matched else None
         rows.append(
             {
                 "id": category["id"],
@@ -438,6 +403,7 @@ def _summary(items: List[Dict[str, Any]], categories: List[Dict[str, Any]], now_
         signal = "MACRO WATCHLIST LIVE"
     return {
         "activeCount": active_count,
+        "activeCountScope": "observed-matching-events-only",
         "categoryCount": sum(1 for row in categories if int(row.get("activeCount") or 0) > 0),
         "topCategory": top_label,
         "signal": signal,
@@ -447,11 +413,12 @@ def _summary(items: List[Dict[str, Any]], categories: List[Dict[str, Any]], now_
 
 def _empty_payload(ctx: PolymarketMacroMapContext, *, status: str = "degraded", source_state: str = "warming") -> Dict[str, Any]:
     return {
-        "generatedAt": _dependencies(ctx).utc_now_iso(),
-        "source": "Polymarket Gamma API",
+        "generatedAt": None,
+        "sourceObservedAt": None,
+        "source": "market-data/postgresql",
         "sourceUrl": getattr(_dependencies(ctx).settings, "polymarket_macro_map_source_url", "") or _dependencies(ctx).settings.gamma_api_base,
         "status": status,
-        "sources": {"gammaEvents": source_state},
+        "sources": {"marketCatalog": source_state},
         "summary": {
             "activeCount": 0,
             "categoryCount": 0,
@@ -468,12 +435,21 @@ def normalize_polymarket_macro_map_payload(payload: Any, *, ctx: PolymarketMacro
     if not isinstance(payload, dict):
         return _empty_payload(ctx, status="invalid", source_state="invalid")
     result = json.loads(json.dumps(payload, ensure_ascii=True, default=str))
-    items = [item for item in (result.get("items") or []) if isinstance(item, dict)]
+    items = bounded_rows(result, now=_dependencies(ctx).utc_now_iso(),
+        max_age=display_age(_dependencies(ctx).settings, "polymarket_macro_map_max_display_age_seconds", 7200),
+        clock=lambda row: row.get("sourceObservedAt"))
     result["items"] = items[: max(1, min(int(limit or DEFAULT_ITEM_LIMIT), DEFAULT_ITEM_LIMIT))]
+    if isinstance(result.get("coverage"), dict):
+        result["coverage"].update(displayedEventCount=len(result["items"]),
+            displayLimit=max(1, min(int(limit or DEFAULT_ITEM_LIMIT), DEFAULT_ITEM_LIMIT)),
+            displayTruncated=len(items) > len(result["items"]))
     result["categories"] = [row for row in (result.get("categories") or []) if isinstance(row, dict)]
     result["summary"] = result.get("summary") if isinstance(result.get("summary"), dict) else {}
-    result["generatedAt"] = str(result.get("generatedAt") or _dependencies(ctx).utc_now_iso())
-    result["source"] = str(result.get("source") or "Polymarket Gamma API")
+    if result["displayRetention"]["expiredItemCount"]:
+        result["categories"] = _category_breakdown(items)
+        result["summary"] = _summary(items, result["categories"], _parse_timestamp(_dependencies(ctx).utc_now_iso()))
+    result["generatedAt"] = result.get("generatedAt") or None
+    result["source"] = str(result.get("source") or "market-data/postgresql")
     result["sourceUrl"] = str(result.get("sourceUrl") or getattr(_dependencies(ctx).settings, "polymarket_macro_map_source_url", "") or _dependencies(ctx).settings.gamma_api_base)
     result["status"] = str(result.get("status") or ("ok" if result["items"] else "empty"))
     return result
@@ -483,118 +459,58 @@ def _with_cache_mode(payload: Dict[str, Any], cache_mode: str) -> Dict[str, Any]
     return {**payload, "cacheMode": str(cache_mode)}
 
 
-def _read_seeded_snapshot(ctx: PolymarketMacroMapContext, *, ttl_seconds: int) -> Optional[Dict[str, Any]]:
-    reader = _dependencies(ctx).get_cached_json
-    if callable(reader):
-        redis_payload = reader(MACRO_MAP_SNAPSHOT_NAMESPACE, MACRO_MAP_CACHE_KEY)
-        if isinstance(redis_payload, dict):
-            snapshot_store = _dependencies(ctx).snapshot_store
-            if snapshot_store is not None:
-                snapshot_store.set(MACRO_MAP_SNAPSHOT_NAMESPACE, MACRO_MAP_CACHE_KEY, redis_payload, ttl_seconds)
-            return _with_cache_mode(redis_payload, "redis-seed")
-
-    snapshot_store = _dependencies(ctx).snapshot_store
-    if snapshot_store is None:
-        return None
-
-    sqlite_payload = snapshot_store.get(MACRO_MAP_SNAPSHOT_NAMESPACE, MACRO_MAP_CACHE_KEY)
-    if isinstance(sqlite_payload, dict):
-        setter = _dependencies(ctx).set_cached_json
-        if callable(setter):
-            setter(MACRO_MAP_SNAPSHOT_NAMESPACE, MACRO_MAP_CACHE_KEY, sqlite_payload, ttl_seconds)
-        return _with_cache_mode(sqlite_payload, "sqlite-seed")
-
-    stale_payload = snapshot_store.get_stale(MACRO_MAP_SNAPSHOT_NAMESPACE, MACRO_MAP_CACHE_KEY)
-    if isinstance(stale_payload, dict):
-        setter = _dependencies(ctx).set_cached_json
-        if callable(setter):
-            setter(MACRO_MAP_SNAPSHOT_NAMESPACE, MACRO_MAP_CACHE_KEY, stale_payload, min(15, ttl_seconds))
-        return _with_cache_mode(stale_payload, "stale-seed")
-    return None
-
-
-def _store_live_build_snapshot(ctx: PolymarketMacroMapContext, payload: Dict[str, Any], *, ttl_seconds: int) -> None:
-    snapshot_store = _dependencies(ctx).snapshot_store
-    if snapshot_store is not None:
-        snapshot_store.set(MACRO_MAP_SNAPSHOT_NAMESPACE, MACRO_MAP_CACHE_KEY, payload, ttl_seconds)
-    setter = _dependencies(ctx).set_cached_json
-    if callable(setter):
-        setter(MACRO_MAP_SNAPSHOT_NAMESPACE, MACRO_MAP_CACHE_KEY, payload, ttl_seconds)
+def _read_seeded_snapshot(ctx: PolymarketMacroMapContext) -> Optional[Dict[str, Any]]:
+    dependencies = _dependencies(ctx)
+    return read_seeded(dependencies.snapshot_store, dependencies.get_cached_json, MACRO_MAP_SNAPSHOT_NAMESPACE, MACRO_MAP_CACHE_KEY)
 
 
 def build_polymarket_macro_map_payload(ctx: PolymarketMacroMapContext) -> Dict[str, Any]:
     dependencies = _dependencies(ctx)
-    errors: Dict[str, str] = {}
-    event_batches: List[List[Dict[str, Any]]] = []
-    for order in ("volume24hr", "startDate"):
-        try:
-            event_batches.append(_fetch_gamma_events(dependencies, order=order))
-        except Exception as exc:
-            errors[order] = type(exc).__name__
-            dependencies.application.logger.exception(
-                "polymarket macro map gamma fetch failed order=%s",
-                order,
-            )
-    events = _merge_unique_events(event_batches)
-    if not events:
-        return _empty_payload(
-            dependencies,
-            status="degraded" if errors else "empty",
-            source_state="error" if errors else "empty",
-        )
-
+    if not callable(dependencies.read_market_catalog):
+        raise RuntimeError("macro market catalog reader missing")
+    terms = _search_terms(dependencies)
+    catalog = dependencies.read_market_catalog(terms=terms)
+    if not isinstance(catalog, dict) or not isinstance(catalog.get("items"), list):
+        raise ValueError("macro market catalog payload invalid")
+    events: Dict[str, Dict[str, Any]] = {}
+    for market in catalog["items"]:
+        event_id = str(market.get("eventId") or "")
+        if not event_id or not market.get("eventTitle"):
+            continue
+        event = events.setdefault(event_id, {"id": event_id, "title": market["eventTitle"],
+            "slug": market.get("eventSlug"), "tags": [], "markets": []})
+        event["markets"].append(market)
+        event["tags"].extend(market.get("tags") or [])
+    items = []
+    for event in events.values():
+        categories = _classify_event(event)
+        if categories and _event_matches_terms(event, terms):
+            items.append(_normalize_event(event, categories))
     now_iso = dependencies.utc_now_iso()
     now_ts = _parse_timestamp(now_iso)
-    terms = _search_terms(dependencies)
-    items: List[Dict[str, Any]] = []
-    for event in events:
-        if _is_event_ended(event, now_iso) or not _event_matches_terms(event, terms):
-            continue
-        categories = _classify_event(event)
-        if not categories:
-            continue
-        item = _normalize_event(event, categories)
-        if item is not None:
-            items.append(item)
     items.sort(key=lambda item: _score_item(item, now_ts), reverse=True)
     categories = _category_breakdown(items)
-    status = "ok" if items else "empty"
-    if errors and items:
-        status = "degraded"
+    coverage = dict(catalog.get("coverage") or {})
+    coverage.update(matchedEventCount=len(items),
+        matchedMarketCount=sum(item["outcomeCount"] for item in items),
+        unpricedMarketCount=sum(item["unpricedOutcomeCount"] for item in items))
+    coverage["unmatchedCandidateCount"] = len(catalog["items"]) - coverage["matchedMarketCount"]
+    observed = sorted(item["sourceObservedAt"] for item in items if item.get("sourceObservedAt"))
+    newest = sorted(item["newestSourceObservedAt"] for item in items if item.get("newestSourceObservedAt"))
     return {
-        "generatedAt": now_iso,
-        "source": "Polymarket Gamma API",
-        "sourceUrl": getattr(
-            dependencies.settings,
-            "polymarket_macro_map_source_url",
-            "",
-        )
-        or dependencies.settings.gamma_api_base,
-        "status": status,
-        "sources": {"gammaEvents": "partial" if errors and items else ("ok" if items else "empty")},
-        "summary": _summary(items, categories, now_ts),
-        "categories": categories,
-        "items": items,
+        "generatedAt": now_iso, "fetchedAt": now_iso, "source": "market-data/postgresql",
+        "sourceUrl": getattr(dependencies.settings, "polymarket_macro_map_source_url", "") or None,
+        "sourceObservedAt": observed[0] if observed else None,
+        "newestSourceObservedAt": newest[-1] if newest else None,
+        "status": ("degraded" if coverage.get("truncated") or coverage["unpricedMarketCount"] else "ok") if items else "empty",
+        "sources": {"marketCatalog": "ok"}, "coverage": coverage,
+        "summary": _summary(items, categories, now_ts), "categories": categories, "items": items,
     }
 
 
 def get_polymarket_macro_map_snapshot(ctx: PolymarketMacroMapContext, limit: int = DEFAULT_ITEM_LIMIT) -> Dict[str, Any]:
     dependencies = _dependencies(ctx)
-    ttl_seconds = max(
-        60,
-        int(
-            getattr(
-                dependencies.settings,
-                "polymarket_macro_map_ttl_seconds",
-                180,
-            )
-            or 180
-        ),
-    )
-    seeded_payload = _read_seeded_snapshot(
-        dependencies,
-        ttl_seconds=ttl_seconds,
-    )
+    seeded_payload = _read_seeded_snapshot(dependencies)
     if seeded_payload is not None:
         return normalize_polymarket_macro_map_payload(
             seeded_payload,
@@ -602,18 +518,5 @@ def get_polymarket_macro_map_snapshot(ctx: PolymarketMacroMapContext, limit: int
             limit=limit,
         )
 
-    payload = _with_cache_mode(
-        build_polymarket_macro_map_payload(dependencies),
-        "live-build",
-    )
-    if payload.get("items"):
-        _store_live_build_snapshot(
-            dependencies,
-            payload,
-            ttl_seconds=ttl_seconds,
-        )
-    return normalize_polymarket_macro_map_payload(
-        payload,
-        ctx=dependencies,
-        limit=limit,
-    )
+    # Public GETs never discover markets or open a database collection run.
+    return _with_cache_mode(_empty_payload(dependencies, status="warming", source_state="warming"), "warming")

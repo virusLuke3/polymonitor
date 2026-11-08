@@ -21,7 +21,7 @@ from urllib.request import Request, urlopen
 from xml.etree import ElementTree as ET
 
 from api.config import PROJECT_ROOT
-from api.clients.source_transport import source_session
+from api.clients.source_transport import source_session, read_with_retry, read_response_bytes
 from api.context import resolve_optional_service_callable
 from api.services import live_video_playback_service, trusted_hls_sources, youtube_live_probe_service
 
@@ -373,7 +373,7 @@ def normalize_source_item(raw: Dict[str, Any], *, generated_at: str, curated: bo
         "failureReason": _string(raw.get("failureReason")),
         "curated": bool(curated),
     }
-    for key in ("playbackTier", "playbackStrategy", "hlsProxyRequired", "hlsProxyReferer"):
+    for key in ("playbackTier", "playbackStrategy", "hlsProxyRequired", "hlsProxyReferer", "hlsAlternates"):
         if key in raw:
             item[key] = raw.get(key)
     item["relevanceScore"] = _score_for(category, curated=curated, source_type=source_type, status=status, market_tags=market_tags)
@@ -634,9 +634,12 @@ def _hls_http_fetch(url: str, *, timeout: int, max_bytes: int, binary: bool = Fa
         headers=headers,
     )
     if os.environ.get("POLYMONITOR_SOURCE_ROUTES_FILE"):
-        with source_session() as session, session.get(url, headers=headers, timeout=timeout, stream=True) as response:
-            response.raise_for_status()
-            data = response.raw.read(max_bytes, decode_content=True)
+        import time
+        deadline = time.monotonic() + timeout * 2 + 1
+        with source_session() as session:
+            data = read_with_retry(session, url,
+                lambda response: read_response_bytes(response, max_bytes, deadline=deadline, sample=binary),
+                attempts=2, deadline=deadline, headers=headers, timeout=timeout, stream=True)
     else:
         with urlopen(request, timeout=timeout) as response:
             status = int(getattr(response, "status", 200) or 200)

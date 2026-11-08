@@ -368,7 +368,7 @@ def test_adsb_fallback_supplies_live_aircraft_when_opensky_degraded(tmp_path, mo
         {
             "http_text_get": http_text_get,
             "http_json_get": http_json_get,
-            "utc_now_iso": lambda: "2026-06-16T01:00:00Z",
+            "utc_now_iso": lambda: datetime.now(timezone.utc).isoformat(),
             "search_markets": lambda query, limit=3: [],
             "get_cached_json": lambda namespace, key: cache.get((namespace, key)),
             "set_cached_json": lambda namespace, key, value, ttl: cache.__setitem__((namespace, key), value),

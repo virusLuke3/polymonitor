@@ -131,7 +131,8 @@ def set_cached_json(ctx: CacheState, namespace: str, cache_key: str, payload: Di
 def _store_snapshot_payload(ctx: CacheState, namespace: str, cache_key: str, payload: Any, ttl_seconds: int) -> None:
     if isinstance(payload, dict) and (payload.get("error") or payload.get("status") in {"error", "unavailable"}):
         raise RuntimeError("Snapshot builder returned an unavailable result")
-    ctx.snapshot_store.set(namespace, cache_key, payload, ttl_seconds)
+    if ctx.snapshot_store.set(namespace, cache_key, payload, ttl_seconds) is False:
+        raise RuntimeError("SQLite snapshot write was not accepted")
 
 
 def _admit_snapshot(ctx, namespace, cache_key):

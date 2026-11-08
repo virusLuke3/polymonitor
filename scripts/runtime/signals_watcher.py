@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Seed Alpha, whale, suspicious flow, and PolySignal snapshots."""
+"""Seed Alpha, whale, and suspicious flow snapshots."""
 
 from __future__ import annotations
 
@@ -27,8 +27,8 @@ except ImportError:
     redis = None
 
 from api.config import ApiSettings, load_api_settings
-from api.services import polysignal_feed_service, signal_service
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
+from api.services import signal_service
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot, retained_snapshot
 from runtime.snapshot_store import SnapshotStore
 from runtime.telegram_panel_publish import publish_cached_panel_snapshot
 
@@ -36,7 +36,6 @@ from runtime.telegram_panel_publish import publish_cached_panel_snapshot
 DEFAULT_ALPHA_LIMIT = 8
 DEFAULT_WHALE_LIMIT = 14
 DEFAULT_SUSPICIOUS_LIMIT = 12
-DEFAULT_POLYSIGNAL_LIMIT = 8
 DEFAULT_SIGNAL_DATA_STALE_AFTER_SECONDS = 7 * 24 * 60 * 60
 SEED_META_NAMESPACE = "seed-meta:signals"
 
@@ -71,16 +70,6 @@ COMPONENTS = {
         "default_limit": DEFAULT_SUSPICIOUS_LIMIT,
         "cache_key_builder": signal_service.build_suspicious_trades_cache_key,
         "fetcher": signal_service.fetch_live_suspicious_trades_payload,
-    },
-    "polysignal": {
-        "panel_id": polysignal_feed_service.PANEL_ID,
-        "cache_key": polysignal_feed_service.PANEL_ID,
-        "namespace": polysignal_feed_service.SNAPSHOT_NAMESPACE,
-        "service_name": "polydata-polysignal-feed-seed.service",
-        "limit_env": "POLYDATA_POLYSIGNAL_LIMIT",
-        "default_limit": DEFAULT_POLYSIGNAL_LIMIT,
-        "cache_key_builder": polysignal_feed_service.build_polysignal_cache_key,
-        "fetcher": polysignal_feed_service.fetch_live_polysignal_payload,
     },
 }
 
@@ -179,13 +168,8 @@ class SignalsWatcher:
         interval_seconds: int,
         settings: Optional[ApiSettings] = None,
     ) -> None:
-        if redis is None:
-            raise RuntimeError("redis package is required. Install scripts/requirements.txt")
-        component = "polysignal" if component == "polybeats" else component
         if component not in COMPONENTS:
             raise ValueError(f"Unsupported signal component: {component}")
-        if not str(redis_url or "").strip():
-            raise RuntimeError("POLYDATA_REDIS_URL is required for signals watcher")
         self.component = component
         self.settings = settings or load_api_settings()
         self.spec = COMPONENTS[component]
@@ -194,14 +178,16 @@ class SignalsWatcher:
         if self.settings.signal_runtime_ttl_seconds < self.interval_seconds + 60:
             raise ValueError("Signal snapshot TTL must allow at least 60 seconds beyond the refresh interval")
         self.redis_prefix = str(redis_prefix or "")
-        self.redis_client = redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2)
+        self.redis_client = (redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2)
+                             if redis is not None and str(redis_url or "").strip() else None)
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self._lock = Path(snapshot_sqlite_path).with_name(f"signals-{component}.lock").open("a")
         try:
             fcntl.flock(self._lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             self._lock.close()
-            self.redis_client.close()
+            if self.redis_client is not None:
+                self.redis_client.close()
             raise RuntimeError(f"Signal watcher already running: {component}") from None
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
 
@@ -223,6 +209,11 @@ class SignalsWatcher:
         return _redis_key(self.redis_prefix, self.namespace(), self.cache_key())
 
     def load_previous_payload(self) -> Dict[str, Any]:
+        stale = self.snapshot_store.get_stale(self.namespace(), self.cache_key())
+        if isinstance(stale, dict):
+            return stale
+        if self.redis_client is None:
+            return {}
         try:
             raw = self.redis_client.get(self.redis_key())
             if raw:
@@ -231,13 +222,15 @@ class SignalsWatcher:
                     return payload
         except Exception:
             print(f"[signals] WARN redis read failed component={self.component}", file=sys.stderr)
-        stale = self.snapshot_store.get_stale(self.namespace(), self.cache_key())
-        return stale if isinstance(stale, dict) else {}
+        return {}
 
     def store_payload(self, payload: Dict[str, Any]) -> None:
         ttl_seconds = self.ttl_seconds()
-        self.snapshot_store.set(self.namespace(), self.cache_key(), payload, ttl_seconds)
-        self.redis_client.set(self.redis_key(), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl_seconds)
+        publish_snapshot(
+            snapshot_store=self.snapshot_store, namespace=self.namespace(),
+            cache_key=self.cache_key(), payload=payload, ttl_seconds=ttl_seconds,
+            redis_client=self.redis_client, redis_cache_key=self.redis_key(),
+        )
 
     def load_seed_meta(self) -> Dict[str, Any]:
         payload = self.seed_meta_store.load(SEED_META_NAMESPACE, str(self.spec["cache_key"]))
@@ -267,7 +260,7 @@ class SignalsWatcher:
             expected_interval_seconds=self.interval_seconds,
             status=status,
             last_attempt_at=attempted_at,
-            last_success_at=last_success_at or attempted_at,
+            last_success_at=last_success_at,
             record_count=record_count,
             source_states=source_states or {"database": status},
             error_summary=error_summary,
@@ -281,7 +274,8 @@ class SignalsWatcher:
         try:
             if hasattr(self, "_service_runtime"):
                 self._service_runtime.close()
-            self.redis_client.close()
+            if self.redis_client is not None:
+                self.redis_client.close()
         finally:
             self._lock.close()
 
@@ -289,13 +283,27 @@ class SignalsWatcher:
         from api.runtime import ServiceRuntime
 
         if not hasattr(self, "_service_runtime"):
-            self._service_runtime = ServiceRuntime(self.settings, application=_AppAdapter())
+            connection_factory = None
+            if self.settings.database.backend in {"postgres", "postgresql"}:
+                from api.db_pool import ApiPostgresConnectionPool
+                # Each singleton collector retains one connection. It must
+                # not take the HTTP workers' four serving permits indefinitely.
+                pool = ApiPostgresConnectionPool(
+                    self.settings.database.connect, max_size=1, acquire_timeout_seconds=20,
+                    budget_name=f"signal-{self.component}-postgres-connections", budget_capacity=1,
+                )
+                def connection_factory(*args, **kwargs):
+                    return pool.acquire(*args, **kwargs)
+                connection_factory.close = pool.close
+            self._service_runtime = ServiceRuntime(
+                self.settings, application=_AppAdapter(), connection_factory=connection_factory,
+            )
             # Collection runs outside HTTP requests. Allow bounded tunnel
             # latency; keep ClickHouse execution, memory and concurrency caps.
             self._service_runtime.resources.clickhouse_read_timeout_seconds = 10.0
         if self.component == "alpha":
             return self._service_runtime.alpha_signal_context
-        return self._service_runtime.polysignal_context if self.component == "polysignal" else self._service_runtime.signal_context
+        return self._service_runtime.signal_context
 
     def fetch_payload(self) -> Dict[str, Any]:
         fetcher: Callable[..., Dict[str, Any]] = self.spec["fetcher"]
@@ -320,6 +328,14 @@ class SignalsWatcher:
         self._refresh_failures = 0
         # Slow successful reads must not produce a catch-up request burst.
         return max(self.interval_seconds / 2, self.interval_seconds - elapsed_seconds)
+
+    def store_seed_meta_fail_soft(self, **kwargs: Any) -> bool:
+        try:
+            self.store_seed_meta(**kwargs)
+            return True
+        except Exception as exc:
+            print(f"[signals] WARN seed meta write failed: {exc.__class__.__name__}", file=sys.stderr)
+            return False
 
     def run_once(self) -> Dict[str, Any]:
         previous = self.load_previous_payload()
@@ -408,7 +424,7 @@ class SignalsWatcher:
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Seed signal panel snapshots into Redis and SQLite")
-    parser.add_argument("--component", choices=sorted([*COMPONENTS, "polybeats"]), required=True)
+    parser.add_argument("--component", choices=sorted(COMPONENTS), required=True)
     parser.add_argument("--watch", action="store_true", help="Run continuously instead of once")
     parser.add_argument("--limit", type=int, default=0, help="Override the component default limit")
     return parser
@@ -419,9 +435,8 @@ def main() -> int:
     load_environment()
     args = build_arg_parser().parse_args()
     settings = load_api_settings()
-    args.component = "polysignal" if args.component == "polybeats" else args.component
     spec = COMPONENTS[args.component]
-    limit = args.limit or int(polysignal_feed_service.config_value(str(spec["limit_env"]), spec["default_limit"]))
+    limit = args.limit or int(os.environ.get(str(spec["limit_env"]), spec["default_limit"]))
     watcher = SignalsWatcher(
         redis_url=settings.redis_url,
         redis_prefix=settings.redis_prefix,
@@ -432,7 +447,6 @@ def main() -> int:
         settings=settings,
     )
     try:
-        watcher.redis_client.ping()
         print(f"[signals] component={args.component} redis_key={watcher.redis_key()} sqlite={settings.snapshot_sqlite_path}", file=sys.stderr)
         if not args.watch:
             print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
@@ -447,7 +461,7 @@ def main() -> int:
             except KeyboardInterrupt:
                 return 0
             except Exception as exc:
-                watcher.store_seed_meta(
+                watcher.store_seed_meta_fail_soft(
                     status="error",
                     record_count=0,
                     error_summary=type(exc).__name__,

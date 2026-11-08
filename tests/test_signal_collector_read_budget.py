@@ -77,7 +77,7 @@ def test_docker_collection_budget_keeps_server_execution_cap():
 
 def test_only_watcher_owned_runtime_receives_collection_budget():
     watcher = SignalsWatcher.__new__(SignalsWatcher)
-    watcher.settings = object()
+    watcher.settings = SimpleNamespace(database=SimpleNamespace(backend="sqlite"))
     watcher.component = "whales"
     runtime = SimpleNamespace(resources=RuntimeResources(), signal_context={})
     with patch("api.runtime.ServiceRuntime", return_value=runtime) as constructor:
@@ -86,3 +86,22 @@ def test_only_watcher_owned_runtime_receives_collection_budget():
     constructor.assert_called_once()
     assert runtime.resources.clickhouse_read_timeout_seconds == 10
     assert RuntimeResources().clickhouse_read_timeout_seconds is None
+
+
+def test_collector_connection_is_bounded_and_does_not_take_api_permits():
+    watcher = SignalsWatcher.__new__(SignalsWatcher)
+    watcher.settings = SimpleNamespace(database=SimpleNamespace(backend="postgres", connect=Mock()))
+    watcher.component = "whales"
+    runtime = SimpleNamespace(resources=RuntimeResources(), signal_context={})
+    with patch("api.db_pool.ApiPostgresConnectionPool") as pool_type, patch(
+        "api.runtime.ServiceRuntime", return_value=runtime
+    ) as runtime_type:
+        watcher.service_context()
+        options = pool_type.call_args.kwargs
+        assert options["budget_name"] == "signal-whales-postgres-connections"
+        assert options["budget_capacity"] == options["max_size"] == 1
+        connector = runtime_type.call_args.kwargs["connection_factory"]
+        connector()
+        connector.close()
+        pool_type.return_value.acquire.assert_called_once()
+        pool_type.return_value.close.assert_called_once()

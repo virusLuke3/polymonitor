@@ -79,8 +79,6 @@ class WorldCupSeedWatcher:
         seed_meta_key: str,
         interval_seconds: int,
     ) -> None:
-        if redis is None:
-            raise RuntimeError("redis package is required. Install scripts/requirements.txt")
         if requests is None:
             raise RuntimeError("requests package is required. Install scripts/requirements.txt")
         self.mode = mode
@@ -88,10 +86,9 @@ class WorldCupSeedWatcher:
         self.seed_meta_key = seed_meta_key
         self.interval_seconds = max(300, int(interval_seconds or 300))
         self.settings = load_api_settings()
-        if not str(self.settings.redis_url or "").strip():
-            raise RuntimeError("POLYDATA_REDIS_URL is required for World Cup seed watcher")
         self.redis_prefix = str(self.settings.redis_prefix or "")
-        self.redis_client = redis.from_url(self.settings.redis_url, decode_responses=True)
+        self.redis_client = (redis.from_url(self.settings.redis_url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2)
+                             if redis is not None and str(self.settings.redis_url or "").strip() else None)
         self.snapshot_store = SnapshotStore(self.settings.snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
         self.requests = requests.Session()
@@ -126,17 +123,24 @@ class WorldCupSeedWatcher:
             conn.close()
 
     def get_cached_json(self, namespace: str, cache_key: str) -> Any:
-        raw = self.redis_client.get(redis_key(self.redis_prefix, namespace, cache_key))
-        if not raw:
+        cached = self.snapshot_store.get(namespace, cache_key)
+        if isinstance(cached, dict):
+            return cached
+        if self.redis_client is None:
             return None
-        return json.loads(str(raw))
+        try:
+            raw = self.redis_client.get(redis_key(self.redis_prefix, namespace, cache_key))
+            payload = json.loads(str(raw)) if raw else None
+            return payload if isinstance(payload, dict) else None
+        except Exception:
+            return None
 
     def set_cached_json(self, namespace: str, cache_key: str, payload: Any, ttl_seconds: int) -> None:
-        self.redis_client.set(
-            redis_key(self.redis_prefix, namespace, cache_key),
-            json.dumps(payload, ensure_ascii=True, default=str),
-            ex=max(1, int(ttl_seconds or 1)),
-        )
+        if self.redis_client is not None:
+            try:
+                self.redis_client.set(redis_key(self.redis_prefix, namespace, cache_key), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl_seconds)
+            except Exception:
+                pass
 
     def service_context(self) -> Dict[str, Any]:
         return {
@@ -168,7 +172,7 @@ class WorldCupSeedWatcher:
         previous = self.seed_meta_store.load(SEED_META_NAMESPACE, self.seed_meta_key) or {}
         attempted_at = utc_now_iso()
         last_success_at = previous.get("lastSuccessAt")
-        if not preserve_last_success and status in {"ok", "degraded", "preserved"}:
+        if not preserve_last_success and (status == "ok" or (status == "degraded" and record_count_value > 0)):
             last_success_at = attempted_at
         payload = build_seed_meta_payload(
             panel_id=self.seed_meta_key,
@@ -178,7 +182,7 @@ class WorldCupSeedWatcher:
             expected_interval_seconds=self.interval_seconds,
             status=status,
             last_attempt_at=attempted_at,
-            last_success_at=last_success_at or attempted_at,
+            last_success_at=last_success_at,
             record_count=record_count_value,
             source_states=source_states,
             error_summary=error_summary,

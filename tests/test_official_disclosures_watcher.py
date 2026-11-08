@@ -31,15 +31,19 @@ def test_contact_identity_is_sec_only(monkeypatch, redirect):
         def raise_for_status(self):
             pass
 
-        def iter_content(self, _):
+        def close(self):
+            pass
+
+        def iter_content(self, chunk_size):
             assert not redirect, "Redirect response must not be parsed as source data"
             yield b'{"results": []}'
 
-    def get(url, **kwargs):
+    def request(method, url, **kwargs):
+        assert method == "GET"
         calls.append((url, kwargs))
         return Response()
 
-    session = SimpleNamespace(get=get, close=lambda: None)
+    session = SimpleNamespace(request=request, close=lambda: None)
     monkeypatch.setattr(watcher, "source_session", lambda: session)
 
     def collect(store, key, url, parse, fetch, cadence):

@@ -174,8 +174,18 @@ An existing acquisition owner may opt into `api.clients.source_transport` throug
 SQLite/Redis namespace and API; routing is transport configuration, not another
 collector or data cache. Pure views continue reading the original owner.
 
-- Configure exact hostnames and approved exits. Only public GET/HEAD requests
-  use this routing; local APIs, Polymarket/LOB and writes are excluded.
+All source addresses, credentials, proxy nodes and route choices must be
+maintained in `.env`, per the [configuration contract](panel-data-pipeline.md#31-密钥数据源和代理统一由-env-配置).
+`POLYMONITOR_SOURCE_ROUTES_FILE` describes an existing compatibility path: its
+contents must be generated from `.env`, not maintained as another list of real
+hosts and proxy URLs. Configuring only this file's path in `.env` does not meet
+the requirement. The examples below describe structure and behavior, not values
+to embed in scripts; existing consumers still require migration and verification.
+
+- Configure exact hostnames and approved exits. Public GET/HEAD requests use
+  this routing. The only POST exception is the documented read-only
+  `https://api.hyperliquid.xyz/info` with exactly `{"type":"metaAndAssetCtxs"}`.
+  Local APIs, Polymarket/LOB, account reads and trading writes are excluded.
   The weather snapshot owner explicitly opts into the exact configured public
   `/books` POST with a validated token-only batch; this does not enable other
   Polymarket requests or change internal LOB routing. See [weather ownership](weather-panel-runtime.md).
@@ -184,10 +194,12 @@ collector or data cache. Pure views continue reading the original owner.
   See the [unit](../deploy/systemd/polymonitor-source-egress@.service),
   [environment example](../deploy/systemd/polymonitor-source-egress@.env.example)
   and [host route example](../deploy/systemd/polymonitor-source-routes.example.json).
-- A read tries at most two eligible exits within the caller's connection/read
-  budget; budgets below eight seconds use one exit. Two consecutive connection
-  failures cool that host/exit for 120 seconds. A successful response resets its
-  failure count. Retry-After from 429 applies to the source without an immediate
+- A read tries at most two eligible exits. The connection/read timeout belongs
+  to each complete attempt and is not divided between exits. An explicit owner
+  deadline caps total work; no request starts after it expires. Two consecutive
+  connection failures cool that host/exit for 120 seconds. Read timeouts do not
+  cool the host for unrelated collectors. A complete successful body resets the
+  failure count (streaming headers alone do not). Retry-After from 429 applies to the source without an immediate
   alternate-exit retry; 403 does not trigger a bypass. Preserve domain-specific
   failure limits. State reuses `panel_snapshots / state:source-transport`; it
   contains cooldown clocks, not market data. Streaming body handling remains
@@ -205,3 +217,62 @@ TV adds browser media-progress validation and same-channel fallback; its source
 maintenance and playback budgets are in the [TV module contract](../webpage/src/panels/modules/market-tv-wire/README.md).
 Dated recovery notes are evidence for their observation window, not deployment
 defaults or proof that every source remains healthy.
+
+Crypto history/options explicitly opt into `read_with_retry` via the existing
+HTTP client. This collector profile retains a 45-second per-attempt I/O timeout,
+at most four attempts and one exit switch, including failures while reading the
+body. It does not alter the default request policy for other owners. Source
+denials and Retry-After remain authoritative. The worker stops starting reads
+or retries after its 90-second slow-task allowance; an outstanding I/O still has its
+own timeout. Durable last-good data and retry clocks use the existing crypto
+SQLite owner, as specified in [the domain contract](crypto-strategy-panels.md#历史与期权请求恢复).
+
+
+### External collector failure isolation (2026-11-04)
+
+- Crypto keeps one existing SQLite owner. Fast quotes/flow/depth publish on the
+  30-second loop with their own 30-second allowance. Three persistent slow workers
+  handle four asset-history jobs and two options jobs; each key has at most one
+  queued/running job, a 90-second allowance, and its original source cadence.
+- Funding uses two venue slots, 45 seconds per venue and at most 12 seconds per
+  request attempt. In-flight work keeps its slot across cycles; timeout is not
+  cancellation. A valid cached catalog survives a quote deadline failure.
+- Finance/Tech/API recovery share the same durable acquisition lock and canonical
+  snapshot size. View limits do not reduce the shared stored universe. If the
+  scheduled owner has attempted within two declared intervals, API recovery does
+  not compete with it, even when that attempt failed. Recovery remains available
+  for absent/overdue owners.
+- Tech, Finance, Finance External and commodity overview watchers own persistent Yahoo pools of
+  three threads, with one reusable HTTP Session per thread. Batches join before
+  the next panel/round. Tech/Finance panels have 180-second budgets; the larger
+  Fear & Greed input set has 420 seconds within its unchanged ten-minute schedule.
+  Finance External gives each of six independent source branches 90 seconds.
+  Yahoo transient failure backoff is per symbol; only 429/Retry-After is source-wide.
+  Daily history retains 260 observations for 200-day calculations (intraday: 48).
+- Last-good retention belongs to each source/identity, with original observed and
+  fetched times. Stablecoin spot retention is five minutes; finance/tech/DeFi
+  quote retention is thirty minutes. A refreshed envelope cannot renew old rows.
+- SQLite remains authoritative. The modified external watchers bound Redis connect
+  and socket waits to two seconds. Optional mirror failure must not erase a
+  successful SQLite publication or fabricate an upstream success timestamp.
+- Valid empty results (ended events, no news) differ from missing price fields or
+  exceptions. Coverage must report expected, received and missing identities.
+
+- OFAC uses the official compressed SDN export (8 MiB compressed / 64 MiB
+  expanded cap; 90-second body deadline), with the consolidated XML kept separate.
+  Parsed values reuse `source:world:ofac / <original URL>` in the existing SQLite
+  store: hourly refresh, at most 24 hours retained with original source clocks.
+- News keeps its approved-host, redirect, conditional-request and 2.5 MB limits.
+  Its existing source worker uses the shared transport with a 45-second source
+  deadline (connect up to 12 seconds, read up to 18); the 90-second process budget
+  remains. Per-source schedules and Retry-After still control subsequent attempts.
+- NWS scheduled acquisition has 20 seconds, including a 6-second connection cap.
+  Browser source waits remain 6.5 seconds; its future continues in the existing
+  bounded owner pool and publishes to the same SQLite snapshot. Provider refresh
+  cadence, geometry, observation timestamps and stale limits are unchanged.
+- Prefer verified direct access where available. GRID has a collector-specific
+  `POLYDATA_GRID_ESPORTS_TRUST_ENV_PROXY` override; disabling it does not change
+  other services or the user's Clash. SSH destinations must be actually reachable
+  through the approved key: a working SOCKS listener alone is insufficient.
+
+Current implementation and acceptance: [external-source recovery](external-panel-recovery-2026-11-04.md).

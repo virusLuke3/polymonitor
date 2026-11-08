@@ -978,7 +978,8 @@ def test_watchers_preserve_previous_on_empty_or_exception(monkeypatch):
     result = news_watcher.run_once()
 
     assert result["status"] == "preserved"
-    assert stored["news_payload"] is previous_news
+    assert stored["news_payload"]["items"] == previous_news["items"]
+    assert stored["news_payload"]["status"] == "stale"
     assert stored["news_meta"]["preserve"] is True
 
 

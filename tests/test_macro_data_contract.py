@@ -97,8 +97,9 @@ def test_api_seed_hit_and_miss_never_call_external_sources(monkeypatch):
     seed = {"schemaVersion": 2, "status": "ok", "generatedAt": "2026-10-04T12:00:00Z", "items": [],
             "events": [{"key": "headline-yoy", "forecast": 3.12}], "eventSummary": {"forecastCount": 1}}
     result = registry.get_cpi_release_command_center_snapshot({"get_cached_json": lambda *args: seed})
-    assert result["events"] == seed["events"]
-    assert result["summary"]["forecastCount"] == 1
+    assert result["events"] == []  # An expired seed is still read-only, not indefinitely displayable.
+    assert result["status"] == "expired"
+    assert result["summary"]["forecastCount"] == 0
     miss = registry.get_cpi_release_command_center_snapshot({})
     assert miss["cacheMode"] == "seed-miss" and miss["generatedAt"] is None
 
@@ -128,12 +129,14 @@ def test_partial_fred_failure_preserves_original_observation_and_clock():
 def test_nowcast_html_parser_keeps_all_months(monkeypatch):
     from bs4 import BeautifulSoup
     from api.services import runtime_service
-    html = '<table><caption>Month-over-month percent change</caption><tr><th>Month</th><th>CPI</th></tr><tr><td>October 2026</td><td>0.3</td></tr><tr><td>September 2026</td><td>0.1</td></tr></table>'
-    deps = SimpleNamespace(settings=SimpleNamespace(cleveland_fed_nowcast_url='https://example.test'),
-        utc_now_iso=lambda: '2026-10-04T12:00:00Z', beautiful_soup=BeautifulSoup,
-        requests_lib=SimpleNamespace(get=lambda *a, **k: SimpleNamespace(text=html, raise_for_status=lambda: None)))
-    monkeypatch.setattr(runtime_service, '_dependencies', lambda ctx: deps)
-    result = runtime_service.fetch_live_inflation_nowcast_payload({})
+    html = ''
+    for caption, period, periods in [('Month-over-month percent change', 'Month', ['October 2026', 'September 2026']),
+                                     ('Year-over-year percent change', 'Month', ['October 2026']),
+                                     ('Quarterly annualized percent change', 'Quarter', ['2026:Q4'])]:
+        headers = ''.join(f'<th>{key}</th>' for key in [period, 'CPI', 'Core CPI', 'PCE', 'Core PCE', 'Updated'])
+        rows = ''.join(f'<tr><td>{value}</td><td>0.3</td><td>0.2</td><td>0.2</td><td>0.2</td><td>10/04</td></tr>' for value in periods)
+        html += f'<table><caption>{caption}</caption><tr>{headers}</tr>{rows}</table>'
+    result = runtime_service._parse_inflation_nowcast_html(html, BeautifulSoup)
     assert result['monthOverMonth']['Month'] == 'October 2026'  # Other consumers stay compatible.
     assert result['monthlyPeriods']['monthOverMonth'][1]['Month'] == 'September 2026'
 

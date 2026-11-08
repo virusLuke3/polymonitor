@@ -405,7 +405,9 @@ class SignalsSeedWatcherTestCase(unittest.TestCase):
         watcher, _ = self.make_watcher()
         with patch("api.runtime.ServiceRuntime") as runtime:
             self.assertIs(watcher.service_context(), runtime.return_value.signal_context)
-            runtime.assert_called_once_with(watcher.settings, application=unittest.mock.ANY)
+            runtime.assert_called_once_with(watcher.settings, application=unittest.mock.ANY,
+                                            connection_factory=unittest.mock.ANY)
+            self.assertTrue(callable(runtime.call_args.kwargs["connection_factory"]))
             watcher.close()
             runtime.return_value.close.assert_called_once()
 

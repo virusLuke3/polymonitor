@@ -135,7 +135,9 @@ def test_archive_transport_ingestion_restart_and_news_window(storage, tmp_path, 
     record = archive.read_latest(snapshots, "cpi")
     assert (archive.archive_root(snapshots) / "cpi" / record["pdfFile"]).read_bytes() == b"%PDF-fixture-original"
     second = collector.collect_one(storage, SnapshotStore(snapshots.db_path), source, first)
-    assert second["duplicate"] == 1 and second["pdf_http_status"] == 304
+    assert second["duplicate"] == 1 and second["reused_archive"]
+    assert len(calls) == 5  # Directory and item checked; unchanged PDF stays local.
+    assert second["pdf_checked_at"] == first["pdf_checked_at"]
     assert second["updated"] == 0
     assert datetime.fromisoformat(second["next_check_at"].replace("Z", "+00:00")) - datetime.fromisoformat(second["checked_at"].replace("Z", "+00:00")) == timedelta(hours=6)
     rows = storage.query_all("SELECT raw_payload FROM content_items")
@@ -144,6 +146,12 @@ def test_archive_transport_ingestion_restart_and_news_window(storage, tmp_path, 
     assert item["published_at"] == "2026-10-14T12:30:00Z"
     assert item["first_seen_at"] == "2026-10-14T12:00:00Z"
     assert public.eligible_item(rows[0]["raw_payload"], source_map(), "2026-10-28T00:00:00Z", datetime(2026, 11, 4, tzinfo=timezone.utc))[1] == "window"
+    assert archive.read_latest(snapshots, "cpi")["receivedAt"] == record["receivedAt"]
+    # Restarted owners still revalidate the same URL for upstream revisions.
+    third = collector.collect_one(storage, snapshots, source,
+                                  {**second, "pdf_checked_at": "2000-01-01T00:00:00Z"})
+    assert third["pdf_http_status"] == 304 and not third["reused_archive"]
+    assert len(calls) == 8
     assert archive.read_latest(snapshots, "cpi")["receivedAt"] == record["receivedAt"]
     # A news-retention cleanup cannot remove the formal original-document archive.
     store.prune(storage, {"retention_days": 90, "max_items": 20000, "max_versions_per_item": 12}, "2028-01-01T00:00:00Z")
@@ -160,6 +168,51 @@ def test_archive_revision_does_not_overwrite_original_or_receipt(tmp_path):
     assert repeated["receivedAt"] == first["receivedAt"]
     assert first["sha256"] != second["sha256"]
     assert len(list((archive.archive_root(snapshots) / "cpi").glob("*.pdf"))) == 2
+
+
+def test_archive_revalidation_without_http_validators_skips_unchanged_pdf_extraction(tmp_path, monkeypatch):
+    import time
+    snapshots = SnapshotStore(str(tmp_path / "snapshot.sqlite"))
+    metadata = {**archive.parse_release(TEXT, "cpi"), "archiveUrl": ITEM_URL, "pdfUrl": PDF_URL,
+                "receivedAt": "2026-11-04T03:00:00Z", "distributor": "FRASER", "pdfHttp": {}}
+    record = archive.save_document(snapshots, "cpi", b"%PDF-same", TEXT, metadata)
+    source = source_map()["bls-cpi"]
+    calls = []
+    def fetch(session, url, configured, state, **kwargs):
+        calls.append(url)
+        body = (f'<a class="list-item" data-type="item" href="{ITEM_URL}">September 2026</a>'.encode()
+                if url == source["feed_url"] else f'<meta name="citation_pdf_url" content="{PDF_URL}">'.encode()
+                if url == ITEM_URL else b"%PDF-same")
+        return body, {"http_status": 200, "etag": None, "last_modified": None}
+    monkeypatch.setattr(fraser, "fetch", fetch)
+    monkeypatch.setattr(fraser, "extract_text", lambda *a, **kw: pytest.fail("Unchanged PDF extracted again"))
+    with requests.Session() as session:
+        items, meta = fraser.collect(session, snapshots, source, deadline=time.monotonic()+45)
+        assert len(calls) == 3 and not meta["reused_archive"]
+        _, reused = fraser.collect(session, snapshots, source, deadline=time.monotonic()+45, source_state=meta)
+        assert len(calls) == 5 and reused["reused_archive"]
+    assert items[0]["archive_received_at"] == record["receivedAt"]
+
+
+def test_archive_domain_queue_wait_does_not_consume_next_release_io_allowance(monkeypatch):
+    clock = [100.]
+    deadlines = []
+    class QueuedLock:
+        def acquire(self, timeout):
+            assert timeout == 45
+            clock[0] = 140.
+            return True
+        def release(self):
+            pass
+    def failed_fetch(session, url, source, state, deadline):
+        deadlines.append(deadline)
+        raise ValueError("fixture-stop")
+    monkeypatch.setattr(fraser, "DOMAIN_LOCK", QueuedLock())
+    monkeypatch.setattr(fraser.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(fraser, "_checked_fetch", failed_fetch)
+    with requests.Session() as session, pytest.raises(ValueError, match="fixture-stop"):
+        fraser.collect(session, None, source_map()["bls-cpi"], deadline=145.)
+    assert deadlines == [185.]
 
 
 def test_old_source_error_does_not_advance_on_bad_archive(storage, tmp_path, monkeypatch):

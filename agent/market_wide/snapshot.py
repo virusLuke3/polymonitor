@@ -212,7 +212,7 @@ def _fill_tape_for_market(helpers: dict[str, Any], market: dict[str, Any], trade
         return None
     call_id = _callable_market_id(market_id)
     detail = _safe_call(helpers, "get_market_by_id", {}, call_id)
-    trades = _items(_safe_call(helpers, "get_trades_by_market_id", [], call_id, trade_limit, 0))
+    trades = _items(_safe_call(helpers, "get_trades_by_market_id", [], call_id, limit=trade_limit, offset=0))
     prices = [_trade_yes_price(trade) for trade in trades if isinstance(trade, dict)]
     prices = [price for price in prices if price is not None]
     if not prices and not isinstance(detail, dict):

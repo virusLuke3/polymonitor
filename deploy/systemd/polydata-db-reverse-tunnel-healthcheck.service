@@ -4,6 +4,8 @@ After=network-online.target polydata-db-reverse-tunnel.service
 Wants=network-online.target
 
 [Service]
+StandardOutput=journal
+StandardError=journal
 Type=oneshot
 EnvironmentFile=%h/.config/polydata/polydata.env
 WorkingDirectory=/__POLYDATA_REPO_ROOT__

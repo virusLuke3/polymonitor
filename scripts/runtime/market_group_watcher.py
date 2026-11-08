@@ -10,6 +10,7 @@ import os
 import sys
 import time
 from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -32,9 +33,10 @@ from api.commodity_symbols import COMMODITY_SYMBOLS
 from api.clients.http_client import http_json_get
 from api.clients.source_transport import source_session
 from api.config import load_api_settings
+from api.context import RuntimeResources
 from api.services import runtime_service
 from api.services import commodities_service, crypto_service
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot, SnapshotPublicationError
 from runtime.snapshot_store import SnapshotStore
 
 
@@ -78,6 +80,9 @@ CRYPTO_COINGECKO_IDS = {
 class _LoggerAdapter:
     def exception(self, message: str, *args: Any, **kwargs: Any) -> None:
         print(f"[market-group] ERROR {message % args if args else message}", file=sys.stderr)
+        error = sys.exc_info()[1]
+        if error is not None:
+            print(type(error).__name__ + ": " + str(error)[:300], file=sys.stderr)
 
 
 class _AppAdapter:
@@ -112,21 +117,19 @@ class MarketGroupWatcher:
         settings: Any,
         interval_seconds: int = DEFAULT_INTERVAL_SECONDS,
     ) -> None:
-        if redis is None:
-            raise RuntimeError("redis package is required. Install scripts/requirements.txt")
         if requests is None:
             raise RuntimeError("requests package is required. Install scripts/requirements.txt")
-        if not str(redis_url or "").strip():
-            raise RuntimeError("POLYDATA_REDIS_URL is required for market group watcher")
         self.settings = settings
         self.interval_seconds = max(30, int(interval_seconds or DEFAULT_INTERVAL_SECONDS))
         self.redis_prefix = str(redis_prefix or "")
-        self.redis_client = redis.from_url(redis_url, decode_responses=True)
+        self.redis_client = redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2) if redis is not None and str(redis_url or "").strip() else None
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
         self.requests = source_session()
         self.requests.trust_env = False
         self._runtime_cache: Dict[str, Dict[str, Any]] = {}
+        self._resources = RuntimeResources()
+        self._source_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="market-group-yahoo")
 
     def ttl_seconds(self, kind: str) -> int:
         configured = int(os.environ.get("POLYDATA_MARKET_GROUP_SEED_TTL_SECONDS", "0") or 0)
@@ -142,7 +145,9 @@ class MarketGroupWatcher:
             "FINANCE_RUNTIME_TTL_SECONDS": self.settings.finance_runtime_ttl_seconds,
             "CRYPTO_COINGECKO_IDS": CRYPTO_COINGECKO_IDS,
             "app": _AppAdapter(),
-            "requests": self.requests,
+            "requests": requests,
+            "_resources": self._resources,
+            "map_market_rows": self._source_executor.map,
             "_safe_float": _safe_float,
             "http_json_get": lambda url, params=None, timeout=12, headers=None: http_json_get(
                 {"requests": self.requests},
@@ -155,7 +160,8 @@ class MarketGroupWatcher:
                 {
                     "SETTINGS": self.settings,
                     "FINANCE_RUNTIME_TTL_SECONDS": self.settings.finance_runtime_ttl_seconds,
-                    "requests": self.requests,
+                    "requests": requests,
+                    "_resources": self._resources,
                     "_safe_float": _safe_float,
                     "get_cached_runtime_payload": self.get_cached_runtime_payload,
                     "set_cached_runtime_payload": self.set_cached_runtime_payload,
@@ -186,6 +192,9 @@ class MarketGroupWatcher:
         return payload
 
     def load_previous_payload(self, namespace: str, cache_key: str) -> Dict[str, Any]:
+        stale = self.snapshot_store.get_stale(namespace, cache_key)
+        if isinstance(stale, dict):
+            return stale
         try:
             raw = self.redis_client.get(_redis_key(self.redis_prefix, namespace, cache_key))
             if raw:
@@ -194,13 +203,18 @@ class MarketGroupWatcher:
                     return payload
         except Exception:
             print(f"[market-group] WARN redis read failed namespace={namespace}", file=sys.stderr)
-        stale = self.snapshot_store.get_stale(namespace, cache_key)
-        return stale if isinstance(stale, dict) else {}
+        return {}
 
     def store_payload(self, namespace: str, cache_key: str, payload: Dict[str, Any], *, kind: str) -> None:
-        ttl_seconds = self.ttl_seconds(kind)
-        self.snapshot_store.set(namespace, cache_key, payload, ttl_seconds)
-        self.redis_client.set(_redis_key(self.redis_prefix, namespace, cache_key), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl_seconds)
+        try:
+            publish_snapshot(snapshot_store=self.snapshot_store, namespace=namespace,
+                             cache_key=cache_key, payload=payload, ttl_seconds=self.ttl_seconds(kind),
+                             redis_client=self.redis_client,
+                             redis_cache_key=_redis_key(self.redis_prefix, namespace, cache_key))
+        except SnapshotPublicationError as exc:
+            self.store_seed_meta(panel_id=f"{kind}-watch", status="error", record_count=0,
+                                 source_states={"publication": "error", "acquired": 0}, error_summary=str(exc))
+            raise
 
     def store_seed_meta(self, *, panel_id: str, status: str, record_count: int, source_states: Dict[str, Any], error_summary: str | None) -> None:
         previous = self.seed_meta_store.load(SEED_META_NAMESPACE, panel_id) or {}
@@ -283,10 +297,14 @@ class MarketGroupWatcher:
         return {"status": status, "recordCount": record_count}
 
     def run_once(self) -> Dict[str, Any]:
-        return {
-            "commodities-watch": self.run_component(panel_id="commodities-watch", kind="commodities", items=COMMODITY_SYMBOLS),
-            "crypto-watch": self.run_component(panel_id="crypto-watch", kind="crypto", items=CRYPTO_SYMBOLS),
-        }
+        result = {}
+        for kind, items in (("commodities", COMMODITY_SYMBOLS), ("crypto", CRYPTO_SYMBOLS)):
+            panel_id = f"{kind}-watch"
+            try:
+                result[panel_id] = self.run_component(panel_id=panel_id, kind=kind, items=items)
+            except SnapshotPublicationError:
+                result[panel_id] = {"status": "publication-failed"}
+        return result
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -313,22 +331,26 @@ def main() -> int:
         settings=settings,
         interval_seconds=args.interval,
     )
-    watcher.redis_client.ping()
-    print(f"[market-group] sqlite={settings.snapshot_sqlite_path}", file=sys.stderr)
-    if not args.watch:
-        print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
-        return 0
-    interval_seconds = max(30, int(args.interval or DEFAULT_INTERVAL_SECONDS))
-    while True:
-        started_at = time.monotonic()
-        try:
+    try:
+        print(f"[market-group] sqlite={settings.snapshot_sqlite_path}", file=sys.stderr)
+        if not args.watch:
             print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
-        except KeyboardInterrupt:
             return 0
-        except Exception as exc:
-            print(f"[market-group] ERROR watch loop failed: {exc}", file=sys.stderr)
-        # Start-to-start cadence; slow sources still get a minimum cooldown.
-        time.sleep(max(5, interval_seconds - (time.monotonic() - started_at)))
+        interval_seconds = max(30, int(args.interval or DEFAULT_INTERVAL_SECONDS))
+        while True:
+            started_at = time.monotonic()
+            try:
+                print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
+            except KeyboardInterrupt:
+                return 0
+            except Exception as exc:
+                print(f"[market-group] ERROR watch loop failed: {exc}", file=sys.stderr)
+            # Start-to-start cadence; slow sources still get a minimum cooldown.
+            time.sleep(max(5, interval_seconds - (time.monotonic() - started_at)))
+    finally:
+        watcher._source_executor.shutdown(wait=True, cancel_futures=True)
+        watcher._resources.close()
+        watcher.requests.close()
 
 
 if __name__ == "__main__":

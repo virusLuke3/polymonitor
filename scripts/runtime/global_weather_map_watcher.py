@@ -14,14 +14,17 @@ _scripts_root = Path(__file__).resolve().parents[1]
 if str(_scripts_root) not in sys.path:
     sys.path.insert(0, str(_scripts_root))
 
-import redis
+try:
+    import redis
+except ImportError:
+    redis = None
 import requests
 
 from api.config import load_api_settings
 from api.context import RuntimeResources
 from api.services import global_weather_map_service
 from db.db import DEFAULT_DB_PATH, get_connection
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot
 from runtime.snapshot_store import SnapshotStore
 from runtime.telegram_panel_publish import publish_cached_panel_snapshot
 
@@ -95,12 +98,11 @@ def _should_preserve_previous(previous: Dict[str, Any], payload: Dict[str, Any])
 class GlobalWeatherMapWatcher:
     def __init__(self, *, redis_url: str, redis_prefix: str, snapshot_sqlite_path: str, settings: Any, interval_seconds: int) -> None:
         self.resources = RuntimeResources()
-        if not redis_url:
-            raise RuntimeError("POLYDATA_REDIS_URL is required for global weather map watcher")
         self.settings = settings
         self.redis_prefix = redis_prefix or ""
         self.interval_seconds = max(60, int(interval_seconds or DEFAULT_INTERVAL_SECONDS))
-        self.redis_client = redis.from_url(redis_url, decode_responses=True)
+        self.redis_client = (redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2)
+                             if redis is not None and redis_url else None)
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
         self.requests = requests.Session()
@@ -126,7 +128,8 @@ class GlobalWeatherMapWatcher:
     def close(self) -> None:
         self.resources.close()
         self.requests.close()
-        self.redis_client.close()
+        if self.redis_client is not None:
+            self.redis_client.close()
 
     def context(self) -> Dict[str, Any]:
         return {
@@ -144,26 +147,29 @@ class GlobalWeatherMapWatcher:
         }
 
     def _get_cached_json(self, namespace: str, cache_key: str) -> Dict[str, Any] | None:
-        raw = self.redis_client.get(_redis_key(self.redis_prefix, namespace, cache_key))
-        if not raw:
+        try:
+            raw = self.redis_client.get(_redis_key(self.redis_prefix, namespace, cache_key)) if self.redis_client is not None else None
+            payload = json.loads(str(raw)) if raw else None
+            return payload if isinstance(payload, dict) else None
+        except Exception:
             return None
-        payload = json.loads(str(raw))
-        return payload if isinstance(payload, dict) else None
 
     def _set_cached_json(self, namespace: str, cache_key: str, payload: Dict[str, Any], ttl: int) -> None:
-        self.redis_client.set(_redis_key(self.redis_prefix, namespace, cache_key), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl)
+        # This callback is an optional cache; business publication is store_payload.
+        if self.redis_client is not None:
+            try:
+                self.redis_client.set(_redis_key(self.redis_prefix, namespace, cache_key), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl)
+            except Exception:
+                _App.logger.exception("optional weather cache write failed")
 
     def previous(self) -> Dict[str, Any]:
-        cached = self._get_cached_json(self.namespace(), self.cache_key())
-        if cached:
-            return cached
         stale = self.snapshot_store.get_stale(self.namespace(), self.cache_key())
-        return stale if isinstance(stale, dict) else {}
+        return stale if isinstance(stale, dict) else self._get_cached_json(self.namespace(), self.cache_key()) or {}
 
     def store_payload(self, payload: Dict[str, Any]) -> None:
         ttl = self.ttl_seconds()
-        self.snapshot_store.set(self.namespace(), self.cache_key(), payload, ttl)
-        self.redis_client.set(self.redis_key(), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl)
+        publish_snapshot(snapshot_store=self.snapshot_store, namespace=self.namespace(), cache_key=self.cache_key(),
+                         payload=payload, ttl_seconds=ttl, redis_client=self.redis_client, redis_cache_key=self.redis_key())
 
     def store_meta(self, *, status: str, record_count: int, source_states: Dict[str, Any] | None = None, error_summary: str | None = None, cache_mode: str | None = None, payload_status: str | None = None, preserve: bool = False) -> None:
         previous = self.seed_meta_store.load(SEED_META_NAMESPACE, SEED_META_CACHE_KEY) or {}
@@ -177,13 +183,14 @@ class GlobalWeatherMapWatcher:
             expected_interval_seconds=self.interval_seconds,
             status=status,
             last_attempt_at=attempted,
-            last_success_at=last_success or attempted,
+            last_success_at=last_success,
             record_count=record_count,
             source_states=source_states,
             error_summary=error_summary,
             cache_mode=cache_mode,
             payload_status=payload_status,
         )
+        payload["lastSuccessAt"] = last_success
         self.seed_meta_store.store(SEED_META_NAMESPACE, SEED_META_CACHE_KEY, payload)
 
     def run_once(self) -> Dict[str, Any]:
@@ -228,7 +235,6 @@ def main() -> int:
     settings = load_api_settings()
     watcher = GlobalWeatherMapWatcher(redis_url=settings.redis_url, redis_prefix=settings.redis_prefix, snapshot_sqlite_path=settings.snapshot_sqlite_path, settings=settings, interval_seconds=args.interval)
     try:
-        watcher.redis_client.ping()
         print(f"[global-weather-map] redis_key={watcher.redis_key()} sqlite={settings.snapshot_sqlite_path}", file=sys.stderr)
         if not args.watch:
             print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)

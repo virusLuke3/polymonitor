@@ -42,7 +42,7 @@ from api.services.new_market_signal_service import (
     SNAPSHOT_TTL_SECONDS,
     normalize_new_market_signals_payload,
 )
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot, retained_snapshot
 from runtime.snapshot_store import SnapshotStore
 from runtime.telegram_panel_publish import publish_cached_panel_snapshot
 
@@ -174,6 +174,9 @@ class NewMarketSignalWatcher:
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=redis_prefix, snapshot_store=self.snapshot_store)
         self.http = requests.Session()
         self.http.trust_env = False
+        proxy_url = os.environ.get("POLYDATA_API_HTTP_PROXY_URL", "").strip()
+        if proxy_url:
+            self.http.proxies.update({"http": proxy_url, "https": proxy_url})
         self.http.headers.update({"Accept": "application/json", "User-Agent": "polyData-new-market-signal/1.0"})
 
     def snapshot_redis_key(self) -> str:
@@ -212,7 +215,7 @@ class NewMarketSignalWatcher:
             expected_interval_seconds=DEFAULT_INTERVAL_SECONDS,
             status=status,
             last_attempt_at=attempted_at,
-            last_success_at=last_success_at or attempted_at,
+            last_success_at=last_success_at,
             record_count=record_count,
             source_states={"database": "ok" if not error_summary else "error", "clob": "ok" if not error_summary else "error"},
             error_summary=error_summary,
@@ -346,22 +349,37 @@ class NewMarketSignalWatcher:
 
     def store_snapshot_payload(self, *, status: str | None = None, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         payload = self.build_snapshot_payload(status=status, metadata=metadata)
-        self.snapshot_store.set(SNAPSHOT_NAMESPACE, SNAPSHOT_CACHE_KEY, payload, SNAPSHOT_TTL_SECONDS)
-        self.redis_client.set(self.snapshot_redis_key(), json.dumps(payload, ensure_ascii=True, default=str), ex=SNAPSHOT_TTL_SECONDS)
+        publish_snapshot(
+            snapshot_store=self.snapshot_store, namespace=SNAPSHOT_NAMESPACE,
+            cache_key=SNAPSHOT_CACHE_KEY, payload=payload, ttl_seconds=SNAPSHOT_TTL_SECONDS,
+            redis_client=self.redis_client, redis_cache_key=self.snapshot_redis_key(),
+        )
         publish_cached_panel_snapshot("new-market-signals", payload)
         return payload
 
     def preserve_current_snapshot(self, *, reason: str) -> Dict[str, Any]:
-        payload = self.store_snapshot_payload(
-            status="ok" if self.load_items() else "empty",
-            metadata={"result": "preserved-current", "reason": reason},
-        )
+        payload = self.snapshot_store.get_stale(SNAPSHOT_NAMESPACE, SNAPSHOT_CACHE_KEY)
+        if not isinstance(payload, dict):
+            try:
+                raw = self.redis_client.get(self.snapshot_redis_key())
+                payload = json.loads(raw) if raw else {}
+            except Exception:
+                payload = {}
+        payload = payload if isinstance(payload, dict) else {}
+        if payload:
+            publish_snapshot(
+                snapshot_store=self.snapshot_store, namespace=SNAPSHOT_NAMESPACE,
+                cache_key=SNAPSHOT_CACHE_KEY, payload=retained_snapshot(payload),
+                ttl_seconds=SNAPSHOT_TTL_SECONDS, redis_client=self.redis_client,
+                redis_cache_key=self.snapshot_redis_key(),
+            )
         self.store_seed_meta(
-            status="scan",
-            record_count=len(payload.get("items") or []),
-            metadata={"result": "preserved-current", "reason": reason},
+            status="preserved" if payload else "error",
+            record_count=len(payload.get("items") or []), error_summary=reason,
+            preserve_last_success=True,
+            metadata={"result": "preserved-current" if payload else "failed", "reason": reason},
         )
-        return {"mode": "preserved", "signals": len(payload.get("items") or []), "reason": reason}
+        return {"mode": "preserved" if payload else "error", "signals": len(payload.get("items") or []), "reason": reason}
 
     def load_pending_market_ids(self) -> List[int]:
         raw = self.redis_client.get(self.pending_key)
@@ -408,9 +426,9 @@ class NewMarketSignalWatcher:
         last_seen = self.get_last_seen_market_id()
         if last_seen is None:
             baseline = self.get_current_max_market_id()
-            self.set_last_seen_market_id(baseline)
             result = {"mode": "bootstrap", "lastSeenMarketId": baseline, "signals": 0, "maxMarketAgeHours": self.max_market_age_hours}
             self.store_snapshot_payload(status="empty", metadata=result)
+            self.set_last_seen_market_id(baseline)
             self.store_seed_meta(status="bootstrap", record_count=0, metadata=result)
             return result
 
@@ -489,8 +507,6 @@ class NewMarketSignalWatcher:
         seen_ids = {int(item.get("marketId")) for item in signals if item.get("marketId") is not None}
         deduped_existing = [item for item in existing if int(item.get("marketId") or 0) not in seen_ids]
         self.store_items([*reversed(signals), *deduped_existing])
-        self.store_pending_market_ids(next_pending_ids)
-        self.set_last_seen_market_id(max_seen)
         stored_items = self.load_items()
         result = {
             "mode": "scan",
@@ -503,6 +519,8 @@ class NewMarketSignalWatcher:
             "maxMarketAgeHours": self.max_market_age_hours,
         }
         self.store_snapshot_payload(status="ok" if stored_items else "empty", metadata=result)
+        self.store_pending_market_ids(next_pending_ids)
+        self.set_last_seen_market_id(max_seen)
         self.store_seed_meta(status="scan", record_count=len(stored_items), metadata=result)
         return result
 
@@ -520,8 +538,8 @@ def main() -> None:
     parser.add_argument("--namespace", default=DEFAULT_NAMESPACE, help="Redis namespace after POLYDATA_REDIS_PREFIX")
     parser.add_argument("--redis-url", default=settings.redis_url, help="Redis URL")
     parser.add_argument("--redis-prefix", default=settings.redis_prefix, help="Redis key prefix")
-    parser.add_argument("--clob-api-base", default=settings.clob_api_base, help="Polymarket CLOB API base")
-    parser.add_argument("--clob-timeout-seconds", type=int, default=settings.clob_timeout_seconds, help="CLOB request timeout")
+    parser.add_argument("--clob-api-base", default=source_value('POLYDATA_CLOB_API_BASE'), help="Polymarket CLOB API base")
+    parser.add_argument("--clob-timeout-seconds", type=int, default=_env_int("POLYDATA_CLOB_TIMEOUT_SECONDS", DEFAULT_CLOB_TIMEOUT_SECONDS), help="CLOB request timeout")
     parser.add_argument(
         "--max-market-age-hours",
         type=int,
@@ -554,7 +572,10 @@ def main() -> None:
             elapsed_ms = (time.perf_counter() - started) * 1000
             print(f"[new-market-signal] {json.dumps(result, ensure_ascii=True)} duration_ms={elapsed_ms:.1f}", file=sys.stderr)
         except Exception as exc:
-            result = watcher.preserve_current_snapshot(reason=str(exc))
+            try:
+                result = watcher.preserve_current_snapshot(reason=str(exc))
+            except Exception as recovery_exc:
+                result = {"mode": "error", "recoveryError": type(recovery_exc).__name__}
             print(f"[new-market-signal] scan failed: {exc}", file=sys.stderr)
             print(f"[new-market-signal] {json.dumps(result, ensure_ascii=True)} duration_ms={(time.perf_counter() - started) * 1000:.1f}", file=sys.stderr)
             if not args.watch:

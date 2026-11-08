@@ -17,6 +17,7 @@ from db.trade_v2 import TRADE_V2_CORE_TABLE, sql_identifier
 
 from api import cache as api_cache
 from api import db as api_db
+from api.readiness import probe_database
 from api.clients import market_data_client
 from api.serialization import iso_days_before
 from api.services.natural_hazards.service import NaturalHazardDependencies
@@ -39,7 +40,6 @@ from api.services import (
     market_service,
     natural_hazards,
     new_market_signal_service,
-    polysignal_feed_service,
     polymarket_macro_map_service,
     query_service,
     runtime_service,
@@ -351,24 +351,6 @@ def bind_services(runtime: ServiceRuntime) -> None:
         "get_cached_json": get_cached_json,
         "get_redis_client": get_redis_client,
         "set_cached_json": runtime.set_cached_json,
-        "utc_now_iso": utc_now_iso,
-    }
-    runtime.polysignal_context = {
-        "_resources": runtime.resources,
-        "SIGNAL_RUNTIME_TTL_SECONDS": runtime.SETTINGS.signal_runtime_ttl_seconds,
-        "SNAPSHOT_STORE": runtime.SNAPSHOT_STORE,
-        "get_cached_json": get_cached_json,
-        "_safe_decimal": _safe_decimal,
-        "app": runtime.app,
-        "format_trade_decimal": format_trade_decimal,
-        "get_backend": get_backend,
-        "get_orderfilled_outcome_mutation_proof": get_orderfilled_outcome_mutation_proof,
-        "get_recent_trades": get_recent_trades,
-        "get_related_content_by_market_id": get_related_content_by_market_id,
-        "normalize_address": normalize_address,
-        "parse_iso_datetime": parse_iso_datetime,
-        "query_all": query_all,
-        "table_exists": table_exists,
         "utc_now_iso": utc_now_iso,
     }
     runtime.query_context = {
@@ -724,6 +706,7 @@ def bind_services(runtime: ServiceRuntime) -> None:
         http_text_post=None,
         http_json_get=http_json_get,
         get_yahoo_market_snapshot=get_yahoo_market_snapshot,
+        get_nasdaq_market_cap=lambda symbol: market_data_client.get_nasdaq_market_cap(runtime.market_data_client_context, symbol),
         get_cached_json=get_cached_json,
         set_cached_json=runtime.set_cached_json,
         get_snapshot_payload=get_snapshot_payload,
@@ -880,9 +863,6 @@ def build_blueprints(runtime: ServiceRuntime):
                     get_crypto_strategy_snapshot=lambda reference_only=False: _crypto_strategy_snapshot(_crypto_strategy_path(runtime.SETTINGS.snapshot_sqlite_path), reference_only=reference_only),
                     get_alpha_signal_snapshot=lambda limit=8: signal_service.get_alpha_signal_snapshot(
                         runtime.signal_context, limit=limit
-                    ),
-                    get_polysignal_snapshot=lambda limit=8: polysignal_feed_service.get_polysignal_snapshot(
-                        runtime.polysignal_context, limit=limit
                     ),
                     get_whale_trades_snapshot=lambda limit=14: signal_service.get_whale_trades_snapshot(
                         runtime.signal_context, limit=limit
@@ -1181,7 +1161,7 @@ def build_blueprints(runtime: ServiceRuntime):
                 build_system_health_payload=lambda: system_service.build_system_health_payload(runtime.system_health),
                 build_seed_health_payload=lambda: system_service.build_seed_health_payload(runtime.seed_health),
                 describe_db_target=runtime.SETTINGS.database.describe,
-                probe_database=lambda: api_db.query_one(runtime.api_db_context, "SELECT 1 AS ready"),
+                probe_database=lambda: probe_database(runtime.SETTINGS.database.connect, runtime.api_db_context["DB_PATH"]),
                 get_redis_client=lambda: api_cache.get_redis_client(runtime.cache),
             )
         ),

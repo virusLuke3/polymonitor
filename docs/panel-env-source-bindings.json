@@ -555,9 +555,6 @@
   "POLYMONITOR_URL_DATA_SEC_GOV_SUBMISSIONS_CIK_0584E3": [
     "scripts/runtime/official_disclosures_watcher.py"
   ],
-  "POLYMONITOR_URL_DWAMDSTREAM103_AKAMAIZED_NET_HLS_LIVE_2015526_DWSTREAM103_MASTER_M3U8_26F26D": [
-    "scripts/api/services/trusted_hls_sources.py"
-  ],
   "POLYMONITOR_URL_EARTHQUAKE_USGS_GOV_EARTHQUAKES_EVENTPAGE_CI41341391_1F4D00": [
     "scripts/runtime/free_news_sources.json"
   ],

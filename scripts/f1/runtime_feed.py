@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import os
+import time
 import uuid
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
@@ -13,6 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from data_sources import env_str
+from api.clients.source_transport import read_response_bytes, read_with_retry, source_session
 
 
 DEFAULT_PANEL_PATH = (Path(__file__).resolve().parents[2] / "data" / "runtime" / "f1" / "panel.json").resolve()
@@ -64,15 +67,29 @@ def atomic_write_json(path: Path, payload: Dict[str, Any]) -> None:
     tmp_path.replace(target)
 
 
-def _requests_get(requests_lib, url: str, *, params: Optional[Dict[str, Any]] = None, timeout: int = 20, headers: Optional[Dict[str, str]] = None):
+def _requests_get(requests_lib, url: str, *, params: Optional[Dict[str, Any]] = None, timeout: int = 45, headers: Optional[Dict[str, str]] = None):
     if hasattr(requests_lib, "Session"):
-        session = requests_lib.Session()
+        session = source_session(requests_lib)
         session.trust_env = False
+        proxy_url = os.environ.get("POLYDATA_API_HTTP_PROXY_URL", "").strip()
+        if proxy_url:
+            session.proxies.update({"http": proxy_url, "https": proxy_url})
         try:
-            return session.get(url, params=params, timeout=timeout, headers=headers or {})
+            return _requests_get(session, url, params=params, timeout=timeout, headers=headers)
         finally:
             session.close()
-    return requests_lib.get(url, params=params, timeout=timeout, headers=headers or {})
+    if hasattr(requests_lib, "request"):
+        deadline = time.monotonic() + 90
+        return read_with_retry(
+            requests_lib, url,
+            lambda response: read_response_bytes(response, 2_500_000, deadline=deadline),
+            attempts=2, deadline=deadline, timeout=timeout, stream=True,
+            params=params, headers=headers or {},
+        )
+    # Injected readers use the same parser without opening a second client.
+    response = requests_lib.get(url, params=params, timeout=timeout, headers=headers or {})
+    response.raise_for_status()
+    return response.text
 
 
 def format_relative_short(anchor: Optional[datetime], now: datetime) -> str:
@@ -176,26 +193,45 @@ def _split_bwenews_title_parts(title: str, description: str) -> tuple[str, Optio
     return headline[:280], summary[:480] if summary else None, source_url
 
 
-def fetch_f1_news_items(requests_lib, *, now: datetime, feed_specs: Optional[Iterable[Dict[str, str]]] = None, limit: int = 4) -> List[Dict[str, Any]]:
+def fetch_f1_news_items(requests_lib, *, now: datetime, feed_specs: Optional[Iterable[Dict[str, str]]] = None, limit: int = 4,
+                        source_states: Optional[Dict[str, str]] = None,
+                        source_errors: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
+    states = source_states if source_states is not None else {}
+    errors = source_errors if source_errors is not None else {}
     if requests_lib is None:
+        states["bwenewsRss"] = "unavailable"
+        errors["bwenewsRss"] = "HTTP client unavailable"
         return []
     items: List[Dict[str, Any]] = []
-    for feed in feed_specs if feed_specs is not None else default_news_feeds():
+    feeds = list(feed_specs) if feed_specs is not None else default_news_feeds()
+    if not feeds:
+        states["bwenewsRss"] = "missing-config"
+    for index, feed in enumerate(feeds):
+        source_id = "bwenewsRss" if index == 0 else f"feed-{index + 1}"
+        if not str(feed.get("url") or "").strip():
+            states[source_id] = "missing-config"
+            continue
         try:
-            response = _requests_get(
+            body = _requests_get(
                 requests_lib,
                 str(feed.get("url") or ""),
-                timeout=10,
+                timeout=45,
                 headers={
                     "Accept": "application/rss+xml, application/xml, text/xml;q=0.9, */*;q=0.8",
                     "User-Agent": "polydata-f1-runtime/1.0",
                 },
             )
-            response.raise_for_status()
-            root = ET.fromstring(response.text)
-        except Exception:
+            root = ET.fromstring(body)
+            if root.tag.lower() != "rss" or root.find("channel") is None:
+                raise ValueError("Expected RSS channel")
+        except Exception as exc:
+            states[source_id] = "error"
+            code = getattr(getattr(exc, "response", None), "status_code", None)
+            errors[source_id] = f"HTTP {code}" if code else type(exc).__name__
             continue
-        for item in root.findall(".//item")[: max(limit, 8)]:
+        raw_items = root.findall(".//item")[: max(limit, 8)]
+        before = len(items)
+        for item in raw_items:
             title_raw = _find_text(item, "title").strip()
             description_raw = _find_text(item, "description").strip()
             title, summary, embedded_source_url = _split_bwenews_title_parts(title_raw, description_raw)
@@ -230,6 +266,10 @@ def fetch_f1_news_items(requests_lib, *, now: datetime, feed_specs: Optional[Ite
                     "publishedAt": published_at,
                 }
             )
+        valid = len(items) - before
+        states[source_id] = "ok" if valid == len(raw_items) and valid else "empty" if not raw_items else "partial" if valid else "error"
+        if raw_items and not valid:
+            errors[source_id] = "RSS items missing required title or link"
     items.sort(key=lambda entry: str(entry.get("publishedAt") or ""), reverse=True)
     return items[:limit]
 
@@ -244,7 +284,11 @@ def build_f1_panel_payload(
 ) -> Dict[str, Any]:
     current_time = now or utc_now()
     feeds = list(feed_specs) if feed_specs is not None else default_news_feeds()
-    cards = fetch_f1_news_items(requests_lib, now=current_time, feed_specs=feeds, limit=max(1, int(limit or 10)))
+    sources: Dict[str, str] = {}
+    errors: Dict[str, str] = {}
+    cards = fetch_f1_news_items(requests_lib, now=current_time, feed_specs=feeds, limit=max(1, int(limit or 10)),
+                               source_states=sources, source_errors=errors)
+    failed = any(state not in {"ok", "empty"} for state in sources.values())
     source_url = str((feeds[0] if feeds else {}).get("source_url") or "")
 
     return {
@@ -252,7 +296,9 @@ def build_f1_panel_payload(
         "season": int(year or current_time.year),
         "source": "bwenews-rss",
         "sourceUrl": source_url,
-        "status": "ok" if cards else "empty",
+        "status": ("degraded" if cards else "error") if failed else "ok" if cards else "empty",
+        "sources": sources,
+        "sourceErrors": errors,
         "focusMeeting": None,
         "cards": cards[: max(1, int(limit or 10))],
     }

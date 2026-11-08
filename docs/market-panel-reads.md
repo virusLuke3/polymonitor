@@ -24,20 +24,32 @@ not prove an empty market history.
 - At most four PostgreSQL connections across API worker generations on one host.
   Each worker is capped to its share (two each for two workers), so idle
   connections in one worker cannot consume its sibling's entire allowance.
-  Alpha display reads share this pool. Queue admission is 200 ms; a cold TCP
+  Alpha display reads share this pool. Queue admission is at most 1 s; a cold TCP
   connection has a separate eight-second deadline. Connections have a recognizable
   application name, and every returned lease is rolled back.
 - Panel SQL: two concurrent queries per host, eight queries/s maximum, read-only transactions, 1 s statement
   timeout, 100 ms lock timeout, 4 MiB work memory, no parallel query workers or JIT.
   Timeouts affect this reader only, never the shared database role globally.
 - Panel ClickHouse reads: two concurrent requests per host, one request/s (burst two); one thread, 256 MiB memory, at
-  most three queries (4 MiB watermark + 56 MiB facts + 4 MiB timestamps) and a four-second request budget.
+  most four queries (4 MiB watermark + 24 MiB indexed keys + 32 MiB facts + 4 MiB timestamps)
+  and a six-second network/request budget. The SQL execution limit is 4 s per
+  query, within that same total deadline: bounded cold reads of existing parts
+  exceeded the former 2 s cap. Token keys are sought independently in primary-key
+  order before their bounded top-N merge; fact reads retain explicit token/block
+  predicates and the full canonical identity check.
+  Admission may wait up to 1.25 s for an existing permit/rate token, within the
+  same six-second deadline. This absorbs sibling panel bursts without raising
+  throughput or issuing source queries while waiting.
   ClickHouse checks limits at granule/part boundaries, so 64 MiB is a query budget,
   not an absolute disk IO ceiling. Errors never become successful empty results.
 - Cross-worker cache ownership uses the existing SQLite snapshot store's fixed
-  64 lock stripes. Worker exit releases locks. Redis availability does not govern
-  admission. Two rebuilds maximum; same-key cold requests do not wait or duplicate
-  work. Failures cool down for 15 s without replacing good data.
+  64 lock stripes per pool, with at most eight pools. Market records, outcome
+  evidence, flow and chart use separate pools 1–4; other callers retain pool 0.
+  This prevents nested dependencies and sibling flow/chart keys from colliding
+  with each other's locks. Worker exit releases locks. Redis availability does
+  not govern admission. Two rebuilds maximum; duplicate record/evidence reads
+  wait at most 1 s for the existing builder, while other cold reads return
+  immediately when busy. Failures cool down for 15 s without replacing good data.
 - The new namespace holds at most 512 payloads, each at most 1 MiB, plus 512 small
   cooldown markers. Stale reuse expires after 60 s for flow, 120 s for Oracle,
   and 300 s for catalog/chart/metadata. Unrelated snapshot namespaces are untouched.

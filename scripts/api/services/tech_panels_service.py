@@ -70,33 +70,6 @@ BIG_TECH_SYMBOLS = (
     ("Intuit", "INTU", "SOFTWARE"),
 )
 
-# Approximate shares outstanding used only when Yahoo chart metadata omits
-# marketCap. This keeps the panel ranked by capitalization instead of falling
-# back to plain price sorting.
-BIG_TECH_SHARES_OUTSTANDING = {
-    "NVDA": 24_300_000_000,
-    "AAPL": 14_800_000_000,
-    "MSFT": 7_430_000_000,
-    "GOOGL": 12_100_000_000,
-    "AMZN": 10_800_000_000,
-    "META": 2_500_000_000,
-    "TSLA": 3_230_000_000,
-    "AVGO": 4_680_000_000,
-    "ORCL": 2_830_000_000,
-    "NFLX": 420_000_000,
-    "AMD": 1_620_000_000,
-    "CRM": 960_000_000,
-    "CSCO": 3_980_000_000,
-    "IBM": 930_000_000,
-    "QCOM": 1_090_000_000,
-    "ADBE": 430_000_000,
-    "PLTR": 2_380_000_000,
-    "NOW": 207_000_000,
-    "SHOP": 1_300_000_000,
-    "ARM": 1_050_000_000,
-    "INTU": 280_000_000,
-}
-
 APP_ENTITIES = (
     ("TikTok", "TIKTOK", ("tiktok",)),
     ("ChatGPT", "CHATGPT", ("chatgpt", "openai")),
@@ -157,6 +130,8 @@ class TechPanelsDependencies:
     set_cached_json: Callable[..., Any] | None
     get_snapshot_payload: Callable[..., Any] | None
     snapshot_store: Any
+    map_yahoo: Callable[..., Any] | None = None
+    get_nasdaq_market_cap: Callable[..., Any] | None = None
 
     @classmethod
     def from_context(
@@ -197,6 +172,8 @@ class TechPanelsDependencies:
                 "get_snapshot_payload",
             ),
             snapshot_store=context.get("SNAPSHOT_STORE"),
+            map_yahoo=context.get("map_yahoo"),
+            get_nasdaq_market_cap=resolve_optional_service_callable(context, "get_nasdaq_market_cap"),
         )
 
 
@@ -864,20 +841,48 @@ def _fetch_quote(
 
 def _market_cap_from_quote(symbol: str, quote: Dict[str, Any]) -> tuple[Optional[float], bool]:
     market_cap = _safe_float(quote.get("marketCap"))
-    if market_cap is not None:
+    if market_cap is not None and market_cap > 0 and not quote.get("marketCapEstimated"):
         return market_cap, False
-    price = _safe_float(quote.get("price"))
-    shares = BIG_TECH_SHARES_OUTSTANDING.get(symbol)
-    if price is None or not shares:
-        return None, False
-    return price * shares, True
+    return None, False
+
+
+def bounded_big_tech_caps(payload: dict) -> dict:
+    """A whole-snapshot failure fallback must not revive old estimated caps."""
+    rows = []
+    for value in payload.get("items", []):
+        row = dict(value)
+        if (row.get("marketCapEstimated") or
+                (row.get("marketCapSource") == "nasdaq-stock-summary" and
+                 seed_recovery.age_seconds(row.get("marketCapFetchedAt"), utc_now_iso()) >= 1800)):
+            row.update(marketCap=None, marketCapEstimated=False, metric=None, metricLabel="--",
+                       rank=None, marketCapStatus="unavailable")
+        rows.append(row)
+    return {**payload, "items": rows}
+
+
+def _fetch_big_tech_inputs(ctx: TechPanelsContext, symbol: str) -> tuple[Any, Any]:
+    getter = _dependencies(ctx).get_nasdaq_market_cap
+    cap = None
+    if getter is not None:
+        try:
+            cap = getter(symbol)
+        except Exception:
+            logger = getattr(_dependencies(ctx).application, "logger", None)
+            if logger:
+                logger.exception("tech market cap fetch failed symbol=%s", symbol)
+    return _fetch_quote(ctx, symbol), cap
 
 
 def build_big_tech_market_cap_payload(ctx: dict, limit: int) -> Dict[str, Any]:
     rows: List[Dict[str, Any]] = []
     failed = []
-    for label, symbol, group in BIG_TECH_SYMBOLS:
-        quote = _fetch_quote(ctx, symbol)
+    dependencies = _dependencies(ctx)
+    mapper = dependencies.map_yahoo or map
+    quotes = mapper(lambda spec: _fetch_big_tech_inputs(ctx, spec[1]), BIG_TECH_SYMBOLS)
+    caps = {}
+    for (label, symbol, group), (quote, cap) in zip(BIG_TECH_SYMBOLS, quotes):
+        if isinstance(cap, dict) and _market_cap_from_quote(symbol, cap)[0] is not None:
+            caps[symbol] = cap
         if not isinstance(quote, dict):
             failed.append(symbol)
             continue
@@ -889,9 +894,9 @@ def build_big_tech_market_cap_payload(ctx: dict, limit: int) -> Dict[str, Any]:
                 "label": label,
                 "symbol": symbol,
                 "title": f"{label} market cap rank watch",
-                "metric": market_cap if market_cap is not None else quote.get("price"),
-                "metricLabel": _format_usd(market_cap) if market_cap is not None else _format_price(quote.get("price")),
-                "metricUnit": "MKT CAP" if market_cap is not None else "PRICE",
+                "metric": market_cap,
+                "metricLabel": _format_usd(market_cap),
+                "metricUnit": "MKT CAP",
                 "secondary": quote.get("price"),
                 "secondaryLabel": _format_price(quote.get("price")),
                 "change": change,
@@ -908,24 +913,63 @@ def build_big_tech_market_cap_payload(ctx: dict, limit: int) -> Dict[str, Any]:
         )
     fetched_count = len(rows)
     avg = sum(_safe_float(row.get("change")) or 0.0 for row in rows) / len(rows) if rows else None
-    dependencies = _dependencies(ctx)
     previous = {}
-    if failed and dependencies.snapshot_store is not None:
+    if dependencies.snapshot_store is not None:
         previous = dependencies.snapshot_store.get_stale(tech_panel_namespace("big-tech-market-cap"), TECH_PANEL_CACHE_KEY) or {}
     retained = seed_recovery.retain_failed_rows(previous, failed, utc_now_iso())
+    # Old cached estimates must not survive the removal of static share counts.
+    for row in retained:
+        cap, _ = _market_cap_from_quote(str(row.get("symbol") or ""), row)
+        row.update(marketCap=cap, marketCapEstimated=False, metric=cap,
+                   metricLabel=_format_usd(cap), metricUnit="MKT CAP")
     rows.extend(retained)
+    present = {row["symbol"] for row in rows}
+    for label, symbol, group in BIG_TECH_SYMBOLS:
+        if symbol not in present and symbol in caps:
+            rows.append({"id": symbol, "symbol": symbol, "label": label, "price": None,
+                         "secondary": None, "secondaryLabel": "--", "change": None, "changeLabel": "--",
+                         "tags": [group, "MEGA"], "tone": "neutral", "points": [],
+                         "quoteAt": None, "fetchedAt": None, "sourceStatus": "unavailable"})
+    previous_rows = {row.get("symbol"): row for row in previous.get("items", []) if isinstance(row, dict)}
+    cap_retained = []
+    for row in rows:
+        symbol = row["symbol"]
+        cap = caps.get(symbol)
+        if cap is None and (dependencies.get_nasdaq_market_cap is not None or row.get("retained")):
+            old = previous_rows.get(symbol, {})
+            if (old.get("marketCapSource") == "nasdaq-stock-summary"
+                    and not old.get("marketCapEstimated") and _market_cap_from_quote(symbol, old)[0] is not None
+                    and seed_recovery.age_seconds(old.get("marketCapFetchedAt"), utc_now_iso()) < 1800):
+                cap = {key: value for key, value in old.items() if key.startswith("marketCap")}
+                cap_retained.append(symbol)
+            else:
+                row["marketCap"] = None
+        if cap is not None:
+            row.update(cap)
+        row["marketCapEstimated"] = False
+        row["marketCapRetained"] = symbol in cap_retained
+        row["metric"] = row.get("marketCap")
+        row["metricLabel"] = _format_usd(row.get("marketCap"))
+        row["metricUnit"] = "MKT CAP"
     rows.sort(key=lambda item: (_safe_float(item.get("marketCap")) is not None, _safe_float(item.get("marketCap")) or 0), reverse=True)
+    cap_symbols = {row["symbol"] for row in rows if row.get("marketCap") is not None}
+    missing_caps = [symbol for _, symbol, _ in BIG_TECH_SYMBOLS if symbol not in cap_symbols]
     for index, row in enumerate(rows, start=1):
-        row["rank"] = index
-        row["title"] = f"#{index} {row['label']} mega-cap watch"
+        row["rank"] = index if row.get("marketCap") is not None else None
+        row["marketCapStatus"] = "stale" if row["marketCapRetained"] else "available" if row["rank"] is not None else "unavailable"
+        row["title"] = f"#{index} {row['label']} mega-cap watch" if row["rank"] is not None else f"{row['label']} market cap unavailable"
     return _payload(
         "big-tech-market-cap",
         title="BIG TECH CAP",
         items=rows[:limit],
         summary={"avgChange": avg, "rankBy": "marketCap", "tracked": len(BIG_TECH_SYMBOLS),
-                 "fetchedCount": fetched_count, "retainedCount": len(retained), "failedSymbols": failed},
-        sources={"yahoo": "ok" if not failed else "partial" if fetched_count else "error"},
-        status="error" if not fetched_count and failed else "partial" if failed else None,
+                 "fetchedCount": fetched_count, "retainedCount": len(retained), "failedSymbols": failed,
+                 "marketCapCount": len(cap_symbols), "missingMarketCapSymbols": missing_caps,
+                 "marketCapRetainedSymbols": cap_retained},
+        sources={"yahoo": "ok" if not failed else "partial" if fetched_count else "error",
+                 "nasdaqMarketCap" if dependencies.get_nasdaq_market_cap is not None else "yahooMarketCap":
+                     "ok" if not missing_caps and not cap_retained else "partial" if cap_symbols else "unavailable"},
+        status="error" if not fetched_count and failed and not caps else "partial" if failed or missing_caps or cap_retained else None,
     )
 
 
@@ -964,22 +1008,26 @@ def _apple_entry_value(app: Dict[str, Any], modern_key: str, legacy_path: tuple[
     return str(value or default).strip()
 
 
-def _fetch_app_store_rows(ctx: dict, limit: int) -> tuple[List[Dict[str, Any]], int, Dict[str, int]]:
+def _fetch_app_store_rows(ctx: dict, limit: int) -> tuple[List[Dict[str, Any]], int, Dict[str, int], Dict[str, str]]:
     per_feed_limit = max(3, min(10, math.ceil(limit / 4)))
     rows: List[Dict[str, Any]] = []
     style_counts: Dict[str, int] = {}
     ok_sources = 0
+    failures: Dict[str, str] = {}
     seen: set[str] = set()
     for style, label, country, chart, genre in APP_STORE_CHART_FEEDS:
         url = _apple_chart_url(country, chart, per_feed_limit, genre)
         try:
-            payload = _http_json_get(ctx, url, timeout=9, headers={"User-Agent": "polydata-tech-panels/1.0", "Accept": "application/json"})
-        except Exception:
+            payload = _http_json_get(ctx, url, timeout=30, headers={"User-Agent": "polydata-tech-panels/1.0", "Accept": "application/json"})
+            if not isinstance(payload, dict) or not isinstance(payload.get("feed"), dict):
+                raise ValueError("Missing Apple chart feed")
+        except Exception as exc:
+            failures[f"{country}:{chart}:{genre or 'all'}"] = type(exc).__name__
             continue
         entries = _parse_apple_chart_entries(payload)
+        ok_sources += 1
         if not entries:
             continue
-        ok_sources += 1
         for index, app in enumerate(entries[:per_feed_limit], start=1):
             name = _apple_entry_value(app, "name", ("im:name", "label"), "App")
             artist = _apple_entry_value(app, "artistName", ("im:artist", "label"))
@@ -1008,7 +1056,7 @@ def _fetch_app_store_rows(ctx: dict, limit: int) -> tuple[List[Dict[str, Any]], 
                     "category": style,
                 }
             )
-    return rows, ok_sources, style_counts
+    return rows, ok_sources, style_counts, failures
 
 
 def _app_tab_rows(rows: List[Dict[str, Any]], per_category_limit: int = 10) -> tuple[List[Dict[str, Any]], Dict[str, int]]:
@@ -1030,12 +1078,13 @@ def _app_tab_rows(rows: List[Dict[str, Any]], per_category_limit: int = 10) -> t
 def build_consumer_app_pulse_payload(ctx: dict, limit: int) -> Dict[str, Any]:
     sources = {"appStoreCharts": "empty", "googleNewsRss": "empty"}
     try:
-        app_rows, ok_chart_sources, style_counts = _fetch_app_store_rows(ctx, max(limit, 40))
-        sources["appStoreCharts"] = "ok" if app_rows else "empty"
+        app_rows, ok_chart_sources, style_counts, chart_failures = _fetch_app_store_rows(ctx, max(limit, 40))
+        sources["appStoreCharts"] = ("partial" if ok_chart_sources else "error") if chart_failures else "ok" if app_rows else "empty"
     except Exception as exc:
         app_rows = []
         ok_chart_sources = 0
         style_counts = {}
+        chart_failures = {"collection": type(exc).__name__}
         app_error = str(exc)
         sources["appStoreCharts"] = "error"
     news_limit = 4
@@ -1064,6 +1113,7 @@ def build_consumer_app_pulse_payload(ctx: dict, limit: int) -> Dict[str, Any]:
             "appStoreRows": len(app_rows),
             "appStoreSourceCount": len(APP_STORE_CHART_FEEDS),
             "appStoreOkSourceCount": ok_chart_sources,
+            "appStoreFailures": chart_failures,
             "appStoreStyleCounts": style_counts,
             "appStoreTabCounts": tab_counts,
             "newsRows": len(news_rows),
@@ -1119,8 +1169,9 @@ def get_tech_panel_snapshot(
     settings = dependencies.settings
     ttl_seconds = int(getattr(settings, "tech_runtime_ttl_seconds", TECH_PANEL_TTL_SECONDS) or TECH_PANEL_TTL_SECONDS)
     payload = seed_recovery.read_watch_seed(
+        owner_meta_namespace="seed-meta:tech",
         namespace=tech_panel_namespace(panel_id), cache_key=TECH_PANEL_CACHE_KEY, panel_id=panel_id,
         snapshot_store=dependencies.snapshot_store, redis_get=dependencies.get_cached_json, redis_set=dependencies.set_cached_json,
-        builder=lambda: build_tech_panel_payload(dependencies, panel_id, limit=max(limit, 24)), ttl_seconds=ttl_seconds,
+        builder=lambda: build_tech_panel_payload(dependencies, panel_id, limit=36), ttl_seconds=ttl_seconds,
     )
     return _trim_payload(payload, limit)

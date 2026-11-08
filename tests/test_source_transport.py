@@ -4,6 +4,42 @@ import pytest
 from api.clients import source_transport as transport
 
 
+def test_full_attempt_does_not_shrink_backup_timeout(monkeypatch):
+    clock = [0.0]
+    calls = []
+    monkeypatch.setattr(transport.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(transport.time, 'sleep', lambda seconds: clock.__setitem__(0, clock[0] + seconds))
+    def request(*args, **kwargs):
+        calls.append(kwargs)
+        clock[0] += 40
+        raise requests.exceptions.ReadTimeout()
+    monkeypatch.setattr(requests.Session, 'request', request)
+    with transport.SourceSession() as session, pytest.raises(requests.exceptions.Timeout):
+        transport.read_with_retry(session, 'https://source.example', lambda response: response.content,
+            attempts=2, deadline=60, timeout=40, require_full_attempt=True)
+    assert len(calls) == 1
+    assert calls[0]['timeout'] == 40
+
+
+def test_two_complete_attempts_fit_fred_budget(monkeypatch):
+    clock = [0.0]
+    calls = []
+    monkeypatch.setattr(transport.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(transport.time, 'sleep', lambda seconds: clock.__setitem__(0, clock[0] + seconds))
+    def request(*args, **kwargs):
+        calls.append(kwargs)
+        clock[0] += 40
+        if len(calls) == 1:
+            raise requests.exceptions.ReadTimeout()
+        return response()
+    monkeypatch.setattr(requests.Session, 'request', request)
+    with transport.SourceSession() as session:
+        assert transport.read_with_retry(session, 'https://source.example', lambda response: response.content,
+            attempts=2, deadline=90, timeout=40, require_full_attempt=True) == b'{}'
+    assert [call['timeout'] for call in calls] == [40, 40]
+    assert [call['proxies']['https'] for call in calls] == ['socks5h://first:1', 'socks5h://second:2']
+
+
 @pytest.fixture(autouse=True)
 def routes(monkeypatch):
     monkeypatch.setattr(transport, '_routes', lambda: {'source.example': ['socks5h://first:1', 'socks5h://second:2']})
@@ -33,7 +69,7 @@ def test_connection_failure_switches_once_and_cools_failed_route(monkeypatch):
         assert session.get('https://source.example', timeout=10).status_code == 200
         assert session.get('https://source.example', timeout=10).status_code == 200
     assert len(calls) == 5
-    assert calls[0]['timeout'].total <= 5
+    assert calls[0]['timeout'].total == 10
     assert calls[-1]['proxies']['https'].endswith('second:2')
 
 

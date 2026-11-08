@@ -20,10 +20,20 @@ SEC API 不需要密钥；使用真实项目身份与经用户确认的联系邮
 - 正式快照：现有 `POLYDATA_SNAPSHOT_SQLITE_PATH`，namespace `snapshot:official-disclosures`，key `company-events` / `policy-progress`。不假设 Upstash、R2 或 Redis 是必须的新基础设施。
 - 来源状态：同一库 `source:official-disclosures`，key `sec:<CIK>:submissions|facts` / `federal-register`。成功数据、lastSuccessAt、lastAttemptAt、nextAttemptAt、错误各自保存。失败不改 lastSuccessAt。
 - 原始响应版本：相邻 `official_disclosures.sqlite3`，压缩 JSON 按来源与 SHA256 去重，保留 90 天，记录首次见到与最近见到。是接入后观测档案，不能倒推成历史当时可知。
-- 公告 publication/acceptance 时间、报告 period、采集成功、尝试、快照生成分开。GET 会重新判断来源是否超过有效期，进程停止后也不会永久显示为新鲜。
-- 串行采集，单来源 15 秒连接 / 45 秒读取、至多两次、100 秒响应检查预算；429 遵守 Retry-After；无全局高频补抓。失败 5/10/20/30 分钟退避，成功来源按原周期复用。单响应上限 24 MB；单任务周期最多 20 分钟，systemd 禁止任务重叠。
+- 公告 publication/acceptance 时间、报告 period、采集成功、尝试、快照生成分开。`generatedAt` 取本投影依赖的最新实际成功时间，`projectedAt` 记录投影生成时间；GET 会重新判断来源是否超过有效期，进程停止后也不会永久显示为新鲜。`source/sources` 返回独立 `lastSuccessAt/lastAttemptAt/nextAttemptAt/error/failures/stale/usable`。存在旧值但刷新失败时顶层为 `degraded`；全部无可用来源为 `unavailable`，不能因仍在七天保留窗口就返回 `ok`。
+- 串行采集，复用共享 SourceSession/显式来源出口及完整响应重试，单次45秒、至多两次、100秒来源预算；总统文件最多五页共用这100秒，不能连续占用五份来源预算。429不立即重试，遵守持久化 Retry-After；无全局高频补抓。失败5/10/20/30分钟退避，成功来源按原周期复用。单响应上限24 MiB；单任务1100秒预算，systemd禁止任务重叠。错误只存类别/HTTP状态，不存可能包含凭据的URL；状态或投影落库失败不能报告发布成功。
 - 浏览器通过共享 Runtime 每 10 分钟读一次快照，15 秒 API 截止，最多一次重试。30 分钟采集不能被手动刷新或浏览器轮询加速。
 - 24 小时后旧值继续作为已披露历史，明确提示更新中断；超过 7 天不再进入当前列表，原始档案保留。当前政策状态按日期计算；没有日期不能补造节点。
+
+Company Events仅依赖16个SEC来源；Federal Register故障不会降低其健康状态。Policy Progress分别暴露监管公告和政治法案子投影状态，行政命令继续只读 `source:official-disclosures/federal-register:presidential`。法案失败不会清除已取得的监管公告，反向亦然。
+
+SEC专用出口配置 `POLYMONITOR_DISCLOSURES_SEC_PROXY_URL` 由项目 `.env` 和共享 `runtime.environment` loader 读取，`.env.example` 仅留空占位。official-disclosures 的 `85-panel-source-env.conf` 对该键设置 `UnsetEnvironment`，防止旧私有 EnvironmentFile 的值优先覆盖项目配置；旧文件的其他配置继续保留。迁移沿用原代理值，没有更换出口，daemon-reload 后由既有 oneshot 自然加载。
+
+2026-11-06 路由归属核对：SEC各公司请求共用 `polymonitor-tencent-egress.service`。MSFT、TSLA、META、GOOGL、AVGO 的同期失败应关联这一个共同传输依赖，不能计为五个独立网络根因；某公司本轮成功也不能证明共享链路持续健康。这里只确认依赖归属，不把它当作每个失败的唯一原因。FRASER项目配置为独立 profile12 代理与直连，不归入 Tencent 故障；其常驻 owner 早于最新环境修改启动，当前文件配置不能单独证明进程内已加载的路由。此次归属核对没有新上游请求，未改变源失败/成功时钟或采集频率。
+
+Geo/Sanctions沿用既有geo owner的六个制裁主题查询，并非政治/公告的新采集器。其 `snapshot:world:geo-sanctions-shock/panel-v1` 中 `federalRegisterSources` 保存各term的成功、尝试、退避时钟和错误；六term共用180秒，单次45秒、每term最多两尝试、2 MiB响应上限，剩余不足45秒则deferred，下轮先处理最久未尝试者。只有六项均有效返回 `results` 才标FR为ok；部分成功为partial，合法空列表可替换旧值，schema错误不能冒充空列表。失败保留旧条目 `collectedAt`；全部来源失败的快照也保留原 `generatedAt`，同时持久化新错误/退避状态。地图只消费这些现有领域记录，本轮没有更改地图坐标、适配或界面。
+
+Geo业务快照复用 `runtime.seed_meta.publish_snapshot`：SQLite拒写或异常会中止发布，不能更新seed成功时间；Redis为可选镜像，镜像故障不否定SQLite已接受的发布。watcher与公共业务seed读取均先读SQLite；公共GET不把Redis旧镜像写回正式库。ACLED认证缓存与其他来源缓存仍是独立缓存，不以缓存写入充当业务快照发布验收。
 
 ## 视觉与单独调整
 

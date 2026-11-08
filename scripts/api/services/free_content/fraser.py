@@ -40,10 +40,14 @@ def latest_item(body, source):
     return max(candidates)[2]
 
 
-def collect(session, snapshot_store, source, *, deadline, probe=False):
-    if not DOMAIN_LOCK.acquire(timeout=max(0, deadline - time.monotonic())):
+def collect(session, snapshot_store, source, *, deadline, probe=False, source_state=None, conditional=True):
+    request_budget = max(0, deadline - time.monotonic())
+    if not DOMAIN_LOCK.acquire(timeout=request_budget):
         raise TimeoutError("fraser-domain-budget-exhausted")
     try:
+        # Queueing behind another BLS release must not consume this release's
+        # 45s I/O allowance. The content worker still caps the whole cycle at 90s.
+        deadline = time.monotonic() + request_budget
         # Direct by default; only an explicit host route may override it.
         # Never inherit the worker's default proxy or the interactive shell's.
         session.trust_env = False
@@ -66,16 +70,32 @@ def collect(session, snapshot_store, source, *, deadline, probe=False):
             if (not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != cached.get("sha256")
                     or not (path.parent / cached["textFile"]).is_file()):
                 cached = {}
-        pdf, meta = _checked_fetch(session, pdf_url, source, cached.get("pdfHttp", {}), deadline)
-        if meta["http_status"] == 304 and cached:
+        source_state = source_state or {}
+        checked_at = source_state.get("pdf_checked_at") or source_state.get("last_success_at")
+        try:
+            checked_age = time.time() - datetime.fromisoformat(str(checked_at).replace("Z", "+00:00")).timestamp()
+        except (TypeError, ValueError):
+            checked_age = float("inf")
+        # FRASER PDF responses may omit both validators. Check the directory and
+        # item each cycle, but revalidate an unchanged, verified PDF once/day.
+        # The check clock survives restarts and never renews the archive receipt.
+        reuse = cached and conditional and not probe and 0 <= checked_age < 86400
+        if reuse:
             record = cached
+            meta = source_state.get("pdf_http") or cached.get("pdfHttp", {})
         else:
-            text = extract_text(pdf, timeout=deadline - time.monotonic())
-            record = {**parse_release(text, kind), "archiveUrl": item_url, "pdfUrl": pdf_url,
-                      "distributor": "FRASER, Federal Reserve Bank of St. Louis", "publisher": "BLS",
-                      "receivedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"), "pdfHttp": meta}
-            if not probe:
-                record = save_document(snapshot_store, kind, pdf, text, record)
+            request_state = (source_state.get("pdf_http") or cached.get("pdfHttp", {})) if cached and conditional and not probe else {}
+            pdf, meta = _checked_fetch(session, pdf_url, source, request_state, deadline)
+            checked_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            if cached and (meta["http_status"] == 304 or hashlib.sha256(pdf).hexdigest() == cached.get("sha256")):
+                record = cached
+            else:
+                text = extract_text(pdf, timeout=deadline - time.monotonic())
+                record = {**parse_release(text, kind), "archiveUrl": item_url, "pdfUrl": pdf_url,
+                          "distributor": "FRASER, Federal Reserve Bank of St. Louis", "publisher": "BLS",
+                          "receivedAt": checked_at, "pdfHttp": meta}
+                if not probe:
+                    record = save_document(snapshot_store, kind, pdf, text, record)
         # Keep the existing RSS article identity across distributor changes.
         # The displayed/clickable URL remains the actually retrieved FRASER item.
         release_date = datetime.fromisoformat(record["published_at"].replace("Z", "+00:00")).strftime("%m%d%Y")
@@ -90,6 +110,7 @@ def collect(session, snapshot_store, source, *, deadline, probe=False):
                 "archive_received_at": record["receivedAt"], "release_number": record["releaseNumber"]}
         return [item], {**directory_meta, "transport": "fraser-pdf", "proxy_mode": proxy_mode,
                         "latest_release": record["published_at"], "latest_reference_period": record["referencePeriod"],
-                        "archive_sha256": record.get("sha256"), "pdf_http_status": meta["http_status"]}
+                        "archive_sha256": record.get("sha256"), "pdf_http_status": meta.get("http_status"),
+                        "pdf_http": meta, "pdf_checked_at": checked_at, "reused_archive": bool(reuse)}
     finally:
         DOMAIN_LOCK.release()

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import math
+import re
+import time
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -8,6 +11,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from api.context import resolve_optional_service_callable, resolve_service_callable
+from api.clients.source_transport import read_response_bytes, read_with_retry, source_session
 from api.services import commodities_service, crypto_service, seed_recovery
 
 
@@ -28,6 +32,7 @@ class RuntimeServiceDependencies:
     requests_lib: Any
     beautiful_soup: Any
     get_snapshot_payload: Callable[..., Any] | None
+    map_market_rows: Callable[..., Any] | None = None
 
     @classmethod
     def from_context(
@@ -38,6 +43,7 @@ class RuntimeServiceDependencies:
             return context
         return cls(
             settings=context.get("SETTINGS"),
+            map_market_rows=context.get("map_market_rows"),
             application=context.get("app"),
             get_yahoo_market_snapshot=resolve_service_callable(
                 context,
@@ -155,13 +161,15 @@ def fetch_live_market_group_payload(ctx: RuntimeServiceContext, items: List[tupl
                 "reference24hAt": snapshot.get("reference24hAt"), "volumeBasis": "provider-volume"} if is_crypto else {}),
         }
 
-    max_workers = min(8, max(1, len(items)))
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(_load_row, item) for item in items]
-        for future in as_completed(futures):
-            symbol, row = future.result()
-            if row is not None:
-                rows_by_symbol[symbol] = row
+    mapper = _dependencies(ctx).map_market_rows
+    if mapper is not None:
+        results = mapper(_load_row, items)
+    else:
+        with ThreadPoolExecutor(max_workers=min(8, max(1, len(items)))) as executor:
+            results = list(executor.map(_load_row, items))
+    for symbol, row in results:
+        if row is not None:
+            rows_by_symbol[symbol] = row
 
     rows = [rows_by_symbol[symbol] for _, _, symbol in items if symbol in rows_by_symbol]
     if kind == "crypto" and len(rows) < len(items):
@@ -686,48 +694,84 @@ def normalize_inflation_nowcast_payload(payload: Any, *, ctx: RuntimeServiceCont
     }
 
 
-def fetch_live_inflation_nowcast_payload(ctx: RuntimeServiceContext) -> Dict[str, Any]:
-    payload: Dict[str, Any] = {
-        "monthOverMonth": None,
-        "yearOverYear": None,
-        "quarterly": [],
-        "generatedAt": _dependencies(ctx).utc_now_iso(),
-        "source": "Cleveland Fed Inflation Nowcasting",
-        "url": _dependencies(ctx).settings.cleveland_fed_nowcast_url,
+def _parse_inflation_nowcast_html(html: str, beautiful_soup: Any) -> Dict[str, Any]:
+    """Require the published table schema; a challenge page is not empty data."""
+    buckets = {
+        "month-over-month percent change": "monthOverMonth",
+        "year-over-year percent change": "yearOverYear",
+        "quarterly annualized percent change": "quarterly",
     }
-    if _dependencies(ctx).requests_lib is None or _dependencies(ctx).beautiful_soup is None:
-        return normalize_inflation_nowcast_payload(payload, ctx=ctx)
-    try:
-        response = _dependencies(ctx).requests_lib.get(
-            payload["url"],
-            timeout=15,
-            headers={"User-Agent": "polydata-runtime/1.0", "Accept": "text/html,application/xhtml+xml"},
-        )
-        response.raise_for_status()
-        soup = _dependencies(ctx).beautiful_soup(response.text, "html.parser")
-        for table in soup.find_all("table"):
-            caption = table.find("caption")
-            caption_text = " ".join(caption.get_text(" ", strip=True).split()).lower() if caption else ""
-            headers = [th.get_text(" ", strip=True) for th in table.find_all("th")]
-            rows: List[Dict[str, str]] = []
-            for tr in table.find_all("tr"):
-                cells = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
-                if not cells or len(cells) != len(headers):
-                    continue
-                rows.append({headers[index]: cells[index] for index in range(len(headers))})
-            if not rows:
+    parsed = {}
+    for table in beautiful_soup(html, "html.parser").find_all("table"):
+        caption = table.find("caption")
+        caption_text = " ".join(caption.get_text(" ", strip=True).split()).lower() if caption else ""
+        bucket = next((key for label, key in buckets.items() if label in caption_text), None)
+        if bucket is None:
+            continue
+        header_row = next((row for row in table.find_all("tr") if row.find("th")), None)
+        headers = [th.get_text(" ", strip=True) for th in header_row.find_all("th")] if header_row else []
+        period = "Quarter" if bucket == "quarterly" else "Month"
+        if not {period, "CPI", "Core CPI", "PCE", "Core PCE", "Updated"}.issubset(headers):
+            raise ValueError("nowcast-table-schema-mismatch")
+        rows = []
+        for tr in table.find_all("tr"):
+            if tr.find_parent("tfoot") is not None:
                 continue
-            if "month-over-month percent change" in caption_text:
-                payload["monthOverMonth"] = rows[0]
-                payload.setdefault("monthlyPeriods", {})["monthOverMonth"] = rows
-            elif "year-over-year percent change" in caption_text:
-                payload["yearOverYear"] = rows[0]
-                payload.setdefault("monthlyPeriods", {})["yearOverYear"] = rows
-            elif "quarterly annualized percent change" in caption_text:
-                payload["quarterly"] = rows[:4]
-    except Exception:
-        _dependencies(ctx).application.logger.exception("inflation nowcast fetch failed")
-    return normalize_inflation_nowcast_payload(payload, ctx=ctx)
+            cells = [td.get_text(" ", strip=True) for td in tr.find_all("td")]
+            if not cells:
+                continue
+            if len(cells) != len(headers):
+                raise ValueError("nowcast-table-row-schema-mismatch")
+            row = dict(zip(headers, cells))
+            if period == "Quarter":
+                valid_period = re.fullmatch(r"20\d{2}:Q[1-4]", row[period])
+            else:
+                try:
+                    datetime.strptime(row[period], "%B %Y")
+                    valid_period = True
+                except ValueError:
+                    valid_period = False
+            if not valid_period:
+                raise ValueError("nowcast-period-invalid")
+            for key in ("CPI", "Core CPI", "PCE", "Core PCE"):
+                # The publisher explicitly leaves already-released measures blank.
+                if row[key] and not math.isfinite(float(row[key])):
+                    raise ValueError("nowcast-value-invalid")
+            rows.append(row)
+        if not rows or bucket in parsed:
+            raise ValueError("nowcast-table-missing-or-duplicate-rows")
+        parsed[bucket] = rows
+    if set(parsed) != set(buckets.values()):
+        raise ValueError("nowcast-required-tables-missing")
+    return {"monthOverMonth": parsed["monthOverMonth"][0],
+            "yearOverYear": parsed["yearOverYear"][0], "quarterly": parsed["quarterly"][:4],
+            "monthlyPeriods": {key: parsed[key] for key in ("monthOverMonth", "yearOverYear")}}
+
+
+def fetch_live_inflation_nowcast_payload(ctx: RuntimeServiceContext) -> Dict[str, Any]:
+    dependencies = _dependencies(ctx)
+    if dependencies.requests_lib is None or dependencies.beautiful_soup is None:
+        raise RuntimeError("nowcast-transport-or-parser-unavailable")
+    owns_session = hasattr(dependencies.requests_lib, "Session")
+    session = source_session(requests_lib=dependencies.requests_lib) if owns_session else dependencies.requests_lib
+    if owns_session:
+        session.trust_env = False
+    deadline = time.monotonic() + 90
+
+    def read(response):
+        body = read_response_bytes(response, 2_500_000, deadline=deadline)
+        html = body.decode(response.encoding or "utf-8", errors="replace")
+        return _parse_inflation_nowcast_html(html, dependencies.beautiful_soup)
+
+    try:
+        parsed = read_with_retry(session, dependencies.settings.cleveland_fed_nowcast_url, read,
+                                 attempts=2, deadline=deadline, timeout=45, stream=True,
+                                 headers={"User-Agent": "polydata-runtime/1.0", "Accept": "text/html,application/xhtml+xml"})
+    finally:
+        if owns_session:
+            session.close()
+    return normalize_inflation_nowcast_payload({**parsed, "generatedAt": dependencies.utc_now_iso(),
+                                               "status": "ok"}, ctx=ctx)
 
 
 def get_inflation_nowcast_snapshot(ctx: RuntimeServiceContext) -> Dict[str, Any]:

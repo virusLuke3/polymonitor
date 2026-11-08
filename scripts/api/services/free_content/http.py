@@ -4,6 +4,7 @@ import socket
 import time
 from urllib.parse import urljoin, urlsplit
 import requests
+from api.clients.source_transport import SourceSession
 
 
 class SourceHTTPError(RuntimeError):
@@ -45,7 +46,8 @@ def fetch(session, url, source, state=None, *, deadline=None):
         remaining()
         validate_url(url, source["allowed_hosts"])
         budget = remaining()
-        with session.get(url, headers=headers, timeout=(min(6, budget), min(18, budget)), allow_redirects=False, stream=True) as r:
+        options = {"source_deadline": deadline} if isinstance(session, SourceSession) else {}
+        with session.get(url, headers=headers, timeout=(min(12, budget), min(18, budget)), allow_redirects=False, stream=True, **options) as r:
             remaining()
             if r.status_code in {301, 302, 303, 307, 308}:
                 url = urljoin(url, r.headers.get("Location", ""))

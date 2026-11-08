@@ -9,6 +9,7 @@ from api.services.finance_watch.common import (
     _dependencies,
     _payload,
     finance_watch_namespace,
+    utc_now_iso,
 )
 from api.services.finance_watch.common import (
     FinanceWatchDependencies as FinanceWatchDependencies,
@@ -61,12 +62,8 @@ def _read_finance_external(
     )
     if isinstance(payload, dict) and payload:
         return payload
-    try:
-        return finance_external_sources_service.build_finance_external_sources_payload(
-            dependencies.external_sources,
-        )
-    except Exception:
-        return {}
+    # This is a derived view. Only the external-source owner acquires/publishes.
+    return {}
 
 
 def build_finance_watch_panel_payload(
@@ -161,10 +158,29 @@ def get_finance_watch_panel_snapshot(
 ) -> Dict[str, Any]:
     dependencies = _dependencies(ctx)
     limit = max(3, min(36, int(limit or 10)))
+    if panel_id in {"tradfi-perp-radar", "crypto-etf-flow", "stablecoin-monitor"}:
+        # These views only transform the external owner's durable snapshot.
+        # A second watcher's phase must not delay a newly published source.
+        external = _read_finance_external(dependencies)
+        now = utc_now_iso()
+        age = seed_recovery.age_seconds(external.get("generatedAt"), now)
+        if age >= 1800:
+            return {"panelId": panel_id, "status": "warming", "generatedAt": "", "items": [],
+                    "cacheMode": "warming", "sources": {"financeExternal": "unavailable"},
+                    "summary": {"count": 0, "totalCount": 0}}
+        payload = build_finance_watch_panel_payload(dependencies, panel_id, limit=36, external=external)
+        payload = seed_recovery.bounded_rows(payload, now)
+        if age >= 900 and payload.get("status") not in {"warming", "unavailable", "error", "failed"}:
+            payload = {**payload, "status": "stale", "cacheMode": "stale-seed",
+                       "error": "External source snapshot is overdue; waiting for its scheduled collector"}
+        else:
+            payload = {**payload, "cacheMode": "external-seed"}
+        return _trim_payload(payload, limit)
     ttl_seconds = FINANCE_WATCH_TTL_SECONDS
     payload = seed_recovery.read_watch_seed(
+        owner_meta_namespace="seed-meta:finance",
         namespace=finance_watch_namespace(panel_id), cache_key=FINANCE_WATCH_CACHE_KEY, panel_id=panel_id,
         snapshot_store=dependencies.snapshot_store, redis_get=dependencies.get_cached_json, redis_set=dependencies.set_cached_json,
-        builder=lambda: build_finance_watch_panel_payload(dependencies, panel_id, limit=max(limit, 24)), ttl_seconds=ttl_seconds,
+        builder=lambda: build_finance_watch_panel_payload(dependencies, panel_id, limit=24), ttl_seconds=ttl_seconds,
     )
     return _trim_payload(payload, limit)

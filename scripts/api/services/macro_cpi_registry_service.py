@@ -1,18 +1,18 @@
 from __future__ import annotations
+from api.services.macro_data_policy import bounded_rows, display_age, read_seeded, row_clock
 
 from data_sources import source_value
 
-import csv
-import io
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import urlsplit
 
 from api.services.macro_data_contract import month_key, monthly_metric, shift_month, value_label, number
 from api.context import resolve_optional_service_callable
+from api.clients.fred_csv import fetch_fred_observations
 from api.services.seed_recovery import age_seconds
 from api.services import cpi_release_calendar_service, energy_gasoline_shock_service, food_retail_basket_service, macro_cpi_panels_service, runtime_service
 
@@ -96,6 +96,7 @@ class MacroCpiRegistryDependencies:
     http_text_get: Callable[..., Any] | None
     get_cached_json: Callable[..., Any] | None
     snapshot_store: Any
+    fred_text_get: Callable[..., str] | None = None
 
     @classmethod
     def from_context(
@@ -106,6 +107,7 @@ class MacroCpiRegistryDependencies:
             return context
         return cls(
             source=context,
+            fred_text_get=context.get("fred_text_get"),
             utc_now_iso=resolve_optional_service_callable(
                 context,
                 "utc_now_iso",
@@ -376,6 +378,10 @@ def _merge_sources(sources: Dict[str, str], prefix: str, payload: Dict[str, Any]
     sources.pop(prefix, None)
     for key, value in source_states.items():
         sources[f"{prefix}.{key}"] = "stale" if payload.get("cacheMode") == "stale-seed" else str(value)
+    if (payload.get("displayRetention") or {}).get("expiredItemCount"):
+        # This is a parent availability state, not another independent source
+        # in the leaf-source coverage denominator.
+        sources[prefix] = "expired"
     generated = _parse_datetime(payload.get("generatedAt"))
     interval = int(payload.get("expectedIntervalSeconds") or (3600 if prefix == "calendar" else 21600))
     if generated and (datetime.now(timezone.utc) - generated).total_seconds() > interval * 1.5:
@@ -456,20 +462,7 @@ def _fred_url(
             source_value('POLYDATA_FINANCE_FRED_CSV_URL_TEMPLATE'),
         ),
     )
-    url = str(template).format(series_id=series_id)
-    lookback_years = int(
-        getattr(
-            dependencies.settings,
-            "fred_csv_lookback_years",
-            FRED_CSV_LOOKBACK_YEARS,
-        )
-        or FRED_CSV_LOOKBACK_YEARS
-    )
-    start_date = f"{max(1900, datetime.now(timezone.utc).year - lookback_years)}-01-01"
-    parts = urlsplit(url)
-    query = dict(parse_qsl(parts.query, keep_blank_values=True))
-    query.setdefault("cosd", start_date)
-    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+    return str(template).format(series_id=series_id)
 
 
 def _fred_row_date(row: Dict[str, Any]) -> str:
@@ -496,13 +489,10 @@ def _fetch_cpi_series_stats(dependencies: MacroCpiRegistryDependencies) -> Dict[
             continue
         try:
             url = _fred_url(dependencies, series_id)
-            text = dependencies.http_text_get(url, timeout=12, headers={"User-Agent": "Polymonitor/1.0"})
-            rows = []
-            for row in csv.DictReader(io.StringIO(str(text or ""))):
-                value, date = _float(row.get(series_id)), _fred_row_date(row)
-                if value is not None and month_key(date):
-                    rows.append({"date": date, "value": value})
-            rows.sort(key=lambda row: row["date"])
+            rows = fetch_fred_observations(
+                dependencies.fred_text_get or dependencies.http_text_get, url, series_id,
+                lookback_years=int(getattr(dependencies.settings, "fred_csv_lookback_years", FRED_CSV_LOOKBACK_YEARS) or FRED_CSV_LOOKBACK_YEARS),
+            )
             if rows:
                 stats[series_id] = {"seriesId": series_id, "date": rows[-1]["date"], "observations": rows,
                                     "source": "FRED / BLS CPI", "sourceUrl": f"{source_value('POLYMONITOR_URL_FRED_STLOUISFED_ORG_SERIES_695D67')}{series_id}",
@@ -511,7 +501,7 @@ def _fetch_cpi_series_stats(dependencies: MacroCpiRegistryDependencies) -> Dict[
             continue
     prior = (dependencies.source.get("previousRegistry") or {}).get("actualSeries", {})
     for series_id, stat in prior.items():
-        if series_id not in stats:
+        if series_id not in stats and age_seconds(stat.get("fetchedAt"), _utc_now_iso(dependencies)) < display_age(dependencies.settings, "macro_cpi_registry_actual_max_display_age_seconds", 5400):
             stats[series_id] = {**stat, "retained": True}
     return stats
 
@@ -583,6 +573,7 @@ def _nowcast_lookup_from_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
             "source": row.get("source") or "Cleveland Fed Inflation Nowcasting",
             "sourceUrl": row.get("sourceUrl"),
             "generatedAt": row.get("date"),
+            "fetchedAt": metadata.get("fetchedAt"),
         }
     return lookup
 
@@ -621,7 +612,8 @@ def _compose_cpi_release_events(
             frozen_at = _parse_datetime(prior_event.get("forecastAsOf"))
             forecast = {"value": prior_event.get("forecast"), "label": prior_event.get("forecastLabel"),
                         "source": prior_event.get("forecastSource"), "sourceUrl": prior_event.get("forecastSourceUrl"),
-                        "generatedAt": prior_event.get("forecastAsOf")} if frozen_at and release_at and frozen_at < release_at else {}
+                        "generatedAt": prior_event.get("forecastAsOf"),
+                        "fetchedAt": prior_event.get("forecastFetchedAt")} if frozen_at and release_at and frozen_at < release_at else {}
         surprise = None
         if actual is not None and _float(forecast.get("value")) is not None:
             surprise = round(float(actual) - float(forecast["value"]), 2)
@@ -639,6 +631,7 @@ def _compose_cpi_release_events(
                 "forecastLabel": forecast.get("label") or "--",
                 "forecastKind": "Nowcast (model)",
                 "forecastAsOf": forecast.get("generatedAt"),
+                "forecastFetchedAt": forecast.get("fetchedAt"),
                 "adjustment": "NSA" if metric == "yoy" else "SA",
                 "limitation": "No period-matched pre-release nowcast" if not forecast else None,
                 "previous": previous,
@@ -651,6 +644,7 @@ def _compose_cpi_release_events(
                 "forecastSource": forecast.get("source") or "Cleveland Fed Inflation Nowcasting",
                 "forecastSourceUrl": forecast.get("sourceUrl") or "",
                 "asOf": stat.get("date"),
+                "fetchedAt": stat.get("fetchedAt"),
                 "actualBasis": "Derived from latest FRED index vintage; not an archived first-release print",
             }
         )
@@ -725,7 +719,7 @@ def _food_rows(payload: Dict[str, Any]) -> List[Dict[str, Any]]:
                 source=str(item.get("source") or "FRED / BLS CPI"),
                 source_url=str(item.get("sourceUrl") or ""),
                 implication="Food CPI observation, not weighted contribution",
-                metadata={"seriesId": item.get("seriesId"), "fetchedAt": payload.get("generatedAt"), "publishedAt": None, "frequency": "monthly", "adjustment": "Source basis"},
+                metadata={"seriesId": item.get("seriesId"), "fetchedAt": item.get("fetchedAt"), "retained": item.get("retained"), "publishedAt": None, "frequency": "monthly", "adjustment": "Source basis"},
             )
         )
     return rows
@@ -814,7 +808,7 @@ def _payload(
     previous = dependencies.source.get("previousRegistry") or {}
     present = {row.get("key") for row in rows}
     if any(state not in {"ok", "empty", "redis-seed", "sqlite-seed"} for state in sources.values()):
-        rows += [{**row, "metadata": {**(row.get("metadata") or {}), "retained": True}} for row in previous.get("items", []) if row.get("key") not in present and row.get("type") != "release"]
+        rows += [{**row, "metadata": {**(row.get("metadata") or {}), "retained": True}} for row in previous.get("items", []) if row.get("key") not in present and row.get("type") != "release" and age_seconds(row_clock(row), _utc_now_iso(dependencies)) < display_age(dependencies.settings, "macro_cpi_registry_max_display_age_seconds", 64800)]
     capped = _rank_rows(rows)[: _limit(limit)]
     cpi_release = (
         _compose_cpi_release_events(dependencies, rows)
@@ -857,24 +851,8 @@ def _with_mode(payload: Dict[str, Any], mode: str) -> Dict[str, Any]:
     return {**payload, "cacheMode": mode}
 
 
-def _read_seeded(
-    dependencies: MacroCpiRegistryDependencies,
-    panel_id: str,
-) -> Optional[Dict[str, Any]]:
-    namespace = _snapshot_namespace(panel_id)
-    if dependencies.get_cached_json is not None:
-        payload = dependencies.get_cached_json(namespace, CACHE_KEY)
-        if isinstance(payload, dict):
-            return _with_mode(payload, "redis-seed")
-    store = dependencies.snapshot_store
-    if store is not None:
-        payload = store.get(namespace, CACHE_KEY)
-        if isinstance(payload, dict):
-            return _with_mode(payload, "sqlite-seed")
-        stale = store.get_stale(namespace, CACHE_KEY)
-        if isinstance(stale, dict):
-            return _with_mode(stale, "stale-seed")
-    return None
+def _read_seeded(dependencies: MacroCpiRegistryDependencies, panel_id: str) -> Optional[Dict[str, Any]]:
+    return read_seeded(dependencies.snapshot_store, dependencies.get_cached_json, _snapshot_namespace(panel_id), CACHE_KEY)
 
 
 def _snapshot(fn, *args: Any, **kwargs: Any) -> Dict[str, Any]:
@@ -888,18 +866,8 @@ def _snapshot(fn, *args: Any, **kwargs: Any) -> Dict[str, Any]:
 def _inflation_nowcast_seeded_snapshot(
     dependencies: MacroCpiRegistryDependencies,
 ) -> Dict[str, Any]:
-    payload = None
-    if dependencies.get_cached_json is not None:
-        payload = dependencies.get_cached_json(
-            runtime_service.INFLATION_NOWCAST_NAMESPACE,
-            runtime_service.INFLATION_NOWCAST_CACHE_KEY,
-        )
-    if not isinstance(payload, dict):
-        store = dependencies.snapshot_store
-        if store is not None:
-            payload = store.get(runtime_service.INFLATION_NOWCAST_NAMESPACE, runtime_service.INFLATION_NOWCAST_CACHE_KEY)
-            if not isinstance(payload, dict):
-                payload = store.get_stale(runtime_service.INFLATION_NOWCAST_NAMESPACE, runtime_service.INFLATION_NOWCAST_CACHE_KEY)
+    payload = read_seeded(dependencies.snapshot_store, dependencies.get_cached_json,
+        runtime_service.INFLATION_NOWCAST_NAMESPACE, runtime_service.INFLATION_NOWCAST_CACHE_KEY)
     if isinstance(payload, dict):
         result = runtime_service.normalize_inflation_nowcast_payload(
             payload,
@@ -1184,7 +1152,8 @@ def _normalize_macro_cpi_registry_payload(
     if not isinstance(payload, dict):
         payload = {}
     result = json.loads(json.dumps(payload, ensure_ascii=True, default=str))
-    rows = [_enrich_row(row) for row in (result.get("items") or []) if isinstance(row, dict)]
+    rows = [_enrich_row(row) for row in bounded_rows(result, now=_utc_now_iso(dependencies),
+        max_age=display_age(dependencies.settings, "macro_cpi_registry_max_display_age_seconds", 64800))]
     result["items"] = _rank_rows(rows)[: _limit(limit)]
     result["generatedAt"] = result.get("generatedAt")
     result["panelId"] = str(result.get("panelId") or panel_id)
@@ -1194,5 +1163,30 @@ def _normalize_macro_cpi_registry_payload(
     result["sources"] = result.get("sources") if isinstance(result.get("sources"), dict) else {}
     result["summary"] = _summarize(panel_id, result["items"], result["sources"], PANEL_CONFIGS.get(panel_id, {}))
     if panel_id == "cpi-release-command-center":
+        now = _utc_now_iso(dependencies)
+        actual_age = display_age(dependencies.settings, "macro_cpi_registry_actual_max_display_age_seconds", 5400)
+        result["displayRetention"]["actualMaxAgeSeconds"] = actual_age
+        display_max_age = display_age(dependencies.settings, "macro_cpi_registry_max_display_age_seconds", 64800)
+        for event in result.get("events") or []:
+            stat = (result.get("actualSeries") or {}).get(event.get("seriesId")) or {}
+            if not event.get("fetchedAt") and event.get("asOf") and event.get("asOf") == stat.get("date"):
+                event["fetchedAt"] = stat.get("fetchedAt")
+            if age_seconds(event.get("fetchedAt"), now) >= actual_age:
+                event.update(actual=None, previous=None, surprise=None, actualLabel="--", previousLabel="--", surpriseLabel="--", actualStatus="expired")
+                result["sources"][f"actuals.{event.get('seriesId')}"] = "expired"
+                result["status"] = "degraded" if rows else "expired"
+            if age_seconds(event.get("forecastFetchedAt"), now) >= display_max_age:
+                event.update(forecast=None, forecastLabel="--", surprise=None, surpriseLabel="--", forecastStatus="expired")
+        # Persisted raw actualSeries remains available in SQLite; only the API
+        # projection omits old numerical observations.
+        result["actualSeries"] = {key: stat for key, stat in (result.get("actualSeries") or {}).items()
+            if age_seconds(stat.get("fetchedAt"), now) < actual_age}
+        if age_seconds(result.get("generatedAt"), now) >= display_max_age:
+            result.update(release={}, events=[], status="expired")
+        event_summary = dict(result.get("eventSummary") or {})
+        for field in ("actual", "previous", "forecast"):
+            event_summary[field + "Count"] = sum(event.get(field) is not None for event in result.get("events") or [])
+        result["eventSummary"] = event_summary
+        result["summary"] = _summarize(panel_id, result["items"], result["sources"], PANEL_CONFIGS.get(panel_id, {}))
         result["summary"].update(result.get("eventSummary") or {})
     return result

@@ -52,7 +52,7 @@ def test_empty_sources_remain_explicit_for_every_finance_panel(context, panel_id
         context, panel_id, external={"fixture": True}
     )
     assert payload["panelId"] == panel_id
-    assert payload["status"] == ("error" if panel_id == "global-index-monitor" else "empty")
+    assert payload["status"] == ({"global-index-monitor": "error", "crypto-fear-greed": "error", "broker-research-watch": "error", "tradfi-perp-radar": "warming", "crypto-etf-flow": "warming", "stablecoin-monitor": "warming"}.get(panel_id, "empty"))
     if panel_id == "crypto-fear-greed":
         assert payload["summary"]["score"] is None
         assert all(row["metricLabel"] == "--" for row in payload["items"])
@@ -103,6 +103,27 @@ def test_news_invalid_transport_is_not_a_healthy_empty_result(context):
         news.build_news_payload(context, "defi-security-watch", "Security", limit=1)
 
 
+def test_news_identity_survives_feed_reordering(monkeypatch):
+    monkeypatch.setattr(news, "utc_now_iso", lambda: "2026-11-06T12:00:00Z")
+    first = '<item><title>Protocol report</title><link>https://example.com/report</link><pubDate>Fri, 06 Nov 2026 10:00:00 GMT</pubDate></item>'
+    other = '<item><title>Second report</title><link>https://example.com/second</link><pubDate>Fri, 06 Nov 2026 09:00:00 GMT</pubDate></item>'
+    def parse(items):
+        return news._parse_rss_items('<rss><channel>' + items + '</channel></rss>', panel_id='defi-security-watch', limit=12)
+    assert parse(first)[0]['id'] == parse(other + first)[0]['id']
+    assert parse(other + first)[0]['id'] != parse(other + first)[1]['id']
+
+
+def test_original_research_feed_does_not_inherit_parent_news_exclusion(context):
+    from api.services.finance_watch import research
+    context['SETTINGS'] = SimpleNamespace(finance_broker_research_feed_urls=('https://scr.zacks.com/rss/pressrelease.aspx',))
+    context['http_text_get'] = lambda *args, **kwargs: '<rss><channel><item><title>MTVA: Research update</title><description>MetALD trial updates; unrelated sector comparison mentions Meta.</description><link>https://scr.zacks.com/news/news-details/2026/report/default.aspx</link><pubDate>Thu, 05 Nov 2026 12:00:00 -0500</pubDate></item></channel></rss>'
+    payload = research.build_broker_research_payload(context, 12)
+    assert payload['status'] == 'ok'
+    assert payload['items'][0]['label'] == 'MTVA'
+    assert payload['items'][0]['publishedAt'] == '2026-11-05T17:00:00Z'
+    assert not research._is_original_research_url('https://www.zacks.com/commentary/research-summary')
+
+
 @pytest.mark.parametrize("panel_id", ["defi-security-watch", "ipo-news-watch", "blockchain-policy-news"])
 @pytest.mark.parametrize("failed", [False, True])
 def test_news_worker_replaces_old_window_only_after_success(monkeypatch, panel_id, failed):
@@ -111,7 +132,8 @@ def test_news_worker_replaces_old_window_only_after_success(monkeypatch, panel_i
     worker = object.__new__(FinanceWatchPanelsWatcher)
     worker.limit = 24
     worker.service_context = lambda: {}
-    previous = {"generatedAt": "2026-10-01T00:00:00Z", "status": "ok", "items": [{"title": "Old news"}]}
+    from datetime import datetime, timedelta, timezone
+    previous = {"generatedAt": (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat(), "status": "ok", "items": [{"title": "Old news"}]}
     fresh = {"generatedAt": "2026-11-03T08:00:00Z", "status": "error" if failed else "empty",
              "sources": {"googleNewsRss": "error" if failed else "empty"}, "items": []}
     worker.load_previous_payload = lambda _: previous
@@ -148,13 +170,9 @@ def test_funding_keeps_asset_order_and_shorts_pay_sign(context):
 
 
 def test_stale_snapshot_retains_evidence_and_trims_without_mutating_cache(context, monkeypatch):
-    monkeypatch.setattr(service.seed_recovery, "recover_seed", lambda *args: False)
     cached = {
-        "panelId": "stablecoin-monitor",
         "generatedAt": (datetime.now(timezone.utc) - timedelta(seconds=1000)).isoformat(),
-        "status": "degraded",
-        "sources": {"financeExternal": "stale"},
-        "items": [{"id": str(index)} for index in range(8)],
+        "stablecoin": {"status": "stale", "items": [{"symbol": str(index)} for index in range(8)]},
     }
     context["SNAPSHOT_STORE"] = SimpleNamespace(
         get=lambda *args: None, get_stale=lambda *args: cached
@@ -163,9 +181,89 @@ def test_stale_snapshot_retains_evidence_and_trims_without_mutating_cache(contex
     assert payload["cacheMode"] == "stale-seed"
     assert payload["generatedAt"] == cached["generatedAt"]
     assert payload["status"] == "stale"
-    assert payload["sources"] == cached["sources"]
-    assert payload["summary"] == {"count": 3, "totalCount": 8}
-    assert len(cached["items"]) == 8
+    assert payload["sources"] == {"financeExternal": "stale"}
+    assert payload["summary"]["count"] == 3
+    assert payload["summary"]["totalCount"] == 8
+    assert len(cached["stablecoin"]["items"]) == 8
+
+
+EXTERNAL_VIEWS = [("tradfi-perp-radar", "tradfiPerps"), ("crypto-etf-flow", "etfFlow"),
+                  ("stablecoin-monitor", "stablecoin")]
+
+
+@pytest.fixture
+def external_projection_context(context, monkeypatch):
+    from api.services import finance_external_sources_service as external_service
+    now = "2026-11-06T15:00:00Z"
+    monkeypatch.setattr(service, "utc_now_iso", lambda: now)
+    monkeypatch.setattr(external_service, "utc_now_iso", lambda: now)
+    stored = {}
+    reads = []
+
+    def read(namespace, key):
+        reads.append((namespace, key))
+        assert (namespace, key) == (external_service.FINANCE_EXTERNAL_NAMESPACE, "v1")
+        return stored.get("external")
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("A pure projection must not acquire data or write a derived snapshot")
+
+    context["SNAPSHOT_STORE"] = SimpleNamespace(get_stale=read, get=forbidden, set=forbidden)
+    for name in ("http_json_get", "http_json_post", "http_text_get", "get_yahoo_market_snapshot",
+                 "set_cached_json", "get_snapshot_payload"):
+        context[name] = forbidden
+    context["get_cached_json"] = lambda *args: None
+    monkeypatch.setattr(service.seed_recovery, "recover_seed", forbidden)
+    return context, stored, reads
+
+
+@pytest.mark.parametrize("panel_id,branch", EXTERNAL_VIEWS)
+def test_external_projection_reads_each_new_durable_source_without_waiting_for_finance_owner(
+    external_projection_context, panel_id, branch,
+):
+    context, stored, reads = external_projection_context
+    for generated, symbol in [("2026-11-06T14:50:00Z", "OLD"), ("2026-11-06T14:59:00Z", "NEW")]:
+        stored["external"] = {"generatedAt": generated, branch: {"status": "ok", "items": [
+            {"symbol": symbol, "lastPx": 100, "price": 1, "fetchedAt": generated},
+        ]}}
+        payload = service.get_finance_watch_panel_snapshot(context, panel_id, 3)
+        assert payload["generatedAt"] == generated
+        assert payload["items"][0]["id"] == symbol
+        assert payload["items"][0]["fetchedAt"] == generated
+        assert payload["status"] == "ok"
+        assert payload["cacheMode"] == "external-seed"
+    assert len(reads) == 2
+
+
+@pytest.mark.parametrize("panel_id,branch", EXTERNAL_VIEWS)
+def test_external_projection_does_not_renew_retained_or_expired_rows(external_projection_context, panel_id, branch):
+    context, stored, _ = external_projection_context
+    stored["external"] = {"generatedAt": "2026-11-06T14:59:00Z", branch: {"status": "partial", "items": [
+        {"symbol": "RETAINED", "fetchedAt": "2026-11-06T14:40:00Z", "retained": True, "sourceStatus": "stale"},
+        {"symbol": "EXPIRED", "fetchedAt": "2026-11-06T14:30:00Z"},
+    ]}}
+    payload = service.get_finance_watch_panel_snapshot(context, panel_id, 3)
+    assert payload["generatedAt"] == stored["external"]["generatedAt"]
+    assert payload["status"] == "partial"
+    assert len(payload["items"]) == 1
+    row = payload["items"][0]
+    assert row["id"] == "RETAINED" and row["retained"] and row["sourceStatus"] == "stale"
+    assert row["fetchedAt"] == "2026-11-06T14:40:00Z"
+    assert len(stored["external"][branch]["items"]) == 2
+
+
+@pytest.mark.parametrize("panel_id,branch", EXTERNAL_VIEWS)
+@pytest.mark.parametrize("generated,status", [("2026-11-06T14:45:00Z", "stale"),
+    ("2026-11-06T14:30:00Z", "warming"), (None, "warming"), ("invalid", "warming")])
+def test_external_projection_keeps_original_freshness_and_missing_clock_boundary(
+    external_projection_context, panel_id, branch, generated, status,
+):
+    context, stored, _ = external_projection_context
+    stored["external"] = {"generatedAt": generated, branch: {"status": "ok", "items": [{"symbol": "SOURCE"}]}}
+    payload = service.get_finance_watch_panel_snapshot(context, panel_id)
+    assert payload["status"] == status
+    assert payload["generatedAt"] == (generated if status == "stale" else "")
+    assert bool(payload["items"]) == (status == "stale")
 
 
 def test_unknown_finance_panel_is_rejected(context):

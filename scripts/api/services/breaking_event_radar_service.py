@@ -232,9 +232,11 @@ def _fetch_gdelt_articles(
             "sort": "hybridrel",
         },
         timeout=timeout,
-        headers={"Accept": "application/json", "User-Agent": "polydata-breaking-event-radar/1.0"},
+        headers={"Accept": "application/json", "User-Agent": "Polymonitor/1.0"},
     )
-    articles = payload.get("articles") if isinstance(payload, dict) else []
+    if not isinstance(payload, dict) or not isinstance(payload.get("articles"), list):
+        raise ValueError("GDELT response has no article collection")
+    articles = payload["articles"]
     return [row for row in articles if isinstance(row, dict)]
 
 
@@ -259,26 +261,32 @@ def _fetch_pageviews(
 ) -> Dict[str, Any]:
     if dependencies.http_json_get is None:
         raise RuntimeError("http_json_get helper missing")
-    end = datetime.now(timezone.utc).date()
+    # Daily totals are available for completed UTC days, not today's partial day.
+    end = datetime.now(timezone.utc).date() - timedelta(days=1)
     start = end - timedelta(days=max(2, days))
     encoded_title = quote(str(title or "").replace(" ", "_"), safe="")
     url = f"{_wikimedia_base_url(dependencies)}/{encoded_title}/daily/{start:%Y%m%d}/{end:%Y%m%d}"
-    timeout = max(2, min(int(os.environ.get("POLYDATA_BREAKING_EVENT_WIKIMEDIA_TIMEOUT_SECONDS", "4") or 4), 12))
+    timeout = max(2, min(int(os.environ.get("POLYDATA_BREAKING_EVENT_WIKIMEDIA_TIMEOUT_SECONDS", "12") or 12), 12))
     payload = dependencies.http_json_get(
         url,
         timeout=timeout,
         headers={
             "Accept": "application/json",
-            "User-Agent": "polydata-breaking-event-radar/1.0",
+            "User-Agent": "Polymonitor/1.0",
         },
     )
-    items = payload.get("items") if isinstance(payload, dict) else []
-    views = [int(row.get("views") or 0) for row in items if isinstance(row, dict)]
+    items = payload.get("items") if isinstance(payload, dict) else None
+    if not isinstance(items, list) or not items:
+        raise ValueError("Wikimedia response has no daily observations")
+    views = [int(row["views"]) for row in items if isinstance(row, dict) and row.get("views") is not None]
+    if len(views) != len(items) or any(value < 0 for value in views):
+        raise ValueError("Wikimedia response has invalid daily observations")
     latest = views[-1] if views else 0
     baseline = sum(views[:-1]) / max(1, len(views[:-1])) if len(views) > 1 else 0
     delta = latest - baseline
     pct = (delta / baseline * 100) if baseline else (100.0 if latest else 0.0)
-    return {"title": title, "latestViews": latest, "baselineViews": round(baseline, 2), "deltaViews": round(delta, 2), "deltaPct": round(pct, 2)}
+    return {"title": title, "latestViews": latest, "baselineViews": round(baseline, 2), "deltaViews": round(delta, 2), "deltaPct": round(pct, 2),
+            "sourceDay": items[-1].get("timestamp"), "fetchedAt": _utc_now_iso(dependencies)}
 
 
 def _article_title(article: Dict[str, Any]) -> str:
@@ -592,10 +600,13 @@ def merge_breaking_event_radar_payloads(
         ),
         reverse=True,
     )[: max(1, min(int(limit or DEFAULT_LIMIT), 80))]
+    failed_refresh = bool(current.get("errors")) and not current_items and bool(ranked)
     return {
         **current,
         "items": ranked,
         "summary": _summary(ranked),
+        **({"generatedAt": previous.get("generatedAt"), "lastAttemptAt": current.get("generatedAt"),
+            "status": "stale", "cacheMode": "stale-seed", "freshness": "stale"} if failed_refresh else {}),
     }
 
 

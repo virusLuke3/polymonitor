@@ -33,8 +33,9 @@ except ImportError:
     BeautifulSoup = None
 
 from api.config import load_api_settings
+from api.clients.source_transport import read_response_bytes, read_with_retry, source_session
 from api.services import cpi_release_calendar_service, polymarket_macro_map_service
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot
 from runtime.snapshot_store import SnapshotStore
 
 
@@ -77,19 +78,16 @@ class CpiReleaseCalendarWatcher:
         settings: Any,
         interval_seconds: int = DEFAULT_INTERVAL_SECONDS,
     ) -> None:
-        if redis is None:
-            raise RuntimeError("redis package is required. Install scripts/requirements.txt")
         if requests is None:
             raise RuntimeError("requests package is required. Install scripts/requirements.txt")
-        if not str(redis_url or "").strip():
-            raise RuntimeError("POLYDATA_REDIS_URL is required for CPI release calendar watcher")
         self.settings = settings
         self.interval_seconds = max(300, int(interval_seconds or DEFAULT_INTERVAL_SECONDS))
         self.redis_prefix = str(redis_prefix or "")
-        self.redis_client = redis.from_url(redis_url, decode_responses=True)
+        self.redis_client = (redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2)
+                             if redis is not None and str(redis_url or "").strip() else None)
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
-        self.requests = requests.Session()
+        self.requests = source_session(requests_lib=requests)
         self.requests.trust_env = False
         self.requests.headers.update({"User-Agent": "Polymonitor/1.0"})
 
@@ -105,17 +103,15 @@ class CpiReleaseCalendarWatcher:
     def ttl_seconds(self) -> int:
         return max(300, int(getattr(self.settings, "cpi_calendar_ttl_seconds", 3600) or 3600))
 
-    def _http_text_get(self, url: str, *, timeout: int = 12, headers: Dict[str, str] | None = None) -> str:
-        started = time.monotonic()
-        with self.requests.get(url, timeout=(min(6, timeout), timeout), headers=headers, stream=True) as response:
-            response.raise_for_status()
-            chunks, size = [], 0
-            for chunk in response.iter_content(65536):
-                size += len(chunk)
-                if size > 2_500_000 or time.monotonic() - started > timeout:
-                    raise TimeoutError("calendar-response-budget-exhausted")
-                chunks.append(chunk)
-            return b"".join(chunks).decode(response.encoding or "utf-8", errors="replace")
+    def _http_text_get(self, url: str, *, timeout: int = 45, headers: Dict[str, str] | None = None) -> str:
+        deadline = time.monotonic() + 90
+
+        def read(response):
+            body = read_response_bytes(response, 2_500_000, deadline=deadline)
+            return body.decode(response.encoding or "utf-8", errors="replace")
+
+        return read_with_retry(self.requests, url, read, attempts=2, deadline=deadline,
+                               timeout=min(45, timeout), headers=headers, stream=True)
 
     def service_context(self) -> Dict[str, Any]:
         return {
@@ -134,29 +130,46 @@ class CpiReleaseCalendarWatcher:
         }
 
     def _get_cached_json(self, namespace: str, cache_key: str) -> Dict[str, Any] | None:
+        cached = self.snapshot_store.get(namespace, cache_key)
+        if isinstance(cached, dict):
+            return cached
+        if self.redis_client is None:
+            return None
         try:
             raw = self.redis_client.get(_redis_key(self.redis_prefix, namespace, cache_key))
-            if raw:
-                payload = json.loads(str(raw))
-                return payload if isinstance(payload, dict) else None
+            payload = json.loads(str(raw)) if raw else None
+            return payload if isinstance(payload, dict) else None
         except Exception:
             return None
-        return None
 
     def _set_cached_json(self, namespace: str, cache_key: str, payload: Dict[str, Any], ttl: int) -> None:
-        self.redis_client.set(_redis_key(self.redis_prefix, namespace, cache_key), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl)
+        # Source caches are best effort; formal snapshots use store_payload.
+        try:
+            self.snapshot_store.set(namespace, cache_key, payload, ttl)
+        except Exception:
+            pass
+        if self.redis_client is not None:
+            try:
+                self.redis_client.set(_redis_key(self.redis_prefix, namespace, cache_key), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl)
+            except Exception:
+                pass
 
     def load_previous_payload(self) -> Dict[str, Any]:
+        stale = self.snapshot_store.get_stale(self.namespace(), self.cache_key())
+        if isinstance(stale, dict):
+            return stale
         cached = self._get_cached_json(self.namespace(), self.cache_key())
         if isinstance(cached, dict):
             return cached
-        stale = self.snapshot_store.get_stale(self.namespace(), self.cache_key())
-        return stale if isinstance(stale, dict) else {}
+        return {}
 
     def store_payload(self, payload: Dict[str, Any]) -> None:
         ttl_seconds = self.ttl_seconds()
-        self.snapshot_store.set(self.namespace(), self.cache_key(), payload, ttl_seconds)
-        self.redis_client.set(self.redis_key(), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl_seconds)
+        publish_snapshot(
+            snapshot_store=self.snapshot_store, namespace=self.namespace(),
+            cache_key=self.cache_key(), payload=payload, ttl_seconds=ttl_seconds,
+            redis_client=self.redis_client, redis_cache_key=self.redis_key(),
+        )
 
     def store_seed_meta(
         self,
@@ -172,7 +185,7 @@ class CpiReleaseCalendarWatcher:
         previous = self.seed_meta_store.load(SEED_META_NAMESPACE, SEED_META_CACHE_KEY) or {}
         attempted_at = utc_now_iso()
         last_success_at = previous.get("lastSuccessAt")
-        if not preserve_last_success and status in {"ok", "degraded", "preserved"}:
+        if not preserve_last_success and (status == "ok" or (status == "degraded" and record_count > 0)):
             last_success_at = attempted_at
         payload = build_seed_meta_payload(
             panel_id=SEED_META_CACHE_KEY,
@@ -192,6 +205,14 @@ class CpiReleaseCalendarWatcher:
         )
         payload["lastSuccessAt"] = last_success_at
         return self.seed_meta_store.store(SEED_META_NAMESPACE, SEED_META_CACHE_KEY, payload)
+
+    def store_seed_meta_fail_soft(self, **kwargs: Any) -> bool:
+        try:
+            self.store_seed_meta(**kwargs)
+            return True
+        except Exception as exc:
+            print(f"[cpi_release_calendar] WARN seed meta write failed: {exc.__class__.__name__}", file=sys.stderr)
+            return False
 
     def run_once(self) -> Dict[str, Any]:
         previous = self.load_previous_payload()
@@ -276,7 +297,6 @@ def main() -> int:
         settings=settings,
         interval_seconds=args.interval,
     )
-    watcher.redis_client.ping()
     print(f"[cpi-calendar] redis_key={watcher.redis_key()} sqlite={settings.snapshot_sqlite_path}", file=sys.stderr)
     if not args.watch:
         print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
@@ -289,7 +309,7 @@ def main() -> int:
         except KeyboardInterrupt:
             return 0
         except Exception as exc:
-            watcher.store_seed_meta(
+            watcher.store_seed_meta_fail_soft(
                 status="error",
                 record_count=0,
                 source_states={"calendarSources": "error"},

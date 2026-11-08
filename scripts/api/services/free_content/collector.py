@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 import requests
+from api.clients.source_transport import source_session
 from .http import fetch
 from .normalize import parse_feed, plain, permission, utc
 from .registry import sources, REGISTRY_PATH
@@ -89,10 +90,11 @@ def collect_one(storage, snapshot_store, source, old, *, probe=False, conditiona
         "public": 0,
     }
     try:
-        with requests.Session() as session:
+        with source_session(requests) as session:
             if source["transport"] == "fraser-pdf":
                 from .fraser import collect
-                items, meta = collect(session, snapshot_store, source, deadline=deadline, probe=probe)
+                items, meta = collect(session, snapshot_store, source, deadline=deadline, probe=probe,
+                                      source_state=old, conditional=conditional)
                 state["last_success_at"] = stamp
             elif source["transport"] == "snapshot" and not probe:
                 items, snapshot = snapshot_items(snapshot_store, source)

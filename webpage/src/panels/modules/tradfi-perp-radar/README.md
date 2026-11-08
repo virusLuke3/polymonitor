@@ -32,9 +32,24 @@ basis and swap open interest are N/A for those reference rows. Their source quot
 time is distinct from fetch time. Source coverage currently excludes unlisted
 SPACEX; it is never supplied with fabricated values.
 
-Acceptance: the bounded real builder probe returned all 17 listed target swaps
-with mark/index/funding/basis, contract volume and USD open interest in 18.2 seconds.
-This proves acquisition and transformation, not formal owner persistence or a
-production frontend release. Tests cover missing values versus zero, source clocks,
-alignment, contract units and retained metric expiry. Formal owner publication and
-the deployed UI are separate release checks.
+Acceptance window (2026-11-07 UTC): the bounded builder probe returned all 17
+listed target swaps with mark/index/funding/basis, contract volume and USD open
+interest in 18.2 seconds. The existing owner then persisted its real snapshot at
+08:16:55.402793Z, with all 17 swaps complete and no metric errors. The actual local
+`/runtime/finance/tradfi-perp-radar?limit=24` returned that same source timestamp,
+`cacheMode=external-seed`, 17 swaps and six futures references; reference funding
+remained N/A. Frontend release `7239a49f` includes the field display; its production
+UI verification is tracked by the release owner. These observations are bounded
+acceptance evidence, not a claim of continuous future availability.
+
+Tests cover missing values versus zero, source clocks, alignment, contract units
+and retained metric expiry. Formal owner persistence and API projection use the
+same source times; request time does not renew those values.
+
+The next normal owner write at 08:32:08 UTC retained all 17 swaps and six
+references. The public API and formal SQLite snapshot matched on that clock and
+all 85 displayed metric states. Production verification found that the shared
+watch-snapshot sanitizer initially discarded `details`; release `da67d2d3` fixes
+the bounded parse and browser-cache round trip. The real homepage then displayed
+expanded contract metrics, including source units and times. Actual USD traded
+turnover remains unknown, and is not replaced by mark-valued USDT volume.

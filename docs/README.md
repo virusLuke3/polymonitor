@@ -8,6 +8,7 @@ Private notes, credentials, deployment journals, and non-public research should 
 
 - `architecture.md` - current architecture and target boundaries.
 - `development.md` - local development, build, and verification commands.
+- [Panel data pipeline](panel-data-pipeline.md), [cadence](panel-data-cadence.md), [resource contract](panel-resource-contract.md) and [runtime lifecycle](panel-runtime-lifecycle.md) are required reading for every new or upgraded Panel.
 - `worldmonitor-polymonitor-comparison.md` - WorldMonitor/Polymonitor product, data, architecture, and engineering comparison.
 - `polymonitor-platform-upgrade-roadmap.md` - staged platform upgrade roadmap that preserves Polymarket specialization.
 - `market-workspace.md` - evidence contract and source boundaries for shareable market dossiers.

@@ -90,16 +90,25 @@ def bind_period(row, record):
     return row
 
 
-def build(http_get, snapshot_store, now, previous=None):
-    stamp = now.isoformat().replace("+00:00", "Z")
+def source_error(exc):
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    # Transport exception strings can contain private proxy credentials.
+    return f"HTTP {status}" if status else type(exc).__name__
+
+
+def build(http_get, snapshot_store, now, previous=None, checked_at=None):
+    def verified_rows(rows):
+        stamp = checked_at() if checked_at else now.isoformat().replace("+00:00", "Z")
+        return [{**row, "verifiedAt": stamp} for row in rows]
+
     states, errors, candidates = {}, {}, {}
     ny_rows = []
     try:
-        ny_rows = parse_nyfed(http_get(NYFED_URL, timeout=12))
+        ny_rows = verified_rows(parse_nyfed(http_get(NYFED_URL, timeout=45)))
         states["nyFed"] = "ok"
     except Exception as exc:
         states["nyFed"] = "error"
-        errors["nyFed"] = type(exc).__name__ + ": " + str(exc)[:160]
+        errors["nyFed"] = source_error(exc)
     years = [now.year] + ([now.year + 1] if now.month == 12 else [])
     conflicts = []
     for kind, rid in RELEASE_IDS.items():
@@ -107,9 +116,9 @@ def build(http_get, snapshot_store, now, previous=None):
         fred_rows = []
         for year in years:
             try:
-                fred_rows += parse_fred(http_get(FRED_URL.format(rid=rid, year=year), timeout=12), kind, year)
+                fred_rows += verified_rows(parse_fred(http_get(FRED_URL.format(rid=rid, year=year), timeout=45), kind, year))
             except Exception as exc:
-                errors[key] = type(exc).__name__ + ": " + str(exc)[:160]
+                errors[key] = source_error(exc)
         states[key] = "error" if key in errors else "ok"
         ny_kind = [row for row in ny_rows if row["kind"] == kind]
         rows = {row["releaseAt"]: row for row in fred_rows}
@@ -126,15 +135,21 @@ def build(http_get, snapshot_store, now, previous=None):
                 rows[row["releaseAt"]] = row
         record = read_latest(snapshot_store, kind)
         for row in rows.values():
-            row["verifiedAt"] = stamp
             candidates[row["id"]] = bind_period(row, record)
         states[kind + "Schedule"] = "conflict" if any(c["kind"] == kind for c in conflicts) else ("ok" if rows else "error")
-        if not rows and states[key] == "error" and not ny_kind:
+        if states[key] == "error":
+            # A fresh monthly fallback must not erase the rest of a previously
+            # verified annual calendar. Fresh months replace their old dates.
+            fresh_months = {row["releaseAt"][:7] for row in rows.values()}
             for old in (previous or {}).get("items", []):
                 verified = old.get("verifiedAt")
-                if old.get("kind") != kind or not verified:
+                if (old.get("kind") != kind or not verified or not old.get("releaseAt")
+                        or old.get("id") in candidates or old["releaseAt"][:7] in fresh_months):
                     continue
-                age = now - datetime.fromisoformat(verified.replace("Z", "+00:00"))
+                try:
+                    age = now - datetime.fromisoformat(verified.replace("Z", "+00:00"))
+                except (TypeError, ValueError):
+                    continue
                 if timedelta(0) <= age <= timedelta(days=7):
                     candidates[old["id"]] = {**old, "scheduleStatus": "retained", "retained": True}
     return list(candidates.values()), states, errors, conflicts

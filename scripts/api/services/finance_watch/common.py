@@ -35,6 +35,8 @@ class FinanceWatchDependencies:
     get_crypto_funding_watch_snapshot: Callable[..., Any] | None
     crypto_funding: crypto_funding_service.CryptoFundingDependencies
     external_sources: finance_external_sources_service.FinanceExternalSourceDependencies
+    map_yahoo: Callable[..., Any] | None = None
+    fred_text_get: Callable[..., str] | None = None
 
     @classmethod
     def from_context(
@@ -45,6 +47,8 @@ class FinanceWatchDependencies:
             return context
         return cls(
             settings=context.get("SETTINGS"),
+            fred_text_get=context.get("fred_text_get"),
+            map_yahoo=context.get("map_yahoo"),
             http_json_get=resolve_optional_service_callable(
                 context,
                 "http_json_get",

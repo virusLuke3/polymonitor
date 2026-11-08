@@ -32,7 +32,7 @@ from api.config import load_api_settings
 from api.context import RuntimeResources
 from api.services import world_cup_match_ops_service, worldcup_dashboard_service
 from db import DEFAULT_DB_PATH, dict_from_row, get_connection
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, utc_now_iso
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, utc_now_iso, publish_snapshot, retained_snapshot
 from runtime.snapshot_store import SnapshotStore
 
 
@@ -62,17 +62,14 @@ def _redis_key(prefix: str, namespace: str, cache_key: str) -> str:
 class WorldCupMatchOpsWatcher:
     def __init__(self, *, redis_url: str, redis_prefix: str, snapshot_sqlite_path: str, settings: Any, limit: int, interval_seconds: int) -> None:
         self.resources = RuntimeResources()
-        if redis is None:
-            raise RuntimeError("redis package is required. Install scripts/requirements.txt")
         if requests is None:
             raise RuntimeError("requests package is required. Install scripts/requirements.txt")
-        if not str(redis_url or "").strip():
-            raise RuntimeError("POLYDATA_REDIS_URL is required for World Cup Match Ops watcher")
         self.settings = settings
         self.limit = max(1, int(limit or DEFAULT_LIMIT))
         self.interval_seconds = max(60, int(interval_seconds or DEFAULT_INTERVAL_SECONDS))
         self.redis_prefix = str(redis_prefix or "")
-        self.redis_client = redis.from_url(redis_url, decode_responses=True)
+        self.redis_client = (redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2)
+                             if redis is not None and str(redis_url or "").strip() else None)
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
         self.requests = requests.Session()
@@ -116,7 +113,8 @@ class WorldCupMatchOpsWatcher:
     def close(self) -> None:
         self.resources.close()
         self.requests.close()
-        self.redis_client.close()
+        if self.redis_client is not None:
+            self.redis_client.close()
 
     def service_context(self) -> Dict[str, Any]:
         context: Dict[str, Any] = {
@@ -134,6 +132,14 @@ class WorldCupMatchOpsWatcher:
         return context
 
     def load_previous_payload(self) -> Dict[str, Any]:
+        stale = self.snapshot_store.get_stale(
+            world_cup_match_ops_service.WORLD_CUP_MATCH_OPS_SNAPSHOT_NAMESPACE,
+            world_cup_match_ops_service.WORLD_CUP_MATCH_OPS_CACHE_KEY,
+        )
+        if isinstance(stale, dict):
+            return stale
+        if self.redis_client is None:
+            return {}
         try:
             raw = self.redis_client.get(self.redis_key())
             if raw:
@@ -142,27 +148,21 @@ class WorldCupMatchOpsWatcher:
                     return payload
         except Exception:
             print("[world-cup-match-ops] WARN redis read failed", file=sys.stderr)
-        stale = self.snapshot_store.get_stale(
-            world_cup_match_ops_service.WORLD_CUP_MATCH_OPS_SNAPSHOT_NAMESPACE,
-            world_cup_match_ops_service.WORLD_CUP_MATCH_OPS_CACHE_KEY,
-        )
-        return stale if isinstance(stale, dict) else {}
+        return {}
 
     def store_payload(self, payload: Dict[str, Any]) -> None:
         ttl_seconds = self.ttl_seconds()
-        self.snapshot_store.set(
-            world_cup_match_ops_service.WORLD_CUP_MATCH_OPS_SNAPSHOT_NAMESPACE,
-            world_cup_match_ops_service.WORLD_CUP_MATCH_OPS_CACHE_KEY,
-            payload,
-            ttl_seconds,
+        publish_snapshot(
+            snapshot_store=self.snapshot_store, namespace=world_cup_match_ops_service.WORLD_CUP_MATCH_OPS_SNAPSHOT_NAMESPACE,
+            cache_key=world_cup_match_ops_service.WORLD_CUP_MATCH_OPS_CACHE_KEY, payload=payload, ttl_seconds=ttl_seconds,
+            redis_client=self.redis_client, redis_cache_key=self.redis_key(),
         )
-        self.redis_client.set(self.redis_key(), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl_seconds)
 
     def store_seed_meta(self, *, status: str, record_count: int, source_states: Dict[str, Any], error_summary: str | None, preserve_last_success: bool = False) -> None:
         previous = self.seed_meta_store.load(SEED_META_NAMESPACE, SEED_META_CACHE_KEY) or {}
         attempted_at = utc_now_iso()
         last_success_at = previous.get("lastSuccessAt")
-        if not preserve_last_success and status in {"ok", "degraded", "preserved"}:
+        if not preserve_last_success and (status == "ok" or (status == "degraded" and record_count > 0)):
             last_success_at = attempted_at
         payload = build_seed_meta_payload(
             panel_id=SEED_META_CACHE_KEY,
@@ -172,7 +172,7 @@ class WorldCupMatchOpsWatcher:
             expected_interval_seconds=self.interval_seconds,
             status=status,
             last_attempt_at=attempted_at,
-            last_success_at=last_success_at or attempted_at,
+            last_success_at=last_success_at,
             record_count=record_count,
             source_states=source_states,
             error_summary=error_summary,
@@ -182,13 +182,21 @@ class WorldCupMatchOpsWatcher:
         )
         self.seed_meta_store.store(SEED_META_NAMESPACE, SEED_META_CACHE_KEY, payload)
 
+    def store_seed_meta_fail_soft(self, **kwargs: Any) -> bool:
+        try:
+            self.store_seed_meta(**kwargs)
+            return True
+        except Exception as exc:
+            print(f"[world_cup_match_ops] WARN seed meta write failed: {exc.__class__.__name__}", file=sys.stderr)
+            return False
+
     def run_once(self) -> Dict[str, Any]:
         previous = self.load_previous_payload()
         try:
             payload = world_cup_match_ops_service.build_world_cup_match_ops_payload(self.service_context(), limit=self.limit)
         except Exception as exc:
             if previous:
-                preserved = {**previous, "cacheMode": "preserved"}
+                preserved = retained_snapshot(previous)
                 self.store_payload(preserved)
                 self.store_seed_meta(status="preserved", record_count=len(previous.get("items") or []), source_states={"worldCupMatchOps": "error"}, error_summary=str(exc), preserve_last_success=True)
                 return {"status": "preserved", "payload": preserved}
@@ -197,7 +205,7 @@ class WorldCupMatchOpsWatcher:
 
         record_count = len(payload.get("items") or [])
         if previous and record_count <= 0:
-            preserved = {**previous, "cacheMode": "preserved"}
+            preserved = retained_snapshot(previous)
             self.store_payload(preserved)
             self.store_seed_meta(
                 status="preserved",
@@ -242,7 +250,6 @@ def main() -> int:
         interval_seconds=args.interval,
     )
     try:
-        watcher.redis_client.ping()
         print(f"[world-cup-match-ops] redis_key={watcher.redis_key()} sqlite={settings.snapshot_sqlite_path}", file=sys.stderr)
         if not args.watch:
             print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
@@ -253,7 +260,7 @@ def main() -> int:
             except KeyboardInterrupt:
                 return 0
             except Exception as exc:
-                watcher.store_seed_meta(status="error", record_count=0, source_states={"worldCupMatchOps": "error"}, error_summary=str(exc), preserve_last_success=True)
+                watcher.store_seed_meta_fail_soft(status="error", record_count=0, source_states={"worldCupMatchOps": "error"}, error_summary=str(exc), preserve_last_success=True)
                 print(f"[world-cup-match-ops] ERROR watch loop failed: {exc}", file=sys.stderr)
             time.sleep(watcher.interval_seconds)
     finally:

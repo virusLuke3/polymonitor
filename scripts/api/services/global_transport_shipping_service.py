@@ -1002,6 +1002,28 @@ def _store_cached_payload(
         setter(namespace, cache_key, payload, ttl_seconds)
 
 
+def _transport_sample_health(payload: Dict[str, Any], source: str) -> str:
+    if payload.get("status") == "skipped":
+        return "skipped"
+    if (payload.get("status") in {"missing-key", "auth-error", "auth-error-cache", "error", "partial", "unavailable"}
+            or payload.get("error") or payload.get("errors")):
+        return "degraded"
+    if payload.get("stale") or payload.get("status") == "stale" or payload.get("freshness") == "stale":
+        return "stale"
+    age = _age_seconds(payload.get("sampledAt") or payload.get("generatedAt"))
+    if age is None or age < 0:
+        return "unknown"
+    setting, default, minimum, maximum = {
+        "aisstream": ("POLYDATA_AISSTREAM_MIN_SAMPLE_INTERVAL_SECONDS", DEFAULT_AISSTREAM_SAMPLE_INTERVAL_SECONDS, 900, 86400),
+        "opensky": ("POLYDATA_OPENSKY_MIN_SAMPLE_INTERVAL_SECONDS", DEFAULT_OPENSKY_SAMPLE_INTERVAL_SECONDS, 300, 21600),
+        "adsb": ("POLYDATA_ADSB_MIN_SAMPLE_INTERVAL_SECONDS", DEFAULT_ADSB_SAMPLE_INTERVAL_SECONDS, 900, 21600),
+    }[source]
+    interval = _env_int(setting, default, minimum=minimum, maximum=maximum)
+    ttl = _float(payload.get("cacheTtlSeconds"))
+    max_age = min(interval, ttl) if ttl is not None and ttl > 0 else interval
+    return "fresh" if age <= max_age else "stale"
+
+
 def _aisstream_status(ctx: dict) -> Dict[str, Any]:
     api_key = _aisstream_api_key()
     min_interval = _env_int(
@@ -1954,9 +1976,9 @@ def build_global_transport_shipping_payload(ctx: dict, *, limit: int = DEFAULT_L
     source_health = {
         "openflights": "fresh",
         "transitland": "fresh",
-        "aisstream": "degraded" if ais_status.get("status") in {"missing-key", "error"} else ("stale" if ais_status.get("cacheMode") else "fresh"),
-        "opensky": "degraded" if opensky_status.get("status") in {"missing-key", "auth-error", "error", "partial"} else ("stale" if opensky_status.get("cacheMode") else "fresh"),
-        "adsb": "skipped" if adsb_status.get("status") == "skipped" else ("degraded" if adsb_status.get("status") in {"error", "partial"} else ("stale" if adsb_status.get("cacheMode") else "fresh")),
+        "aisstream": _transport_sample_health(ais_status, "aisstream"),
+        "opensky": _transport_sample_health(opensky_status, "opensky"),
+        "adsb": _transport_sample_health(adsb_status, "adsb"),
         "weatherRiskJoin": "frontend-runtime",
         "conflictRiskJoin": "frontend-runtime",
     }
@@ -1971,9 +1993,15 @@ def build_global_transport_shipping_payload(ctx: dict, *, limit: int = DEFAULT_L
         "sources": {
             "openflights": {"status": "ok", "airportsSource": airports_source, "routesSource": routes_source},
             "transitland": {"status": "ok", "sourceUrl": transit_url},
-            "aisstream": {"status": ais_status.get("status"), "sourceUrl": AISSTREAM_DOC_URL},
-            "opensky": {"status": opensky_status.get("status"), "sourceUrl": OPENSKY_DOC_URL},
-            "adsb": {"status": adsb_status.get("status"), "sourceUrl": ADSB_LOL_DOC_URL},
+            "aisstream": {"status": ais_status.get("status"), "sourceUrl": AISSTREAM_DOC_URL,
+                          "sampledAt": ais_status.get("sampledAt"), "cacheMode": ais_status.get("cacheMode"),
+                          "cacheTtlSeconds": ais_status.get("cacheTtlSeconds")},
+            "opensky": {"status": opensky_status.get("status"), "sourceUrl": OPENSKY_DOC_URL,
+                        "sampledAt": opensky_status.get("sampledAt"), "cacheMode": opensky_status.get("cacheMode"),
+                        "cacheTtlSeconds": opensky_status.get("cacheTtlSeconds")},
+            "adsb": {"status": adsb_status.get("status"), "sourceUrl": ADSB_LOL_DOC_URL,
+                     "sampledAt": adsb_status.get("sampledAt"), "cacheMode": adsb_status.get("cacheMode"),
+                     "cacheTtlSeconds": adsb_status.get("cacheTtlSeconds")},
         },
         "sourceHealth": source_health,
         "cachePolicy": {

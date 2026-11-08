@@ -57,6 +57,10 @@ def validate(root: Path) -> list[str]:
 
     for service in sorted(unit_dir.glob("*.service")):
         content = service.read_text(encoding="utf-8")
+        for directive in ("StandardOutput", "StandardError"):
+            values = re.findall(rf"^{directive}=(.*)$", content, re.MULTILINE)
+            if values != ["journal"]:
+                errors.append(f"{service.relative_to(root)} must set {directive}=journal exactly once")
         for relative_path in SCRIPT_PATTERN.findall(content):
             if not (root / relative_path).is_file():
                 errors.append(f"{service.relative_to(root)} references missing executable {relative_path}")

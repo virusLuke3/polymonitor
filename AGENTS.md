@@ -1,5 +1,20 @@
 # Polymonitor Agent Guidance
 
+Before adding or upgrading any Panel, read
+`document/开发/Panel开发统一指南.md`, `docs/panel-data-pipeline.md`, and
+`docs/panel-data-cadence.md`. For data requests, shared resources or caching,
+also read `docs/panel-resource-contract.md` and `docs/panel-runtime-lifecycle.md`.
+Apply these contracts to the existing data owner, acquisition, storage, API and
+shared Runtime before implementing the view. Record the chosen chain, storage
+identity, independent clocks, resource budgets and acceptance evidence in the
+Panel's existing feature index or domain document; pure views link the reused
+owner instead of creating another collector or cache. Dated audits and incident
+records are supporting evidence, not current-health claims or default deployment
+configuration. WorldMonitor storage products are references, not assumed local
+infrastructure. If the ignored local guide is absent in a clean checkout, use
+the public `docs/panel-modules.md` together with these data contracts and report
+that the local guide was unavailable.
+
 For any task that changes the 2D map, its controls, its data adapters, its
 runtime APIs, its fallback renderer, or its deployment behavior, read
 `document/地图/WorldEventMap实施指导.md` in full before editing.

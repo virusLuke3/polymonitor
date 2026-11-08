@@ -25,20 +25,26 @@ def read_flow(reader, market_id, *, limit=50, before=None, chart_range=None):
         tokens = [ch._uint256_clickhouse_token(market.get(key)) for key in ("yes_token_id", "no_token_id")]
         if not all(tokens) or tokens[0] == tokens[1]:
             raise TimeoutError("Market token mapping unavailable")
+        deadline = time.monotonic() + 6.0
+        admission_deadline = time.monotonic() + 1.25
         permit = try_permit("panel-clickhouse", 2)
+        while permit is None and time.monotonic() < admission_deadline:
+            time.sleep(0.025)
+            permit = try_permit("panel-clickhouse", 2)
         if permit is None:
             raise TimeoutError("Panel ClickHouse budget full")
         with permit:
-            if not take_read_token("panel-clickhouse", per_second=1, burst=2):
-                raise TimeoutError("Panel ClickHouse rate budget full")
+            while not take_read_token("panel-clickhouse", per_second=1, burst=2):
+                if time.monotonic() >= admission_deadline:
+                    raise TimeoutError("Panel ClickHouse rate budget full")
+                time.sleep(0.025)
             settings = replace(reader.runtime.SETTINGS.clickhouse, max_threads=1, max_memory_bytes=256 * 1024**2,
-                               max_bytes_to_read=16 * 1024**2, max_execution_seconds=2)
+                               max_bytes_to_read=16 * 1024**2, max_execution_seconds=4)
             context = {"app": reader.runtime.app, "get_backend": lambda: "postgres", "query_all": reader.semantic_query,
                        "_resources": SimpleNamespace(clickhouse=settings, clickhouse_read_timeout_seconds=None,
                                                      clickhouse_slots=threading.BoundedSemaphore(1))}
             # Four bounded reads cross the tunnel sequentially. Network wait
             # needs its own allowance; SQL time, bytes and concurrency stay fixed.
-            deadline = time.monotonic() + 6.0
             calls = 0
 
             def read(sql):
@@ -50,7 +56,7 @@ def read_flow(reader, market_id, *, limit=50, before=None, chart_range=None):
                 if calls > 4 or remaining <= 0:
                     raise TimeoutError("Panel trade request budget exhausted")
                 context["_resources"].clickhouse = replace(settings, max_bytes_to_read=(4, 24, 32, 4)[calls - 1] * 1024**2)
-                rows = ch._query_json_rows(context, sql, timeout_seconds=min(3, remaining))
+                rows = ch._query_json_rows(context, sql, timeout_seconds=min(5, remaining))
                 if rows is None:
                     raise TimeoutError(f"Panel trade query unavailable at read {calls}")
                 return rows
@@ -77,11 +83,18 @@ def read_flow(reader, market_id, *, limit=50, before=None, chart_range=None):
             # Seek narrow event keys before reading wide variant/amount columns.
             # Values still come from the published fact view, never unchecked
             # base rows; its source variants and identity checks are preserved.
-            chosen = read(f"""SELECT market_id, token_id, block_number, log_index, tx_hash
+            # Each token is the leading primary-key field. Seek its own top-N
+            # before merging; the global top-N is contained in these two sets.
+            # Keep fact eligibility on both seeks, including variant-only rows.
+            seeks = [f"""SELECT * FROM (SELECT market_id, token_id, block_number, log_index, tx_hash
                 FROM orderfilled_events_v1
                 PREWHERE intDiv(block_number,1000000) BETWEEN {lower // 1000000} AND {upper // 1000000}
-                  AND block_number BETWEEN {lower} AND {upper} AND token_id IN ({token_sql})
+                  AND block_number BETWEEN {lower} AND {upper} AND token_id = '{token}'
                 WHERE fact_variant_count > 0 {cursor_sql}
+                ORDER BY token_id DESC, block_number DESC, log_index DESC, tx_hash DESC LIMIT {limit + 1})"""
+                for token in tokens]
+            chosen = read(f"""SELECT market_id, token_id, block_number, log_index, tx_hash
+                FROM ({' UNION ALL '.join(seeks)})
                 ORDER BY block_number DESC, log_index DESC, tx_hash DESC LIMIT {limit + 1}
                 FORMAT JSONEachRow""")
             rows = []
@@ -95,6 +108,8 @@ def read_flow(reader, market_id, *, limit=50, before=None, chart_range=None):
                           "toString(f.price) AS price, f.block_number") if chart_range else ch._orderfilled_projection_sql(include_time=False)
                 rows = read(f"""SELECT {fields} FROM orderfilled_fact_primary_v1 f
                     WHERE intDiv(canonical_block_number,1000000) IN ({partitions})
+                    AND canonical_token_id IN ({token_sql})
+                    AND canonical_block_number BETWEEN {min(int(r['block_number']) for r in chosen)} AND {max(int(r['block_number']) for r in chosen)}
                     AND (canonical_market_id,canonical_token_id,canonical_block_number,canonical_log_index,canonical_tx_hash)
                         IN ({identities})
                     ORDER BY block_number DESC,log_index DESC,tx_hash DESC FORMAT JSONEachRow""")

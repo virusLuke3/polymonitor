@@ -1,0 +1,19 @@
+[Unit]
+Description=Polymonitor collector egress through the authorized Tencent host
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+EnvironmentFile=/__POLYMONITOR_ENV_FILE__
+ExecStart=/usr/bin/ssh -N -T -i ${POLYMONITOR_TENCENT_EGRESS_IDENTITY} -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o ProxyCommand=none -o ProxyJump=none -o HostKeyAlias=${POLYMONITOR_TENCENT_HOST_KEY_ALIAS} -D ${POLYMONITOR_TENCENT_EGRESS_LISTEN} ${POLYMONITOR_TENCENT_EGRESS_TARGET}
+StandardOutput=journal
+StandardError=journal
+Restart=always
+RestartSec=5
+TimeoutStopSec=10
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

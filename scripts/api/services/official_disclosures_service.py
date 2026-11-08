@@ -124,16 +124,18 @@ def archive(store, key, raw, now):
 
 
 def collect_source(store, key, url, parse, fetch, cadence, *, now=None):
-    now = time.time() if now is None else now
+    clock = time.time if now is None else lambda: now
+    now = clock()
     previous = store.get_stale(SOURCES, key) or {}
     if previous.get("nextAttemptAt", 0) > now:
         return previous
-    state = {**previous, "lastAttemptAt": now}
+    state = {**previous, "lastAttemptAt": now, "cadence": cadence}
     try:
         raw = fetch(url)
         value = parse(raw)
-        digest = archive(store, key, raw, now)
-        state.update(data=value, lastSuccessAt=now, nextAttemptAt=now + cadence,
+        received_at = clock()
+        digest = archive(store, key, raw, received_at)
+        state.update(data=value, lastSuccessAt=received_at, nextAttemptAt=received_at + cadence,
                      error=None, failures=0, sha256=digest)
     except Exception as exc:
         failures = previous.get("failures", 0) + 1
@@ -143,18 +145,34 @@ def collect_source(store, key, url, parse, fetch, cadence, *, now=None):
             from api.clients.source_transport import _retry_seconds
             if response.status_code == 429:
                 retry_after = _retry_seconds(response.headers.get("Retry-After"))
-        state.update(error=f"{type(exc).__name__}: {str(exc)[:160]}", failures=failures,
-                     nextAttemptAt=now + max(retry_after, min(1800, 300 * 2 ** min(failures - 1, 3))))
-    store.set(SOURCES, key, state, 90 * 86400)
+        code = response.status_code if response is not None else None
+        if code in (401, 403):
+            retry_after = max(retry_after, cadence)
+        # Exception URLs can contain credentials; persist only the error class/status.
+        state.update(error=f"HTTP {code}" if code else type(exc).__name__, failures=failures,
+                     nextAttemptAt=clock() + max(retry_after, min(1800, 300 * 2 ** min(failures - 1, 3))))
+    if not store.set(SOURCES, key, state, 90 * 86400):
+        raise RuntimeError("Disclosure source state was not persisted")
     return state
 
 
 def source_meta(state, now):
-    age = now - state.get("lastSuccessAt", 0)
+    success = state.get("lastSuccessAt")
+    age = now - success if success is not None else float("inf")
     return {"lastSuccessAt": iso(state["lastSuccessAt"]) if state.get("lastSuccessAt") else None,
             "lastAttemptAt": iso(state["lastAttemptAt"]) if state.get("lastAttemptAt") else None,
+            "nextAttemptAt": iso(state["nextAttemptAt"]) if state.get("nextAttemptAt") else None,
+            "failures": state.get("failures", 0),
             "error": state.get("error"), "stale": age > 86400,
-            "usable": age <= 7 * 86400, "sha256": state.get("sha256")}
+            "usable": success is not None and age <= 7 * 86400, "sha256": state.get("sha256")}
+
+
+def _status(sources):
+    if not sources or not any(s.get("usable") for s in sources):
+        return "unavailable"
+    if any(s.get("error") or s.get("stale") or not s.get("usable") for s in sources):
+        return "degraded"
+    return "ok"
 
 
 def publish(store, now=None):
@@ -177,8 +195,13 @@ def publish(store, now=None):
                             "availableCount": fr.get("data", {}).get("availableCount", 0), "source": fr_meta},
     }
     for panel_id, payload in definitions.items():
-        store.set(NAMESPACE, panel_id, {"panelId": panel_id, "schemaVersion": 1,
-                                      "generatedAt": iso(now), **payload}, 90 * 86400)
+        states = ([fr_meta] if panel_id == "policy-progress" else
+                  [meta for company in source_states.values() for meta in company.values()])
+        successes = [meta["lastSuccessAt"] for meta in states if meta.get("lastSuccessAt")]
+        if not store.set(NAMESPACE, panel_id, {"panelId": panel_id, "schemaVersion": 1,
+                         "generatedAt": max(successes) if successes else None,
+                         "projectedAt": iso(now), "status": _status(states), **payload}, 90 * 86400):
+            raise RuntimeError("Disclosure snapshot was not persisted")
 
 
 def get_snapshot(store, panel_id, *, limit=100):
@@ -200,9 +223,20 @@ def get_snapshot(store, panel_id, *, limit=100):
             for field, source in (("filings", "filings"), ("facts", "facts")):
                 if not company["sources"][source]["usable"]:
                     company[field] = [] if field == "filings" else {}
+        payload["sources"] = {company["symbol"]: company["sources"] for company in payload["companies"]}
+        states = [meta for company in payload["companies"] for meta in company["sources"].values()]
+        status = _status(states)
     else:
         payload["source"] = refresh_meta(payload["source"])
         payload["items"] = payload["items"][:limit] if payload["source"]["usable"] else []
         from api.services.politics.snapshots import get_snapshot as get_politics_snapshot
         payload["legislation"] = get_politics_snapshot(store, "politics-legislation", limit=40)
-    return {**payload, "status": "ok"}
+        states = [payload["source"]]
+        status = _status(states)
+        legislation_status = payload["legislation"].get("status")
+        if status == "ok" and legislation_status != "ok":
+            status = "degraded"
+        elif status == "unavailable" and legislation_status in {"ok", "degraded"}:
+            status = "degraded"
+    successes = [meta["lastSuccessAt"] for meta in states if meta.get("lastSuccessAt")]
+    return {**payload, "status": status, "generatedAt": max(successes) if successes else None}

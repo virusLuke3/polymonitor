@@ -5,12 +5,14 @@ from data_sources import source_value
 import hashlib
 import json
 import re
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from api.context import resolve_optional_service_callable
+from requests import exceptions as request_errors
 
 
 GRID_ESPORTS_NAMESPACE = "snapshot:esports:esports-intel"
@@ -230,7 +232,7 @@ def _graphql_headers(settings: Any) -> Dict[str, str]:
     return headers
 
 
-def _post_graphql(
+def _post_graphql_once(
     ctx: GridEsportsContext,
     url: str,
     query: str,
@@ -274,6 +276,27 @@ def _post_graphql(
     if not isinstance(payload, dict):
         raise RuntimeError("GRID GraphQL returned non-object payload")
     return payload
+
+
+def _post_graphql(ctx: GridEsportsContext, url: str, query: str, variables: Dict[str, Any],
+                  timeout: int = 45, *, deadline: float | None = None) -> Dict[str, Any]:
+    """Retry these read-only queries within one collector budget, never denials."""
+    deadline = time.monotonic() + 90 if deadline is None else deadline
+    for attempt in range(2):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("GRID collection budget exhausted")
+        try:
+            return _post_graphql_once(ctx, url, query, variables, timeout=min(timeout, remaining))
+        except (request_errors.Timeout, request_errors.ConnectionError, TimeoutError):
+            if attempt:
+                raise
+        except request_errors.HTTPError as exc:
+            if attempt or getattr(exc.response, "status_code", None) not in {500, 502, 503, 504}:
+                raise
+        if time.monotonic() + 1 >= deadline:
+            raise TimeoutError("GRID collection budget exhausted")
+        time.sleep(1)
 
 
 def _raise_graphql_errors(payload: Dict[str, Any]) -> None:
@@ -370,6 +393,7 @@ def _context_tags(status: str, metrics: List[Dict[str, Any]], state: Optional[Di
 def _series_state(
     ctx: GridEsportsContext,
     series_id: str,
+    *, deadline: float | None = None,
 ) -> Tuple[Optional[Dict[str, Any]], str]:
     dependencies = _dependencies(ctx)
     settings = dependencies.settings
@@ -377,7 +401,7 @@ def _series_state(
     if not url:
         return None, "missing-url"
     try:
-        payload = _post_graphql(dependencies, url, SERIES_STATE_QUERY, {"id": series_id}, timeout=12)
+        payload = _post_graphql(dependencies, url, SERIES_STATE_QUERY, {"id": series_id}, timeout=45, deadline=deadline)
         _raise_graphql_errors(payload)
         state = (payload.get("data") or {}).get("seriesState") if isinstance(payload.get("data"), dict) else None
         return state if isinstance(state, dict) else None, "ok" if isinstance(state, dict) else "empty"
@@ -620,6 +644,7 @@ def fetch_live_grid_esports_payload(
     limit: int = DEFAULT_GRID_ESPORTS_LIMIT,
 ) -> Dict[str, Any]:
     dependencies = _dependencies(ctx)
+    deadline = time.monotonic() + 90
     settings = dependencies.settings
     generated_at = _generated_at(dependencies)
     api_key = str(getattr(settings, "grid_api_key", "") or "").strip()
@@ -654,7 +679,7 @@ def fetch_live_grid_esports_payload(
             "upcomingLte": lte,
             "first": candidate_limit,
         },
-        timeout=20,
+        timeout=45, deadline=deadline,
     )
     _raise_graphql_errors(payload)
     recent_nodes, recent_count = _extract_series_nodes(payload, "recent")
@@ -684,11 +709,13 @@ def fetch_live_grid_esports_payload(
             or scheduled_at is None
             or scheduled_at <= reference_at + timedelta(minutes=15)
         )
-        if not state_due:
+        if time.monotonic() >= deadline:
+            state, state_status = None, "budget-exhausted"
+        elif not state_due:
             state, state_status = None, "not-due"
         else:
             state, state_status = (
-                _series_state(dependencies, series_id)
+                _series_state(dependencies, series_id, deadline=deadline)
                 if series_id
                 else (None, "missing-id")
             )

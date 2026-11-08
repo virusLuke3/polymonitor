@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 from api.runtime_panels import get_panel_by_id
 from api.services import breaking_event_radar_service, world_cup_match_ops_service
@@ -63,6 +66,87 @@ def test_breaking_event_radar_seed_miss_does_not_live_build_when_disabled() -> N
     assert payload["status"] == "warming"
     assert payload["cacheMode"] == "seed-miss"
     assert payload["items"] == []
+
+
+@pytest.mark.parametrize("payload", [{}, {"items": []}, {"items": [{"views": None}]}, {"items": [{"views": -1}]}])
+def test_breaking_radar_missing_wikimedia_observation_is_failure_not_zero(payload):
+    dependencies = breaking_event_radar_service.BreakingEventRadarDependencies.from_context(
+        {"SETTINGS": object(), "http_json_get": lambda *a, **kw: payload})
+    with pytest.raises(ValueError):
+        breaking_event_radar_service._fetch_pageviews(dependencies, "Iran")
+
+
+def test_breaking_radar_daily_pageviews_keep_provider_day_and_completed_day_bound():
+    calls = []
+    day = (datetime.now(timezone.utc).date() - timedelta(days=1)).strftime("%Y%m%d")
+    def get(url, **kwargs):
+        calls.append(url)
+        return {"items": [{"views": 0, "timestamp": day + "00"}]}
+    dependencies = breaking_event_radar_service.BreakingEventRadarDependencies.from_context(
+        {"SETTINGS": object(), "http_json_get": get})
+    result = breaking_event_radar_service._fetch_pageviews(dependencies, "Iran")
+    assert calls[0].endswith("/" + day)
+    assert result["latestViews"] == 0 and result["sourceDay"] == day + "00"
+    assert result["fetchedAt"]
+
+
+def test_breaking_radar_bad_gdelt_payload_is_failure_not_empty():
+    dependencies = breaking_event_radar_service.BreakingEventRadarDependencies.from_context(
+        {"SETTINGS": object(), "http_json_get": lambda *a, **kw: {"error": "bad query"}})
+    with pytest.raises(ValueError):
+        breaking_event_radar_service._fetch_gdelt_articles(dependencies, {"query": "fixture"}, max_records=5)
+
+
+def test_breaking_radar_watcher_uses_approved_source_session(monkeypatch, tmp_path):
+    from api.clients import source_transport
+    from runtime import breaking_event_radar_watcher as module
+    from unittest.mock import Mock
+    session = Mock()
+    factory = Mock(return_value=session)
+    monkeypatch.setattr(source_transport, "source_session", factory)
+    monkeypatch.setattr(module, "redis", SimpleNamespace(from_url=lambda *a, **kw: Mock()))
+    watcher = module.BreakingEventRadarWatcher(redis_url="redis://fixture", redis_prefix="fixture:",
+        snapshot_sqlite_path=str(tmp_path / "snapshot.sqlite"), settings=object(), limit=12, interval_seconds=300)
+    assert watcher.requests is session
+    factory.assert_called_once_with(module.requests)
+
+
+def test_breaking_radar_all_sources_failed_does_not_renew_previous_success(monkeypatch):
+    from runtime import breaking_event_radar_watcher as module
+    from unittest.mock import Mock
+    watcher = object.__new__(module.BreakingEventRadarWatcher)
+    watcher.limit = 12
+    previous = {"items": [{"topicId": "iran-geopolitics", "entity": "Iran", "velocityScore": 10}],
+                "generatedAt": "2026-01-01T00:00:00Z", "rotation": {"index": -1}}
+    watcher.load_previous_payload = lambda: previous
+    watcher.service_context = lambda: {}
+    watcher.store_payload = Mock()
+    watcher.store_seed_meta = Mock()
+    monkeypatch.setattr(breaking_event_radar_service, "build_breaking_event_radar_payload", lambda *a, **kw: {
+        "items": [], "status": "degraded", "generatedAt": "2026-01-02T00:00:00Z",
+        "sources": {"gdelt": {"status": "rate-limited", "count": 0},
+                                                     "wikimedia": {"status": "error", "count": 0}},
+        "errors": ["gdelt:rate-limited", "wikimedia:timeout"]})
+    watcher.run_once()
+    assert watcher.store_seed_meta.call_args.kwargs["preserve_last_success"] is True
+    stored = watcher.store_payload.call_args.args[0]
+    assert stored["generatedAt"] == previous["generatedAt"]
+    assert stored["lastAttemptAt"] == "2026-01-02T00:00:00Z"
+    assert stored["status"] == "stale" and stored["freshness"] == "stale"
+    assert stored["rotation"]["index"] == 0
+
+
+def test_breaking_radar_failed_first_attempt_has_no_success_clock():
+    from runtime import breaking_event_radar_watcher as module
+    from unittest.mock import Mock
+    watcher = object.__new__(module.BreakingEventRadarWatcher)
+    watcher.interval_seconds = 300
+    watcher.limit = 12
+    watcher.seed_meta_store = Mock()
+    watcher.seed_meta_store.load.return_value = {}
+    watcher.store_seed_meta(status="degraded", record_count=0, source_states={"gdelt": "error"},
+                            error_summary="failed", preserve_last_success=True)
+    assert watcher.seed_meta_store.store.call_args.args[2]["lastSuccessAt"] is None
 
 
 def test_world_cup_match_ops_transforms_dashboard_payload() -> None:

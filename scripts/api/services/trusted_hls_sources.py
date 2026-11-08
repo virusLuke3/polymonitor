@@ -1,8 +1,21 @@
 from __future__ import annotations
 
 from data_sources import source_value
+import json
 
 from typing import Any, Dict, Iterable, List
+
+
+def _resource_paths(key: str) -> list[str]:
+    try:
+        paths = json.loads(source_value(key) or '[]')
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(paths, list):
+        return []
+    return [path for path in paths[:8] if isinstance(path, str)
+            and path.startswith('/') and path.endswith('/') and path != '/'
+            and '..' not in path and '?' not in path and '#' not in path]
 
 
 TRUSTED_HLS_SOURCES: tuple[Dict[str, Any], ...] = (
@@ -65,8 +78,12 @@ TRUSTED_HLS_SOURCES: tuple[Dict[str, Any], ...] = (
         "region": "europe",
         "country": "DE",
         "language": "en",
-        "hlsUrl": source_value('POLYMONITOR_URL_DWAMDSTREAM103_AKAMAIZED_NET_HLS_LIVE_2015526_DWSTREAM103_MASTER_M3U8_26F26D'),
-        "hlsProxyAdditionalPaths": ["/hls/live/2015526-b/dwstream103/"],
+        "hlsUrl": source_value('POLYMONITOR_TV_DW_HLS_URL'),
+        "hlsProxyRequired": True,
+        "hlsProxyAdditionalPaths": _resource_paths('POLYMONITOR_TV_DW_RESOURCE_PATHS'),
+        # DW English is stream102; the retired stream103 mapping was Arabic.
+        "hlsAlternates": [{"url": source_value('POLYMONITOR_TV_DW_ENGLISH_BACKUP_HLS_URL'),
+                           "proxy": False, "additionalPaths": _resource_paths('POLYMONITOR_TV_DW_ENGLISH_BACKUP_RESOURCE_PATHS')}],
         "externalUrl": source_value('POLYMONITOR_URL_WWW_DW_COM_EN_MEDIA_CENTER_LIVE_TV_S_100825_9FB021'),
         "fallbackVideoId": "LuKwFajn37U",
         "marketTags": ["germany", "europe", "geopolitics", "war", "policy"],
@@ -156,7 +173,7 @@ TRUSTED_HLS_SOURCES: tuple[Dict[str, Any], ...] = (
         "region": "asia",
         "country": "CN",
         "language": "en",
-        "hlsUrl": source_value('POLYMONITOR_URL_NEWS_CGTN_COM_RESOURCE_LIVE_ENGLISH_CGTN_NEWS_M3U8_69DC92'),
+        "hlsUrl": source_value('POLYMONITOR_TV_CGTN_HLS_URL'),
         "externalUrl": source_value('POLYMONITOR_URL_WWW_CGTN_COM_TV_350F14'),
         "marketTags": ["china", "asia", "geopolitics", "trade", "policy"],
         "marketUseCase": "Trusted China and Asia live stream for geopolitics and macro policy markets.",
@@ -168,7 +185,7 @@ TRUSTED_HLS_SOURCES: tuple[Dict[str, Any], ...] = (
         "region": "asia",
         "country": "JP",
         "language": "en",
-        "hlsUrl": source_value('POLYMONITOR_URL_NHKWLIVE_OJP_AKAMAIZED_NET_HLS_LIVE_2003459_NHKWLIVE_OJP_EN_INDEX_4M_M3U8_925491'),
+        "hlsUrl": source_value('POLYMONITOR_TV_NHK_HLS_URL'),
         "externalUrl": source_value('POLYMONITOR_URL_WWW3_NHK_OR_JP_NHKWORLD_EN_LIVE_1422D0'),
         "fallbackVideoId": "f0lYfG_vY_U",
         "marketTags": ["japan", "asia", "geopolitics", "earthquake", "policy"],

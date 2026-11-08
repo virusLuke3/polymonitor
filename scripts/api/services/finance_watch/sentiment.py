@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+
+from api.clients.fred_csv import fetch_fred_observations
 
 try:
     import requests
@@ -22,6 +25,7 @@ from api.services.finance_watch.common import (
     _setting,
     _tone,
     finance_watch_namespace,
+    utc_now_iso,
 )
 
 FNG_WEIGHTS = {
@@ -54,19 +58,15 @@ def _fetch_fred_observations(
     ctx: FinanceWatchContext,
     series_id: str,
 ) -> List[Dict[str, Any]]:
-    try:
-        text = _http_text_get(ctx, _setting(ctx, "finance_fred_csv_url_template").format(series_id=series_id), timeout=10)
-    except Exception:
-        return []
-    rows: List[Dict[str, Any]] = []
-    for line in text.splitlines()[1:]:
-        parts = [part.strip() for part in line.split(",")]
-        if len(parts) < 2 or parts[1] in {"", "."}:
-            continue
-        value = _safe_float(parts[1])
-        if value is not None:
-            rows.append({"date": parts[0], "value": value})
-    return rows
+    template = _setting(ctx, "finance_fred_csv_url_template")
+    if not template:
+        raise ValueError("FRED source not configured")
+    dependencies = _dependencies(ctx)
+    reader = dependencies.fred_text_get or (lambda url, **kwargs: _http_text_get(ctx, url, **kwargs))
+    return fetch_fred_observations(
+        reader, template.format(series_id=series_id), series_id,
+        lookback_years=int(getattr(dependencies.settings, "fred_csv_lookback_years", 4) or 4),
+    )
 
 
 def _fred_latest(rows: List[Dict[str, Any]]) -> Optional[float]:
@@ -159,62 +159,102 @@ def _fetch_barchart_last_price(
 def _fetch_cnn_fng(
     ctx: FinanceWatchContext,
 ) -> Optional[Dict[str, Any]]:
-    if requests is None:
-        return None
-    session = requests.Session()
-    session.trust_env = True
+    reader = _dependencies(ctx).http_json_get
+    if reader is None:
+        raise RuntimeError("CNN source adapter unavailable")
+    data = reader(
+        _setting(ctx, "finance_cnn_fng_url"), timeout=10,
+        headers={"Accept": "application/json", "Referer": _setting(ctx, "finance_cnn_fng_referer_url")},
+    )
+    if not isinstance(data, dict):
+        raise ValueError("CNN sentiment schema mismatch")
+    current = data.get("fear_and_greed") if isinstance(data.get("fear_and_greed"), dict) else data
+    score = _safe_float(current.get("score"))
+    if score is None or not 0 <= score <= 100:
+        raise ValueError("CNN sentiment score missing or invalid")
+    return {"score": round(score), "label": str(current.get("rating") or _score_label(score)),
+            "sourceObservedAt": _source_timestamp(current.get("timestamp")), "sourceFetchedAt": utc_now_iso()}
+
+
+def _source_timestamp(value: Any) -> Optional[str]:
     try:
-        response = session.get(
-            _setting(ctx, "finance_cnn_fng_url"),
-            timeout=10,
-            headers={
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
-                "Accept": "application/json",
-                "Referer": _setting(ctx, "finance_cnn_fng_referer_url"),
-            },
-        )
-        response.raise_for_status()
-        data = response.json()
-    except Exception:
+        if isinstance(value, (int, float)):
+            stamp = datetime.fromtimestamp(value / 1000 if value > 10**11 else value, timezone.utc)
+        else:
+            stamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            if stamp.tzinfo is None:
+                return None
+        return stamp.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    except (ValueError, TypeError, OverflowError, OSError):
         return None
-    finally:
-        session.close()
-    score = _safe_float(data.get("score") or (data.get("fear_and_greed") or {}).get("score"))
-    label = data.get("rating") or (data.get("fear_and_greed") or {}).get("rating")
-    return {"score": round(score), "label": str(label or _score_label(score))} if score is not None else None
 
 
 def _fetch_aaii_sentiment(
     ctx: FinanceWatchContext,
-) -> Optional[Dict[str, float]]:
-    try:
-        html = _http_text_get(ctx, _setting(ctx, "finance_aaii_sentiment_url"), timeout=10)
-    except Exception:
-        return None
+) -> Optional[Dict[str, Any]]:
+    html = _http_text_get(ctx, _setting(ctx, "finance_aaii_sentiment_url"), timeout=10)
     values = [_safe_float(match.group(1)) for match in re.finditer(r'<td[^>]*class="tableTxt"[^>]*>([\d.]+)%', html)]
     values = [value for value in values if value is not None]
-    if len(values) < 3:
-        return None
-    return {"bull": float(values[0]), "bear": float(values[2])}
+    if len(values) < 3 or any(not 0 <= value <= 100 for value in values[:3]) or abs(sum(values[:3]) - 100) > 0.2:
+        raise ValueError("AAII sentiment proportions missing or invalid")
+    return {"bull": float(values[0]), "neutral": float(values[1]), "bear": float(values[2]),
+            "sourceObservedAt": None, "sourceFetchedAt": utc_now_iso()}
 
 
 def build_fear_greed_payload(
     ctx: FinanceWatchContext,
     limit: int,
 ) -> Dict[str, Any]:
-    raw = _http_json_get(ctx, _setting(ctx, "finance_alternative_fng_url"), params={"limit": 2, "format": "json"}, timeout=12)
+    errors = {}
+    source_details = {}
+    def isolated(name, fetch, fallback):
+        try:
+            return fetch()
+        except Exception as exc:
+            errors[name] = type(exc).__name__
+            response = getattr(exc, "response", None)
+            source_details[name] = {"status": "error", "errorType": type(exc).__name__,
+                "httpStatus": getattr(response, "status_code", None), "sourceObservedAt": None,
+                "sourceFetchedAt": None, "sourcePublishedAt": None}
+            return fallback
+
+    def fred_series(series):
+        name = "fred." + series
+        rows = isolated(name, lambda: _fetch_fred_observations(ctx, series), [])
+        source_details[name] = {**source_details.get(name, {}),
+            "seriesId": series,
+            "status": "ok" if rows else "error" if name in errors else "unavailable",
+            "value": _fred_latest(rows),
+            "sourceObservedAt": rows[-1]["date"] if rows else None,
+            "sourceFetchedAt": utc_now_iso() if rows else None,
+            "sourcePublishedAt": None,
+            "observationCount": len(rows),
+        }
+        return rows
+
+    raw = isolated("alternativeMe", lambda: _http_json_get(ctx, _setting(ctx, "finance_alternative_fng_url"),
+                   params={"limit": 2, "format": "json"}, timeout=12), {})
     data = (raw.get("data") or []) if isinstance(raw, dict) else []
     item = data[0] if data and isinstance(data[0], dict) else {}
     previous = data[1] if len(data) > 1 and isinstance(data[1], dict) else {}
     crypto_score = _safe_float(item.get("value"))
     crypto_prev_score = _safe_float(previous.get("value"))
-    cnn = _fetch_cnn_fng(ctx)
-    aaii = _fetch_aaii_sentiment(ctx)
+    cnn = isolated("cnn", lambda: _fetch_cnn_fng(ctx), None)
+    aaii = isolated("aaii", lambda: _fetch_aaii_sentiment(ctx), None)
+    for name, reading in (("cnn", cnn), ("aaii", aaii)):
+        if reading:
+            source_details[name] = {"status": "ok", "sourceObservedAt": reading.get("sourceObservedAt"),
+                "sourceFetchedAt": reading.get("sourceFetchedAt"), "sourcePublishedAt": None}
     put_call = _fetch_barchart_last_price(ctx, "%24CPC")
     pct_above_200d = _fetch_barchart_last_price(ctx, "%24S5TH")
-    yahoo = {symbol: _fetch_yahoo_closes(ctx, symbol, range_name="1y") for symbol in ("^GSPC", "^VIX", "^VIX3M", "^SKEW", "GLD", "TLT", "HYG", "SPY", "RSP", "DX-Y.NYB")}
-    fred = {series: _fetch_fred_observations(ctx, series) for series in ("BAMLH0A0HYM2", "BAMLC0A0CM", "DGS10", "FEDFUNDS", "T10Y2Y", "UNRATE", "M2SL", "WALCL", "SOFR")}
-    vix = _safe_float(yahoo.get("^VIX", {}).get("price")) or _fred_latest(_fetch_fred_observations(ctx, "VIXCLS"))
+    symbols = ("^GSPC", "^VIX", "^VIX3M", "^SKEW", "GLD", "TLT", "HYG", "SPY", "RSP", "DX-Y.NYB")
+    mapper = _dependencies(ctx).map_yahoo or map
+    yahoo = dict(zip(symbols, mapper(lambda symbol: isolated("yahoo:" + symbol,
+        lambda: _fetch_yahoo_closes(ctx, symbol, range_name="1y"), {}), symbols)))
+    fred = {series: fred_series(series)
+            for series in ("BAMLH0A0HYM2", "BAMLC0A0CM", "DGS10", "FEDFUNDS", "T10Y2Y", "UNRATE", "M2SL", "WALCL", "SOFR")}
+    vix = _safe_float(yahoo.get("^VIX", {}).get("price")) or _fred_latest(
+        fred_series("VIXCLS"))
     vix3m = _safe_float(yahoo.get("^VIX3M", {}).get("price"))
     skew = _safe_float(yahoo.get("^SKEW", {}).get("price"))
     spx_closes = [float(value) for value in yahoo.get("^GSPC", {}).get("closes", [])]
@@ -322,8 +362,9 @@ def build_fear_greed_payload(
         ("SPY", "SPY", "EQUITY", False),
     )
     for label_name, symbol, tag, inverted in crypto_drivers + macro_drivers:
-        quote = yahoo.get(symbol) if symbol in yahoo else _fetch_yahoo_snapshot(ctx, symbol, interval="5m", range_name="1d")
-        if isinstance(quote, dict):
+        quote = yahoo.get(symbol) if symbol in yahoo else isolated("yahoo:" + symbol,
+            lambda s=symbol: _fetch_yahoo_snapshot(ctx, s, interval="5m", range_name="1d"), {})
+        if isinstance(quote, dict) and quote.get("price") is not None:
             change = _safe_float(quote.get("changePercent"))
             tone_value = _tone((-change if inverted and change is not None else change))
             drivers.append(
@@ -354,10 +395,16 @@ def build_fear_greed_payload(
         title="FEAR & GREED",
         items=drivers[:limit],
         summary={"score": score, "classification": label, "headerMetrics": header_metrics, "categories": category_rows, "cryptoScore": crypto_score, "cryptoPreviousScore": crypto_prev_score},
-        sources={"alternativeMe": "ok" if crypto_score is not None else "empty", "cnn": "ok" if cnn else "empty", "aaii": "ok" if aaii else "empty", "fred": "ok" if hy_spread is not None else "empty"},
+        sources={"alternativeMe": "ok" if crypto_score is not None else "empty", "cnn": "ok" if cnn else "empty", "aaii": "ok" if aaii else "empty", "fred": "ok" if all(fred.values()) else "partial" if any(fred.values()) else "empty",
+                 **{"fred." + series: "ok" if rows else "unavailable" for series, rows in fred.items()}},
         status="ok" if score is not None else "empty",
     )
     payload["headline"] = {"label": label, "score": score, "previousScore": previous_score, "delta": delta, "regime": regime, "tone": "up" if score and score >= 55 else ("down" if score and score <= 45 else "neutral")}
+    if errors or (score is not None and any(row["degraded"] for row in category_rows)):
+        payload["status"] = "partial" if score is not None else "error"
+    payload["errors"] = errors
+    payload["sourceDetails"] = source_details
+    payload["sources"].update({name: "error" for name in errors})
     return payload
 
 

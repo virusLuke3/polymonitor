@@ -42,6 +42,19 @@ def retain_failed_rows(previous: dict, failed_ids: list[str], now: str) -> list[
     return rows
 
 
+def bounded_rows(payload: dict, now: str, retain_seconds: int = 1800) -> dict:
+    """Publication/cache copies never extend an individual row's source lifetime."""
+    original = payload.get("items")
+    if not isinstance(original, list):
+        return payload
+    rows = [row for row in original if isinstance(row, dict) and
+            age_seconds(row.get("sourceFetchedAt") or row.get("fetchedAt") or payload.get("generatedAt"), now) < retain_seconds]
+    if len(rows) == len(original):
+        return payload
+    return {**payload, "items": rows, "status": "partial" if rows else "unavailable",
+            "summary": {**(payload.get("summary") or {}), "count": len(rows), "expiredCount": len(original) - len(rows)}}
+
+
 def recover_seed(key: str, callback: Callable[[], None]) -> bool:
     """At most four running recoveries and one attempt/key/30s per process."""
     app = current_app._get_current_object() if has_app_context() else None
@@ -78,7 +91,8 @@ def recover_seed(key: str, callback: Callable[[], None]) -> bool:
 
 def read_watch_seed(*, namespace: str, cache_key: str, panel_id: str, snapshot_store: Any,
                     redis_get: Callable | None, redis_set: Callable | None, builder: Callable[[], dict],
-                    ttl_seconds: int, max_age_seconds: int = 900, retain_seconds: int = 1800) -> dict:
+                    ttl_seconds: int, max_age_seconds: int = 900, retain_seconds: int = 1800,
+                    owner_meta_namespace: str | None = None) -> dict:
     """GETs never wait for acquisition. Original seed clocks bound all cache tiers."""
     def clock() -> str:
         return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -87,12 +101,12 @@ def read_watch_seed(*, namespace: str, cache_key: str, panel_id: str, snapshot_s
         if snapshot_store is not None:
             payload = snapshot_store.get(namespace, cache_key) or snapshot_store.get_stale(namespace, cache_key)
             if isinstance(payload, dict) and payload.get("panelId") == panel_id:
-                return payload, "sqlite-seed"
+                return bounded_rows(payload, clock(), retain_seconds), "sqlite-seed"
         if redis_get is not None:
             try:
                 payload = redis_get(namespace, cache_key)
                 if isinstance(payload, dict) and payload.get("panelId") == panel_id:
-                    return payload, "redis-seed"
+                    return bounded_rows(payload, clock(), retain_seconds), "redis-seed"
             except Exception:
                 _logger.warning("Optional Redis seed read failed namespace=%s", namespace)
         return None, "warming"
@@ -108,7 +122,13 @@ def read_watch_seed(*, namespace: str, cache_key: str, panel_id: str, snapshot_s
         return age_seconds(payload.get("generatedAt"), clock()) < age
 
     payload, mode = read()
-    if not usable(payload, max_age_seconds):
+    owner_active = False
+    if owner_meta_namespace and snapshot_store is not None:
+        meta = snapshot_store.get_stale(owner_meta_namespace, panel_id)
+        if isinstance(meta, dict):
+            interval = min(3600, max(60, int(meta.get("expectedIntervalSeconds") or 600)))
+            owner_active = age_seconds(meta.get("lastAttemptAt"), clock()) < interval * 2
+    if not usable(payload, max_age_seconds) and not owner_active:
         def recover() -> None:
             lock = snapshot_store.fetch_lock(namespace, cache_key, timeout=0) if snapshot_store is not None and hasattr(snapshot_store, "fetch_lock") else nullcontext()
             try:
@@ -125,14 +145,14 @@ def read_watch_seed(*, namespace: str, cache_key: str, panel_id: str, snapshot_s
                     stored = False
                     if snapshot_store is not None:
                         try:
-                            snapshot_store.set(namespace, cache_key, replacement, ttl_seconds)
-                            stored = True
+                            stored = snapshot_store.set(namespace, cache_key, replacement, ttl_seconds) is not False
                         except Exception:
                             _logger.exception("SQLite recovery write failed namespace=%s", namespace)
-                    if redis_set is not None:
+                    if redis_set is not None and (snapshot_store is None or stored):
                         try:
                             redis_set(namespace, cache_key, replacement, ttl_seconds)
-                            stored = True
+                            if snapshot_store is None and redis_get is not None:
+                                stored = redis_get(namespace, cache_key) == replacement
                         except Exception:
                             _logger.exception("Redis recovery write failed namespace=%s", namespace)
                     if not stored:
@@ -143,6 +163,6 @@ def read_watch_seed(*, namespace: str, cache_key: str, panel_id: str, snapshot_s
     if usable(payload, retain_seconds):
         stale = not usable(payload, max_age_seconds)
         return {**payload, "cacheMode": "stale-seed" if stale else mode,
-                **({"status": "stale", "error": "Collector snapshot is overdue; recovering in the background"} if stale else {})}
+                **({"status": "stale", "error": "Collector snapshot is overdue; waiting for its scheduled collector" if owner_active else "Collector snapshot is overdue; recovering in the background"} if stale else {})}
     return {"panelId": panel_id, "status": "warming", "generatedAt": "", "items": [],
             "cacheMode": "warming", "sources": {"collector": "warming"}}

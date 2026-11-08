@@ -427,6 +427,8 @@ pyproject-hooks==1.2.0
     # via
     #   build
     #   pip-tools
+pysocks==1.7.1
+    # via -r scripts/requirements.lock.txt
 pytest==8.4.2
     # via -r scripts/requirements-dev.in
 python-dateutil==2.9.0.post0

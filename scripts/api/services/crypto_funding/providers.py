@@ -7,7 +7,7 @@ from typing import Callable
 from .contracts import CATALOG_RETAIN_SECONDS, CATALOG_SECONDS, current, millis_iso, normalize_quote, number
 from .universe import underlying
 
-SOURCE_BUDGET_SECONDS = 8
+SOURCE_BUDGET_SECONDS = 45
 
 
 def origin(url: str) -> str:
@@ -83,7 +83,7 @@ def collect_venue(exchange: str, *, url: str, get: Callable, now: str, cached_ca
         left = deadline - time.monotonic()
         if left <= 0:
             raise TimeoutError("venue-request-deadline")
-        return get(endpoint, params=params, timeout=min(5, left), headers={"Accept": "application/json", "User-Agent": "polymonitor-funding/3"})
+        return get(endpoint, params=params, timeout=min(12, left), headers={"Accept": "application/json", "User-Agent": "polymonitor-funding/3"})
 
     result = {"status": "error", "catalogStatus": "unavailable", "catalog": {}, "quotes": [],
               "attemptedAt": now, "fetchedAt": None, "responseAt": None, "errorCode": None}

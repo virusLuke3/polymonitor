@@ -294,7 +294,7 @@ def test_weather_provider_throttle_uses_independent_forecast_and_shared_cooldown
         assert result['current']['wind_speed_10m'] == 7.2
         assert result['dailySampled'] and result['daily']['temperature_2m_min'] == [12.4]
         assert calls[-1][1]['params'] == {'lat': '51.5085', 'lon': '-0.1257'}
-        assert 'polymonitor.club' in calls[-1][1]['headers']['User-Agent']
+        assert calls[-1][1]['headers']['User-Agent'].startswith('Polymonitor/')
         query_map_weather(ctx, latitude=48.8566, longitude=2.3522)
         assert len([u for u,_ in calls if 'open-meteo' in u]) == 1
         count = len(calls)

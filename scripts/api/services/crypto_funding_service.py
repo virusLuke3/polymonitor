@@ -28,6 +28,7 @@ class CryptoFundingDependencies:
     executor: Any = None
     market_executor: Any = None
     market_jobs: Any = None
+    venue_jobs: Any = None
 
     @classmethod
     def from_context(
@@ -57,6 +58,7 @@ class CryptoFundingDependencies:
             executor=context.get("funding_executor"),
             market_executor=context.get("funding_market_executor"),
             market_jobs=context.get("funding_market_jobs"),
+            venue_jobs=context.get("funding_venue_jobs"),
         )
 
     @property
@@ -152,25 +154,38 @@ def fetch_live_crypto_funding_watch_payload(ctx: CryptoFundingContext, limit: in
             "Bybit": dependencies.settings.crypto_funding_watch_bybit_api_url}
     pool = dependencies.executor or ThreadPoolExecutor(max_workers=2, thread_name_prefix="funding-venue")
     futures = {}
+    jobs = dependencies.venue_jobs if dependencies.venue_jobs is not None else {}
+    cached_catalogs = {}
     for exchange, url in urls.items():
         key = catalog_key(exchange, url)
         cached = _cached(dependencies, CATALOG_NAMESPACE, key)
-        futures[pool.submit(providers.collect_venue, exchange, url=url, get=dependencies.http_json_get, now=now,
+        cached_catalogs[exchange] = cached or {}
+        if exchange not in jobs:
+            jobs[exchange] = pool.submit(providers.collect_venue, exchange, url=url, get=dependencies.http_json_get, now=now,
                             clock=dependencies.utc_now_iso,
                             cached_catalog=cached, save_catalog=lambda value, key=key: _store(dependencies,
-                                CATALOG_NAMESPACE, key, value, contracts.CATALOG_SECONDS))] = exchange
+                                CATALOG_NAMESPACE, key, value, contracts.CATALOG_SECONDS))
+        futures[jobs[exchange]] = exchange
     done, pending = wait(futures, timeout=providers.SOURCE_BUDGET_SECONDS + 1)
     results = {}
     for future in done:
         exchange = futures[future]
+        jobs.pop(exchange, None)
         try:
             results[exchange] = future.result()
         except Exception as exc:
-            results[exchange] = {"status": "error", "catalogStatus": "unavailable", "catalog": {},
+            catalog = cached_catalogs[exchange]
+            if not contracts.current(catalog.get("checkedAt"), now, contracts.CATALOG_RETAIN_SECONDS):
+                catalog = {}
+            results[exchange] = {"status": "error", "catalogStatus": "retained" if catalog else "unavailable", "catalog": catalog,
                                  "quotes": [], "errorCode": type(exc).__name__}
     for future in pending:
-        future.cancel()
-        results[futures[future]] = {"status": "error", "catalogStatus": "unavailable", "catalog": {},
+        # A running request keeps its existing slot; never enqueue another copy.
+        exchange = futures[future]
+        catalog = cached_catalogs[exchange]
+        if not contracts.current(catalog.get("checkedAt"), now, contracts.CATALOG_RETAIN_SECONDS):
+            catalog = {}
+        results[exchange] = {"status": "error", "catalogStatus": "retained" if catalog else "unavailable", "catalog": catalog,
                                    "quotes": [], "errorCode": "venue-deadline"}
     if dependencies.executor is None:
         pool.shutdown(wait=False, cancel_futures=True)

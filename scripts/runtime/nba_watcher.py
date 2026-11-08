@@ -27,9 +27,10 @@ try:
 except ImportError:
     requests = None
 
+from api.clients.source_transport import source_session
 from api.config import load_api_settings
 from api.services import runtime_service
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, SnapshotPublicationError, publish_snapshot, retained_snapshot
 from runtime.snapshot_store import SnapshotStore
 from runtime.telegram_panel_publish import publish_cached_panel_snapshot
 
@@ -82,26 +83,23 @@ class NbaWatcher:
         predictor_limit: int = DEFAULT_PREDICTOR_LIMIT,
         interval_seconds: int = DEFAULT_INTERVAL_SECONDS,
     ) -> None:
-        if redis is None:
-            raise RuntimeError("redis package is required. Install scripts/requirements.txt")
         if requests is None:
             raise RuntimeError("requests package is required. Install scripts/requirements.txt")
-        if not str(redis_url or "").strip():
-            raise RuntimeError("POLYDATA_REDIS_URL is required for NBA watcher")
         self.settings = settings
         self.scoreboard_limit = max(1, int(scoreboard_limit or DEFAULT_SCOREBOARD_LIMIT))
         self.intel_limit = max(1, int(intel_limit or DEFAULT_INTEL_LIMIT))
         self.predictor_limit = max(1, int(predictor_limit or DEFAULT_PREDICTOR_LIMIT))
         self.interval_seconds = max(30, int(interval_seconds or DEFAULT_INTERVAL_SECONDS))
         self.redis_prefix = str(redis_prefix or "")
-        self.redis_client = redis.from_url(redis_url, decode_responses=True)
+        self.redis_client = (redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2)
+                             if redis is not None and str(redis_url or "").strip() else None)
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(
             redis_client=self.redis_client,
             redis_prefix=self.redis_prefix,
             snapshot_store=self.snapshot_store,
         )
-        self.requests = requests.Session()
+        self.requests = source_session(requests)
         self.requests.trust_env = str(os.environ.get("POLYDATA_RUNTIME_TRUST_ENV", "0")).lower() in {"1", "true", "yes", "on"}
         self.requests.headers.update({"User-Agent": "polydata-nba-seed/1.0"})
 
@@ -137,7 +135,7 @@ class NbaWatcher:
         previous = self.load_seed_meta(cache_key)
         attempted_at = utc_now_iso()
         last_success_at = previous.get("lastSuccessAt")
-        if not preserve_last_success and str(status or "").strip().lower() in {"ok", "degraded", "preserved"}:
+        if not preserve_last_success and (str(status or "").strip().lower() == "ok" or (str(status or "").strip().lower() == "degraded" and record_count > 0)):
             last_success_at = attempted_at
         payload = build_seed_meta_payload(
             panel_id=panel_id,
@@ -147,7 +145,7 @@ class NbaWatcher:
             expected_interval_seconds=self.interval_seconds,
             status=status,
             last_attempt_at=attempted_at,
-            last_success_at=last_success_at or attempted_at,
+            last_success_at=last_success_at,
             record_count=record_count,
             source_states=source_states,
             error_summary=error_summary,
@@ -169,6 +167,11 @@ class NbaWatcher:
         return _redis_key(self.redis_prefix, namespace, cache_key)
 
     def load_previous_payload(self, namespace: str, cache_key: str) -> Dict[str, Any]:
+        stale = self.snapshot_store.get_stale(namespace, cache_key)
+        if isinstance(stale, dict):
+            return stale
+        if self.redis_client is None:
+            return {}
         try:
             raw = self.redis_client.get(self.redis_key(namespace, cache_key))
             if raw:
@@ -177,13 +180,15 @@ class NbaWatcher:
                     return payload
         except Exception:
             print(f"[nba] WARN redis read failed namespace={namespace}", file=sys.stderr)
-        stale = self.snapshot_store.get_stale(namespace, cache_key)
-        return stale if isinstance(stale, dict) else {}
+        return {}
 
     def store_payload(self, namespace: str, cache_key: str, payload: Dict[str, Any]) -> None:
         ttl_seconds = self.ttl_seconds()
-        self.snapshot_store.set(namespace, cache_key, payload, ttl_seconds)
-        self.redis_client.set(self.redis_key(namespace, cache_key), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl_seconds)
+        publish_snapshot(
+            snapshot_store=self.snapshot_store, namespace=namespace,
+            cache_key=cache_key, payload=payload, ttl_seconds=ttl_seconds,
+            redis_client=self.redis_client, redis_cache_key=self.redis_key(namespace, cache_key),
+        )
 
     def http_json_get(
         self,
@@ -225,26 +230,29 @@ class NbaWatcher:
         cache_key: str,
         fetcher: Callable[[Dict[str, Any]], Dict[str, Any]],
     ) -> Dict[str, Any]:
-        previous = self.load_previous_payload(namespace, cache_key)
         try:
-            payload = fetcher(self.service_context())
-        except Exception as exc:
-            if previous:
-                self.store_payload(namespace, cache_key, previous)
-                return {"status": "preserved", "recordCount": _nba_record_count(previous), "error": str(exc)}
+            previous = self.load_previous_payload(namespace, cache_key)
+            try:
+                payload = fetcher(self.service_context())
+            except Exception as exc:
+                if previous:
+                    self.store_payload(namespace, cache_key, retained_snapshot(previous))
+                    return {"status": "preserved", "recordCount": _nba_record_count(previous), "error": str(exc)}
+                return {"status": "error", "recordCount": 0, "error": str(exc)}
+
+            record_count = _nba_record_count(payload)
+            previous_record_count = _nba_record_count(previous)
+            if previous_record_count > 0 and record_count <= 0:
+                self.store_payload(namespace, cache_key, retained_snapshot(previous))
+                return {"status": "preserved", "recordCount": previous_record_count, "error": f"{label} returned empty payload"}
+
+            payload = {**payload, "cacheMode": "seeded"}
+            self.store_payload(namespace, cache_key, payload)
+            telegram_sent = publish_cached_panel_snapshot(panel_id, payload)
+            status = "ok" if record_count > 0 else "empty"
+            return {"status": status, "recordCount": record_count, "error": None, "telegramSent": telegram_sent}
+        except SnapshotPublicationError as exc:
             return {"status": "error", "recordCount": 0, "error": str(exc)}
-
-        record_count = _nba_record_count(payload)
-        previous_record_count = _nba_record_count(previous)
-        if previous_record_count > 0 and record_count <= 0:
-            self.store_payload(namespace, cache_key, previous)
-            return {"status": "preserved", "recordCount": previous_record_count, "error": f"{label} returned empty payload"}
-
-        payload = {**payload, "cacheMode": "seeded"}
-        self.store_payload(namespace, cache_key, payload)
-        telegram_sent = publish_cached_panel_snapshot(panel_id, payload)
-        status = "ok" if record_count > 0 else "empty"
-        return {"status": status, "recordCount": record_count, "error": None, "telegramSent": telegram_sent}
 
     def run_once(self) -> Dict[str, Any]:
         components = {
@@ -284,7 +292,7 @@ class NbaWatcher:
                 operational_status = "degraded"
             else:
                 operational_status = "error"
-            self.store_seed_meta(
+            self.store_seed_meta_fail_soft(
                 status=operational_status,
                 record_count=int(component.get("recordCount") or 0),
                 source_states={component_name: payload_status},
@@ -315,7 +323,7 @@ class NbaWatcher:
                 "intelLimit": self.intel_limit,
                 "predictorLimit": self.predictor_limit,
             },
-            preserve_last_success=status == "error",
+            preserve_last_success=not any(value["status"] in {"ok", "empty"} for value in components.values()),
         )
         return {"status": status, "components": components}
 
@@ -351,7 +359,6 @@ def main() -> int:
         predictor_limit=args.predictor_limit,
         interval_seconds=args.interval,
     )
-    watcher.redis_client.ping()
     print(f"[nba] sqlite={settings.snapshot_sqlite_path}", file=sys.stderr)
     if not args.watch:
         result = watcher.run_once()

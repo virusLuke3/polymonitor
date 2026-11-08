@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from typing import Any, Dict, List, Optional
 
@@ -57,6 +58,9 @@ class TelegramClient:
         self.timeout_seconds = max(1, int(timeout_seconds or 12))
         self.session = requests.Session()
         self.session.trust_env = False
+        proxy_url = os.environ.get("POLYDATA_TELEGRAM_HTTP_PROXY_URL", "").strip()
+        if proxy_url:
+            self.session.proxies.update({"http": proxy_url, "https": proxy_url})
 
     def send_message(
         self,

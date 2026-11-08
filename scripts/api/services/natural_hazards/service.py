@@ -43,6 +43,7 @@ class NaturalHazardDependencies:
     firms_map_key: str
     firms_base_url: str
     firms_source: str
+    nws_fetch_budget_seconds: float = nws.PROVIDER_FETCH_BUDGET_SECONDS
 
     @classmethod
     def from_context(cls, context: Mapping[str, Any]) -> "NaturalHazardDependencies":
@@ -55,6 +56,7 @@ class NaturalHazardDependencies:
         app = context.get("app")
         return cls(
             resources=runtime_resources(context),
+            nws_fetch_budget_seconds=min(20, max(nws.PROVIDER_FETCH_BUDGET_SECONDS, float(context.get("NWS_COLLECTOR_FETCH_BUDGET_SECONDS", nws.PROVIDER_FETCH_BUDGET_SECONDS)))),
             http_json_get=getter,
             http_text_get=resolve_optional_service_callable(context, "http_text_get"),
             http_bytes_get=resolve_optional_service_callable(context, "http_bytes_get"),
@@ -170,7 +172,8 @@ def _source_specs(
             url=dependencies.nws_url, limit=min(700, bounded_limit),
             previous_events=(previous or {}).get("events", []),
             snapshot_store=dependencies.snapshot_store,
-            deadline=monotonic() + nws.PROVIDER_FETCH_BUDGET_SECONDS)
+            deadline=monotonic() + dependencies.nws_fetch_budget_seconds,
+            connect_timeout_seconds=6 if dependencies.nws_fetch_budget_seconds > nws.PROVIDER_FETCH_BUDGET_SECONDS else 2)
     specs: dict[str, tuple[int, Callable[[], Dict[str, Any]]]] = {
         "usgs": (
             60,

@@ -5,6 +5,8 @@ Wants=network-online.target
 StartLimitIntervalSec=0
 
 [Service]
+StandardOutput=journal
+StandardError=journal
 Type=simple
 EnvironmentFile=%h/.config/polydata/polydata.env
 ExecCondition=/bin/bash -lc 'test -n "$${POLYDATA_GCP_TUNNEL_SSH_TARGET:-$${POLYDATA_GCP_SSH_TARGET:-}}"'

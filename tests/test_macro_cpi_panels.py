@@ -69,7 +69,7 @@ def test_macro_cpi_panel_builds_fred_and_policy_items():
     assert payload["summary"]["coverage"] >= 3
     assert any(item["source"] == "Federal Register" for item in payload["items"])
     assert payload["sources"]["ppi_all"] == "ok"
-    assert all("cosd=" in url for url in ctx["requested_urls"])
+    assert all("cosd=" not in url for url in ctx["requested_urls"])
 
 
 def test_all_remaining_macro_panels_return_normalized_payloads():

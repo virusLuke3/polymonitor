@@ -298,7 +298,7 @@ class GridEsportsWatcherTestCase(unittest.TestCase):
         self.assertEqual("ok", result["status"])
         self.assertEqual(["Alpha vs Beta"], seen_queries)
 
-    def test_watcher_preserves_previous_snapshot_when_new_payload_is_empty(self):
+    def test_watcher_clears_previous_series_after_verified_empty(self):
         watcher, fake_redis, _ = self.make_watcher()
         previous = {
             "generatedAt": "2026-05-12T00:00:00Z",
@@ -319,9 +319,55 @@ class GridEsportsWatcherTestCase(unittest.TestCase):
         with patch.object(grid_esports_service, "fetch_live_grid_esports_payload", return_value=empty_payload):
             result = watcher.run_once()
 
-        self.assertEqual("preserved", result["status"])
+        self.assertEqual("empty", result["status"])
         stored = json.loads(fake_redis.get(watcher.redis_key()) or "{}")
-        self.assertEqual("old-series", stored["items"][0]["id"])
+        self.assertEqual([], stored["items"])
         meta = json.loads(fake_redis.get("polydata:seed-meta:esports:esports-intel") or "{}")
-        self.assertEqual("preserved", meta["status"])
-        self.assertIn("Preserved previous GRID esports snapshot", meta["errorSummary"])
+        self.assertEqual("empty", meta["status"])
+        self.assertIsNone(meta["errorSummary"])
+
+    def test_failed_refresh_marks_retained_payload_stale_without_advancing_success(self):
+        watcher, fake_redis, _ = self.make_watcher()
+        previous = {"generatedAt": "2026-11-06T10:00:00Z", "status": "ok", "items": [{"id": "series"}]}
+        with patch.object(grid_esports_service, "fetch_live_grid_esports_payload", return_value=previous):
+            watcher.run_once()
+        key = "polydata:seed-meta:esports:esports-intel"
+        success = json.loads(fake_redis.get(key))["lastSuccessAt"]
+        with patch.object(grid_esports_service, "fetch_live_grid_esports_payload", side_effect=TimeoutError("private-details")):
+            result = watcher.run_once()
+        self.assertEqual("stale", result["payload"]["status"])
+        self.assertEqual(previous["generatedAt"], result["payload"]["generatedAt"])
+        self.assertEqual(success, json.loads(fake_redis.get(key))["lastSuccessAt"])
+        self.assertEqual("TimeoutError", json.loads(fake_redis.get(key))["errorSummary"])
+
+
+def test_grid_read_retry_keeps_full_attempt_budget_and_does_not_retry_denial(monkeypatch):
+    import requests
+    from types import SimpleNamespace
+    calls = []
+    def retry(ctx, url, query, variables, timeout):
+        calls.append(timeout)
+        if len(calls) == 1:
+            raise requests.ReadTimeout()
+        return {"data": {}}
+    monkeypatch.setattr(grid_esports_service, "_post_graphql_once", retry)
+    monkeypatch.setattr(grid_esports_service.time, "sleep", lambda _: None)
+    grid_esports_service._post_graphql({}, "fixture", "query Test {}", {}, timeout=45)
+    assert calls == [45, 45]
+    calls.clear()
+    def denied(*args, **kwargs):
+        calls.append(1)
+        raise requests.HTTPError(response=SimpleNamespace(status_code=429))
+    monkeypatch.setattr(grid_esports_service, "_post_graphql_once", denied)
+    import pytest
+    with pytest.raises(requests.HTTPError):
+        grid_esports_service._post_graphql({}, "fixture", "query Test {}", {})
+    assert len(calls) == 1
+
+
+def test_grid_stops_starting_reads_after_collection_budget(monkeypatch):
+    import pytest
+    monkeypatch.setattr(grid_esports_service.time, "monotonic", lambda: 100)
+    monkeypatch.setattr(grid_esports_service, "_post_graphql_once", lambda *a, **kw: pytest.fail("late source read"))
+    with pytest.raises(TimeoutError):
+        grid_esports_service._post_graphql({}, "fixture", "query Test {}", {}, deadline=99)

@@ -38,12 +38,12 @@ def test_tunnel_cold_connection_is_admitted_within_default_budget(monkeypatch):
         factory.close()
 
 
-def test_explicit_short_connection_deadline_still_rejects_late_sessions(monkeypatch):
+def test_connection_budget_rejects_late_sessions_independently_of_queue_budget(monkeypatch):
     from unittest.mock import Mock
     from api import db_pool
     clock, connection = [0.0], Mock()
     def connect(*args, **kwargs):
-        clock[0] += 6.3
+        clock[0] += 8.3
         return connection
     monkeypatch.setenv("POLYDATA_API_POSTGRES_POOL_ACQUIRE_TIMEOUT_SECONDS", "5")
     monkeypatch.delenv("POLYDATA_API_POSTGRES_POOL_SIZE", raising=False)
@@ -119,12 +119,12 @@ def test_stalled_work_has_a_fixed_capacity_and_shutdown_does_not_admit_more(ctx)
         release.wait(5)
         return value
     try:
-        for name in ("alpha", "whales", "flow", "polysignal"):
+        for name in ("alpha", "whales", "flow"):
             with pytest.raises(SignalReadPending):
                 read_verified_seed(ctx, name, {}, blocked, wait_seconds=.01)
         with pytest.raises(SignalReadPending, match="capacity"):
             read_verified_seed(ctx, "unexpected", {}, blocked)
-        assert len(ctx["_resources"].signal_reads) == 4
+        assert len(ctx["_resources"].signal_reads) == 3
     finally:
         release.set()
         for check in ctx["_resources"].signal_reads.values():

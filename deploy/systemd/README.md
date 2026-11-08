@@ -54,6 +54,14 @@ The optional ports are `POLYDATA_CONSUMER_POSTGRES_REMOTE_PORT` and
 to the dedicated remote port only after a database query through it succeeds.
 The existing ClickHouse consumer tunnel remains separate.
 
+This PostgreSQL unit connects directly to its SSH target. It explicitly sets
+`ProxyCommand=none`, `ProxyJump=none` and `ControlPath=none`, so a proxy or an
+already proxied SSH master cannot carry database traffic. Host-specific drop-ins
+must preserve these options; remove previous local HTTP/SOCKS proxy overrides.
+Check authenticated direct SSH before restarting the tunnel, then verify an
+actual database query on GCP port 45434. If direct access fails, the service
+retries the direct route instead of switching to a metered proxy.
+
 
 GCP can share its original environment file with other projects. Put the host
 and port in a private `~/.config/polydata/consumer-database.env`, then add

@@ -39,7 +39,7 @@ except ImportError:
 from api.config import load_api_settings
 from api.services import worldcup_dashboard_service
 from db import DEFAULT_DB_PATH, dict_from_row, get_connection
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot, retained_snapshot
 from runtime.snapshot_store import SnapshotStore
 from runtime.telegram_panel_publish import publish_cached_panel_snapshot
 from telegram.topics.client import TelegramClient
@@ -150,16 +150,13 @@ class WorldCupDashboardWatcher:
         settings: Any,
         interval_seconds: int = DEFAULT_INTERVAL_SECONDS,
     ) -> None:
-        if redis is None:
-            raise RuntimeError("redis package is required. Install scripts/requirements.txt")
         if requests is None:
             raise RuntimeError("requests package is required. Install scripts/requirements.txt")
-        if not str(redis_url or "").strip():
-            raise RuntimeError("POLYDATA_REDIS_URL is required for World Cup dashboard watcher")
         self.settings = settings
         self.interval_seconds = max(300, int(interval_seconds or DEFAULT_INTERVAL_SECONDS))
         self.redis_prefix = str(redis_prefix or "")
-        self.redis_client = redis.from_url(redis_url, decode_responses=True)
+        self.redis_client = (redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2)
+                             if redis is not None and str(redis_url or "").strip() else None)
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
         self.requests = requests.Session()
@@ -221,6 +218,14 @@ class WorldCupDashboardWatcher:
         }
 
     def load_previous_payload(self) -> Dict[str, Any]:
+        stale = self.snapshot_store.get_stale(
+            worldcup_dashboard_service.WORLDCUP_DASHBOARD_NAMESPACE,
+            worldcup_dashboard_service.WORLDCUP_DASHBOARD_CACHE_KEY,
+        )
+        if isinstance(stale, dict) and not worldcup_dashboard_service._has_generated_fallback_artifacts(stale):
+            return stale
+        if self.redis_client is None:
+            return {}
         try:
             raw = self.redis_client.get(self.redis_key())
             if raw:
@@ -229,23 +234,15 @@ class WorldCupDashboardWatcher:
                     return payload
         except Exception:
             print("[worldcup-dashboard] WARN redis read failed", file=sys.stderr)
-        stale = self.snapshot_store.get_stale(
-            worldcup_dashboard_service.WORLDCUP_DASHBOARD_NAMESPACE,
-            worldcup_dashboard_service.WORLDCUP_DASHBOARD_CACHE_KEY,
-        )
-        if isinstance(stale, dict) and not worldcup_dashboard_service._has_generated_fallback_artifacts(stale):
-            return stale
         return {}
 
     def store_payload(self, payload: Dict[str, Any]) -> None:
         ttl_seconds = self.ttl_seconds()
-        self.snapshot_store.set(
-            worldcup_dashboard_service.WORLDCUP_DASHBOARD_NAMESPACE,
-            worldcup_dashboard_service.WORLDCUP_DASHBOARD_CACHE_KEY,
-            payload,
-            ttl_seconds,
+        publish_snapshot(
+            snapshot_store=self.snapshot_store, namespace=worldcup_dashboard_service.WORLDCUP_DASHBOARD_NAMESPACE,
+            cache_key=worldcup_dashboard_service.WORLDCUP_DASHBOARD_CACHE_KEY, payload=payload, ttl_seconds=ttl_seconds,
+            redis_client=self.redis_client, redis_cache_key=self.redis_key(),
         )
-        self.redis_client.set(self.redis_key(), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl_seconds)
 
     def publish_new_odds_alerts(self, previous: Dict[str, Any], payload: Dict[str, Any]) -> int:
         rows = _new_odds(previous, payload)
@@ -283,7 +280,7 @@ class WorldCupDashboardWatcher:
         previous = self.seed_meta_store.load(SEED_META_NAMESPACE, SEED_META_CACHE_KEY) or {}
         attempted_at = utc_now_iso()
         last_success_at = previous.get("lastSuccessAt")
-        if not preserve_last_success and status in {"ok", "degraded", "preserved"}:
+        if not preserve_last_success and (status == "ok" or (status == "degraded" and record_count > 0)):
             last_success_at = attempted_at
         payload = build_seed_meta_payload(
             panel_id="worldcup-dashboard",
@@ -293,7 +290,7 @@ class WorldCupDashboardWatcher:
             expected_interval_seconds=self.interval_seconds,
             status=status,
             last_attempt_at=attempted_at,
-            last_success_at=last_success_at or attempted_at,
+            last_success_at=last_success_at,
             record_count=record_count,
             source_states=source_states,
             error_summary=error_summary,
@@ -303,13 +300,21 @@ class WorldCupDashboardWatcher:
         )
         self.seed_meta_store.store(SEED_META_NAMESPACE, SEED_META_CACHE_KEY, payload)
 
+    def store_seed_meta_fail_soft(self, **kwargs: Any) -> bool:
+        try:
+            self.store_seed_meta(**kwargs)
+            return True
+        except Exception as exc:
+            print(f"[worldcup_dashboard] WARN seed meta write failed: {exc.__class__.__name__}", file=sys.stderr)
+            return False
+
     def run_once(self) -> Dict[str, Any]:
         previous = self.load_previous_payload()
         try:
             payload = worldcup_dashboard_service.build_worldcup_dashboard_payload(self.service_context())
         except Exception as exc:
             if previous:
-                preserved = {**previous, "cacheMode": "preserved"}
+                preserved = retained_snapshot(previous)
                 self.store_payload(preserved)
                 self.store_seed_meta(
                     status="preserved",
@@ -330,7 +335,7 @@ class WorldCupDashboardWatcher:
 
         record_count = _record_count(payload)
         if previous and len(payload.get("matches") or []) < 64:
-            preserved = {**previous, "cacheMode": "preserved"}
+            preserved = retained_snapshot(previous)
             self.store_payload(preserved)
             self.store_seed_meta(
                 status="preserved",
@@ -379,7 +384,6 @@ def main() -> int:
         settings=settings,
         interval_seconds=args.interval,
     )
-    watcher.redis_client.ping()
     print(f"[worldcup-dashboard] redis_key={watcher.redis_key()} sqlite={settings.snapshot_sqlite_path}", file=sys.stderr)
     if not args.watch:
         print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
@@ -391,7 +395,7 @@ def main() -> int:
         except KeyboardInterrupt:
             return 0
         except Exception as exc:
-            watcher.store_seed_meta(
+            watcher.store_seed_meta_fail_soft(
                 status="error",
                 record_count=0,
                 source_states={"worldcupDashboard": "error"},

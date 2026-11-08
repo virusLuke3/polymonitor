@@ -1,14 +1,58 @@
 from __future__ import annotations
 
 import json
+import math
+import re
 import time
 import requests
 from email.utils import parsedate_to_datetime
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from .http_client import http_json_get
 from api.serialization import parse_interval_minutes
+from data_sources import source_value
+
+
+def get_nasdaq_market_cap(ctx: dict, symbol: str) -> Optional[Dict[str, Any]]:
+    """Read the published US-stock summary; never derive cap from share counts."""
+    template = source_value("POLYDATA_NASDAQ_STOCK_SUMMARY_URL_TEMPLATE")
+    if not template:
+        return None
+    if not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,14}", symbol):
+        raise ValueError("Invalid stock symbol")
+    url = template.format(symbol=symbol)
+    cached = ctx["get_cached_runtime_payload"]("nasdaq-market-cap", url)
+    if cached is not None:
+        return cached
+    deadline = min(time.monotonic() + 90, ctx.get("external_source_deadline") or float("inf"))
+    payload = http_json_get(ctx, url, params={"assetclass": "stocks"}, timeout=45,
+                            headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
+                            max_response_bytes=500_000, retry_attempts=2, retry_deadline=deadline)
+    data = (payload or {}).get("data") or {}
+    summary = data.get("summaryData") or {}
+    field = summary.get("MarketCap") or {}
+    raw = str(field.get("value") or "").strip()
+    if (str(data.get("symbol") or "").upper() != symbol
+            or str(data.get("assetClass") or "").upper() != "STOCKS"
+            or ((payload or {}).get("status") or {}).get("rCode") != 200
+            or field.get("label") != "Market Cap"
+            or not re.fullmatch(r"\$?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?", raw)):
+        raise ValueError("Invalid Nasdaq stock summary identity or market cap")
+    value = float(raw.replace(",", "").lstrip("$"))
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError("Invalid Nasdaq market cap value")
+    result = {
+        "marketCap": value, "marketCapEstimated": False,
+        "marketCapSource": "nasdaq-stock-summary", "marketCapSymbol": symbol,
+        # This US-listed stock dataset reports USD; the response itself has no
+        # currency or source timestamp. Keep that basis and limitation explicit.
+        "marketCapCurrency": "USD", "marketCapCurrencyBasis": "nasdaq-us-listed-stocks",
+        "marketCapQuoteAt": None,
+        "marketCapFetchedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "marketCapReference": {"assetClass": "STOCKS", "exchange": (summary.get("Exchange") or {}).get("value")},
+    }
+    return ctx["set_cached_runtime_payload"]("nasdaq-market-cap", url, result, ttl_seconds=300)
 
 
 
@@ -80,16 +124,28 @@ def get_yahoo_market_snapshot(
         if cached is not None:
             return cached
     source_key = ctx['SETTINGS'].yahoo_chart_base_url.rstrip('/')
-    state = ctx["get_cached_runtime_payload"]("yahoo-source-backoff", source_key) or {}
+    source_state = ctx["get_cached_runtime_payload"]("yahoo-source-backoff", source_key) or {}
+    if float(source_state.get("retryAt") or 0) > time.time():
+        raise RuntimeError("Yahoo source is in bounded failure backoff")
+    # Transient/invalid-symbol failures belong to that symbol. Only an actual
+    # source rate limit may suppress requests for unrelated equities/indices.
+    item_key = source_key + ":" + symbol
+    state = ctx["get_cached_runtime_payload"]("yahoo-source-backoff", item_key) or {}
     if float(state.get("retryAt") or 0) > time.time():
         raise RuntimeError("Yahoo source is in bounded failure backoff")
+    # Quote collectors reuse the approved route and retry complete bodies. The
+    # owner's remaining round budget still bounds both attempts and their delay.
+    deadline = min(time.monotonic() + 90, ctx.get("external_source_deadline") or float("inf"))
     try:
         payload = http_json_get(
             ctx,
             f"{ctx['SETTINGS'].yahoo_chart_base_url.rstrip('/')}/{symbol}",
             params={"interval": interval, "range": range_name, "includePrePost": "false"},
-            timeout=12,
+            timeout=45,
             headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"},
+            max_response_bytes=2_500_000,
+            retry_attempts=2,
+            retry_deadline=deadline,
         )
     except requests.RequestException as exc:
         failures = int(state.get("failures") or 0) + 1
@@ -102,10 +158,11 @@ def get_yahoo_market_snapshot(
             except (TypeError, ValueError, OverflowError):
                 delay = 0
         delay = max(delay, 60 if failures >= 3 else 0)
-        ctx["set_cached_runtime_payload"]("yahoo-source-backoff", source_key,
+        backoff_key = source_key if getattr(getattr(exc, "response", None), "status_code", None) == 429 else item_key
+        ctx["set_cached_runtime_payload"]("yahoo-source-backoff", backoff_key,
             {"failures": failures, "retryAt": time.time() + delay if delay else 0}, ttl_seconds=max(60, int(delay) + 1))
         raise
-    ctx["set_cached_runtime_payload"]("yahoo-source-backoff", source_key,
+    ctx["set_cached_runtime_payload"]("yahoo-source-backoff", item_key,
         {"failures": 0, "retryAt": 0}, ttl_seconds=60)
     result = (((payload or {}).get("chart") or {}).get("result") or [None])[0]
     if not isinstance(result, dict):
@@ -147,7 +204,7 @@ def get_yahoo_market_snapshot(
         "volume24h": ctx["_safe_float"](meta.get("regularMarketVolume")),
         "marketCap": ctx["_safe_float"](meta.get("marketCap")),
         "name": meta.get("symbol") or symbol,
-        "points": points[-48:],
+        "points": points[-260:] if interval == "1d" else points[-48:],
         **_quote_metadata(meta, current, ctx["_safe_float"]),
     }
     # Crypto uses an actual 24h lookback, independent of Yahoo's chart baseline.

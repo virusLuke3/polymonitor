@@ -6,8 +6,8 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-EnvironmentFile=%h/.config/polymonitor/egress-%i.env
-ExecStart=/usr/bin/ssh -N -T -i ${POLYMONITOR_EGRESS_IDENTITY} -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=12 -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o ProxyCommand=none -o ProxyJump=none -D ${POLYMONITOR_EGRESS_LISTEN} ${POLYMONITOR_EGRESS_TARGET}
+Environment=POLYMONITOR_ENV_FILE=/__POLYMONITOR_ENV_FILE__
+ExecStart=/__POLYDATA_PYTHON_BIN__ /__POLYDATA_REPO_ROOT__/scripts/runtime/source_egress.py --node %i
 Restart=always
 RestartSec=5
 TimeoutStopSec=10

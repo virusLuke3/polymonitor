@@ -2,6 +2,25 @@
 
 polyData dashboard panels are registered through frontend and backend manifests so new panels can be added without editing the dashboard shell.
 
+This document owns the panel interface contract. The
+[frontend optimization plan](frontend-architecture-optimization.md) owns migration
+steps and acceptance; the [WorldMonitor architecture](worldmonitor-frontend-architecture.md)
+is the upstream reference, not an alternative implementation contract.
+
+Before adding or upgrading a panel, read the [data pipeline contract](panel-data-pipeline.md)
+and [cadence rules](panel-data-cadence.md). Identify the existing producer, storage,
+API and shared Runtime before writing the view. Requests and caching also follow
+the [resource contract](panel-resource-contract.md) and [shared lifecycle](panel-runtime-lifecycle.md).
+Keep these choices in the existing feature index or domain document.
+
+All credentials, upstream source endpoints/templates and proxy nodes/routes must
+come from `.env`, including public sources and fallback destinations. Do not
+hard-code their values in scripts, catalogs, defaults or deployment units. Follow
+the [environment configuration contract](panel-data-pipeline.md#31-密钥数据源和代理统一由-env-配置)
+for shared loading, missing configuration, safe examples and migration checks.
+This rule also applies when the ignored local guide is absent; it does not claim
+that existing hard-coded configuration has already been migrated.
+
 ## Design Intent
 
 The panel system is intentionally moving away from "large central scripts" and toward small, explicit modules. A panel should own its data access, render entrypoint, metadata, refresh behavior, and backend snapshot logic. Central files should only compose manifests; they should not accumulate panel-specific business logic.
@@ -33,6 +52,29 @@ Declare a request `limit` in the runtime options once. The constructor exposes i
 as `panel.request.limit` for batching and binds the same value as the second
 argument to the individual `fetchData` callback. The runtime store must not keep
 a separate table of panel-specific request parameters.
+
+When a map or another feature consumes the same runtime data, keep one owner for
+the snapshot, cache, and refresh lifecycle. Consumer visibility is aggregated by `usePanelRuntime`: enabled visible panels and
+`setConsumerPanels(consumerId, sourceIds)` are independent consumers. Removing a
+consumer only aborts a batch when no remaining consumer needs it. Page hiding
+pauses shared requests and retry timers; resuming uses the same request owner.
+
+A view that renders another panel's snapshot declares `dataSourceId` and omits
+`fetchData`. Weather detail views use `global-temperature-monitor` this way.
+A panel with additional inputs declares `dataDependencies`, including views with
+no fetcher of their own. Macro panels use this for `polymarket-macro-map`; the three
+market-wide AI views consume `alpha-signal`, `whale-tracker` and `suspicious-flow`.
+Dependency-only views must remain in `RUNTIME_PANEL_MODULES` so their visibility
+can keep those owners active. Register the source owner once.
+`getData(id)`, `getStatus(id)` and explicit refresh resolve these declarations;
+renderers read the canonical key from `runtimeData`. App does not translate these
+snapshots into a second set of provider-specific context fields.
+
+`fetchData(context, limit)` must forward `context?.signal` to its service, including
+individual fallback requests. The Runtime owns in-flight sharing, retries and
+refresh intervals; bodies must not start a second loop for these snapshots.
+Payload observation time remains distinct from request completion time. Retaining
+a useful snapshot after a warming response also retains its observation time.
 
 The frontend runtime uses the versioned `/v1/runtime/panels` envelope. Legacy
 `/runtime/panels` and per-panel routes remain raw-payload compatibility
@@ -67,6 +109,23 @@ For a new frontend panel:
 2. Keep panel-specific UI in that directory. Shared Finance, Tech and Macro templates live under `panels/shared/`; do not reintroduce grouped renderer registries or import another panel's implementation. The fixed price/book/trade strip remains owned by `FocusedMarketStrip`.
 3. Add the module to `webpage/src/panels/modules/index.ts`.
 4. Do not add panel-specific state or refresh code to `App.tsx`.
+5. Add body styles to the owning family in `webpage/src/panels/styles/`; map, globe and focused-market styles have their own feature/component files. Keep generic shell rules in `panels/styles/shell.css` and grid policy in `styles/panel-workspace.css` / `styles/panel-layout-stability.css`. Remove replaced rules in the same migration.
+
+`styles/panels.css` is an import-only entry. Each family explicitly preserves its
+`base` layer and the existing unlayered dashboard constraints; moving a declaration
+between these changes the cascade, including the reversed priority of important
+layers. `scripts/frontend-style-owners.mjs` defines private selector ownership and
+`npm run check:boundaries` rejects rules in the wrong owner. Responsive variants,
+state selectors, shorthand fallbacks and detached drag previews remain part of the
+contract, not automatically redundant rules.
+
+`e2e/panel-styles.spec.ts` mounts production registry renderers with the shared shell
+and fixed local fixtures. Its desktop/mobile checks cover every non-focus registered
+body plus populated finance, tech, macro and weather examples. Dashboard, focused
+market, real panel sizing and interactions remain covered by
+`e2e/frontend-architecture.spec.ts`; isolated body snapshots do not replace those
+integration checks. Both are included in `npm run test:frontend:e2e` and CI's
+`npm run test:browser`.
 
 Weather sharing is split into pure `shared/weather/model.ts` and `trend.ts`,
 the token-book hook, and reusable chart components. Views share these modules
@@ -85,6 +144,21 @@ owned by `finance_watch/research.py`, `news.py`, `markets.py`, and `sentiment.py
 their dependencies and common request/payload utilities live in `common.py`.
 Builders do not import the orchestration service. Existing API and watcher
 entrypoints, cache keys, stale-snapshot handling and public payloads stay stable.
+
+Finance external inputs remain owned by `runtime/finance_external_sources_watcher.py`
+and stored as `runtime:finance:external-sources / v1` in the existing snapshot store.
+OKX uses the `.env`-configured batch ticker endpoint once per source refresh,
+validates the SWAP response, then intersects the returned instrument IDs with
+the watchlist. Missing watchlist IDs are distinct from transport failures; an
+empty/invalid catalog cannot establish unsupported instruments. Last trade price,
+24-hour change and base-currency volume keep their own meanings: unknown mark,
+spot, funding and dollar notional remain null. Yahoo futures are labeled reference
+futures. COT keeps the original report date and HTTP failures, and stops repeated
+queries after a 401/403 rejection. GET acquisition shares the existing transport
+with at most two complete attempts, a 90-second source deadline and an 8 MiB body
+cap. Successful row acquisition times survive composition; failed rows retain
+their original clocks only within the existing 30-minute retention bound. API
+views read these snapshots and do not start another collector or cache.
 
 Minimal backend runtime module shape:
 

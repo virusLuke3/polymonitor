@@ -18,8 +18,11 @@ import redis
 import requests
 
 from api.config import load_api_settings
+from api.clients.source_transport import source_session
+from api.clients.fred_csv import read_fred_text
 from api.services import macro_cpi_registry_service
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, retained_snapshot, collection_delay
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, retained_snapshot, collection_delay, publish_snapshot
+from runtime.macro_collection import start_round, round_evidence, read_text
 from runtime.snapshot_store import SnapshotStore
 from runtime.telegram_panel_publish import publish_cached_panel_snapshot
 
@@ -39,13 +42,11 @@ def _redis_key(prefix: str, namespace: str, cache_key: str) -> str:
 
 class MacroCpiRegistryWatcher:
     def __init__(self, *, redis_url: str, redis_prefix: str, snapshot_sqlite_path: str, settings: Any, interval_seconds: int) -> None:
-        if not redis_url:
-            raise RuntimeError("POLYDATA_REDIS_URL is required for macro CPI registry watcher")
         self.settings = settings
         self.redis_prefix = redis_prefix or ""
         self.interval_seconds = max(300, int(interval_seconds or DEFAULT_INTERVAL_SECONDS))
-        self.redis_client = redis.from_url(redis_url, decode_responses=True)
-        self.requests = requests.Session()
+        self.redis_client = redis.from_url(redis_url, decode_responses=True, socket_connect_timeout=2, socket_timeout=2) if redis_url else None
+        self.requests = source_session(requests)
         self.requests.trust_env = str(os.environ.get("POLYDATA_RUNTIME_TRUST_ENV", "0")).lower() in {"1", "true", "yes", "on"}
         self.snapshot_store = SnapshotStore(snapshot_sqlite_path)
         self.seed_meta_store = SeedMetaStore(redis_client=self.redis_client, redis_prefix=self.redis_prefix, snapshot_store=self.snapshot_store)
@@ -63,19 +64,20 @@ class MacroCpiRegistryWatcher:
         return _redis_key(self.redis_prefix, self.namespace(panel_id), self.cache_key())
 
     def _get_cached_json(self, namespace: str, cache_key: str) -> Dict[str, Any] | None:
-        raw = self.redis_client.get(_redis_key(self.redis_prefix, namespace, cache_key))
-        if not raw:
-            return None
-        payload = json.loads(str(raw))
+        payload = self.snapshot_store.get(namespace, cache_key)
+        if not isinstance(payload, dict):
+            payload = self.snapshot_store.get_stale(namespace, cache_key)
         return payload if isinstance(payload, dict) else None
 
     def _set_cached_json(self, namespace: str, cache_key: str, payload: Dict[str, Any], ttl: int) -> None:
-        self.redis_client.set(_redis_key(self.redis_prefix, namespace, cache_key), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl)
+        if self.redis_client is not None:
+            try:
+                self.redis_client.set(_redis_key(self.redis_prefix, namespace, cache_key), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl)
+            except Exception as exc:
+                print(f"[macro-source] Redis cache mirror failed: {type(exc).__name__}", file=sys.stderr)
 
     def _http_text_get(self, url: str, **kwargs: Any) -> str:
-        response = self.requests.get(url, **kwargs)
-        response.raise_for_status()
-        return response.text
+        return read_text(self, url, **kwargs)
 
     def context(self) -> Dict[str, Any]:
         return {
@@ -85,19 +87,23 @@ class MacroCpiRegistryWatcher:
             "set_cached_json": self._set_cached_json,
             "utc_now_iso": utc_now_iso,
             "http_text_get": self._http_text_get,
+            "fred_text_get": lambda url, **kwargs: read_fred_text(self.requests, url, deadline=getattr(self, "collection_deadline", None)),
         }
 
     def previous(self, panel_id: str) -> Dict[str, Any]:
-        cached = self._get_cached_json(self.namespace(panel_id), self.cache_key())
-        if cached:
-            return cached
         stale = self.snapshot_store.get_stale(self.namespace(panel_id), self.cache_key())
-        return stale if isinstance(stale, dict) else {}
+        if isinstance(stale, dict):
+            return stale
+        return self._get_cached_json(self.namespace(panel_id), self.cache_key()) or {}
 
     def store_payload(self, panel_id: str, payload: Dict[str, Any]) -> None:
+        evidence = round_evidence(self)
+        if evidence:
+            payload = {**payload, "collectionBudget": evidence}
         ttl = self.ttl_seconds()
-        self.snapshot_store.set(self.namespace(panel_id), self.cache_key(), payload, ttl)
-        self.redis_client.set(self.redis_key(panel_id), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl)
+        publish_snapshot(snapshot_store=self.snapshot_store, namespace=self.namespace(panel_id),
+                         cache_key=self.cache_key(), payload=payload, ttl_seconds=ttl,
+                         redis_client=self.redis_client, redis_cache_key=self.redis_key(panel_id))
 
     def store_meta(self, panel_id: str, *, status: str, record_count: int, source_states: Dict[str, Any] | None = None, error_summary: str | None = None, preserve: bool = False, cache_mode: str | None = None, payload_status: str | None = None) -> None:
         previous = self.seed_meta_store.load(SEED_META_NAMESPACE, panel_id) or {}
@@ -111,7 +117,7 @@ class MacroCpiRegistryWatcher:
             expected_interval_seconds=self.interval_seconds,
             status=status,
             last_attempt_at=attempted,
-            last_success_at=last_success or attempted,
+            last_success_at=last_success,
             record_count=record_count,
             source_states=source_states,
             error_summary=error_summary,
@@ -145,6 +151,7 @@ class MacroCpiRegistryWatcher:
         return {"panelId": panel_id, "status": "stored", "payloadStatus": payload.get("status"), "items": len(payload.get("items") or []), "telegramSent": telegram_sent}
 
     def run_once(self) -> Dict[str, Any]:
+        start_round(self, 'macro_cpi_registry_round_budget_seconds', 450)
         results = [self.run_panel(panel_id) for panel_id in macro_cpi_registry_service.MACRO_CPI_REGISTRY_PANEL_IDS]
         status = "ok" if all(result.get("status") == "stored" and result.get("payloadStatus") == "ok" for result in results) else "degraded"
         return {"status": status, "results": results}
@@ -159,7 +166,6 @@ def main() -> int:
     args = parser.parse_args()
     settings = load_api_settings()
     watcher = MacroCpiRegistryWatcher(redis_url=settings.redis_url, redis_prefix=settings.redis_prefix, snapshot_sqlite_path=settings.snapshot_sqlite_path, settings=settings, interval_seconds=args.interval)
-    watcher.redis_client.ping()
     print(f"[macro-cpi-registry] panels={','.join(macro_cpi_registry_service.MACRO_CPI_REGISTRY_PANEL_IDS)} sqlite={settings.snapshot_sqlite_path}", file=sys.stderr)
     if not args.watch:
         print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)

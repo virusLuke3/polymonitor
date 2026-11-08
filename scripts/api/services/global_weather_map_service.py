@@ -1844,6 +1844,14 @@ def _read_seeded_snapshot(
     *,
     ttl_seconds: int,
 ) -> Optional[Dict[str, Any]]:
+    store = dependencies.snapshot_store
+    if store is not None:
+        payload = store.get(GLOBAL_WEATHER_MAP_SNAPSHOT_NAMESPACE, GLOBAL_WEATHER_MAP_CACHE_KEY)
+        if isinstance(payload, dict):
+            return _with_cache_mode(payload, "sqlite-seed")
+        stale = store.get_stale(GLOBAL_WEATHER_MAP_SNAPSHOT_NAMESPACE, GLOBAL_WEATHER_MAP_CACHE_KEY)
+        if isinstance(stale, dict):
+            return _with_cache_mode(stale, "stale-seed")
     if dependencies.get_cached_json is not None:
         payload = dependencies.get_cached_json(
             GLOBAL_WEATHER_MAP_SNAPSHOT_NAMESPACE,
@@ -1851,15 +1859,6 @@ def _read_seeded_snapshot(
         )
         if isinstance(payload, dict):
             return _with_cache_mode(payload, "redis-seed")
-    store = dependencies.snapshot_store
-    if store is None:
-        return None
-    payload = store.get(GLOBAL_WEATHER_MAP_SNAPSHOT_NAMESPACE, GLOBAL_WEATHER_MAP_CACHE_KEY)
-    if isinstance(payload, dict):
-        return _with_cache_mode(payload, "sqlite-seed")
-    stale = store.get_stale(GLOBAL_WEATHER_MAP_SNAPSHOT_NAMESPACE, GLOBAL_WEATHER_MAP_CACHE_KEY)
-    if isinstance(stale, dict):
-        return _with_cache_mode(stale, "stale-seed")
     return None
 
 

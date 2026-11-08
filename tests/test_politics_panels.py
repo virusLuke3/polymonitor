@@ -119,13 +119,13 @@ def test_transport_accepts_only_verified_fec_redirect(monkeypatch):
             self.headers = {"Location": location} if location else {}
         def close(self): pass
         def raise_for_status(self): pass
-        def iter_content(self, size): yield b"source"
+        def iter_content(self, chunk_size): yield b"source"
         def __enter__(self): return self
         def __exit__(self, *args): self.close()
     class Session:
         trust_env = True
         def __init__(self, destination): self.destination, self.calls = destination, []
-        def get(self, url, **kwargs):
+        def request(self, method, url, **kwargs):
             self.calls.append((url, kwargs))
             return Response(302, self.destination) if len(self.calls) == 1 else Response(200)
         def close(self): pass
@@ -140,3 +140,55 @@ def test_transport_accepts_only_verified_fec_redirect(monkeypatch):
     with pytest.raises(ValueError, match="redirected"):
         transport.get("https://www.fec.gov/files/bulk-downloads/2026/weball26.zip")
     assert len(session.calls) == 1
+
+
+def test_bill_404_backoff_survives_restart_and_does_not_erase_success(tmp_path):
+    import requests
+    store = SnapshotStore(str(tmp_path / 'snapshots.sqlite3'))
+    response = requests.Response()
+    response.status_code = 404
+    def missing():
+        raise requests.HTTPError('private URL', response=response)
+    first = collect(store, 'bill:119hres1648', missing, 1800, now=1000)
+    assert first['error'] == 'HTTP 404' and first['nextAttemptAt'] == 4600
+    restarted = SnapshotStore(store.db_path)
+    assert collect(restarted, 'bill:119hres1648', lambda: pytest.fail('404 retried early'), 1800, now=2000) == first
+    second = collect(restarted, 'bill:119hres1648', missing, 1800, now=4601)
+    assert second['nextAttemptAt'] == 11801 and second.get('lastSuccessAt') is None
+
+
+def test_legislation_reports_failed_details_and_funding_isolates_unrelated_bill(tmp_path, monkeypatch):
+    from api.services.politics import store as storage
+    from api.services.politics.catalog import catalog
+    store = SnapshotStore(str(tmp_path / 'snapshots.sqlite3'))
+    monkeypatch.setattr(storage.time, 'time', lambda: 1000)
+    feed_key = next(spec.key for spec in catalog() if spec.key.startswith('bills-'))
+    for key, data in [(feed_key, {'items': [{'id': '119hres1648', 'title': 'An unrelated resolution'}]}),
+                      ('funding-law-119-103', {'title': 'Current law'}),
+                      ('bill:119hr6500', {'id': '119hr6500', 'title': 'Appropriations'})]:
+        collect(store, key, lambda data=data: (b'data', data), 1800, now=900)
+    store.set(SOURCE_NS, 'bill:119hres1648', {'lastAttemptAt': 950, 'error': 'HTTP 404'}, 1000)
+    store.set(SOURCE_NS, 'bill-index', {'ids': ['119hres1648', '119hr6500'],
+              'targetIds': ['119hres1648', '119hr6500'], 'targetCount': 2}, 1000)
+    legislation = snapshots.get_snapshot(store, 'politics-legislation')
+    assert legislation['status'] == 'degraded' and legislation['failedCount'] == 1
+    assert legislation['acquiredCount'] == 1 and legislation['pendingCount'] == 1
+    assert legislation['generatedAt'] == storage.iso(900)
+    assert snapshots.get_snapshot(store, 'politics-funding')['status'] == 'ok'
+
+
+def test_bill_freshness_accounts_for_bounded_rotation_without_more_fetches(tmp_path):
+    from api.services.politics.store import bill_refresh_interval
+    store = SnapshotStore(str(tmp_path / 'snapshots.sqlite3'))
+    collect(store, 'bill:119hr1', lambda: (b'body', {'id': '119hr1'}), 1800, now=1000)
+    store.set(SOURCE_NS, 'bill-index', {'targetCount': 101}, 1000)
+    assert bill_refresh_interval(101) == 6300
+    _, meta = source(store, 'bill:119hr1', 'url', now=1000 + 6300)
+    assert not meta['stale'] and meta['expectedIntervalSeconds'] == 6300
+    assert meta['staleAfterSeconds'] == 18900
+    assert source(store, 'bill:119hr1', 'url', now=1000 + 18901)[1]['stale']
+    assert store.get_stale(SOURCE_NS, 'bill:119hr1')['nextAttemptAt'] == 2800
+    state = store.get_stale(SOURCE_NS, 'bill:119hr1')
+    store.set(SOURCE_NS, 'bill:119hr1', {**state, 'error': 'HTTP 404', 'nextAttemptAt': 999999}, 1000)
+    assert source(store, 'bill:119hr1', 'url', now=1000 + 18901)[1]['stale']
+    assert bill_refresh_interval(5) == 1800

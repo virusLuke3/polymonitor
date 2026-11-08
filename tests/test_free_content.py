@@ -358,7 +358,8 @@ def test_public_read_uses_one_database_query_and_reuses_route_market(storage, so
     from api.services.query_service import ContentStorageDependencies, get_related_content_by_market_id
     from api.services.content_service import get_related_content_payload
 
-    store.persist(storage, source, [article(source)], "2026-10-01T00:00:00Z")
+    stamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    store.persist(storage, source, [article(source, published_at=stamp)], stamp)
     store.save_state(storage, source["source_id"], {"status": "ok"})
     calls = []
     dependency = ContentStorageDependencies(

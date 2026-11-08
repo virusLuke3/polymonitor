@@ -69,7 +69,7 @@ def make_ctx(*, fail: bool = False):
 
 def test_food_retail_basket_builds_official_component_snapshot():
     ctx = make_ctx()
-    payload = food_retail_basket_service.get_food_retail_basket_snapshot(ctx, limit=4)
+    payload = food_retail_basket_service.get_food_retail_basket_snapshot(ctx, limit=4, allow_live_build=True)
 
     assert payload["status"] == "degraded"
     assert "error" in payload["sources"].values()
@@ -79,11 +79,11 @@ def test_food_retail_basket_builds_official_component_snapshot():
     assert len(payload["items"]) == 4
     assert payload["items"][0]["source"] == "FRED / BLS CPI"
     assert payload["items"][0]["momPct"] > 0
-    assert all("cosd=" in url for url in ctx["requested_urls"])
+    assert all("cosd=" not in url for url in ctx["requested_urls"])
 
 
 def test_food_retail_basket_warms_when_all_sources_fail():
-    payload = food_retail_basket_service.get_food_retail_basket_snapshot(make_ctx(fail=True))
+    payload = food_retail_basket_service.get_food_retail_basket_snapshot(make_ctx(fail=True), allow_live_build=True)
 
     assert payload["status"] == "warming"
     assert payload["items"] == []
