@@ -3,12 +3,15 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 UNIT_SOURCE_DIR="${ROOT_DIR}/deploy/systemd"
+QA_PYTHON_BIN="$(command -v python3)"
 RENDERED_DIR="$(mktemp -d)"
 trap 'rm -rf -- "${RENDERED_DIR}"' EXIT
 
 while IFS= read -r -d '' source; do
   unit="${source##*/}"
   sed \
+    -e "s|/__POLYDATA_VENV__/bin/python|${QA_PYTHON_BIN}|g" \
+    -e "s|/__POLYDATA_PYTHON_BIN__|${QA_PYTHON_BIN}|g" \
     -e "s|/__POLYDATA_REPO_ROOT__|${ROOT_DIR}|g" \
     -e "s|%h/develop/polymarket/githubProjects/polymonitor|${ROOT_DIR}|g" \
     "${source}" > "${RENDERED_DIR}/${unit}"
