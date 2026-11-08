@@ -1,3 +1,4 @@
+import { publicFeedSnapshot } from '@/panels/shared/public-feed-snapshot';
 import type { PanelInputs } from '../../types';
 import type { RuntimeNbaIntelPayload } from '@/types';
 import { Panel } from '@/components/Panel';
@@ -78,6 +79,7 @@ const renderers: PanelRenderMap = {
 
 export const panel = runtimePanelFromRenderer(renderers, {
   id: 'nba-intel',
+  snapshot: publicFeedSnapshot('nba-intel', 12),
   title: 'NBA Intel',
   eyebrow: 'sports',
   description: 'ESPN news, starting lineups, and pregame rumors.',

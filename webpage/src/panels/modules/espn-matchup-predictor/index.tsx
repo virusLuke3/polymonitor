@@ -1,3 +1,4 @@
+import { publicFeedSnapshot } from '@/panels/shared/public-feed-snapshot';
 import type { PanelInputs } from '../../types';
 import type { RuntimeNbaMatchupPredictorPayload } from '@/types';
 import { Panel } from '@/components/Panel';
@@ -104,6 +105,7 @@ const renderers: PanelRenderMap = {
 
 export const panel = runtimePanelFromRenderer(renderers, {
   id: 'espn-matchup-predictor',
+  snapshot: publicFeedSnapshot('espn-matchup-predictor', 8),
   title: 'ESPN Matchup Predictor',
   eyebrow: 'sports',
   description: 'ESPN BPI win probability, matchup quality, projected margin, and expected score.',

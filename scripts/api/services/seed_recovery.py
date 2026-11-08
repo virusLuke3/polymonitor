@@ -27,6 +27,40 @@ def age_seconds(timestamp: Any, now: str) -> float:
         return float("inf")
 
 
+def read_public_seed(*, namespace: str, cache_key: str, snapshot_store: Any,
+                     redis_get: Callable | None, max_age_seconds: int,
+                     retain_seconds: int, now: str | None = None) -> dict | None:
+    """Read an existing owner's publication; never acquire, write or renew it.
+
+    SQLite is authoritative. Optional Redis is only a missing-local fallback,
+    and all tiers are bounded by the original payload clock, not storage TTL.
+    """
+    current = now or datetime.now(timezone.utc).isoformat()
+
+    def accepted(value: Any, mode: str) -> dict | None:
+        if not isinstance(value, dict):
+            return None
+        if str(value.get("status") or "").lower() in {"error", "failed", "unavailable", "warming", "invalid"}:
+            return None
+        age = age_seconds(value.get("generatedAt"), current)
+        if age >= retain_seconds:
+            return None
+        return {**value, "cacheMode": mode,
+                **({"status": "stale"} if age >= max_age_seconds else {})}
+
+    if snapshot_store is not None:
+        for getter in (snapshot_store.get, snapshot_store.get_stale):
+            value = accepted(getter(namespace, cache_key), "sqlite-seed")
+            if value is not None:
+                return value
+    if redis_get is not None:
+        try:
+            return accepted(redis_get(namespace, cache_key), "redis-seed")
+        except Exception:
+            _logger.warning("Optional Redis seed read failed namespace=%s", namespace)
+    return None
+
+
 def retain_failed_rows(previous: dict, failed_ids: list[str], now: str) -> list[dict]:
     """Retain only failed identities for 30m, never renew their acquisition clock."""
     failed = set(failed_ids)

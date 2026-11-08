@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readResourceCache, resourceIsCurrent, writeResourceCache, type ResourceCacheContract } from './resource-cache';
+import { readResourceCache, readResourceCacheEntry, resourceIsCurrent, writeResourceCache, type ResourceCacheContract } from './resource-cache';
 import { parseIntelPayload, type IntelPayload } from './modules/related-news/model';
 
 const now = Date.parse('2026-10-01T12:00:00Z');
@@ -18,6 +18,16 @@ function storage() {
 }
 
 describe('public panel snapshot recovery', () => {
+  it('restores the previous check separately from the source clock and rejects a copied key', () => {
+    const cache = storage();
+    writeResourceCache(contract, payload, cache, now + 1000);
+    expect(readResourceCacheEntry(contract, cache, now + 2000)).toMatchObject({ checkedAt: now + 1000, value: { generatedAt: payload.generatedAt } });
+    const key = 'polymonitor:panel-resource:' + contract.key;
+    cache.setItem(key + ':other', cache.getItem(key)!);
+    expect(readResourceCache({ ...contract, key: contract.key + ':other' }, cache, now + 2000)).toBeNull();
+    cache.setItem(key, JSON.stringify({ version: 1, value: payload, cachedAt: now }));
+    expect(readResourceCacheEntry(contract, cache, now + 2000)?.checkedAt).toBeNull();
+  });
   it('bounds total storage and evicts old entries while preserving the newest snapshot and user settings', () => {
     const cache = storage(), large = { ...contract, cache: { version: 1, maxChars: 512_000 } };
     cache.setItem('user-preference', 'keep');
@@ -47,6 +57,15 @@ describe('public panel snapshot recovery', () => {
     writeResourceCache(larger, value, cache, now);
     expect(readResourceCache(larger, cache, now)?.items[0]?.id).toBe('large');
     expect(readResourceCache(contract, cache, now)).toBeNull();
+  });
+  it('persists an explicitly accepted stale response without renewing its source clock', () => {
+    const retained = { ...contract, staleAgeMs: 30 * 60_000, acceptStale: true };
+    const cache = storage();
+    writeResourceCache(retained, payload, cache, now + 360_000);
+    expect(readResourceCacheEntry(retained, cache, now + 360_000)).toMatchObject({
+      checkedAt: now + 360_000, value: { generatedAt: payload.generatedAt },
+    });
+    expect(readResourceCache(retained, cache, now + 1_800_000)).toBeNull();
   });
   it('hydrates a validated snapshot immediately without extending its source lifetime', () => {
     const cache = storage();
@@ -79,8 +98,8 @@ describe('public panel snapshot recovery', () => {
   it('isolates public resource keys, bounds storage and survives storage failure', () => {
     const cache = storage();
     cache.setItem('user-preference', 'keep');
-    for (let i = 0; i < 40; i++) writeResourceCache({ ...contract, key: `resource:${i}` }, payload, cache, now);
-    expect(cache.length).toBe(33);
+    for (let i = 0; i < 104; i++) writeResourceCache({ ...contract, key: `resource:${i}` }, payload, cache, now);
+    expect(cache.length).toBe(97);
     expect(cache.getItem('user-preference')).toBe('keep');
     expect(readResourceCache({ ...contract, key: 'another-market' }, cache, now)).toBeNull();
     const blocked = { ...cache, getItem: () => { throw new Error('disabled'); }, setItem: () => { throw new Error('quota'); } };

@@ -97,7 +97,7 @@ class SportsOddsServiceTestCase(unittest.TestCase):
         }
 
     def test_snapshot_normalizes_bookmaker_consensus_and_pm_delta(self):
-        payload = sports_odds_service.get_sports_odds_snapshot(self.make_context(), limit=4)
+        payload = sports_odds_service._safe_live_sports_odds_payload(sports_odds_service._dependencies(self.make_context()), limit=4)
 
         self.assertEqual("ok", payload["status"])
         self.assertEqual(1, len(payload["items"]))
@@ -110,7 +110,7 @@ class SportsOddsServiceTestCase(unittest.TestCase):
 
     def test_missing_key_returns_renderable_degraded_payload(self):
         ctx = self.make_context(api_key="")
-        payload = sports_odds_service.get_sports_odds_snapshot(ctx, limit=4)
+        payload = sports_odds_service._safe_live_sports_odds_payload(sports_odds_service._dependencies(ctx), limit=4)
 
         self.assertEqual("degraded", payload["status"])
         self.assertEqual("missing-key", payload["sources"]["theOddsApi"])
@@ -137,8 +137,8 @@ class SportsOddsServiceTestCase(unittest.TestCase):
 
 
     def test_newer_watcher_snapshot_beats_old_request_size_cache(self):
-        old = {"generatedAt": "2026-07-21T09:00:00Z", "items": [{"id": "old"}]}
-        current = {"generatedAt": "2026-09-23T01:00:00Z", "items": [{"id": str(i)} for i in range(12)]}
+        old = {"generatedAt": "2026-05-12T17:00:00Z", "items": [{"id": "old"}]}
+        current = {"generatedAt": "2026-05-12T18:00:00Z", "items": [{"id": str(i)} for i in range(12)]}
         ctx = self.make_context()
         ctx["get_cached_json"] = lambda namespace, key: current if json.loads(key)["limit"] == 32 else old
         with patch.dict("os.environ", {"POLYDATA_SPORTS_ODDS_LIMIT": "32"}), patch.object(
@@ -150,8 +150,8 @@ class SportsOddsServiceTestCase(unittest.TestCase):
         self.assertEqual("0", payload["items"][0]["id"])
 
     def test_older_watcher_snapshot_does_not_replace_newer_request_cache(self):
-        current = {"generatedAt": "2026-09-23T01:00:00Z", "items": [{"id": "new"}]}
-        old = {"generatedAt": "2026-07-21T09:00:00Z", "items": [{"id": "old"}]}
+        current = {"generatedAt": "2026-05-12T18:00:00Z", "items": [{"id": "new"}]}
+        old = {"generatedAt": "2026-05-12T17:00:00Z", "items": [{"id": "old"}]}
         ctx = self.make_context()
         ctx["get_cached_json"] = lambda namespace, key: old if json.loads(key)["limit"] == 32 else current
         with patch.dict("os.environ", {"POLYDATA_SPORTS_ODDS_LIMIT": "32"}):

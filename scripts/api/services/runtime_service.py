@@ -375,22 +375,30 @@ def fetch_live_nba_scoreboard_payload(ctx: RuntimeServiceContext, limit: int = 1
     return normalize_nba_scoreboard_payload({"items": games, "generatedAt": _dependencies(ctx).utc_now_iso()}, limit=limit)
 
 
+def _read_nba_seed(ctx: RuntimeServiceContext, *, namespace: str, cache_key: str, ttl_seconds: int) -> Optional[Dict[str, Any]]:
+    dependencies = _dependencies(ctx)
+    return seed_recovery.read_public_seed(
+        namespace=namespace, cache_key=cache_key, snapshot_store=dependencies.snapshot_store,
+        redis_get=dependencies.get_cached_json, max_age_seconds=180, retain_seconds=900,
+        now=dependencies.utc_now_iso(),
+    )
+
+
 def get_nba_scoreboard_snapshot(ctx: RuntimeServiceContext, limit: int = 10) -> Dict[str, Any]:
     ttl_seconds = int(_dependencies(ctx).sports_runtime_ttl_seconds)
     cache_key = build_nba_scoreboard_cache_key(limit=limit)
-    seeded_payload = _read_seeded_snapshot(ctx, namespace=NBA_SCOREBOARD_NAMESPACE, cache_key=cache_key, ttl_seconds=ttl_seconds)
+    seeded_payload = _read_nba_seed(ctx, namespace=NBA_SCOREBOARD_NAMESPACE, cache_key=cache_key, ttl_seconds=ttl_seconds)
     if seeded_payload is None and int(limit or 0) != 10:
-        seeded_payload = _read_seeded_snapshot(
+        seeded_payload = _read_nba_seed(
             ctx,
             namespace=NBA_SCOREBOARD_NAMESPACE,
             cache_key=build_nba_scoreboard_cache_key(limit=10),
             ttl_seconds=ttl_seconds,
         )
     if seeded_payload is not None:
-        return normalize_nba_scoreboard_payload(seeded_payload, limit=limit, generated_at=_dependencies(ctx).utc_now_iso())
+        return normalize_nba_scoreboard_payload(seeded_payload, limit=limit)
 
-    payload = _with_cache_mode(fetch_live_nba_scoreboard_payload(ctx, limit=limit), "live-fallback")
-    return _store_seed_fallback(ctx, namespace=NBA_SCOREBOARD_NAMESPACE, cache_key=cache_key, payload=payload, ttl_seconds=ttl_seconds)
+    return {"items": [], "generatedAt": "", "status": "warming", "cacheMode": "warming"}
 
 
 def _runtime_float(ctx: RuntimeServiceContext, value: Any) -> Optional[float]:
@@ -531,19 +539,18 @@ def fetch_live_nba_matchup_predictor_payload(ctx: RuntimeServiceContext, limit: 
 def get_nba_matchup_predictor_snapshot(ctx: RuntimeServiceContext, limit: int = 8) -> Dict[str, Any]:
     ttl_seconds = int(_dependencies(ctx).sports_runtime_ttl_seconds)
     cache_key = build_nba_matchup_predictor_cache_key(limit=limit)
-    seeded_payload = _read_seeded_snapshot(ctx, namespace=NBA_MATCHUP_PREDICTOR_NAMESPACE, cache_key=cache_key, ttl_seconds=ttl_seconds)
+    seeded_payload = _read_nba_seed(ctx, namespace=NBA_MATCHUP_PREDICTOR_NAMESPACE, cache_key=cache_key, ttl_seconds=ttl_seconds)
     if seeded_payload is None and int(limit or 0) != 8:
-        seeded_payload = _read_seeded_snapshot(
+        seeded_payload = _read_nba_seed(
             ctx,
             namespace=NBA_MATCHUP_PREDICTOR_NAMESPACE,
             cache_key=build_nba_matchup_predictor_cache_key(limit=8),
             ttl_seconds=ttl_seconds,
         )
     if seeded_payload is not None:
-        return normalize_nba_matchup_predictor_payload(seeded_payload, limit=limit, generated_at=_dependencies(ctx).utc_now_iso())
+        return normalize_nba_matchup_predictor_payload(seeded_payload, limit=limit)
 
-    payload = _with_cache_mode(fetch_live_nba_matchup_predictor_payload(ctx, limit=limit), "live-fallback")
-    return _store_seed_fallback(ctx, namespace=NBA_MATCHUP_PREDICTOR_NAMESPACE, cache_key=cache_key, payload=payload, ttl_seconds=ttl_seconds)
+    return {"items": [], "generatedAt": "", "status": "warming", "cacheMode": "warming"}
 
 
 def normalize_nba_intel_payload(payload: Any, *, limit: int = 12, generated_at: str | None = None) -> Dict[str, Any]:
@@ -659,19 +666,18 @@ def fetch_live_nba_intel_payload(ctx: RuntimeServiceContext, limit: int = 12) ->
 def get_nba_intel_snapshot(ctx: RuntimeServiceContext, limit: int = 12) -> Dict[str, Any]:
     ttl_seconds = int(_dependencies(ctx).sports_runtime_ttl_seconds)
     cache_key = build_nba_intel_cache_key(limit=limit)
-    seeded_payload = _read_seeded_snapshot(ctx, namespace=NBA_INTEL_NAMESPACE, cache_key=cache_key, ttl_seconds=ttl_seconds)
+    seeded_payload = _read_nba_seed(ctx, namespace=NBA_INTEL_NAMESPACE, cache_key=cache_key, ttl_seconds=ttl_seconds)
     if seeded_payload is None and int(limit or 0) != 12:
-        seeded_payload = _read_seeded_snapshot(
+        seeded_payload = _read_nba_seed(
             ctx,
             namespace=NBA_INTEL_NAMESPACE,
             cache_key=build_nba_intel_cache_key(limit=12),
             ttl_seconds=ttl_seconds,
         )
     if seeded_payload is not None:
-        return normalize_nba_intel_payload(seeded_payload, limit=limit, generated_at=_dependencies(ctx).utc_now_iso())
+        return normalize_nba_intel_payload(seeded_payload, limit=limit)
 
-    payload = _with_cache_mode(fetch_live_nba_intel_payload(ctx, limit=limit), "live-fallback")
-    return _store_seed_fallback(ctx, namespace=NBA_INTEL_NAMESPACE, cache_key=cache_key, payload=payload, ttl_seconds=ttl_seconds)
+    return {"items": [], "generatedAt": "", "status": "warming", "cacheMode": "warming", "lineups": []}
 
 
 INFLATION_NOWCAST_NAMESPACE = "snapshot:macro:inflation-nowcast"

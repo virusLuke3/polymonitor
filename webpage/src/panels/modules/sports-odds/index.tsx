@@ -1,3 +1,4 @@
+import { publicFeedSnapshot } from '@/panels/shared/public-feed-snapshot';
 import { compactText as compact, relativeDuration as timeLabel } from '../../shared/formatters';
 import { numericValue as numeric } from '@/panels/shared/formatters';
 import { useMemo, useState } from 'preact/hooks';
@@ -161,6 +162,7 @@ const renderers: PanelRenderMap = {
 
 export const panel = runtimePanelFromRenderer(renderers, {
   id: 'sports-odds',
+  snapshot: publicFeedSnapshot('sports-odds', 8),
   title: 'Sports Odds',
   eyebrow: 'sports',
   description: 'Bookmaker consensus monitor with Polymarket comparison hooks.',

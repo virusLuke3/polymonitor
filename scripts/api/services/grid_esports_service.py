@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from api.services.seed_recovery import read_public_seed
+
 from data_sources import source_value
 
 import hashlib
@@ -585,10 +587,6 @@ def normalize_grid_esports_payload(payload: Any, *, settings: Any, limit: int = 
     }
 
 
-def _with_cache_mode(payload: Dict[str, Any], cache_mode: str) -> Dict[str, Any]:
-    return {**payload, "cacheMode": str(payload.get("cacheMode") or cache_mode)}
-
-
 def _read_seeded_snapshot(
     dependencies: GridEsportsDependencies,
     *,
@@ -596,47 +594,12 @@ def _read_seeded_snapshot(
     cache_key: str,
     ttl_seconds: int,
 ) -> Optional[Dict[str, Any]]:
-    reader = dependencies.get_cached_json
-    if reader is not None:
-        redis_payload = reader(namespace, cache_key)
-        if isinstance(redis_payload, dict):
-            store = dependencies.snapshot_store
-            if store is not None:
-                store.set(namespace, cache_key, redis_payload, ttl_seconds)
-            return _with_cache_mode(redis_payload, "redis-seed")
-    store = dependencies.snapshot_store
-    if store is None:
-        return None
-    sqlite_payload = store.get(namespace, cache_key)
-    if isinstance(sqlite_payload, dict):
-        setter = dependencies.set_cached_json
-        if setter is not None:
-            setter(namespace, cache_key, sqlite_payload, ttl_seconds)
-        return _with_cache_mode(sqlite_payload, "sqlite-seed")
-    stale_payload = store.get_stale(namespace, cache_key)
-    if isinstance(stale_payload, dict):
-        setter = dependencies.set_cached_json
-        if setter is not None:
-            setter(namespace, cache_key, stale_payload, min(15, ttl_seconds))
-        return _with_cache_mode(stale_payload, "stale-seed")
-    return None
-
-
-def _store_seed_fallback(
-    dependencies: GridEsportsDependencies,
-    *,
-    namespace: str,
-    cache_key: str,
-    payload: Dict[str, Any],
-    ttl_seconds: int,
-) -> Dict[str, Any]:
-    store = dependencies.snapshot_store
-    if store is not None:
-        store.set(namespace, cache_key, payload, ttl_seconds)
-    setter = dependencies.set_cached_json
-    if setter is not None:
-        setter(namespace, cache_key, payload, ttl_seconds)
-    return payload
+    return read_public_seed(
+        namespace=namespace, cache_key=cache_key,
+        snapshot_store=dependencies.snapshot_store, redis_get=dependencies.get_cached_json,
+        max_age_seconds=240, retain_seconds=900,
+        now=dependencies.utc_now_iso() if dependencies.utc_now_iso is not None else None,
+    )
 
 
 def fetch_live_grid_esports_payload(
@@ -831,18 +794,4 @@ def get_grid_esports_snapshot(
             ),
         )
 
-    def _builder() -> Dict[str, Any]:
-        return _safe_live_grid_esports_payload(dependencies, limit=limit)
-
-    if dependencies.snapshot_store is None and dependencies.get_snapshot_payload is not None:
-        return dependencies.get_snapshot_payload(
-            GRID_ESPORTS_NAMESPACE,
-            cache_key,
-            _builder,
-            ttl_seconds=ttl_seconds,
-        )
-
-    payload = _with_cache_mode(_safe_live_grid_esports_payload(dependencies, limit=limit), "live-build")
-    if payload.get("items"):
-        return _store_seed_fallback(dependencies, namespace=GRID_ESPORTS_NAMESPACE, cache_key=cache_key, payload=payload, ttl_seconds=ttl_seconds)
-    return payload
+    return {"items": [], "generatedAt": "", "status": "warming", "cacheMode": "warming"}

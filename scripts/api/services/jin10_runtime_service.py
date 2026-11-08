@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from api.services.seed_recovery import read_public_seed
+
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -116,57 +118,18 @@ def fetch_live_jin10_panel_payload(
     )
 
 
-def _with_cache_mode(payload: Dict[str, Any], cache_mode: str) -> Dict[str, Any]:
-    return {**payload, "cacheMode": str(payload.get("cacheMode") or cache_mode)}
-
-
 def _read_seeded_snapshot(
     dependencies: Jin10RuntimeDependencies,
     *,
     cache_key: str,
     ttl_seconds: int,
 ) -> Dict[str, Any] | None:
-    redis_payload = dependencies.get_cached_json(
-        JIN10_SNAPSHOT_NAMESPACE,
-        cache_key,
+    return read_public_seed(
+        namespace=JIN10_SNAPSHOT_NAMESPACE, cache_key=cache_key,
+        snapshot_store=dependencies.snapshot_store, redis_get=dependencies.get_cached_json,
+        max_age_seconds=300, retain_seconds=1800,
+        now=dependencies.utc_now_iso() if dependencies.utc_now_iso is not None else None,
     )
-    if isinstance(redis_payload, dict):
-        dependencies.snapshot_store.set(
-            JIN10_SNAPSHOT_NAMESPACE,
-            cache_key,
-            redis_payload,
-            ttl_seconds,
-        )
-        return _with_cache_mode(redis_payload, "redis-seed")
-
-    sqlite_payload = dependencies.snapshot_store.get(
-        JIN10_SNAPSHOT_NAMESPACE,
-        cache_key,
-    )
-    if isinstance(sqlite_payload, dict):
-        if dependencies.set_cached_json is not None:
-            dependencies.set_cached_json(
-                JIN10_SNAPSHOT_NAMESPACE,
-                cache_key,
-                sqlite_payload,
-                ttl_seconds,
-            )
-        return _with_cache_mode(sqlite_payload, "sqlite-seed")
-
-    stale_payload = dependencies.snapshot_store.get_stale(
-        JIN10_SNAPSHOT_NAMESPACE,
-        cache_key,
-    )
-    if isinstance(stale_payload, dict):
-        if dependencies.set_cached_json is not None:
-            dependencies.set_cached_json(
-                JIN10_SNAPSHOT_NAMESPACE,
-                cache_key,
-                stale_payload,
-                min(15, ttl_seconds),
-            )
-        return _with_cache_mode(stale_payload, "stale-seed")
-    return None
 
 
 def get_jin10_panel_snapshot(
@@ -205,22 +168,4 @@ def get_jin10_panel_snapshot(
             generated_at=dependencies.utc_now_iso(),
         )
 
-    payload = fetch_live_jin10_panel_payload(
-        dependencies,
-        limit=limit,
-    )
-    payload = _with_cache_mode(payload, "live-fallback")
-    dependencies.snapshot_store.set(
-        JIN10_SNAPSHOT_NAMESPACE,
-        cache_key,
-        payload,
-        ttl_seconds,
-    )
-    if dependencies.set_cached_json is not None:
-        dependencies.set_cached_json(
-            JIN10_SNAPSHOT_NAMESPACE,
-            cache_key,
-            payload,
-            ttl_seconds,
-        )
-    return payload
+    return {"items": [], "generatedAt": "", "status": "warming", "cacheMode": "warming"}

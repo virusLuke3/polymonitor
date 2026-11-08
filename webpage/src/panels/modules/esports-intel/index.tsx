@@ -1,3 +1,4 @@
+import { publicFeedSnapshot } from '@/panels/shared/public-feed-snapshot';
 import { compactText, relativeDuration as startLabel } from '../../shared/formatters';
 import { numericValue as numeric } from '@/panels/shared/formatters';
 import { useMemo, useState } from 'preact/hooks';
@@ -222,6 +223,7 @@ const renderers: PanelRenderMap = {
 
 export const panel = runtimePanelFromRenderer(renderers, {
   id: 'esports-intel',
+  snapshot: publicFeedSnapshot('esports-intel', 3),
   title: 'Esports Intel',
   eyebrow: 'sports',
   description: 'GRID official esports series state with local Polymarket matching context.',

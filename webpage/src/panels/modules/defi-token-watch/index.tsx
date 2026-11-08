@@ -1,3 +1,4 @@
+import { publicFeedSnapshot } from '@/panels/shared/public-feed-snapshot';
 import { useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeDefiTokenWatch } from '@/services/api';
@@ -87,6 +88,7 @@ const renderers: PanelRenderMap = {
 
 export const panel = runtimePanelFromRenderer(renderers, {
   id: 'defi-token-watch',
+  snapshot: publicFeedSnapshot('defi-token-watch', 10),
   title: 'DeFi Token Watch',
   eyebrow: 'finance',
   description: 'Compact DeFi token tape with price, 24h move, and weekly trend.',

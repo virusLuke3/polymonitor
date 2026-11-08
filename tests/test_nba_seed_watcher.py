@@ -151,7 +151,7 @@ class NbaSeedWatcherTestCase(unittest.TestCase):
                 "get_cached_json": lambda namespace, key: cached.get((namespace, key)),
                 "set_cached_json": lambda namespace, key, payload, ttl: cached.__setitem__((namespace, key), payload),
                 "http_json_get": lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("live fetch should not run")),
-                "utc_now_iso": lambda: "2026-05-03T00:00:00Z",
+                "utc_now_iso": lambda: "2026-05-03T08:01:00Z",
             }
             payload = runtime_service.get_nba_scoreboard_snapshot(ctx, limit=10)
 

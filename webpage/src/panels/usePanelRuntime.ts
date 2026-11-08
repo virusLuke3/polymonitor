@@ -13,7 +13,7 @@ import {
 } from './types';
 import type { RuntimePanelMetadata } from '@/services/api';
 import { ApiHttpError } from '@/services/api';
-import { readResourceCache, writeResourceCache, resourceIsCurrent } from './resource-cache';
+import { readResourceCache, readResourceCacheEntry, writeResourceCache, resourceIsCurrent, type RestoredResource } from './resource-cache';
 
 const DEFAULT_REFRESH_INTERVAL_MS: Record<PanelRefreshTier, number> = {
   bootstrap: 0, fast: 60_000, slow: 10 * 60_000, manual: 0,
@@ -96,22 +96,35 @@ function retryDelay(panel: PanelModule, failureCount: number): number | null {
   return Math.min(ceiling, base * (2 ** Math.max(0, failureCount - 1)));
 }
 
+function restoredStatus(panel: PanelModule, entry: RestoredResource<unknown>): PanelRuntimeStatus {
+  const updatedAt = panel.snapshot?.updatedAt(entry.value) ?? runtimeTimestamp(entry.value);
+  const maxAge = panel.snapshot?.maxAgeMs ?? DEFAULT_STALE_AFTER_MS[panel.refreshPolicy?.tier || 'manual'];
+  const stale = !resourceIsCurrent(updatedAt, maxAge) || (entry.value as { status?: string })?.status === 'stale';
+  return { ...EMPTY_STATUS, phase: stale ? 'stale' : payloadIsDegraded(entry.value) ? 'degraded' : 'ready',
+    updatedAt, checkedAt: entry.checkedAt, cacheMode: 'browser' };
+}
+
 /** Shared resource owner. UI visibility is one consumer, never the whole demand. */
 export function usePanelRuntime({ panels, activePanelIds, initialData = {}, suspended = false, waitForVisibility = false }: UsePanelRuntimeOptions) {
   const byId = useMemo(() => new Map(panels.map((panel) => [panel.id, panel])), [panels]);
   const sourceId = useCallback((id: string) => byId.get(id)?.dataSourceId || id, [byId]);
-  const [runtimeData, setData] = useState<PanelRuntimeData>(() => {
+  const [restoredState] = useState(() => {
     const restored = { ...(typeof initialData === 'function' ? initialData() : initialData) };
+    const statuses: Record<string, PanelRuntimeStatus> = {};
     panels.forEach(panel => {
       if (!panel.snapshot) return;
       try {
-        const cached = readResourceCache(panel.snapshot, window.localStorage);
-        if (cached != null && (restored[panel.id] == null || (panel.snapshot.updatedAt(cached) ?? 0) > (runtimeTimestamp(restored[panel.id]) ?? 0))) restored[panel.id] = cached;
+        const cached = readResourceCacheEntry(panel.snapshot, window.localStorage);
+        if (cached != null && (restored[panel.id] == null || (panel.snapshot.updatedAt(cached.value) ?? 0) > (runtimeTimestamp(restored[panel.id]) ?? 0))) {
+          restored[panel.id] = cached.value;
+          statuses[panel.id] = restoredStatus(panel, cached);
+        }
       } catch { /* Public persistence is optional. */ }
     });
-    return restored;
+    return { data: restored, statuses };
   });
-  const [statuses, setStatuses] = useState<Record<string, PanelRuntimeStatus>>({});
+  const [runtimeData, setData] = useState<PanelRuntimeData>(restoredState.data);
+  const [statuses, setStatuses] = useState<Record<string, PanelRuntimeStatus>>(restoredState.statuses);
   const [documentHidden, setDocumentHidden] = useState(() => typeof document !== 'undefined' && document.hidden);
   const [, demandChanged] = useState(0);
   const consumers = useRef(new Map<string, Set<string>>());
@@ -163,6 +176,13 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
     setStatuses(next);
   }, []);
 
+  // Late-registered parameterized resources use the same restoration path.
+  const restoreResource = useCallback((panel: PanelModule, entry: RestoredResource<unknown>) => {
+    if (dataRef.current[panel.id] != null) return;
+    setRuntimeData(current => ({ ...current, [panel.id]: entry.value }));
+    updateStatuses([panel.id], () => restoredStatus(panel, entry));
+  }, [setRuntimeData, updateStatuses]);
+
   const refreshPanels = useCallback(async (requested: PanelModule[], options: RuntimeRefreshOptions = {}): Promise<PanelRuntimeData> => {
     if (!mounted.current || ((suspendedRef.current || document.hidden) && !options.force)) return {};
     const ids = options.panelIds ? new Set([...options.panelIds].flatMap((id) => [sourceId(id), ...(byId.get(id)?.dataDependencies || [])])) : demandRef.current;
@@ -209,21 +229,24 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
           const retained = merged[id] !== value;
           const updatedAt = retained ? statusesRef.current[id]?.updatedAt ?? runtimeTimestamp(merged[id])
             : eligible.find(panel => panel.id === id)?.snapshot?.updatedAt(value) ?? runtimeTimestamp(value) ?? metadataTimestamp(metadata);
-          const staleAfter = policy?.staleAfterMs ?? DEFAULT_STALE_AFTER_MS[policy?.tier || 'manual'];
+          const staleAfter = eligible.find(panel => panel.id === id)?.snapshot?.maxAgeMs
+            ?? policy?.staleAfterMs ?? DEFAULT_STALE_AFTER_MS[policy?.tier || 'manual'];
           const phase = metadataPhase(metadata) ?? ((value as { status?: string } | null)?.status === 'stale' ? 'stale' : payloadIsDegraded(value) ? 'degraded'
             : updatedAt != null && Date.now() - updatedAt > staleAfter ? 'stale' : 'ready');
           const retry = retries.current.get(id);
           if (retry != null) { window.clearTimeout(retry); retries.current.delete(id); }
           lanes.get(id)!.result = { [id]: value };
           const contract = eligible.find(panel => panel.id === id)?.snapshot;
+          const checkedAt = Date.now();
           if (contract) {
             try {
               const previous = contract.shouldPersist ? readResourceCache(contract, window.localStorage) : null;
-              if (!contract.shouldPersist || contract.shouldPersist(value, previous)) writeResourceCache(contract, raw ?? value, window.localStorage);
+              if (!retained && !['warming', 'invalid', 'unknown'].includes(String((value as { status?: string })?.status))
+                && (!contract.shouldPersist || contract.shouldPersist(value, previous))) writeResourceCache(contract, raw ?? value, window.localStorage, checkedAt);
             } catch { /* A cache failure cannot fail the displayed snapshot. */ }
           }
           setRuntimeData(merged);
-          updateStatuses([id], () => ({ phase, updatedAt, lastAttemptAt: now, checkedAt: Date.now(), fetching: false, failureCount: 0, error: null,
+          updateStatuses([id], () => ({ phase, updatedAt, lastAttemptAt: now, checkedAt, fetching: false, failureCount: 0, error: null,
             cacheMode: metadata?.cache?.mode || null, freshness: metadata?.freshness?.state || null,
             ageSeconds: metadata?.freshness?.ageSeconds ?? null,
           }));
@@ -306,7 +329,13 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
         if (!policy || policy.tier === 'manual') return false;
         const status = statusesRef.current[panel.id];
         if (status?.error && (status.retryable === false || (status.nextRetryAt ?? 0) > now)) return false;
-        if (status?.lastAttemptAt == null) return true;
+        if (status?.lastAttemptAt == null) {
+          // Cached check time is distinct from source freshness. Never restart
+          // its lifetime on reload, or defer a stale/failed resource's check.
+          const interval = policy.intervalMs ?? DEFAULT_REFRESH_INTERVAL_MS[policy.tier];
+          return !(status?.cacheMode === 'browser' && status.phase === 'ready' && status.checkedAt != null
+            && interval > 0 && now - status.checkedAt < interval);
+        }
         const interval = policy.intervalMs ?? DEFAULT_REFRESH_INTERVAL_MS[policy.tier];
         return interval > 0 && now - status.lastAttemptAt >= interval;
       });
@@ -314,7 +343,7 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
       const stale = panels.filter((panel) => {
         const status = statusesRef.current[panel.id];
         return status?.phase === 'ready' && status.updatedAt != null && panel.refreshPolicy
-          && now - status.updatedAt > (panel.refreshPolicy.staleAfterMs ?? DEFAULT_STALE_AFTER_MS[panel.refreshPolicy.tier]);
+          && now - status.updatedAt >= (panel.snapshot?.maxAgeMs ?? panel.refreshPolicy.staleAfterMs ?? DEFAULT_STALE_AFTER_MS[panel.refreshPolicy.tier]);
       });
       updateStatuses(stale.map((panel) => panel.id), (status) => ({ ...status, phase: 'stale' }));
       const projected = revalidateRuntimeSnapshots(panels, dataRef.current, now);
@@ -391,6 +420,6 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
     const next = { ...statusesRef.current }; ids.forEach(id => delete next[id]);
     statusesRef.current = next; if (mounted.current) setStatuses(next);
   }, [setRuntimeData]);
-  return { runtimeData, setRuntimeData, statuses, getStatus, refreshPanels, refreshIds,
+  return { runtimeData, setRuntimeData, restoreResource, statuses, getStatus, refreshPanels, refreshIds,
     getData, forgetIds, setConsumerPanels, setPanelVisible, suspended: runtimeSuspended };
 }

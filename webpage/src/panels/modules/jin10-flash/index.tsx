@@ -1,3 +1,4 @@
+import { publicFeedSnapshot } from '@/panels/shared/public-feed-snapshot';
 import type { RuntimeJin10Item, RuntimeJin10Payload } from '@/types';
 import { useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
@@ -189,6 +190,7 @@ const renderers: PanelRenderMap = {
 
 export const panel = runtimePanelFromRenderer(renderers, {
   id: 'jin10-flash',
+  snapshot: publicFeedSnapshot('jin10-flash', 24),
   title: 'Jin10 Flash',
   eyebrow: 'macro',
   description: 'Jin10 macro flash feed in market-card form.',

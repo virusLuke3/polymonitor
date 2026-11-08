@@ -1,3 +1,4 @@
+import { publicFeedSnapshot } from '@/panels/shared/public-feed-snapshot';
 import type { PanelInputs } from '../../types';
 import type { RuntimeNbaPayload } from '@/types';
 import { Panel } from '@/components/Panel';
@@ -52,6 +53,7 @@ const renderers: PanelRenderMap = {
 
 export const panel = runtimePanelFromRenderer(renderers, {
   id: 'nba-scoreboard',
+  snapshot: publicFeedSnapshot('nba-scoreboard', 10),
   title: 'NBA Scoreboard',
   eyebrow: 'sports',
   description: 'Upcoming and live NBA games.',

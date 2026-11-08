@@ -1,3 +1,4 @@
+import { publicFeedSnapshot } from '@/panels/shared/public-feed-snapshot';
 import type { RuntimeF1PanelCard, RuntimeF1Payload } from '@/types';
 import { Panel } from '@/components/Panel';
 import type { PanelRenderMap } from '@/panels/types';
@@ -134,6 +135,7 @@ const renderers: PanelRenderMap = {
 
 export const panel = runtimePanelFromRenderer(renderers, {
   id: 'f1-trackside',
+  snapshot: publicFeedSnapshot('f1-trackside', 10),
   title: 'BWE News',
   eyebrow: 'news',
   description: 'BWENews runtime RSS flashes with cached auto-refresh.',

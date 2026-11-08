@@ -1,3 +1,4 @@
+import { publicFeedSnapshot } from '@/panels/shared/public-feed-snapshot';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeNewMarketSignals } from '@/services/api';
 import type { RuntimeNewMarketSignalItem, RuntimeNewMarketSignalsPayload } from '@/types';
@@ -91,6 +92,7 @@ const renderers: PanelRenderMap<'selectedMarketId' | 'setSelectedMarketId'> = {
 export const panel = runtimePanelFromRenderer(renderers, {
   contextKeys: ['selectedMarketId', 'setSelectedMarketId'],
   id: 'new-market-signals',
+  snapshot: publicFeedSnapshot('new-market-signals', 12),
   title: 'New Market Signals',
   eyebrow: 'market',
   description: 'First-seen markets with initial YES probability.',

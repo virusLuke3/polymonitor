@@ -152,7 +152,7 @@ class F1SeedWatcherTestCase(unittest.TestCase):
                 "SNAPSHOT_STORE": store,
                 "get_cached_json": lambda namespace, key: cached.get((namespace, key)),
                 "set_cached_json": lambda namespace, key, payload, ttl: cached.__setitem__((namespace, key), payload),
-                "utc_now_iso": lambda: "2026-05-03T00:00:00Z",
+                "utc_now_iso": lambda: "2026-05-03T08:00:00Z",
                 "app": SimpleNamespace(logger=SimpleNamespace(exception=lambda *args, **kwargs: None)),
                 "requests": None,
             }

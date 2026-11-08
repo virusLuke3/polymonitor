@@ -35,6 +35,71 @@ status and manual refresh to shared family controls.
   up; explicit summary/map demand can keep a resource active. Unmount cancels
   only that consumer's demand. Manual refresh is an explicit override.
 
+## Reload recovery
+
+Public persistence is an explicit resource contract, not a second collector or
+scheduler. Restore validated data and its original source/check clocks before
+network admission. Bootstrap loading must not cover restored content. A fresh
+saved check may defer the next automatic read only until the existing browser
+interval is due; stale data requests a background check while remaining visible
+within its domain retention bound. Manual refresh bypasses that deferral.
+
+Restore READY/STALE/degraded state from the payload and original age, with
+`cacheMode=browser`; restoration is not a new successful request. Failed refreshes
+retain the last valid value without refreshing its lifetime. Healthy empty
+responses replace it; warming/errors must not overwrite a saved successful
+snapshot. Expiry removes data even if another request is still pending.
+
+The existing `resource-cache.ts` storage namespace remains the single public
+browser cache. Complete keys include panel/resource ID and request limit; schema,
+shape, original timestamp and capacity are validated on read and write. Storage
+failure is optional and must not affect layouts or current content. Dedicated
+resource consumers and workspace resources share these rules through
+`usePanelRuntime`; views of a shared owner do not create separate copies.
+
+The cache is bounded to 96 entries and 2,000,000 encoded characters in total;
+the additional public feeds cap each entry at 128,000 characters. The envelope
+adds the complete key and last validated `checkedAt`; old entries without that
+check clock may still restore under their existing schema, but must recheck.
+No layout keys are migrated or removed. `public-feed:<id>:limit:<n>:v1` identifies
+the nine reviewed static feeds below; the declarations remain in each module.
+
+| Public feed / reused owner | Browser check | Fresh / maximum retained source age |
+| --- | --- | --- |
+| NBA scoreboard, intel, ESPN predictor / `nba_watcher.py` | 60 seconds | 3 / 15 minutes |
+| Esports / `grid_esports_watcher.py` | 2 minutes | 4 / 15 minutes |
+| Sports Odds / `sports_odds_watcher.py` | 15 minutes | 3 / 6 hours |
+| Jin10 / `jin10_watcher.py` | 60 seconds | 5 / 30 minutes |
+| BWE (`f1-trackside`) / `f1_watcher.py` | 3 minutes | 5 / 30 minutes |
+| DeFi Tokens / `defi_token_watch_watcher.py` | 5 minutes | 15 / 30 minutes |
+| New Market Signals / `new_market_signal_watcher.py` | 5 minutes | 15 / 30 minutes |
+
+Their existing SQLite namespaces (`snapshot:sports:nba`, `snapshot:sports:nba-intel`,
+`snapshot:sports:nba-matchup-predictor`, `snapshot:esports:esports-intel`,
+`snapshot:sports:sports-odds`, `snapshot:macro:jin10`, `snapshot:sports:f1`,
+`snapshot:finance:defi-token-watch`) and existing key builders remain authoritative.
+New Market keeps its existing Redis queue and confirmed SQLite publication.
+Collectors retain their existing source schedules; this change adds no producer,
+history store, paid fetch or faster acquisition. Finance/Tech and parameterized
+resources reuse the shared recovery/status changes with their own domain limits.
+
+The seven NBA/Jin10/BWE/Esports/Odds GETs now use `read_public_seed` in
+`scripts/api/services/seed_recovery.py`: local SQLite before optional Redis,
+original-clock retention, no publication or synchronous upstream work. A cold
+read returns warming with no fabricated timestamp. DeFi already follows the
+same separation. API read success does not establish collector health.
+Account data and execution-sensitive resources retain their explicit contracts;
+this is not automatic persistence of every registered resource.
+
+Acceptance covers a real reload after a successful read, fresh-check deferral,
+stale-while-refresh, request failure, authoritative empty, expiry, manual retry,
+two consumers, and restoration while bootstrap is pending. Local intercepted
+tests prove failure semantics; production uses real desktop/mobile requests and
+separately reports restored content, current source freshness and source errors.
+Checks: `tests/test_public_panel_seed_reads.py`, the existing source/watcher
+tests, `resource-cache.test.ts`, `shared/public-feed-snapshot.test.ts`,
+`e2e/panel-reload.spec.ts`, and shared lifecycle/resource browser regressions.
+
 ## Adopted families
 
 | Family | Browser checks | Collector cadence | Fresh seed | Maximum retained seed |

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from api.services.seed_recovery import read_public_seed
+
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -124,35 +126,18 @@ def fetch_live_f1_panel_payload(
         )
 
 
-def _with_cache_mode(payload: Dict[str, Any], cache_mode: str) -> Dict[str, Any]:
-    return {**payload, "cacheMode": str(payload.get("cacheMode") or cache_mode)}
-
-
 def _read_seeded_snapshot(
     dependencies: F1RuntimeDependencies,
     *,
     cache_key: str,
     ttl_seconds: int,
 ) -> Dict[str, Any] | None:
-    redis_payload = dependencies.get_cached_json(F1_SNAPSHOT_NAMESPACE, cache_key)
-    if isinstance(redis_payload, dict):
-        dependencies.snapshot_store.set(F1_SNAPSHOT_NAMESPACE, cache_key, redis_payload, ttl_seconds)
-        return _with_cache_mode(redis_payload, "redis-seed")
-
-    sqlite_payload = dependencies.snapshot_store.get(F1_SNAPSHOT_NAMESPACE, cache_key)
-    if isinstance(sqlite_payload, dict):
-        setter = dependencies.set_cached_json
-        if setter is not None:
-            setter(F1_SNAPSHOT_NAMESPACE, cache_key, sqlite_payload, ttl_seconds)
-        return _with_cache_mode(sqlite_payload, "sqlite-seed")
-
-    stale_payload = dependencies.snapshot_store.get_stale(F1_SNAPSHOT_NAMESPACE, cache_key)
-    if isinstance(stale_payload, dict):
-        setter = dependencies.set_cached_json
-        if setter is not None:
-            setter(F1_SNAPSHOT_NAMESPACE, cache_key, stale_payload, min(15, ttl_seconds))
-        return _with_cache_mode(stale_payload, "stale-seed")
-    return None
+    return read_public_seed(
+        namespace=F1_SNAPSHOT_NAMESPACE, cache_key=cache_key,
+        snapshot_store=dependencies.snapshot_store, redis_get=dependencies.get_cached_json,
+        max_age_seconds=300, retain_seconds=1800,
+        now=dependencies.utc_now_iso() if dependencies.utc_now_iso is not None else None,
+    )
 
 
 def get_f1_panel_snapshot(
@@ -173,9 +158,4 @@ def get_f1_panel_snapshot(
             generated_at=dependencies.utc_now_iso(),
         )
 
-    payload = _with_cache_mode(fetch_live_f1_panel_payload(dependencies, limit=limit), "live-fallback")
-    dependencies.snapshot_store.set(F1_SNAPSHOT_NAMESPACE, cache_key, payload, ttl_seconds)
-    setter = dependencies.set_cached_json
-    if setter is not None:
-        setter(F1_SNAPSHOT_NAMESPACE, cache_key, payload, ttl_seconds)
-    return payload
+    return {"cards": [], "generatedAt": "", "status": "warming", "cacheMode": "warming"}

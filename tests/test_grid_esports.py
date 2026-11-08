@@ -133,7 +133,7 @@ class GridEsportsServiceTestCase(unittest.TestCase):
         }
 
     def test_live_payload_normalizes_grid_series_state_and_pm_context(self):
-        payload = grid_esports_service.get_grid_esports_snapshot(self.make_context(), limit=2)
+        payload = grid_esports_service._safe_live_grid_esports_payload(grid_esports_service._dependencies(self.make_context()), limit=2)
 
         self.assertEqual("ok", payload["status"])
         self.assertEqual(2, len(payload["items"]))
@@ -149,7 +149,7 @@ class GridEsportsServiceTestCase(unittest.TestCase):
         ctx = self.make_context()
         ctx["search_markets"] = lambda query, limit=3: {"items": [{"id": 8, "title": query, "latestPrice": "0.51"}]}
 
-        payload = grid_esports_service.get_grid_esports_snapshot(ctx, limit=1)
+        payload = grid_esports_service._safe_live_grid_esports_payload(grid_esports_service._dependencies(ctx), limit=1)
 
         self.assertEqual("ok", payload["status"])
         self.assertEqual("matched", payload["items"][0]["pm"]["status"])
@@ -173,7 +173,7 @@ class GridEsportsServiceTestCase(unittest.TestCase):
 
         ctx["search_markets"] = search_markets
 
-        payload = grid_esports_service.get_grid_esports_snapshot(ctx, limit=1)
+        payload = grid_esports_service._safe_live_grid_esports_payload(grid_esports_service._dependencies(ctx), limit=1)
 
         self.assertEqual("matched", payload["items"][0]["pm"]["status"])
         self.assertEqual(1871323, payload["items"][0]["pm"]["marketId"])
@@ -181,14 +181,14 @@ class GridEsportsServiceTestCase(unittest.TestCase):
         self.assertEqual([grid_esports_service.DEFAULT_GRID_PM_SEARCH_LIMIT], limits)
 
     def test_live_payload_is_degraded_when_series_state_errors(self):
-        payload = grid_esports_service.get_grid_esports_snapshot(self.make_context(state_errors=True), limit=2)
+        payload = grid_esports_service._safe_live_grid_esports_payload(grid_esports_service._dependencies(self.make_context(state_errors=True)), limit=2)
 
         self.assertEqual("degraded", payload["status"])
         self.assertEqual("empty", payload["sources"]["gridSeriesState"])
         self.assertEqual("pending-state", payload["items"][0]["state"])
 
     def test_missing_key_returns_renderable_degraded_payload(self):
-        payload = grid_esports_service.get_grid_esports_snapshot(self.make_context(missing_key=True), limit=2)
+        payload = grid_esports_service._safe_live_grid_esports_payload(grid_esports_service._dependencies(self.make_context(missing_key=True)), limit=2)
 
         self.assertEqual("degraded", payload["status"])
         self.assertEqual("missing-key", payload["sources"]["gridCentralData"])
@@ -201,7 +201,7 @@ class GridEsportsServiceTestCase(unittest.TestCase):
             raise TimeoutError("central timeout")
 
         ctx["http_json_post"] = fail_post
-        payload = grid_esports_service.get_grid_esports_snapshot(ctx, limit=2)
+        payload = grid_esports_service._safe_live_grid_esports_payload(grid_esports_service._dependencies(ctx), limit=2)
 
         self.assertEqual("degraded", payload["status"])
         self.assertEqual("error", payload["sources"]["gridCentralData"])

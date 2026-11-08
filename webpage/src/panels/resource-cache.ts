@@ -18,7 +18,7 @@ export interface PanelSnapshotContract<T> extends ResourceCacheContract<T> {
 }
 
 const PREFIX = 'polymonitor:panel-resource:';
-const MAX_ENTRIES = 32;
+const MAX_ENTRIES = 96;
 const MAX_TOTAL_CHARS = 2_000_000;
 const MAX_CHARS = 256_000;
 const storageKey = (key: string) => `${PREFIX}${key}`;
@@ -27,29 +27,39 @@ export function resourceIsCurrent(timestamp: number | null, maxAgeMs: number, no
   return timestamp != null && Number.isFinite(timestamp) && timestamp <= now + 60_000 && now - timestamp < maxAgeMs;
 }
 
-export function readResourceCache<T>(contract: ResourceCacheContract<T>, storage: Storage, now = Date.now()): T | null {
+export type RestoredResource<T> = { value: T; checkedAt: number | null };
+
+export function readResourceCacheEntry<T>(contract: ResourceCacheContract<T>, storage: Storage, now = Date.now()): RestoredResource<T> | null {
   if (!contract.cache) return null;
   const key = storageKey(contract.key);
   try {
     const raw = storage.getItem(key);
     if (!raw) return null;
     const envelope = JSON.parse(raw);
-    if (raw.length > (contract.cache.maxChars ?? MAX_CHARS) || envelope.version !== contract.cache.version) throw new Error('Invalid cache version');
+    if (raw.length > (contract.cache.maxChars ?? MAX_CHARS) || envelope.version !== contract.cache.version
+      || (envelope.key != null && envelope.key !== contract.key)) throw new Error('Invalid cache identity/version');
     const value = contract.parse(envelope.value);
     if (!resourceIsCurrent(contract.updatedAt(value), Math.max(contract.maxAgeMs, contract.staleAgeMs ?? contract.maxAgeMs), now)) throw new Error('Expired cache');
-    return value;
+    const checkedAt = typeof envelope.checkedAt === 'number' && Number.isFinite(envelope.checkedAt)
+      && envelope.checkedAt > 0 && envelope.checkedAt <= now ? envelope.checkedAt : null;
+    return { value, checkedAt };
   } catch {
     try { storage.removeItem(key); } catch { /* Storage is optional. */ }
     return null;
   }
 }
 
-export function writeResourceCache<T>(contract: ResourceCacheContract<T>, raw: unknown, storage: Storage, now = Date.now()) {
+export function readResourceCache<T>(contract: ResourceCacheContract<T>, storage: Storage, now = Date.now()): T | null {
+  return readResourceCacheEntry(contract, storage, now)?.value ?? null;
+}
+
+export function writeResourceCache<T>(contract: PanelSnapshotContract<T>, raw: unknown, storage: Storage, now = Date.now()) {
   if (!contract.cache) return;
   try {
     const value = contract.parse(raw);
-    if (!resourceIsCurrent(contract.updatedAt(value), contract.maxAgeMs, now)) return;
-    const encoded = JSON.stringify({ version: contract.cache.version, cachedAt: now, value: raw });
+    const retention = contract.acceptStale ? Math.max(contract.maxAgeMs, contract.staleAgeMs ?? contract.maxAgeMs) : contract.maxAgeMs;
+    if (!resourceIsCurrent(contract.updatedAt(value), retention, now)) return;
+    const encoded = JSON.stringify({ key: contract.key, version: contract.cache.version, cachedAt: now, checkedAt: now, value: raw });
     if (encoded.length > (contract.cache.maxChars ?? MAX_CHARS)) return;
     const key = storageKey(contract.key);
     // Bound this cache without touching other application storage.

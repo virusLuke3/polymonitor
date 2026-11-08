@@ -55,7 +55,7 @@ unvalidated bootstrap preview into the complete resource.
   Invalid/stale data never becomes the new saved snapshot. This does not exempt displayed content
   from current permission, window and expiry rules.
 - Persistence is only for reviewed public data. Schema version 4, complete keys
-  including the 100-item request limit, revalidation and 32 entries bound this
+  including the 100-item request limit, revalidation and 96 entries bound this
   cache. This resource explicitly permits 512,000 characters per entry for the
   larger page; other resources retain their 256,000-character default.
   Storage failure does not fail a panel or remove other application storage.

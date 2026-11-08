@@ -108,7 +108,7 @@ class NbaMatchupPredictorTestCase(unittest.TestCase):
         }
 
     def test_predictor_normalizes_away_projection_and_derives_home_projection(self):
-        payload = runtime_service.get_nba_matchup_predictor_snapshot(self.make_context(), limit=2)
+        payload = runtime_service.fetch_live_nba_matchup_predictor_payload(self.make_context(), limit=2)
 
         self.assertEqual(2, len(payload["items"]))
         first = payload["items"][0]
@@ -120,7 +120,7 @@ class NbaMatchupPredictorTestCase(unittest.TestCase):
         self.assertEqual(108.342, first["homeExpectedPoints"])
 
     def test_predictor_returns_partial_results_when_one_event_fails(self):
-        payload = runtime_service.get_nba_matchup_predictor_snapshot(self.make_context(fail_event_id="401"), limit=2)
+        payload = runtime_service.fetch_live_nba_matchup_predictor_payload(self.make_context(fail_event_id="401"), limit=2)
 
         self.assertEqual(["402"], [item["eventId"] for item in payload["items"]])
 

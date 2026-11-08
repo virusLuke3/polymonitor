@@ -75,8 +75,8 @@ class F1RuntimeServiceTestCase(unittest.TestCase):
             "set_cached_json": lambda namespace, cache_key, payload, ttl_seconds: None,
         }
 
-    def test_get_f1_panel_snapshot_builds_live_payload_with_news(self):
-        payload = f1_runtime_service.get_f1_panel_snapshot(self.make_context(), limit=8)
+    def test_fetch_live_f1_panel_payload_builds_live_payload_with_news(self):
+        payload = f1_runtime_service.fetch_live_f1_panel_payload(self.make_context(), limit=8)
 
         self.assertEqual(payload["status"], "ok")
         self.assertEqual(payload["source"], "bwenews-rss")
@@ -87,11 +87,11 @@ class F1RuntimeServiceTestCase(unittest.TestCase):
         self.assertEqual(payload["cards"][0]["url"], "fixture-bwenews-item-99999")
         self.assertIn("Binance 合约将上线 OPGUSDT 永续合约", payload["cards"][0]["summary"])
 
-    def test_get_f1_panel_snapshot_reports_error_when_requests_unavailable(self):
+    def test_fetch_live_f1_panel_payload_reports_error_when_requests_unavailable(self):
         ctx = self.make_context()
         ctx["requests"] = None
 
-        payload = f1_runtime_service.get_f1_panel_snapshot(ctx, limit=8)
+        payload = f1_runtime_service.fetch_live_f1_panel_payload(ctx, limit=8)
 
         self.assertEqual(payload["status"], "error")
         self.assertEqual(payload["sources"]["bwenewsRss"], "unavailable")

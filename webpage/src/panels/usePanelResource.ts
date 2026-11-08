@@ -2,7 +2,7 @@ import { createContext, createElement, type ComponentChildren } from 'preact';
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { PanelFetchContext, PanelModule, PanelRefreshConfig, PanelRuntimeStatus } from './types';
 import { usePanelRuntime } from './usePanelRuntime';
-import { readResourceCache, resourceIsCurrent, type PanelSnapshotContract } from './resource-cache';
+import { readResourceCacheEntry, resourceIsCurrent, type PanelSnapshotContract, type RestoredResource } from './resource-cache';
 
 export interface PanelResource<T> extends PanelSnapshotContract<T> {
   title: string;
@@ -16,7 +16,7 @@ export interface PanelResource<T> extends PanelSnapshotContract<T> {
 type Consumer = { contract: PanelResource<unknown>; active: boolean; panelId: string | null };
 type Owner = {
   runtime: ReturnType<typeof usePanelRuntime>;
-  register: (contract: PanelResource<unknown>, active: boolean, seed: unknown, panelId: string | null) => { release: () => void; setActive: (active: boolean) => void };
+  register: (contract: PanelResource<unknown>, active: boolean, seed: RestoredResource<unknown> | null, panelId: string | null) => { release: () => void; setActive: (active: boolean) => void };
   consumers: Map<symbol, Consumer>;
 };
 const ResourceOwner = createContext<Owner | null>(null);
@@ -52,12 +52,11 @@ export function PanelResourceProvider({ children }: { children: ComponentChildre
     .filter(consumer => consumer.active).map(consumer => consumer.contract.key))], [revision]);
   const runtime = usePanelRuntime({ panels, activePanelIds });
   runtimeRef.current = runtime;
-  const register = useCallback((contract: PanelResource<unknown>, active: boolean, seed: unknown, panelId: string | null) => {
+  const register = useCallback((contract: PanelResource<unknown>, active: boolean, seed: RestoredResource<unknown> | null, panelId: string | null) => {
     const token = Symbol(contract.key);
     const consumer = { contract, active, panelId };
     consumers.current.set(token, consumer);
-    if (seed != null) runtimeRef.current?.setRuntimeData(current => current[contract.key] == null
-      ? { ...current, [contract.key]: seed } : current);
+    if (seed != null) runtimeRef.current?.restoreResource(resourcePanel(contract), seed);
     changed(value => value + 1);
     const release = () => {
       consumers.current.delete(token);
@@ -96,7 +95,7 @@ export function usePanelResource<T>(contract: PanelResource<T>, active?: boolean
     contract.refreshPolicy.requestTimeoutMs,
     contract.refreshPolicy.retry?.attempts, contract.refreshPolicy.retry?.baseDelayMs, contract.refreshPolicy.retry?.maxDelayMs]);
   const seed = useMemo(() => {
-    try { return readResourceCache(declaration, window.localStorage); } catch { return null; }
+    try { return readResourceCacheEntry(declaration, window.localStorage); } catch { return null; }
   }, [declaration]);
   const enabled = active ?? visible;
   const subscription = useRef<ReturnType<Owner['register']> | null>(null);
@@ -107,7 +106,7 @@ export function usePanelResource<T>(contract: PanelResource<T>, active?: boolean
   }, [owner.register, declaration, seed, panelId]);
   useLayoutEffect(() => subscription.current?.setActive(enabled), [enabled]);
   const runtime = owner.runtime;
-  const latest = (runtime.getData(contract.key) ?? seed) as T | null;
+  const latest = (runtime.getData(contract.key) ?? seed?.value) as T | null;
   const status = resourceStatus(contract, latest, runtime.getStatus(contract.key));
   const timestamp = latest == null ? null : contract.updatedAt(latest);
   const [, tick] = useState(0);
@@ -125,7 +124,7 @@ export function usePanelResource<T>(contract: PanelResource<T>, active?: boolean
   return {
     data, status, expired, suspended: runtime.suspended || !enabled,
     loading: !data && !status.error && !expired,
-    fromCache: data != null && status.checkedAt == null,
+    fromCache: data != null && (status.cacheMode === 'browser' || status.checkedAt == null),
     error: status.error || (expired ? 'Resource snapshot is overdue' : null),
     refresh: () => runtime.refreshIds([contract.key], { reason: 'manual', force: true }),
   };
