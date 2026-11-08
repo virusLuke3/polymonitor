@@ -12,7 +12,7 @@ export function panelStyleOwner(selector) {
   if (/\.wm-(macro-|cpi-|energy-|food-|nowcast-|intel-signal|linked-market|market-implication|registry-empty|row-marker|intel-mark|status-badge)/.test(value)) return 'macro';
   if (/\.wm-(f1-|score-|scoreboard|lineup-|matchup-|esports-|odds-|nba-)/.test(value) || /data-panel-id=['"](?:nba-|espn-)/.test(value)) return 'sports';
   if (/\.wm-(evidence-|breaking-)/.test(value)) return 'breaking';
-  if (/\.wm-(jin10-|new-market|signal-|trade-|oracle-|orderfilled-|intel-|news-|content-feed|related-intel|alpha-|polybeats-|whale-|flow-|geo-)/.test(value)) return 'signals';
+  if (/\.wm-(jin10-|new-market|signal-|trade-|oracle-|orderfilled-|intel-|news-|content-feed|related-intel|alpha-|whale-|flow-|geo-)/.test(value)) return 'signals';
   if (/\.wm-(market-(summary|status-value|context|search|sort|radar|signal|catalog)|feature-|summary-row|poly-market)/.test(value) || /data-workspace-panel-id=['"]market-summary/.test(value)) return 'market';
   return 'shell';
 }

@@ -1,5 +1,24 @@
 # Panel Modules
 
+## Retirement and inventory maintenance
+
+Retiring a Panel removes its production registration, dedicated worker/API,
+operations contract, delivery-catalog entry and obsolete visual baselines.
+Replace tests that expect the old feature to load with retirement checks for
+both local and account layouts. Keep only the historical-ID filter needed to
+prevent saved layouts from restoring it; preserve other panels, sizes and
+explicit hides. Dated incident records remain historical evidence.
+
+`tests/test_panel_operations_contract.py` compares the operations inventory with
+the real frontend registry and checks reused data owners. Inventory coverage is
+not a source-health claim: missing source evidence remains UNKNOWN. The contract
+uses repository service-template names; deployed service identities and
+source-level clocks still need runtime verification.
+
+`webpage/e2e/retired-panels.spec.ts` verifies that the two retired signal IDs stay
+absent, do not trigger requests and are removed from synchronized preferences.
+The ordinary-homepage discovery suite covers active defaults and later hides.
+
 polyData dashboard panels are registered through frontend and backend manifests so new panels can be added without editing the dashboard shell.
 
 This document owns the panel interface contract. The

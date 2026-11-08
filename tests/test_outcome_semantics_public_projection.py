@@ -136,6 +136,10 @@ def _mutation_proof(row: dict | None = None) -> dict:
     return proof
 
 
+
+# These SQL assertions intentionally exercise the supported compatibility schema.
+pytestmark = pytest.mark.usefixtures("canonical_orderfilled_store")
+
 def test_reversed_yes_no_source_labels_are_projected_by_exact_token(install_semantics):
     install_semantics("source_first_second", ("No", "Yes"))
 
@@ -1041,7 +1045,3 @@ def test_catalog_quote_keeps_source_first_labels_without_claiming_yes_no(install
     assert result['primaryOutcomePrice'] == '0.3000000000'
     assert result['sourcePrices'][0]['sourceLabel'] == 'Away'
     assert result['latestPrice'] is None and not result['supportsYesNoWording']
-
-
-# These SQL fixtures model the canonical store; primary tests opt in explicitly.
-pytestmark = pytest.mark.usefixtures("legacy_orderfilled_store")

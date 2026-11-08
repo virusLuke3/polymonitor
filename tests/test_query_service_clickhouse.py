@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 import os
 import unittest
 from unittest.mock import patch
@@ -7,6 +9,10 @@ from unittest.mock import patch
 
 from api.services import query_service
 
+
+
+# These SQL assertions intentionally exercise the supported compatibility schema.
+pytestmark = pytest.mark.usefixtures("canonical_orderfilled_store")
 
 class QueryServiceClickHouseTestCase(unittest.TestCase):
     def test_recent_trades_raises_when_clickhouse_enabled_but_unavailable(self):
@@ -52,8 +58,3 @@ class QueryServiceClickHouseTestCase(unittest.TestCase):
             service, '_query_json_rows', side_effect=[[], None]
         ):
             self.assertIsNone(service.get_recent_trades({}))
-
-
-# These SQL fixtures model the canonical store; primary tests opt in explicitly.
-import pytest
-pytestmark = pytest.mark.usefixtures("legacy_orderfilled_store")

@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+import pytest
 import os
 from api.context import RuntimeResources
 from api.config import ClickHouseSettings
@@ -20,6 +22,10 @@ class Response:
     def read(self) -> bytes:
         return b""
 
+
+
+# These SQL assertions intentionally exercise the supported compatibility schema.
+pytestmark = pytest.mark.usefixtures("canonical_orderfilled_store")
 
 def test_whale_window_uses_clock_and_one_fact_scan_without_repeating_watermark():
     with patch.object(
@@ -233,8 +239,3 @@ def test_trade_watermark_reuses_existing_cache_without_repeating_fact_scan():
         assert clickhouse_orderfilled_service.get_market_trades(context, 7) == []
         assert clickhouse_orderfilled_service.get_market_trades(context, 7) == []
     assert sum("AS latest_block" in call.args[1] for call in read.call_args_list) == 1
-
-
-# These SQL fixtures model the canonical store; primary tests opt in explicitly.
-import pytest
-pytestmark = pytest.mark.usefixtures("legacy_orderfilled_store")

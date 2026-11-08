@@ -92,4 +92,4 @@ source/check clock advancement without API substitution.
 
 The shared lifecycle applies broadly. Domain parsers and real upstream readiness
 must still be adopted and verified family by family; this change does not assert
-that every one of the 72 panels is healthy or fully migrated.
+that every registered Panel is healthy or fully migrated.

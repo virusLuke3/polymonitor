@@ -70,19 +70,14 @@ document/
 
 # Local-only experimental pipelines. These files are intentionally kept out of
 # the shared repository until their data contracts and operating model settle.
-/deploy/clickhouse/polysignal_serving.sql
 /deploy/systemd/polydata-non-trade-asset-deltas-live.service
 /deploy/systemd/polydata-non-trade-cashflows-live.service
 /deploy/systemd/polydata-pnl-trade-cashflows-live.service
 /quant/prices/backfill_block_close_timestamps.py
-/scripts/api/routes/runtime_polysignal.py
-/scripts/api/services/polysignal_agent_service.py
-/scripts/api/services/polysignal_service.py
 /scripts/clickhouse/build_conversion_ctf_net_classifications.py
 /scripts/clickhouse/build_ctf_token_transfer_legs.py
 /scripts/clickhouse/build_non_trade_asset_deltas.py
 /scripts/clickhouse/build_pnl_trade_cashflows.py
-/scripts/clickhouse/build_polysignal_serving.py
 /scripts/clickhouse/build_position_snapshots.py
 /scripts/clickhouse/import_block_timestamps_from_trade_times.py
 /scripts/clickhouse/run_conversion_ctf_net_classifications_live.sh

@@ -292,15 +292,11 @@ oracle_request_id
 
 提供累计/已实现 PnL、持仓、成交、maker/taker 行为、持仓时间、领域偏好、入场领先程度、赔率偏好、资金来源、smart-money 证据和质量评分。
 
-### 可解释 PolySignal
+### 已退休：PolySignal
 
-每个信号显示：
-
-- 触发原因和原始证据
-- 对应交易和地址历史准确率
-- 市场流动性与可执行性
-- 信号失效条件
-- 后续表现
+PolySignal 已于 2026-11-07 退出产品、采集和部署入口，不再列为后续开发项。
+以下分阶段实施记录中的旧名称仅描述当时边界；保留的 Alpha、Whale、Flow
+以及三个 market-wide AI Panel 不依赖这个已退休模块。
 
 ### 可复现 Quant
 
@@ -592,5 +588,5 @@ Workspace、Oracle/data-quality、PWA、MCP、移动端导航、公开 SDK、Web
 1. 选择并接入真实 OAuth 2.1 issuer，完成 MCP Protected Resource Metadata、PKCE 和客户端注册。
 2. 为 Web Push 增加真实浏览器端到端验收与投递 SLO 看板；这需要至少一个用户在生产浏览器中主动授权通知。
 
-若要优先建设 Address Workspace、可解释 PolySignal 或可复现 Quant，必须先重新确认
-PnL/position/address、PolySignal 和 Quant 的修改边界，再建立独立实施计划。
+若要优先建设 Address Workspace 或可复现 Quant，必须先重新确认
+PnL/position/address 和 Quant 的修改边界，再建立独立实施计划。PolySignal 已退休，不属于后续候选。

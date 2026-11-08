@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { DEFAULT_PANEL_IDS, PANEL_LIBRARY } from '@/panels/registry';
 import type { PanelLayoutPrefs } from './panelLayout';
 import { reconcileDefaultPanels } from './defaultPanels';
-import { canonicalPanelId, migratePanelLayout } from './panelIdentity';
+import { migratePanelLayout } from './panelIdentity';
 import { AuthApiError, fetchAuthSession } from '@/services/auth';
 import { fetchWorkspaceLayout, saveWorkspaceLayout } from '@/services/product';
 import { clampMapZoom, isWorldEventRegion, type WorldEventRegion } from '@/features/world-event-map';
@@ -35,7 +35,7 @@ function reorderPanelIds(panelIds: string[], draggedPanelId: string, targetPanel
 function sanitizePanelIds(panelIds: string[]) {
   const valid = new Set(PANEL_LIBRARY.map((panel) => panel.id));
   const unique: string[] = [];
-  for (const panelId of panelIds.map(canonicalPanelId)) {
+  for (const panelId of panelIds) {
     if (!valid.has(panelId) || unique.includes(panelId)) continue;
     unique.push(panelId);
   }

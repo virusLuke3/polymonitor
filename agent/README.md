@@ -29,8 +29,9 @@ POLYDATA_AGENT_RUNTIME=chat
 These settings belong on the model host. Remote consumers use the existing
 private gateway connection, never a public model port. Qwen requests disable
 thinking so the bounded output budget produces dashboard JSON. Explicit provider
-overrides remain supported; the shared client also serves single-market analysis
-and optional PolySignal explanations.
+overrides remain supported; the shared client also serves single-market analysis.
+PolySignal and its dedicated producer are retired; historical observations below
+do not describe an available Panel or a service to restart.
 
 The seed and serving API must share `POLYDATA_SNAPSHOT_SQLITE_PATH` and the same
 Redis configuration. The persisted namespace is `agent:market-wide:snapshot`,
@@ -80,7 +81,7 @@ does not add a timer or reader-triggered generation to public GETs.
 canonical key, stale exclusion, failure versus empty, and prompt/output paths.
 
 Both trade sources depend on the existing OrderFilled owner and ClickHouse
-`block_timestamps`; they do not use the optional PolySignal producer. RPC repair
+`block_timestamps`. RPC repair
 belongs to the existing `polydata-trade-sync`, `polydata-block-timestamps-live`
 and `polydata-orderfilled-health` units. Service-specific route overrides must
 load after their other environment files and preserve sequential cursors,

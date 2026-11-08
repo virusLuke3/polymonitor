@@ -5,7 +5,7 @@ import pytest
 from api.services import clickhouse_orderfilled_service as service
 
 
-def test_canonical_watermark_reads_only_latest_partition():
+def test_canonical_watermark_reads_only_latest_partition(canonical_orderfilled_store):
     with patch.object(
         service, "_settings", return_value=ClickHouseSettings(table="orderfilled_fact", database="poly_orderfilled")
     ):
@@ -21,8 +21,7 @@ def test_custom_table_does_not_assume_canonical_partition_scheme():
         assert service._latest_fact_block_sql({}) == "SELECT ifNull(max(block_number), 0) FROM custom_facts"
 
 
-def test_primary_watermark_continues_past_newer_raw_only_partition(monkeypatch):
-    monkeypatch.setenv('POLYDATA_ORDERFILLED_PRIMARY_STORE', '1')
+def test_primary_watermark_continues_past_newer_raw_only_partition(primary_orderfilled_store):
     with patch.object(service, '_settings', return_value=ClickHouseSettings(table='orderfilled_fact')):
         with patch.object(service, '_query_json_rows', side_effect=[
             [{'partition': '97'}, {'partition': '96'}, {'partition': '95'}],
@@ -34,8 +33,7 @@ def test_primary_watermark_continues_past_newer_raw_only_partition(monkeypatch):
     assert 'intDiv(block_number,1000000)=96' in query.call_args_list[2].args[1]
 
 
-def test_primary_watermark_failure_does_not_become_empty_history(monkeypatch):
-    monkeypatch.setenv('POLYDATA_ORDERFILLED_PRIMARY_STORE', '1')
+def test_primary_watermark_failure_does_not_become_empty_history(primary_orderfilled_store):
     with patch.object(service, '_settings', return_value=ClickHouseSettings(table='orderfilled_fact')):
         with patch.object(service, '_query_json_rows', side_effect=[[{'partition': '96'}], None]):
             with pytest.raises(TimeoutError, match='unavailable'):
@@ -57,7 +55,7 @@ def test_bounded_fact_read_uses_indexed_block_coordinate(monkeypatch, flag, colu
     assert 'AND '+column+' BETWEEN' in query.call_args_list[0].args[1]
 
 
-def test_recent_trades_limits_rows_before_timestamp_lookup():
+def test_recent_trades_limits_rows_before_timestamp_lookup(canonical_orderfilled_store):
     with patch.object(
         service,
         "_query_json_rows",
@@ -73,7 +71,3 @@ def test_recent_trades_limits_rows_before_timestamp_lookup():
     assert "LIMIT 3" in query.call_args_list[1].args[1]
     assert "block_number IN (180)" in query.call_args.args[1]
     assert "SELECT block_number FROM selected" not in query.call_args.args[1]
-
-
-# These SQL fixtures model the canonical store; primary tests opt in explicitly.
-pytestmark = pytest.mark.usefixtures("legacy_orderfilled_store")

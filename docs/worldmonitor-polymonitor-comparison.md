@@ -65,7 +65,7 @@ UMA / Adapter / UpDown Oracle 生命周期
             ↓
 LOB 实时订单簿和历史快照
             ↓
-地址画像、PnL、PolySignal、异常资金流
+地址画像、PnL、异常资金流
             ↓
 价格序列、回测、订单、成交、账本和绩效指标
 ```
@@ -194,7 +194,7 @@ WorldMonitor 的存储重点是产品状态和缓存：
 Polymonitor 是持久化数据平台：
 
 - Postgres：市场、Oracle、运营状态和 Quant
-- ClickHouse：成交、现金流、持仓、转账和 PolySignal
+- ClickHouse：成交、现金流、持仓和转账
 - Redis：跨进程缓存
 - SQLite：面板快照
 - Parquet/Kaggle：历史数据和发布
@@ -288,7 +288,7 @@ Polymonitor 的主要缺口是：
 - UMA/Adapter/UpDown Oracle
 - LOB 实时与历史订单簿
 - 地址持仓、钱包画像和 PnL
-- PolySignal、鲸鱼和异常资金流
+- 鲸鱼和异常资金流（PolySignal 已退休）
 - 区块级与时间级价格
 - 预测市场回测与执行模拟
 - Quant 数据库、worker 和大规模历史数据

@@ -49,6 +49,12 @@ def missing_route_dependency(*args, **kwargs):
 
 
 @pytest.fixture
-def legacy_orderfilled_store(monkeypatch):
-    """Canonical-table SQL fixtures declare their storage layout explicitly."""
+def canonical_orderfilled_store(monkeypatch):
+    """Opt into the supported orderfilled_fact compatibility schema."""
     monkeypatch.setenv("POLYDATA_ORDERFILLED_PRIMARY_STORE", "0")
+
+
+@pytest.fixture
+def primary_orderfilled_store(monkeypatch):
+    """Use the current orderfilled_fact_primary_v1 / orderfilled_events_v1 layout."""
+    monkeypatch.setenv("POLYDATA_ORDERFILLED_PRIMARY_STORE", "1")

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from copy import deepcopy
 from types import MappingProxyType
 
@@ -129,6 +131,10 @@ def _ctx(projection_rows):
         "app": None,
     }
 
+
+
+# These SQL assertions intentionally exercise the supported compatibility schema.
+pytestmark = pytest.mark.usefixtures("canonical_orderfilled_store")
 
 def test_clickhouse_raw_trade_uses_exact_token_label_and_keeps_logical_slot(monkeypatch):
     def read(_ctx, query, *, timeout_seconds=1.8):
@@ -322,12 +328,3 @@ def test_cached_alpha_item_without_market_identity_cannot_self_attest():
     )
 
     assert sanitized["items"] == []
-
-
-
-
-
-
-# These SQL fixtures model the canonical store; primary tests opt in explicitly.
-import pytest
-pytestmark = pytest.mark.usefixtures("legacy_orderfilled_store")

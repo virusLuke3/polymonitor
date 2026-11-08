@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import pytest
+
 
 from api.services import clickhouse_orderfilled_service
 
+
+
+# These SQL assertions intentionally exercise the supported compatibility schema.
+pytestmark = pytest.mark.usefixtures("canonical_orderfilled_store")
 
 def test_market_trades_falls_back_to_canonical_market_tokens(monkeypatch):
     queries: list[str] = []
@@ -56,8 +62,3 @@ def test_market_trades_falls_back_to_canonical_market_tokens(monkeypatch):
     assert "f.market_id = 2014865" not in queries[1]
     assert "5d5506f45b3f09c6415469bdfb09129e313733d1f08cbb15ccbabaf271c19b93" in queries[1]
     assert "block_number IN (88548039)" in queries[2]
-
-
-# These SQL fixtures model the canonical store; primary tests opt in explicitly.
-import pytest
-pytestmark = pytest.mark.usefixtures("legacy_orderfilled_store")

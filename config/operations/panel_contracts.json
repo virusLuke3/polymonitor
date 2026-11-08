@@ -1,11 +1,7 @@
 {
   "contractVersion": "polymonitor.panel-operations.v1",
-  "excludedPanelIds": [
-    "world-cup-match-ops"
-  ],
-  "excludedPanelPrefixes": [
-    "worldcup-"
-  ],
+  "excludedPanelIds": ["world-cup-match-ops"],
+  "excludedPanelPrefixes": ["worldcup-"],
   "groups": [
     {
       "owner": "markets",
@@ -23,7 +19,7 @@
       "representativeProbe": "trade_sync",
       "expectedFreshnessSeconds": 900,
       "degradationPolicy": "Preserve the last complete trade projection and isolate failures from unrelated panels.",
-      "panelIds": ["global-orderfilled", "sample-chain-trades"]
+      "panelIds": ["global-orderfilled"]
     },
     {
       "owner": "oracle",
@@ -32,7 +28,7 @@
       "representativeProbe": "oracle_sync",
       "expectedFreshnessSeconds": 1800,
       "degradationPolicy": "Show the last lifecycle state with an explicit stale or partial marker.",
-      "panelIds": ["oracle-feed", "oracle-timeline"]
+      "panelIds": ["oracle-feed"]
     },
     {
       "owner": "market-workspace",
@@ -41,7 +37,7 @@
       "representativeProbe": "price_sync",
       "expectedFreshnessSeconds": 900,
       "degradationPolicy": "Retain the last complete price or evidence snapshot and expose its age.",
-      "panelIds": ["price-chart", "price-implications", "related-news"]
+      "panelIds": ["price-chart"]
     },
     {
       "owner": "lob",
@@ -58,7 +54,6 @@
       "dataSources": ["redis", "seed-meta:signals"],
       "serviceNames": [
         "polydata-alpha-signal-seed.service",
-        "polydata-polybeats-feed-seed.service",
         "polydata-whale-trades-seed.service",
         "polydata-suspicious-trades-seed.service"
       ],
@@ -68,7 +63,7 @@
         "suspicious-flow": "suspicious-trades"
       },
       "degradationPolicy": "Keep last-good signal evidence, never fabricate a current signal.",
-      "panelIds": ["alpha-signal", "polybeats-feed", "whale-tracker", "suspicious-flow"]
+      "panelIds": ["alpha-signal", "whale-tracker", "suspicious-flow"]
     },
     {
       "owner": "market-groups",
@@ -80,7 +75,7 @@
         "commodity-equity-transmission": "commodities-watch"
       },
       "degradationPolicy": "Retain last-good groups with stale and source-degraded labels.",
-      "panelIds": ["commodities-watch", "commodity-equity-transmission", "crypto-watch"]
+      "panelIds": ["commodities-watch", "commodity-equity-transmission"]
     },
     {
       "owner": "finance",
@@ -97,13 +92,11 @@
         "broker-research-watch",
         "crypto-etf-flow",
         "crypto-fear-greed",
-        "crypto-perp-funding",
         "defi-security-watch",
         "defi-token-watch",
         "defi-yield-monitor",
         "global-index-monitor",
         "ipo-news-watch",
-        "stablecoin-monitor",
         "tradfi-perp-radar"
       ]
     },
@@ -154,16 +147,12 @@
       "owner": "weather",
       "healthStrategy": "seed",
       "dataSources": ["redis", "seed-meta:weather"],
-      "serviceNames": [
-        "polydata-global-weather-map-seed.service",
-        "polydata-weather-news-seed.service"
-      ],
+      "serviceNames": ["polydata-global-weather-map-seed.service", "polydata-weather-news-seed.service"],
       "expectedFreshnessSeconds": 900,
       "evidenceAliases": {
         "global-temperature-monitor": "global-weather-map",
         "weather-city-snapshot": "global-weather-map",
         "weather-market-browser": "global-weather-map",
-        "weather-quote-table": "global-weather-map",
         "weather-trend-7d": "global-weather-map",
         "weather-trend-detail": "global-weather-map"
       },
@@ -173,7 +162,6 @@
         "weather-city-snapshot",
         "weather-market-browser",
         "weather-news",
-        "weather-quote-table",
         "weather-trend-7d",
         "weather-trend-detail"
       ]
@@ -182,10 +170,7 @@
       "owner": "content",
       "healthStrategy": "seed",
       "dataSources": ["redis", "content-snapshots"],
-      "serviceNames": [
-        "polydata-breaking-event-radar-seed.service",
-        "polydata-market-tv-wire-seed.service"
-      ],
+      "serviceNames": ["polydata-breaking-event-radar-seed.service", "polydata-market-tv-wire-seed.service"],
       "expectedFreshnessSeconds": 1800,
       "evidenceAliases": {
         "market-youtube-channels": "market-tv-wire"
@@ -197,10 +182,7 @@
       "owner": "world-intel",
       "healthStrategy": "seed",
       "dataSources": ["redis", "world-snapshots"],
-      "serviceNames": [
-        "polydata-geo-sanctions-shock.service",
-        "polydata-global-transport-shipping-seed.service"
-      ],
+      "serviceNames": ["polydata-geo-sanctions-shock.service"],
       "expectedFreshnessSeconds": 7200,
       "degradationPolicy": "Retain last-good evidence and label partial upstream coverage.",
       "panelIds": ["geo-sanctions-shock"]
@@ -226,14 +208,7 @@
       ],
       "expectedFreshnessSeconds": 900,
       "degradationPolicy": "Use last-good event data and keep provider errors isolated.",
-      "panelIds": [
-        "espn-matchup-predictor",
-        "esports-intel",
-        "f1-trackside",
-        "nba-intel",
-        "nba-scoreboard",
-        "sports-odds"
-      ]
+      "panelIds": ["espn-matchup-predictor", "esports-intel", "f1-trackside", "nba-intel", "nba-scoreboard", "sports-odds"]
     },
     {
       "owner": "markets",
@@ -250,7 +225,7 @@
       "dataSources": ["external-api", "runtime-cache"],
       "expectedFreshnessSeconds": 1800,
       "degradationPolicy": "Prefer last-good cache, distinguish rate limits from complete source failure.",
-      "panelIds": ["blockchain-policy-news", "crypto-funding-watch"]
+      "panelIds": ["blockchain-policy-news"]
     },
     {
       "owner": "browser",
@@ -258,7 +233,146 @@
       "dataSources": ["static-assets", "browser-runtime"],
       "representativeProbe": "production-build-and-browser-smoke",
       "degradationPolicy": "No synthetic heartbeat; rely on registry, build and browser evidence.",
-      "panelIds": ["trade-policy-radar", "weather-quote-detail", "world-clock"]
+      "panelIds": ["trade-policy-radar", "world-clock"]
+    },
+    {
+      "owner": "market-wide-agent",
+      "healthStrategy": "seed",
+      "dataSources": ["sqlite", "agent:market-wide:snapshot"],
+      "acquisitionEntrypoint": "scripts/agent/seed_market_wide_insights.py",
+      "expectedFreshnessSeconds": 43200,
+      "degradationPolicy": "Validate each persisted lens and its input evidence; database activity alone does not establish generated snapshot health.",
+      "panelIds": ["price-implications", "sample-chain-trades", "oracle-timeline"],
+      "serviceNames": ["polydata-agent-market-wide-seed.service"]
+    },
+    {
+      "owner": "content-topic",
+      "healthStrategy": "seed",
+      "dataSources": ["postgres:content_items", "sqlite:snapshot:content:free-public"],
+      "acquisitionEntrypoint": "scripts/runtime/content_topic_refresh.py",
+      "expectedFreshnessSeconds": 300,
+      "degradationPolicy": "Retain original publication clocks and bounded candidate coverage; no feed evidence means unknown.",
+      "panelIds": ["related-news"],
+      "serviceNames": ["polydata-content-topic-refresh.service"]
+    },
+    {
+      "owner": "crypto-strategy",
+      "healthStrategy": "seed",
+      "dataSources": ["sqlite:crypto-strategy", "market-data:contract-reference", "historical-exchange-transfers"],
+      "acquisitionEntrypoint": "scripts/runtime/crypto_strategy_watcher.py",
+      "expectedFreshnessSeconds": 120,
+      "degradationPolicy": "Check each source clock separately. Historical inflows are not live; never substitute a Finance compatibility seed for strategy data.",
+      "panelIds": [
+        "crypto-watch",
+        "crypto-order-flow",
+        "crypto-perp-funding",
+        "options-implied-probability",
+        "stablecoin-monitor",
+        "crypto-exchange-inflow"
+      ],
+      "serviceNames": ["polydata-crypto-strategy-seed.service"]
+    },
+    {
+      "owner": "crypto-reference",
+      "healthStrategy": "seed",
+      "dataSources": ["market-data:official-twap", "market-data:contract-anchor", "market-data:book-snapshot"],
+      "acquisitionEntrypoint": "scripts/api/services/crypto_strategy/native_reference.py",
+      "expectedFreshnessSeconds": 15,
+      "degradationPolicy": "Only current official observations and exact contract anchors support threshold distance; quotes and unavailable raw-window models stay separate.",
+      "panelIds": ["crypto-oracle-reference"]
+    },
+    {
+      "owner": "crypto-funding",
+      "healthStrategy": "seed",
+      "dataSources": ["sqlite", "seed-meta:crypto", "market-registry"],
+      "acquisitionEntrypoint": "scripts/runtime/crypto_funding_watcher.py",
+      "expectedFreshnessSeconds": 300,
+      "degradationPolicy": "Keep venue funding clocks and market-association freshness independent.",
+      "panelIds": ["crypto-funding-watch"],
+      "serviceNames": ["polydata-crypto-funding-seed.service"],
+      "evidenceAliases": {
+        "crypto-funding-watch": "funding-watch"
+      }
+    },
+    {
+      "owner": "weather-markets",
+      "healthStrategy": "seed",
+      "dataSources": ["sqlite:snapshot:weather:markets/catalog-v1", "sqlite:snapshot:weather:markets/books-v1"],
+      "acquisitionEntrypoint": "scripts/runtime/weather_market_watcher.py",
+      "expectedFreshnessSeconds": 300,
+      "degradationPolicy": "Use official book snapshots with their source times; forecast seed freshness cannot establish quote freshness.",
+      "panelIds": ["weather-quote-detail", "weather-quote-table"],
+      "serviceNames": ["polymonitor-weather-markets.service"]
+    },
+    {
+      "owner": "official-disclosures",
+      "healthStrategy": "seed",
+      "dataSources": ["sqlite:snapshot:official-disclosures", "sqlite:source:official-disclosures"],
+      "acquisitionEntrypoint": "scripts/runtime/official_disclosures_watcher.py",
+      "expectedFreshnessSeconds": 5400,
+      "degradationPolicy": "Read source-level success/attempt clocks; company facts and regulatory releases retain their independent cadences.",
+      "panelIds": ["company-events"],
+      "serviceNames": ["polydata-official-disclosures.service"]
+    },
+    {
+      "owner": "politics-elections",
+      "healthStrategy": "seed",
+      "dataSources": ["sqlite:source:politics:v1", "sqlite:politics.sqlite3/evidence", "official-election-evidence"],
+      "acquisitionEntrypoint": "scripts/runtime/politics_watcher.py --owner elections",
+      "expectedFreshnessSeconds": 10800,
+      "degradationPolicy": "Keep polling, tabulation and legal certification separate; public coverage is not all elections.",
+      "panelIds": ["politics-election", "politics-early-vote"],
+      "serviceNames": ["polydata-politics@elections.service"]
+    },
+    {
+      "owner": "politics-nominations",
+      "healthStrategy": "seed",
+      "dataSources": ["sqlite:source:politics:v1", "sqlite:politics.sqlite3/evidence", "official-primary-and-delegate-evidence"],
+      "acquisitionEntrypoint": "scripts/runtime/politics_watcher.py --owner elections",
+      "expectedFreshnessSeconds": 259200,
+      "degradationPolicy": "Daily historical primary/delegate checks retain original contest dates and source-specific freshness.",
+      "panelIds": ["politics-nomination"],
+      "serviceNames": ["polydata-politics@elections.service"]
+    },
+    {
+      "owner": "politics-campaign-finance",
+      "healthStrategy": "seed",
+      "dataSources": ["sqlite:source:politics:v1", "sqlite:politics.sqlite3/evidence", "fec-public-records"],
+      "acquisitionEntrypoint": "scripts/runtime/politics_watcher.py --owner campaign-finance",
+      "expectedFreshnessSeconds": 64800,
+      "degradationPolicy": "Respect six-hour collection and bounded filings coverage; missing direction or revisions remain unknown.",
+      "panelIds": ["politics-campaign-finance"],
+      "serviceNames": ["polydata-politics@campaign-finance.service"]
+    },
+    {
+      "owner": "politics-government",
+      "healthStrategy": "seed",
+      "dataSources": ["sqlite:source:politics:v1", "sqlite:politics.sqlite3/evidence", "official-legislative-evidence"],
+      "acquisitionEntrypoint": "scripts/runtime/politics_watcher.py --owner government",
+      "expectedFreshnessSeconds": 10800,
+      "degradationPolicy": "Use each source cadence and legal evidence; a current roster does not establish future control or every appointment.",
+      "panelIds": ["politics-seats", "politics-government", "politics-appointments", "politics-funding"],
+      "serviceNames": ["polydata-politics@government.service"]
+    },
+    {
+      "owner": "presidential-documents",
+      "healthStrategy": "seed",
+      "dataSources": ["sqlite:snapshot:official-disclosures", "federal-register:presidential"],
+      "acquisitionEntrypoint": "scripts/runtime/official_disclosures_watcher.py",
+      "expectedFreshnessSeconds": 5400,
+      "degradationPolicy": "Keep signed, published and effective dates distinct; missing legal-effect evidence remains unknown.",
+      "panelIds": ["politics-executive"],
+      "serviceNames": ["polydata-official-disclosures.service"]
+    },
+    {
+      "owner": "policy-progress",
+      "healthStrategy": "seed",
+      "dataSources": ["sqlite:snapshot:official-disclosures", "sqlite:source:politics:v1"],
+      "acquisitionEntrypoint": "scripts/runtime/official_disclosures_watcher.py; scripts/runtime/politics_watcher.py --owner government",
+      "expectedFreshnessSeconds": 10800,
+      "degradationPolicy": "Regulations and legislation reuse their separate owners; success of either source does not prove the other is current.",
+      "panelIds": ["policy-progress"],
+      "serviceNames": ["polydata-official-disclosures.service", "polydata-politics@government.service"]
     }
   ]
 }

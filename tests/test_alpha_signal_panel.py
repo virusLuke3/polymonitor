@@ -1,3 +1,4 @@
+import pytest
 from copy import deepcopy
 from unittest.mock import patch
 from api.context import RuntimeResources
@@ -30,6 +31,10 @@ def build(ctx, rows):
     with patch.object(alpha, '_candidates', return_value=rows):
         return alpha.fetch_live_alpha_signal_payload(ctx)
 
+
+
+# These SQL assertions intentionally exercise the supported compatibility schema.
+pytestmark = pytest.mark.usefixtures("canonical_orderfilled_store")
 
 def test_token_identity_does_not_depend_on_stored_outcome_code_or_mutation_receipt():
     result = build(context(), [row()])
@@ -231,8 +236,3 @@ def test_alpha_query_reuses_supplied_connection_factory_and_releases_lease(tmp_p
         sql_calls = connection.cursor.return_value.execute.call_args_list
         assert sql_calls[0].args == ('SELECT 1', ())
     connection.close.assert_called_once()
-
-
-# These SQL fixtures model the canonical store; primary tests opt in explicitly.
-import pytest
-pytestmark = pytest.mark.usefixtures("legacy_orderfilled_store")
