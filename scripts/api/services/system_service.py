@@ -77,7 +77,10 @@ class SeedHealthDependencies:
         )
 
 
+from api.services.external_panels_service import health_specs as external_health_specs
+
 SEED_META_SPECS = [
+    *external_health_specs(),
     {
         "panelId": "related-news",
         "namespace": "seed-meta:content",

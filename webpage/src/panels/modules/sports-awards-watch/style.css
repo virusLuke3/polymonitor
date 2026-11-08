@@ -1,0 +1,4 @@
+.sportsx-awards-leader { border-left: 2px solid var(--ds-color-warning); padding: 8px 10px; margin: 10px 0; background: color-mix(in srgb,var(--ds-color-warning) 7%,transparent); }
+.sportsx-awards-leader > span { font-size: 18px; color: var(--ds-color-warning); }
+.sportsx-awards-leader > strong { display: block; font-size: 28px; line-height: 1.2; color: var(--ds-color-warning); }
+.sportsx-awards-leader > strong small { font-size: 10px; margin-left: 8px; }

@@ -370,6 +370,30 @@ def fetch_live_nba_scoreboard_payload(ctx: RuntimeServiceContext, limit: int = 1
                 "homeScore": (home or {}).get("score"),
                 "awayScore": (away or {}).get("score"),
                 "broadcast": (((competition.get("broadcasts") or [None])[0]) or {}).get("names", [None])[0],
+                # Preserve shared event facts for research projections. Missing
+                # periods/quotes remain absent; final scores are not live quotes.
+                "homeTeamId": ((home or {}).get("team") or {}).get("id"),
+                "awayTeamId": ((away or {}).get("team") or {}).get("id"),
+                "season": event.get("season"),
+                "period": (competition.get("status") or {}).get("period"),
+                "displayClock": (competition.get("status") or {}).get("displayClock"),
+                "homePeriods": [
+                    {"period": row.get("period"), "value": row.get("value")}
+                    for row in ((home or {}).get("linescores") or [])[:12]
+                ],
+                "awayPeriods": [
+                    {"period": row.get("period"), "value": row.get("value")}
+                    for row in ((away or {}).get("linescores") or [])[:12]
+                ],
+                "leaders": [
+                    {"side": side, "category": category.get("name"),
+                     "athleteId": (row.get("athlete") or {}).get("id"),
+                     "name": (row.get("athlete") or {}).get("displayName"),
+                     "value": row.get("value")}
+                    for side, team in (("home", home or {}), ("away", away or {}))
+                    for category in (team.get("leaders") or [])[:4]
+                    for row in (category.get("leaders") or [])[:3]
+                ],
             }
         )
     return normalize_nba_scoreboard_payload({"items": games, "generatedAt": _dependencies(ctx).utc_now_iso()}, limit=limit)

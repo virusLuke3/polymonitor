@@ -1,0 +1,8 @@
+.sportsx-tennis-round { position: relative; margin: 8px 0 10px 4px; padding-left: 12px; border-left: 1px solid var(--ds-color-category-purple); }
+.sportsx-tennis-round h4 { color: var(--ds-color-category-purple); text-transform: uppercase; letter-spacing: .6px; font-size: 10px; }
+.sportsx-tennis-round h4::before { content: ''; position: absolute; left: -4px; top: 5px; width: 7px; height: 7px; background: var(--ds-color-category-purple); }
+.sportsx-tennis-match { padding: 6px 8px; background: var(--ds-color-surface-2); margin: 5px 0; }
+.sportsx-tennis-match > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 3px; font-size: 11px; }
+.sportsx-tennis-match b { color: var(--ds-color-text-secondary); white-space: nowrap; }
+.sportsx-tennis-match .is-winner,.sportsx-tennis-match .is-winner b { color: var(--ds-color-category-cyan); font-weight: 700; }
+.sportsx-tennis-match.is-upcoming { border-left: 2px solid var(--ds-color-category-orange); }

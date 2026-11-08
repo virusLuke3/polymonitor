@@ -1,0 +1,11 @@
+[Unit]
+Description=Polymonitor external evidence schedule (%i)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+RandomizedDelaySec=20s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

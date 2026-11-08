@@ -1,0 +1,6 @@
+.sportsx-dota-score { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; align-items: center; text-align: center; margin: 12px 0; }
+.sportsx-dota-score strong { display: block; font-size: 28px; line-height: 1.2; }
+.sportsx-dota-score div > span { display: block; font-weight: 600; font-size: 12px; margin-top: 4px; }
+.sportsx-dota-score > span { font-size: 24px; color: var(--ds-color-text-muted); }
+.sportsx-dota-map .sportsx-hero { margin: 7px 0; }
+.sportsx-dota-map .sportsx-hero strong { font-size: 24px; }

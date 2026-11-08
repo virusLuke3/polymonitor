@@ -1,0 +1,6 @@
+.sportsx-esports-context { display: grid; grid-template-columns: auto 1fr auto 1fr; gap: 6px; align-items: center; margin: 12px 0; }
+.sportsx-esports-context strong { font-size: 26px; }
+.sportsx-esports-context span { font-size: 10px; color: var(--ds-color-text-secondary); }
+.sportsx-esports-series { border-left: 2px solid var(--ds-color-category-purple); padding: 2px 0 4px 9px; margin: 12px 0; }
+.sportsx-esports-series h4 { margin: 3px 0; color: var(--ds-color-category-purple); }
+.sportsx-esports-series .sportsx-row > small { max-width: 42%; text-align: right; }

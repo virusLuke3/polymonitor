@@ -1,0 +1,16 @@
+[Unit]
+Description=Polymonitor external evidence collector (%i)
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/.local/share/polymonitor/backend
+Environment=PYTHONPATH=%h/.local/share/polymonitor/backend/scripts
+Environment=POLYDATA_DISABLE_DOTENV=1
+EnvironmentFile=%h/.local/share/polymonitor/backend/runtime-config/polydata/polydata.env
+EnvironmentFile=%h/.local/share/polymonitor/backend/runtime-config/local.env
+EnvironmentFile=%h/.local/share/polymonitor/backend/runtime-config/external-panels.env
+ExecStart=/usr/bin/python3 -m runtime.external_panels_watcher --owner %i
+TimeoutStartSec=720
+Nice=10
+MemoryMax=512M

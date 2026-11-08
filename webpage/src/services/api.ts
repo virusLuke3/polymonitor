@@ -825,3 +825,7 @@ export function fetchOfficialDisclosures(panelId: "company-events" | "policy-pro
 export function fetchPolitics(domain: string, signal?: AbortSignal) {
   return apiGet<unknown>(`/runtime/politics/${encodeURIComponent(domain)}`, signal);
 }
+
+export function fetchExternalPanel(panelId: string, signal?: AbortSignal) {
+  return apiGet<unknown>(`/runtime/external/${encodeURIComponent(panelId)}`, signal);
+}

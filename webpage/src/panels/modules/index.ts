@@ -1,3 +1,38 @@
+import { panel as external0 } from './geo-conflict-watch';
+import { panel as external1 } from './geo-ceasefire-watch';
+import { panel as external2 } from './geo-territory-control';
+import { panel as external3 } from './geo-diplomacy-calendar';
+import { panel as external4 } from './geo-treaty-tracker';
+import { panel as external5 } from './weather-precipitation';
+import { panel as external6 } from './weather-drought';
+import { panel as external7 } from './weather-extremes';
+import { panel as external8 } from './weather-storm-advisory';
+import { panel as external9 } from './sports-spread-monitor';
+import { panel as external10 } from './sports-total-monitor';
+import { panel as external11 } from './sports-player-props';
+import { panel as external12 } from './sports-tournament-path';
+import { panel as external13 } from './sports-season-race';
+import { panel as external14 } from './sports-awards-watch';
+import { panel as external15 } from './esports-map-state';
+import { panel as external16 } from './esports-tournament-path';
+import { panel as external17 } from './crypto-listing-watch';
+import { panel as external18 } from './crypto-project-milestones';
+import { panel as external19 } from './chain-metrics-monitor';
+import { panel as external20 } from './fiscal-tax-monitor';
+import { panel as external21 } from './merger-progress';
+import { panel as external22 } from './private-valuation-watch';
+import { panel as external23 } from './ai-leaderboard-watch';
+import { panel as external24 } from './art-auction-watch';
+import { panel as external25 } from './culture-box-office';
+import { panel as external26 } from './culture-awards-race';
+import { panel as external27 } from './culture-music-charts';
+import { panel as external28 } from './product-release-watch';
+import { panel as external29 } from './public-figure-events';
+import { panel as external30 } from './reality-show-progress';
+import { panel as external31 } from './research-evidence-watch';
+import { panel as external32 } from './social-window-monitor';
+import { panel as external33 } from './space-mission-watch';
+import { panel as external34 } from './mentions-evidence';
 import type { PanelModule } from '../types';
 import { panel as activeMarkets } from './active-markets';
 import { panel as globalOrderfilled } from './global-orderfilled';
@@ -173,4 +208,39 @@ export const PANEL_MODULES: PanelModule[] = [
   politicsAppointments,
   politicsFunding,
 
+  external0,
+  external1,
+  external2,
+  external3,
+  external4,
+  external5,
+  external6,
+  external7,
+  external8,
+  external9,
+  external10,
+  external11,
+  external12,
+  external13,
+  external14,
+  external15,
+  external16,
+  external17,
+  external18,
+  external19,
+  external20,
+  external21,
+  external22,
+  external23,
+  external24,
+  external25,
+  external26,
+  external27,
+  external28,
+  external29,
+  external30,
+  external31,
+  external32,
+  external33,
+  external34,
 ];

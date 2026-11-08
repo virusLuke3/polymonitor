@@ -1,0 +1,6 @@
+.sportsx-total-quarters { display: flex; align-items: flex-end; justify-content: space-around; gap: 8px; margin: 15px 0 10px; }
+.sportsx-total-quarters > div { flex: 1; text-align: center; }
+.sportsx-total-quarters b { display: block; font-size: 11px; margin-bottom: 5px; }
+.sportsx-total-stack { height: 90px; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; }
+.sportsx-total-stack span { display: block; width: min(100%,44px); min-height: 0; background: var(--ds-color-category-cyan); color: var(--ds-color-surface-1); font-size: 9px; overflow: hidden; }
+.sportsx-total-stack span + span { background: var(--ds-color-category-orange); }

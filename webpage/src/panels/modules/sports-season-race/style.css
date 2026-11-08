@@ -1,0 +1,5 @@
+.sportsx-season-focus { display: flex; justify-content: space-between; gap: 10px; margin: 10px 0; }
+.sportsx-season-focus > strong { font-size: 28px; color: var(--ds-color-warning); line-height: 1.2; text-align: right; }
+.sportsx-season-focus > strong small { display: block; font-weight: 400; }
+.sportsx-season .sportsx-table button { background: none; border: 0; padding: 0; color: var(--ds-color-text); text-align: left; }
+.sportsx-season .sportsx-table .is-selected { background: color-mix(in srgb,var(--ds-color-warning) 8%,transparent); }

@@ -373,6 +373,116 @@
       "degradationPolicy": "Regulations and legislation reuse their separate owners; success of either source does not prove the other is current.",
       "panelIds": ["policy-progress"],
       "serviceNames": ["polydata-official-disclosures.service", "polydata-politics@government.service"]
+    },
+    {
+      "owner": "external-geopolitics",
+      "healthStrategy": "seed",
+      "dataSources": [
+        "sqlite:source:external-panels:v1",
+        "sqlite:external-panel-evidence"
+      ],
+      "serviceNames": [
+        "polymonitor-external-panels@geopolitics.service"
+      ],
+      "expectedFreshnessSeconds": 86400,
+      "degradationPolicy": "Per-source cadence/retention from API sources; original clocks and bounded last-good data. Healthy service is not complete data coverage.",
+      "panelIds": [
+        "geo-conflict-watch",
+        "geo-ceasefire-watch",
+        "geo-territory-control",
+        "geo-diplomacy-calendar",
+        "geo-treaty-tracker"
+      ]
+    },
+    {
+      "owner": "external-weather",
+      "healthStrategy": "seed",
+      "dataSources": [
+        "sqlite:source:external-panels:v1",
+        "sqlite:external-panel-evidence"
+      ],
+      "serviceNames": [
+        "polymonitor-external-panels@weather.service"
+      ],
+      "expectedFreshnessSeconds": 86400,
+      "degradationPolicy": "Per-source cadence/retention from API sources; original clocks and bounded last-good data. Healthy service is not complete data coverage.",
+      "panelIds": [
+        "weather-precipitation",
+        "weather-drought",
+        "weather-extremes",
+        "weather-storm-advisory"
+      ]
+    },
+    {
+      "owner": "external-sports",
+      "healthStrategy": "seed",
+      "dataSources": [
+        "sqlite:source:external-panels:v1",
+        "sqlite:external-panel-evidence"
+      ],
+      "serviceNames": [
+        "polymonitor-external-panels@sports.service"
+      ],
+      "expectedFreshnessSeconds": 86400,
+      "degradationPolicy": "Per-source cadence/retention from API sources; original clocks and bounded last-good data. Healthy service is not complete data coverage.",
+      "panelIds": [
+        "sports-spread-monitor",
+        "sports-total-monitor",
+        "sports-player-props",
+        "sports-tournament-path",
+        "sports-season-race",
+        "sports-awards-watch",
+        "esports-map-state",
+        "esports-tournament-path"
+      ]
+    },
+    {
+      "owner": "external-finance",
+      "healthStrategy": "seed",
+      "dataSources": [
+        "sqlite:source:external-panels:v1",
+        "sqlite:external-panel-evidence"
+      ],
+      "serviceNames": [
+        "polymonitor-external-panels@finance.service"
+      ],
+      "expectedFreshnessSeconds": 86400,
+      "degradationPolicy": "Per-source cadence/retention from API sources; original clocks and bounded last-good data. Healthy service is not complete data coverage.",
+      "panelIds": [
+        "crypto-listing-watch",
+        "crypto-project-milestones",
+        "chain-metrics-monitor",
+        "fiscal-tax-monitor",
+        "merger-progress",
+        "private-valuation-watch"
+      ]
+    },
+    {
+      "owner": "external-culture-tech",
+      "healthStrategy": "seed",
+      "dataSources": [
+        "sqlite:source:external-panels:v1",
+        "sqlite:external-panel-evidence"
+      ],
+      "serviceNames": [
+        "polymonitor-external-panels@culture-tech.service"
+      ],
+      "expectedFreshnessSeconds": 86400,
+      "degradationPolicy": "Per-source cadence/retention from API sources; original clocks and bounded last-good data. Healthy service is not complete data coverage.",
+      "panelIds": [
+        "ai-leaderboard-watch",
+        "art-auction-watch",
+        "culture-box-office",
+        "culture-awards-race",
+        "culture-music-charts",
+        "product-release-watch",
+        "public-figure-events",
+        "reality-show-progress",
+        "research-evidence-watch",
+        "social-window-monitor",
+        "space-mission-watch",
+        "mentions-evidence"
+      ]
     }
   ]
 }
