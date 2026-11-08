@@ -11,8 +11,9 @@ function transaction<T>(mode: IDBTransactionMode, work: (tx: IDBTransaction, res
       if (settled) return;
       settled = true; clearTimeout(timer); db?.close(); resolve(value);
     };
-    // Blocked/disabled storage must never hold a network read or UI indefinitely.
-    const timer = setTimeout(() => { value = null; try { tx?.abort(); } catch { /* Finished. */ } done(); }, 800);
+    // Storage has its own bounded lifetime. Runtime releases network admission
+    // earlier, without throwing away a valid read delayed by a busy main thread.
+    const timer = setTimeout(() => { value = null; try { tx?.abort(); } catch { /* Finished. */ } done(); }, 5000);
     try {
       const open = indexedDB.open(DB, 1);
       open.onupgradeneeded = () => {

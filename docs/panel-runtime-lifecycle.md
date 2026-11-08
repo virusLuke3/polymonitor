@@ -66,8 +66,11 @@ characters across all large owners. Weather caps an entry at 4,000,000, transpor
 and market history at 2,000,000, crypto research/history at 1,000,000. Encoded
 characters are capacity units, not a promise of physical disk bytes. Writes and
 oldest-entry eviction are atomic. IndexedDB restore precedes request admission;
-a blocked/disabled store releases admission within 800 ms. A late restore cannot
-replace a network attempt or a different parameter identity. No dual writes or
+a blocked/disabled store releases admission within 800 ms. The storage operation
+may complete for up to five seconds, so a busy main thread cannot discard a valid
+large snapshot merely by delaying its callbacks. A late restore may fill an empty
+view while the network check remains pending, preserving that attempt/error; it
+can never replace accepted network data or a different parameter identity. No dual writes or
 second scheduler are introduced. The envelope
 adds the complete key and last validated `checkedAt`; old entries without that
 check clock may still restore under their existing schema, but must recheck.

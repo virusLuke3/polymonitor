@@ -136,7 +136,7 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
   const controllers = useRef(new Map<string, AbortController>());
   const retries = useRef(new Map<string, number>());
   const mounted = useRef(true);
-  const hydration = useRef(new Map<string, { pending: boolean }>());
+  const hydration = useRef(new Map<string, { pending: boolean; timer?: number }>());
   const runtimeSuspended = suspended || documentHidden;
   const suspendedRef = useRef(runtimeSuspended);
   suspendedRef.current = runtimeSuspended;
@@ -182,19 +182,32 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
   const restoreResource = useCallback((panel: PanelModule, entry: RestoredResource<unknown>) => {
     if (dataRef.current[panel.id] != null) return;
     setRuntimeData(current => ({ ...current, [panel.id]: entry.value }));
-    updateStatuses([panel.id], () => restoredStatus(panel, entry));
+    updateStatuses([panel.id], current => {
+      const restored = restoredStatus(panel, entry);
+      // A slow storage read may finish while revalidation is already pending.
+      // Show its valid snapshot without resetting that attempt/error/deadline.
+      return current.lastAttemptAt == null && !current.fetching && !current.error ? restored
+        : { ...restored, ...current, phase: current.error ? 'degraded' : restored.phase,
+          updatedAt: restored.updatedAt, checkedAt: restored.checkedAt, cacheMode: 'browser' };
+    });
   }, [setRuntimeData, updateStatuses]);
 
   useEffect(() => {
     panels.forEach(panel => {
       if (panel.snapshot?.cache?.storage !== 'indexeddb' || hydration.current.has(panel.id)) return;
-      const token = { pending: true };
+      const token: { pending: boolean; timer?: number } = { pending: true };
       hydration.current.set(panel.id, token);
-      void readIndexedResource(panel.snapshot).then(entry => {
+      token.timer = window.setTimeout(() => {
         if (!mounted.current || hydration.current.get(panel.id) !== token) return;
-        // A manual request may have started while storage was opening. Its
-        // accepted value/status must win over a late restore.
-        if (entry && statusesRef.current[panel.id]?.lastAttemptAt == null) restoreResource(panel, entry);
+        token.pending = false;
+        hydrated(version => version + 1);
+      }, 800);
+      void readIndexedResource(panel.snapshot).then(entry => {
+        window.clearTimeout(token.timer);
+        if (!mounted.current || hydration.current.get(panel.id) !== token) return;
+        // restoreResource never replaces an accepted network value. A pending
+        // attempt can still display a valid snapshot while it completes.
+        if (entry) restoreResource(panel, entry);
         token.pending = false;
         hydrated(version => version + 1);
       });
@@ -421,6 +434,7 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
     mounted.current = true;
     return () => {
       mounted.current = false;
+      hydration.current.forEach(token => window.clearTimeout(token.timer));
       controllers.current.forEach((controller) => controller.abort());
       controllers.current.clear(); inflight.current.clear();
       retries.current.forEach((timer) => window.clearTimeout(timer)); retries.current.clear();
@@ -430,6 +444,7 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
   const getData = useCallback((id: string) => runtimeData[sourceId(id)], [runtimeData, sourceId]);
   const forgetIds = useCallback((ids: string[]) => {
     ids.forEach(id => {
+      window.clearTimeout(hydration.current.get(id)?.timer);
       hydration.current.delete(id);
       const controller = controllers.current.get(id);
       controllers.current.delete(id); inflight.current.delete(id);

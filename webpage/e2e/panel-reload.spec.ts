@@ -43,6 +43,53 @@ test('a multi-megabyte resource restores from IndexedDB before network and share
   expect(await page.evaluate(() => window.frontendHarness.runtime!.getData('shared'))).toBeUndefined();
 });
 
+for (const networkWins of [false, true]) test(`slow storage releases admission, preserves pending checks and never replaces accepted network data (${networkWins})`, async ({ page }) => {
+  await installLocalAssets(page);
+  await page.goto('/e2e/lifecycle.html');
+  await page.waitForFunction(() => Boolean(window.frontendHarness));
+  await page.clock.install({ time: new Date(start) });
+  await page.evaluate(() => window.frontendHarness.mount('indexed-runtime'));
+  await page.clock.runFor(1100);
+  await expect.poll(() => page.evaluate(() => window.frontendHarness.requests.length)).toBe(1);
+  await page.evaluate(generatedAt => window.frontendHarness.requests[0].resolve({ generatedAt, items: ['saved'] }), GENERATED_AT);
+  await page.clock.runFor(100);
+  await expect.poll(() => indexedSnapshot(page)).not.toBeNull();
+  const checkedAt = await indexedSnapshot(page);
+  await page.reload();
+  await page.waitForFunction(() => Boolean(window.frontendHarness));
+  await page.clock.install({ time: new Date(start + 2000) });
+  await page.evaluate(() => {
+    const open = IDBFactory.prototype.open;
+    IDBFactory.prototype.open = function(...args) {
+      const request = open.apply(this, args);
+      Object.defineProperty(request, 'onsuccess', { set(callback) {
+        request.addEventListener('success', event => {
+          (window as any).storageOpened = true;
+          setTimeout(() => callback.call(request, event), 1200);
+        });
+      } });
+      return request;
+    };
+    window.frontendHarness.mount('indexed-runtime');
+  });
+  await page.waitForFunction(() => (window as any).storageOpened);
+  await page.clock.runFor(900);
+  expect(await page.evaluate(() => window.frontendHarness.requests.length)).toBe(1);
+  if (networkWins) {
+    await page.evaluate(() => window.frontendHarness.requests[0].resolve({ generatedAt: new Date().toISOString(), items: ['new network'] }));
+    await page.clock.runFor(100);
+  }
+  await page.clock.runFor(500);
+  await expect.poll(() => page.evaluate(() => (window.frontendHarness.runtime!.getData('shared') as any)?.items[0]))
+    .toBe(networkWins ? 'new network' : 'saved');
+  if (!networkWins) {
+    expect(await page.evaluate(() => window.frontendHarness.runtime!.getStatus('shared'))).toMatchObject({ fetching: true, checkedAt, cacheMode: 'browser' });
+    await page.evaluate(() => window.frontendHarness.requests[0].resolve({ generatedAt: new Date().toISOString(), items: ['new network'] }));
+    await page.clock.runFor(100);
+    expect(await page.evaluate(() => (window.frontendHarness.runtime!.getData('shared') as any)?.items[0])).toBe('new network');
+  }
+});
+
 test('large storage evicts the oldest resource within its shared budget and rejects invalid envelopes', async ({ page }) => {
   await installLocalAssets(page);
   await page.goto('/e2e/lifecycle.html');
