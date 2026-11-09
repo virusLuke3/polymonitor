@@ -1,0 +1,27 @@
+# 网站数据传输契约
+
+网站静态文件和 Nginx 在公网主机，本机现有 API 读取正式 SQLite、Redis 和既有数据拥有者。浏览器通过同域 `/wm-api/` 访问；反向连接仅提供传输，不新增采集器、数据副本或成功时间。主机、密钥、跳板、端口和转发列表属于私有 `.env`，本文和脚本不保存个人地址。
+
+## 连接与资源预算
+
+- `scripts/runtime/website_link.py` 读取 `POLYMONITOR_WEB_LINK_TARGET`、跳板名称、现有专用 SSH 身份及转发列表。可选 `POLYMONITOR_WEB_LINK_PROFILES_JSON` 为 `bulk`、`interactive` 等独立连接声明 `remote`/`local` 转发列表。每个方向最多八项，仅允许回环地址；配置缺失或无效则停止启动。
+- 默认连接保留现有消费者。额外 `polymonitor-website-link@bulk.service` 为公共批量响应提供第二条连接；`@interactive` 专门承载市场目录、详情、图表、成交、Oracle、bootstrap 和 health。大新闻/地图响应的 TCP 丢包不再阻塞市场连接。Nginx 的 bulk pool 有两个目标，interactive pool 有一个目标；部署时核对空闲端口，禁止抢占其他服务。
+- 每条 SSH 连接开启压缩，连接超时 15 秒，保活 10 秒、连续三次无回应退出；转发失败退出，systemd 五秒后重连。SSH 存活不证明 HTTP 能正常通过，必须检查实际业务响应。跳板使用独立网站 SSH 进程，不复用或重启采集器连接，不修改主 Clash 选择、LOB 密钥和端口。
+- 跳板授权仅给网站已有专用身份增加目标 SSH 端口的 `permitopen`；不得放开全地址转发。最终生产配置与测试过但未使用的出口分开记录。
+- Gunicorn `gthread` 的默认首数据等待及 keepalive 组合会提前关闭高延迟转发连接。`POLYDATA_GUNICORN_KEEPALIVE_SECONDS=30`；Nginx pool 的 idle keepalive 为 15 秒、每连接最多 100 请求，bulk/interactive 每个 worker 分别最多保留 8/4 条空闲连接。使用 HTTP/1.1 并清空 upstream `Connection` 头，才会真正复用。
+- Nginx pool 地址由 `POLYMONITOR_WEB_API_UPSTREAMS_JSON` 和 `POLYMONITOR_WEB_INTERACTIVE_UPSTREAM` 渲染进 `deploy/nginx/polydata-relay-upstreams.conf.example`。站点的普通 API 指向 bulk pool，市场路由及 bootstrap/health 指向 interactive pool。现有 LOB 专用路由、限流和实时性保持各自契约。配置校验失败立即恢复原配置，成功后 reload。
+
+## 数据与时钟
+
+前端 `/runtime/`、`/v1/runtime/` 批量读取与 `/content/` 正文列表共同遵守共享下载并发预算（桌面三条、手机两条）。市场目录保持队列优先级；后台大正文不能绕过队列或依靠重复失败抢占带宽。
+
+传输隔离不改变采集周期、正式落库、快照生成时间、浏览器检查周期或最大旧值保留期。市场目录继续由共享 Runtime 每五分钟检查，最多保留十五分钟；断网显示原快照和原时钟。自然灾害同源 Nginx 缓存遵守已有 30/60 秒有效期，不无限提供过期内容；市场接口继续 `no-store`，不把实时报价转换为网关旧缓存。
+
+AI Insights、Special Radar、Trend Watch 复用 `agent:market-wide:snapshot / v1:<lens>`。模型与 seed 的运行身份和预算见 [Agent 索引](../agent/README.md)。生成成功、输入覆盖和展示成功分别验证，缺失输入仍保留原限制。
+
+## 发布验收
+
+1. 核对实际进程环境、SSH socket、监听归属及对应配置；不只检查 unit active。模拟建立连接后九秒才发送 HTTP，确认后端没有提前关闭。
+2. 同时请求市场目录、详情、图表和较大批量响应；对比本机、远端回环、公网的状态、耗时、记录数和原始时间。空列表需要来源证据，历史日汇总不能当实时流。
+3. 从普通公网首页使用真实 API/瓦片加载，保留已有布局；桌面、手机分别截图。验证缓存刷新、离线保留及离线重载、联网自动取得下一份有效响应。不能用手动注入 online 事件或替换响应代替线上验收。
+4. 新代码仅发布本任务提交；源码、部署版本、数据结果和长时间稳定性分别记录。已有源缺失、业务语义限制与本次传输修复分开报告。

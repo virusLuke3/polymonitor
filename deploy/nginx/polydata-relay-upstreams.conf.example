@@ -1,0 +1,20 @@
+# Optional reverse-link deployment. Render addresses from the private .env;
+# never install this unrendered template. Keepalive idle time must be shorter
+# than POLYDATA_GUNICORN_KEEPALIVE_SECONDS (30 seconds).
+upstream polymonitor_bulk_api {
+    least_conn;
+    __POLYMONITOR_WEB_API_UPSTREAM_SERVERS__
+    keepalive 8;
+    keepalive_timeout 15s;
+    keepalive_requests 100;
+}
+upstream polymonitor_interactive_api {
+    __POLYMONITOR_WEB_INTERACTIVE_UPSTREAM_SERVER__
+    keepalive 4;
+    keepalive_timeout 15s;
+    keepalive_requests 100;
+}
+# API locations using these pools must set proxy_http_version 1.1 and
+# proxy_set_header Connection "". Market/detail and bootstrap/health use the
+# interactive pool; bulk snapshots use the bulk pool. Live books retain their
+# own existing endpoint, admission and freshness contracts.

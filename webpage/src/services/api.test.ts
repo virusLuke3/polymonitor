@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiHttpError, ApiTimeoutError, withRuntimeRequestBudget, fetchMarketsPage, fetchAviationViewport, fetchMarketWideAiSnapshot, fetchNaturalHazardMapSource, fetchRuntimeAlpha, fetchRuntimeGeoSanctionsShock, fetchRuntimeGlobalTemperatureMonitor, fetchSystemHealth, fetchWorkspaceBundle } from './api';
+import { ApiHttpError, ApiTimeoutError, withRuntimeRequestBudget, fetchMarketsPage, fetchLatestContent, fetchRuntimePanels, fetchAviationViewport, fetchMarketWideAiSnapshot, fetchNaturalHazardMapSource, fetchRuntimeAlpha, fetchRuntimeGeoSanctionsShock, fetchRuntimeGlobalTemperatureMonitor, fetchSystemHealth, fetchWorkspaceBundle } from './api';
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
@@ -89,13 +89,29 @@ describe('HTTP lifecycle', () => {
     const controller = new AbortController();
     const request = fetchWorkspaceBundle(1, { includeContent: true, signal: controller.signal });
     controller.abort(); await expect(request).rejects.toMatchObject({ name: 'AbortError' });
-    expect(signals).toHaveLength(2);
+    expect(signals).toHaveLength(1); // Optional content is cancelled before admission.
     expect(signals.every((signal) => signal.aborted)).toBe(true);
   });
 });
 
 
 describe('shared Runtime admission', () => {
+  it('holds news and versioned panel batches behind the same three downloads', async () => {
+    vi.stubGlobal('window', globalThis);
+    const releases: (() => void)[] = [];
+    const active = [0, 1, 2].map(() => withRuntimeRequestBudget(() => new Promise<void>(resolve => releases.push(resolve))));
+    await new Promise(resolve => setTimeout(resolve, 10));
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ data: { panels: {} } }) })));
+    const controller = new AbortController();
+    const news = fetchLatestContent(100, controller.signal);
+    const batch = fetchRuntimePanels(['nba', 'defi-token-watch'], {}, controller.signal);
+    const rejected = [expect(news).rejects.toMatchObject({ name: 'AbortError' }), expect(batch).rejects.toMatchObject({ name: 'AbortError' })];
+    await new Promise(resolve => setTimeout(resolve, 10));
+    expect(fetch).not.toHaveBeenCalled();
+    controller.abort(); await Promise.all(rejected);
+    releases.forEach(release => release()); await Promise.all(active);
+    expect(fetch).not.toHaveBeenCalled();
+  });
   it('propagates workspace overload without issuing a second detail request', async () => {
     vi.stubGlobal('window', globalThis);
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 503, headers: new Headers({ 'Retry-After': '15' }) })));

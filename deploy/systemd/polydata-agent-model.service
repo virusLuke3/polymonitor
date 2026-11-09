@@ -1,0 +1,21 @@
+[Unit]
+Description=Polymonitor local Qwen model for scheduled AI panels
+After=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=3
+
+[Service]
+Type=simple
+Environment=POLYMONITOR_ENV_FILE=/__POLYDATA_REPO_ROOT__/.env
+ExecStart=/usr/bin/python3 /__POLYDATA_REPO_ROOT__/scripts/runtime/local_agent_model.py
+Restart=on-failure
+RestartSec=20
+TimeoutStopSec=45
+KillMode=control-group
+MemoryMax=40G
+TasksMax=512
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

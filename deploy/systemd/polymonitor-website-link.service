@@ -1,0 +1,18 @@
+[Unit]
+Description=Polymonitor private website data link
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Environment=POLYMONITOR_ENV_FILE=/__POLYDATA_REPO_ROOT__/.env
+ExecStart=/usr/bin/python3 /__POLYDATA_REPO_ROOT__/scripts/runtime/website_link.py
+Restart=always
+RestartSec=5
+TimeoutStopSec=10
+KillMode=control-group
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

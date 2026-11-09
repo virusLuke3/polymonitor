@@ -3,7 +3,7 @@ polyData server-side agents live here.
 - `common/`: shared environment loading, OpenAI-compatible LLM calls, Tavily search, and JSON helpers.
 - `market_insight/`: market-focused AI insight API; the current three dashboard panels use `market_wide/`.
 - `market_wide/`: market-wide AI insight agent for market brief, special-market radar, and trend radar panels.
-- `gateway/`: local Flask gateway for machines that can reach private AI endpoints; GCP can call it through a reverse SSH tunnel.
+- `gateway/`: local Flask gateway for machines that can reach private AI endpoints; remote consumers use the configured private website link.
 
 Agents read secrets from server-side `.env` files only. Frontend code calls the Flask API and never receives `API_KEY` or `TAVILY_API_KEY`.
 
@@ -20,11 +20,31 @@ bounded market-data evidence (80 markets, 60 groups, 24 trades/oracle events,
 It uses the existing local Agent gateway and OpenAI-compatible Qwen3.5-9B service:
 
 ```dotenv
-POLYDATA_AGENT_API_BASE=http://127.0.0.1:18003/v1
-POLYDATA_AGENT_MODEL=qwen3.5-9b
-POLYDATA_AGENT_API_KEY=EMPTY
+POLYDATA_AGENT_API_BASE=<private loopback OpenAI-compatible endpoint>
+POLYDATA_AGENT_MODEL=<served model ID>
+POLYDATA_AGENT_API_KEY=<private provider configuration>
 POLYDATA_AGENT_RUNTIME=chat
 ```
+
+The optional `deploy/systemd/polydata-agent-model.service` runs the existing
+local weights through `scripts/runtime/local_agent_model.py`. The user-selected
+model is Qwen3.5-9B; model path, interpreter, CUDA libraries, bind address, port,
+GPU and model ID all come from the private `.env`, with placeholders in
+`.env.example`. The launcher binds only to loopback and passes an allowlist of
+environment variables to the model, excluding unrelated source/API credentials.
+Do not export the entire personal `.env` through systemd: legacy aliases may not
+be valid shell identifiers. Remove stale model overrides from gateway drop-ins
+so they cannot silently override that file.
+
+The deployed inference budget is one running request and four queued requests,
+32,768 context tokens, 2,048-token prefill chunks and a configured 0.72 GPU memory
+fraction. CPU math libraries use one thread, tokenizer parallelism is disabled,
+and Rayon/compiler pools are bounded. The model unit limits host memory to 40 GB
+and tasks to 512, restarts failures after 20 seconds, and stops retrying after
+three starts in ten minutes. This model service is independent of the scheduled
+seed; restarting inference does not erase good snapshots or launch generation
+from a page read. A failed lens becomes eligible after the existing five-minute
+retry floor; a successful lens retains the six-hour minimum below.
 
 These settings belong on the model host. Remote consumers use the existing
 private gateway connection, never a public model port. Qwen requests disable

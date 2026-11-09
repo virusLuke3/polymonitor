@@ -138,8 +138,10 @@ function apiGetWithTimeout<T>(path: string, timeoutMs = 12000, externalSignal?: 
   // Bulk dashboard GETs used to bypass the same limit as the map sources.
   // Interactive details/bootstrap still start immediately; catalogue/summary
   // bodies share admission with runtime to avoid a first-screen download burst.
-  const bulkDashboard = /^\/(?:market-groups|markets)(?:\?|$)|^\/(?:content|trades\/recent|oracle\/recent|system\/health)(?:\?|$)/.test(path);
-  if (!path.startsWith('/runtime/') && !bulkDashboard) return run();
+  const bulkDashboard = /^\/(?:market-groups|markets)(?:\?|$)|^\/content(?:\/|\?|$)|^\/(?:trades\/recent|oracle\/recent|system\/health)(?:\?|$)/.test(path);
+  // Versioned batches and content lists must share the same admission limit.
+  // Otherwise their large bodies bypass the map/panel budget on first load.
+  if (!/^\/(?:v1\/)?runtime\//.test(path) && !bulkDashboard) return run();
   // Visible quote/signal consumers share the first tier with primary hazards
   // and interactive detail. Bulk map layers cannot starve their refreshes.
   // The bounded catalog/search owner gets the next shared slot on interaction.

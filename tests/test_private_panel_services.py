@@ -1,0 +1,65 @@
+from pathlib import Path
+import shlex
+
+import pytest
+
+from runtime import local_agent_model, website_link
+
+
+def test_model_uses_private_config_without_exporting_unrelated_secrets(tmp_path, monkeypatch):
+    interpreter = tmp_path / "bin" / "python"
+    interpreter.parent.mkdir()
+    interpreter.touch()
+    (tmp_path / "config.json").write_text("{}")
+    values = {"PYTHON": str(interpreter), "PATH": str(tmp_path), "HOST": "127.0.0.1",
+              "PORT": "18003", "MEMORY_FRACTION": "0.72", "CONTEXT": "16384",
+              "GPU": "0", "LIBRARY_PATH": "/configured/lib", "CUDA_HOME": "/configured/cuda"}
+    config = {"POLYMONITOR_AGENT_MODEL_" + key: value for key, value in values.items()}
+    config["POLYDATA_AGENT_MODEL"] = "configured-model"
+    monkeypatch.setattr(local_agent_model, "configured_value", lambda key: config.get(key, ""))
+    monkeypatch.setenv("PRIVATE_API_KEY", "must-not-leak")
+    argv, env = local_agent_model.model_command()
+    assert argv[0] == str(interpreter)
+    assert argv[argv.index("--model-path") + 1] == str(tmp_path)
+    assert env["CUDA_VISIBLE_DEVICES"] == "0"
+    assert env["OPENBLAS_NUM_THREADS"] == "1"
+    assert str(interpreter.parent) in env["PATH"].split(":")
+    assert "PRIVATE_API_KEY" not in env
+    config["POLYMONITOR_AGENT_MODEL_HOST"] = "0.0.0.0"
+    with pytest.raises(ValueError, match="loopback"):
+        local_agent_model.model_command()
+
+
+def test_website_jump_preserves_private_forwarding_and_quoted_identity(monkeypatch):
+    config = {"POLYMONITOR_TENCENT_EGRESS_IDENTITY": "/keys/web",
+              "POLYMONITOR_TENCENT_HOST_KEY_ALIAS": "web.example.invalid",
+              "POLYMONITOR_WEB_LINK_JUMP_NODE": "ireland",
+              "POLYMONITOR_EGRESS_IDENTITY": "/keys/source with space",
+              "POLYMONITOR_EGRESS_IRELAND_TARGET": "reader@jump.example.invalid",
+              "POLYMONITOR_WEB_LINK_TARGET": "web@web.example.invalid",
+              "POLYMONITOR_WEB_LINK_REMOTE_FORWARDS_JSON": '["127.0.0.1:18500:127.0.0.1:18502"]',
+              "POLYMONITOR_WEB_LINK_LOCAL_FORWARDS_JSON": '["127.0.0.1:54443:127.0.0.1:443"]'}
+    monkeypatch.setattr(website_link, "configured_value", lambda key: config.get(key, ""))
+    argv = website_link.ssh_argv()
+    jump = next(x.removeprefix("ProxyCommand=") for x in argv if x.startswith("ProxyCommand="))
+    assert shlex.split(jump)[2] == "/keys/source with space"
+    assert shlex.split(jump)[-3:] == ["-W", "%h:%p", "reader@jump.example.invalid"]
+    assert argv[-1] == config["POLYMONITOR_WEB_LINK_TARGET"]
+    assert "ExitOnForwardFailure=yes" in argv
+    assert "ServerAliveCountMax=3" in argv
+    config["POLYMONITOR_WEB_LINK_PROFILES_JSON"] = '{"interactive":{"remote":["127.0.0.1:19504:127.0.0.1:19502"],"local":[]}}'
+    isolated = website_link.ssh_argv("interactive")
+    assert "127.0.0.1:19504:127.0.0.1:19502" in isolated
+    assert "127.0.0.1:18500:127.0.0.1:18502" not in isolated
+    assert "-L" not in isolated
+    with pytest.raises(ValueError, match="Invalid website forwarding profile"):
+        website_link.ssh_argv("unknown")
+    config["POLYMONITOR_WEB_LINK_REMOTE_FORWARDS_JSON"] = '["0.0.0.0:18500:127.0.0.1:18502"]'
+    with pytest.raises(ValueError, match="Invalid POLYMONITOR_WEB_LINK_REMOTE_FORWARDS_JSON"):
+        website_link.ssh_argv()
+
+
+def test_missing_config_is_not_replaced_by_embedded_private_defaults(monkeypatch):
+    monkeypatch.setattr(website_link, "configured_value", lambda key: "")
+    with pytest.raises(ValueError, match="^Missing POLYMONITOR_TENCENT_EGRESS_IDENTITY$"):
+        website_link.ssh_argv()
