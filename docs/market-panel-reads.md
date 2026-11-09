@@ -114,7 +114,12 @@ freshness by being embedded in metadata. Selected OrderFilled and Oracle retain
 their existing memory-only polling; LOB explicitly declares `cache: null`.
 Search is an on-demand query, not another periodic collector. No account data is
 persisted in these public snapshots. Runtime deadlines remain 6 s for detail and
-10 s for catalog/history; source/SQL budgets above are unchanged.
+30 s for catalog and 10 s for history; source/SQL budgets above are unchanged.
+The catalog budget includes admission and the complete response body. Production
+verification observed HTTP 200 headers followed by the old ten-second client
+deadline before the body completed over the reverse tunnel; that attempt could
+not populate browser storage. Runtime and transport now share one thirty-second
+budget, keeping single-flight and cancellation rather than overlapping reads.
 
 Unit checks cover parameter identity, original retention and stripped live data;
 browser checks cover selection/range cancellation and restore-before-request.

@@ -1,5 +1,5 @@
 import type { MarketsPayload, WorkspaceBundle, ChartPayload, MarketGroupSort } from '@/types';
-import { fetchMarketsPage, fetchMarketFocusTile, fetchMarketChart } from '@/services/api';
+import { fetchMarketsPage, fetchMarketFocusTile, fetchMarketChart, MARKET_CATALOG_REQUEST_TIMEOUT_MS } from '@/services/api';
 import type { PanelResource } from '@/panels/usePanelResource';
 import { publicSnapshot, record, records, strings, textFields } from '@/panels/public-snapshot';
 import { RuntimeResponseError, runtimeTimestamp } from '@/panels/runtime-store';
@@ -25,7 +25,7 @@ export function marketCatalogResource(sort: MarketGroupSort): PanelResource<Mark
       }
       return value as MarketsPayload;
     },
-  }), title: 'Market catalog', refreshPolicy: { tier: 'slow', intervalMs: MARKET_CATALOG_AUTO_REFRESH_MS, requestTimeoutMs: 10_000 },
+  }), title: 'Market catalog', refreshPolicy: { tier: 'slow', intervalMs: MARKET_CATALOG_AUTO_REFRESH_MS, requestTimeoutMs: MARKET_CATALOG_REQUEST_TIMEOUT_MS },
   fetch: context => fetchMarketsPage(1, '', 50, context?.signal, sort) };
 }
 

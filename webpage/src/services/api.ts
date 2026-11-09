@@ -191,6 +191,8 @@ export function fetchMarketSearch(query: string, limit = 12, signal?: AbortSigna
   return apiGetWithTimeout<{ items: MarketListItem[] }>(`/markets?${params.toString()}`, 5000, signal);
 }
 
+// Covers admission, headers and the complete stored catalog body across the relay.
+export const MARKET_CATALOG_REQUEST_TIMEOUT_MS = 30_000;
 export function fetchMarketsPage(page = 1, query = '', pageSize = 50, signal?: AbortSignal, sort = 'volume') {
   const params = new URLSearchParams({
     page: String(page),
@@ -198,7 +200,7 @@ export function fetchMarketsPage(page = 1, query = '', pageSize = 50, signal?: A
     status: 'active', sort,
   });
   if (query.trim()) params.set('q', query.trim());
-  return apiGetWithTimeout<MarketsPayload>(`/markets?${params.toString()}`, 10000, signal);
+  return apiGetWithTimeout<MarketsPayload>(`/markets?${params.toString()}`, MARKET_CATALOG_REQUEST_TIMEOUT_MS, signal);
 }
 
 

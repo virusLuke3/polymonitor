@@ -150,6 +150,24 @@ test('catalog hard expiry cannot resurrect the original bootstrap preview', asyn
   expect(await page.evaluate(() => window.frontendHarness.catalog!.marketCatalogError)).toBeTruthy();
 });
 
+test('a slow catalog can finish beyond ten seconds without a duplicate read', async ({ page }) => {
+  let release: (() => Promise<void>) | undefined;
+  let reads = 0;
+  await page.route('**/wm-api/markets?**', route => {
+    reads++;
+    release = () => route.fulfill({ json: { generatedAt: GENERATED_AT, items: [{ ...fixtureMarkets[0], title: 'slow catalog' }],
+      pagination: { page: 1, pageSize: 50 }, sort: 'volume' } });
+  });
+  await mount(page, 'catalog');
+  await expect.poll(() => Boolean(release)).toBe(true);
+  await page.clock.runFor(20_000);
+  expect(reads).toBe(1);
+  expect(await page.evaluate(() => window.frontendHarness.catalog!.marketCatalogRefreshing)).toBe(true);
+  await release!();
+  await expect(page.locator('output')).toHaveText('slow catalog');
+  expect(await page.evaluate(() => window.frontendHarness.catalog!.marketCatalogError)).toBeNull();
+});
+
 for (const userOverride of [false, true]) {
   test(`404 during an empty catalog preserves selection and respects user deselection (${userOverride})`, async ({ page }) => {
     let missing: (() => Promise<void>) | undefined;
