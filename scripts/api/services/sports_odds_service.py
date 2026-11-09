@@ -539,7 +539,7 @@ def _safe_live_sports_odds_payload(
         )
 
 
-def get_sports_odds_snapshot(
+def _get_legacy_sports_odds_snapshot(
     ctx: SportsOddsContext,
     limit: int = DEFAULT_SPORTS_ODDS_LIMIT,
 ) -> Dict[str, Any]:
@@ -582,3 +582,8 @@ def get_sports_odds_snapshot(
             ),
         )
     return {"items": [], "generatedAt": "", "status": "warming", "cacheMode": "warming"}
+
+
+def get_sports_odds_snapshot(ctx: SportsOddsContext, limit: int = DEFAULT_SPORTS_ODDS_LIMIT) -> Dict[str, Any]:
+    from api.services.bookmaker_panels.snapshot_service import attach_board
+    return attach_board(_dependencies(ctx).snapshot_store, _get_legacy_sports_odds_snapshot(ctx, limit))

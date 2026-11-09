@@ -1,0 +1,133 @@
+import { useMemo, useState } from 'preact/hooks';
+import { Panel } from '@/components/Panel';
+import { useI18n } from '@/services/i18n';
+import { usePanelRuntimeView } from '@/panels/PanelRuntimeView';
+import { lineKey, quoteCurrent, safeLink, teamKey, type Fixture, type Payload, type Quote } from './model';
+
+const percent = (n: number) => `${(n * 100).toFixed(1)}%`;
+const short = (s: string) => s === 'soccer' ? 'FOOTBALL' : s === 'lol' ? 'LoL' : s.toUpperCase();
+const same = (a: string, b: string) => teamKey(a) === teamKey(b);
+
+function MatchBoard({ event, game }: { event: Fixture; game: boolean }) {
+  const { locale, formatRelativeTime, formatDateTime } = useI18n();
+  const t = (en: string, zh: string) => locale === 'zh' ? zh : en;
+  const [market, setMarket] = useState('h2h');
+  const [line, setLine] = useState('');
+  const [expanded, setExpanded] = useState(false);
+  const choices = event.quotes.filter(q => q.market === market && q.category === 'sportsbook');
+  const lines = [...new Set(choices.map(lineKey))];
+  const chosenLine = lines.includes(line) ? line : lines[0];
+  const quotes = choices.filter(q => lineKey(q) === chosenLine);
+  const labels = (quotes[0]?.outcomes || []).map(o => o.name).sort((a, b) =>
+    Number(same(b, event.home)) - Number(same(a, event.home)) || Number(same(a, 'Draw')) - Number(same(b, 'Draw')));
+  const winner = event.quotes.filter(q => q.market === 'h2h' && q.category === 'sportsbook' && quoteCurrent(q));
+  const hasDraw = winner.some(q => q.outcomes.length === 3);
+  const eligible = [...new Map(winner.filter(q => q.outcomes.length === (hasDraw ? 3 : 2)).map(q => [q.book, q])).values()];
+  const sides = [event.home, ...(hasDraw ? ['Draw'] : []), event.away];
+  const probabilities = sides.map(side => eligible.length ? eligible.reduce((sum, q) =>
+    sum + (q.outcomes.find(o => same(o.name, side))?.probability || 0), 0) / eligible.length : null);
+  const alternatives = event.quotes.filter(q => q.market === market && q.category !== 'sportsbook');
+  function rows(items: Quote[]) {
+    return items.map((q, i) => <tr key={`${q.book}:${q.market}:${i}`} className={quoteCurrent(q) ? '' : 'wm-bookmaker-aged'}>
+      <th scope="row"><span>{safeLink(q.url) ? <a href={safeLink(q.url)} target="_blank" rel="noopener noreferrer">{q.label} ↗</a> : q.label}</span>
+        <small>{q.sourceUpdatedAt ? formatRelativeTime(q.sourceUpdatedAt) : t('Time unknown', '报价时间未知')}</small></th>
+      {labels.map((label, j) => { const o = q.outcomes.find(o => same(o.name, label)); return <td key={label} data-side={j === 0 ? 'a' : j === labels.length - 1 ? 'b' : 'draw'}>
+        <b>{o?.decimal.toFixed(2) ?? '—'}</b><small>{o ? `${o.point == null ? '' : `${o.point > 0 ? '+' : ''}${o.point} · `}${percent(o.probability)}` : '—'}</small>
+      </td>; })}
+    </tr>);
+  }
+  return <>
+    <div className="wm-bookmaker-event-meta"><span>{event.competition}</span><time dateTime={event.startTime}>{formatDateTime(event.startTime)}</time></div>
+    <div className={`wm-bookmaker-versus ${hasDraw ? 'three-way' : ''}`}>
+      {sides.map((side, i) => <div key={side} data-side={i === 0 ? 'a' : i === sides.length - 1 ? 'b' : 'draw'}>
+        <strong>{side}</strong><b>{probabilities[i] == null ? '—' : percent(probabilities[i]!)}</b>
+      </div>)}
+    </div>
+    {eligible.length > 0 && <div className="wm-bookmaker-probability-bar" aria-label={t('Average proportional no-vig probabilities', '博彩公司平均比例去水概率')}>
+      {probabilities.map((p, i) => <span key={i} data-side={i === 0 ? 'a' : i === probabilities.length - 1 ? 'b' : 'draw'} style={{ width: `${(p || 0) * 100}%` }} />)}
+    </div>}
+    <p className="wm-bookmaker-caption">{eligible.length ? `${eligible.length} ${t('books · proportional no-vig average', '家公司 · 比例去水均值')}` : t('No recent, timestamped winner quotes', '暂无近期且带源时间的胜负报价')}
+      {event.tier !== 'public-board' && ` · ${t('Supplemental feed', '补充来源')}`}</p>
+    <div className="wm-bookmaker-tabs" role="group" aria-label={t('Market type', '盘口类型')}>
+      {([['h2h', t(game ? 'Series winner' : 'Winner', game ? '系列赛胜负' : '胜负')], ['spreads', t('Handicap', '让分')], ['totals', t('Totals', '大小分')]]).map(([key, label]) =>
+        <button type="button" key={key} aria-pressed={market === key} onClick={() => { setMarket(key || 'h2h'); setLine(''); }}>{label}</button>)}
+    </div>
+    {lines.length > 1 && <label className="wm-bookmaker-line">{t('Line', '盘口线')} <select aria-label={t('Exact market line', '选择相同盘口线')} value={chosenLine} onChange={e => setLine(e.currentTarget.value)}>
+      {lines.map(key => <option key={key} value={key}>{market === 'h2h' ? `${key} ${t('outcomes', '项结果')}` : key.split('|').join(' / ')}</option>)}
+    </select></label>}
+    {quotes.length ? <>
+      <table className="wm-bookmaker-table"><thead><tr><th>{t('Bookmaker', '博彩公司')}</th>{labels.map(label => <th key={label} title={label}>{label}</th>)}</tr></thead>
+        <tbody>{rows(expanded ? quotes : quotes.slice(0, 8))}</tbody></table>
+      {quotes.length > 8 && <button type="button" className="wm-bookmaker-more" onClick={() => setExpanded(v => !v)}>{expanded ? t('Show fewer', '收起') : `${t('All bookmakers', '全部公司')} · ${quotes.length}`}</button>}
+    </> : <p className="wm-bookmaker-empty">{t('This source has no complete quotes for this market.', '此来源暂无该盘口的完整报价。')}</p>}
+    {alternatives.length > 0 && <details className="wm-bookmaker-alternatives"><summary>{t('Prediction markets & exchanges', '预测市场与交易所')} · {new Set(alternatives.map(q => q.book)).size}</summary>
+      <p className="wm-bookmaker-caption">{t('Provider-linked event. Settlement rules remain unverified; excluded from bookmaker average.', '聚合来源关联的比赛，结算规则尚未核实；不计入博彩公司均值。')}</p>
+      {alternatives.map((q, i) => <div className="wm-bookmaker-alternative" key={`${q.book}:${i}`}>
+        <strong>{safeLink(q.url) ? <a href={safeLink(q.url)} target="_blank" rel="noopener noreferrer">{q.label} ↗</a> : q.label}</strong>
+        <small>{q.category === 'prediction_market' ? t('Prediction market', '预测市场') : t('Exchange', '交易所')} · {q.sourceUpdatedAt ? formatRelativeTime(q.sourceUpdatedAt) : t('Time unknown', '时间未知')}</small>
+        <span>{q.outcomes.map(o => `${o.name}${o.point != null ? ` ${o.point}` : ''} ${o.decimal.toFixed(2)}`).join(' / ')}</span>
+      </div>)}
+    </details>}
+    <details className="wm-bookmaker-method"><summary>{t('Prices & coverage', '报价与覆盖口径')}</summary>
+      <p>{t('Decimal odds; the smaller percentage below each price removes that bookmaker’s margin proportionally. Older or undated quotes are excluded from the headline. Full match/series only; bookmaker rules can differ.', '上方为十进制赔率，下方为该公司比例去水概率。旧报价和时间未知报价不计入主数字。这里只比较完整比赛或系列赛，博彩公司结算规则可能不同。')}</p>
+      <p>{event.provider} · {t('Received', '采集于')} {formatDateTime(event.fetchedAt)}</p>
+    </details>
+  </>;
+}
+
+export function BookmakerPanel({ payload, game = false }: { payload?: Payload; game?: boolean }) {
+  const { locale, formatDateTime, formatRelativeTime } = useI18n();
+  const t = (en: string, zh: string) => locale === 'zh' ? zh : en;
+  const runtime = usePanelRuntimeView();
+  const [sport, setSport] = useState(game ? 'lol' : 'nba');
+  const [eventId, setEventId] = useState('');
+  const [tab, setTab] = useState('odds');
+  const board = payload?.bookmakerBoard;
+  const fixtures = useMemo(() => (board?.fixtures || []).filter(f => f.sport === sport), [board, sport]);
+  const event = fixtures.find(f => f.id === eventId) || fixtures[0];
+  const sports = [...new Set([...(game ? ['lol', 'valorant', 'cs2', 'dota2'] : ['nba', 'soccer', 'nfl', 'nhl', 'mlb', 'tennis']), ...(board?.fixtures.map(f => f.sport) || [])])];
+  const source = board?.sources.find(s => s.id === `bookmakers:board:${sport}:v1`);
+  return <Panel title={game ? 'GAME' : 'SPORTS'} dataPanelId={game ? 'esports-intel' : 'sports-odds'}
+    className={`wm-bookmaker-panel ${game ? 'wm-bookmaker-game' : 'wm-bookmaker-sports'}`}
+    controls={<button type="button" className="wm-panel-action-button" aria-label={t('Refresh snapshot', '刷新快照')} onClick={() => runtime?.refresh?.()}>↻</button>}>
+    <div className="wm-bookmaker-sports-tabs" role="group" aria-label={t('Sport or game', '体育或游戏项目')}>
+      {sports.map(key => <button type="button" key={key} aria-pressed={sport === key} onClick={() => { setSport(key); setEventId(''); }}>{short(key)}<small>{board?.fixtures.filter(f => f.sport === key).length || '·'}</small></button>)}
+    </div>
+    <div className="wm-bookmaker-tabs" role="group" aria-label={t('View', '视图')}>
+      {[['odds', t('Bookmakers', '博彩公司')], ['facts', t(game ? 'Official scores' : 'Standings', game ? '官方赛况' : '排名与赛程')], ...(game ? [['props', t('Player props', '选手道具')]] : [])].map(([key, label]) =>
+        <button type="button" key={key} aria-pressed={tab === key} onClick={() => setTab(key || 'odds')}>{label}</button>)}
+    </div>
+    {tab === 'odds' && <>
+      {event ? <><label className="wm-bookmaker-event-select"><select aria-label={t('Select match', '选择比赛')} value={event.id} onChange={e => setEventId(e.currentTarget.value)}>
+        {fixtures.map(f => <option key={f.id} value={f.id}>{f.home} / {f.away} · {f.provider}</option>)}
+      </select></label><MatchBoard key={event.id} event={event} game={game} /></> :
+        <div className="wm-bookmaker-empty"><strong>{short(sport)}</strong><p>{!payload ? t('Loading saved source data…', '正在读取已采集的数据…') : source?.usable ?
+          t('No fixtures in the public board’s current window.', '公开看板当前时间窗内没有比赛记录。') : t('Source data is temporarily unavailable.', '来源数据暂时不可用。')}</p>
+          {source?.usable && <small>{t('Window: 4 hours after start to 36 hours before start.', '窗口：开赛后 4 小时至开赛前 36 小时。')}</small>}</div>}
+    </>}
+    {tab === 'facts' && <div className="wm-bookmaker-facts">
+      {game && <><p className="wm-bookmaker-caption">{t('GRID · official series state; CS2 / Dota coverage depends on access.', 'GRID 官方系列赛赛况；CS2 / Dota 覆盖取决于账号权限。')}</p>
+        {(payload?.items || []).filter(i => sport === 'cs2' ? /counter|cs2/i.test(i.gameTitle || '') : sport === 'dota2' ? /dota/i.test(i.gameTitle || '') : sport === 'lol' ? /league/i.test(i.gameTitle || '') : /valorant/i.test(i.gameTitle || '')).map(i =>
+          <article key={i.id}><div><small>{i.gameTitle} · {i.state}</small><b>{i.score || '—'}</b></div><strong>{i.teamA || '—'} <em>vs</em> {i.teamB || '—'}</strong>
+            <p>{i.currentMap || i.tournament || '—'}</p><small>{payload?.officialGeneratedAt ? formatRelativeTime(payload.officialGeneratedAt) : t('Time unknown', '时间未知')}</small></article>)}
+        {(sport === 'lol' || sport === 'valorant') && <p className="wm-bookmaker-empty">{t('This GRID account has no verified state feed for this game. Bookmaker odds are available independently.', '当前 GRID 账号尚未取得此游戏的赛况权限；博彩公司赔率是独立数据链路。')}</p>}
+      </>}
+      {(payload?.sportsContext || []).filter(c => game ? sport === 'dota2' : sport === 'nba' ? c.source.id.includes('standings') : sport === 'tennis' && c.source.id.includes('tournament')).map(c =>
+        <section key={c.source.id}><p className="wm-bookmaker-caption">{c.source.label} · {c.source.lastSuccessAt ? formatRelativeTime(c.source.lastSuccessAt) : '—'}</p>
+          {c.rows.length ? c.rows.map((r, i) => <div className="wm-bookmaker-fact-row" key={i}><span><strong>{r.title}</strong><small>{r.detail}</small></span><b>{r.value}</b></div>) :
+            <p className="wm-bookmaker-empty">{t('No retained records from this source.', '此来源暂无保留的有效记录。')}</p>}</section>)}
+      {!game && !['nba', 'tennis'].includes(sport) && <p className="wm-bookmaker-empty">{t('Official standings are not connected for this sport; use Bookmakers for available prices.', '此项目尚未接入官方排名；已有赔率请查看博彩公司页。')}</p>}
+    </div>}
+    {tab === 'props' && <div className="wm-bookmaker-props"><p className="wm-bookmaker-caption">{t('KashRock · public demo sample, not a live prop feed', 'KashRock 公开演示样本，并非实时道具流')}</p>
+      {(board?.props || []).filter(p => p.sport === sport).map(p => <article key={p.id}><small>{p.book} · {p.stat}</small><h4>{p.player}</h4>
+        <div><strong>{p.direction.toUpperCase()} {p.line}</strong><b>{p.decimal.toFixed(2)}</b></div>
+        <p>{t('Quote time unknown · opposite side unavailable', '报价时间未知 · 缺少另一侧赔率')}</p>
+        {p.startTime && <small>{formatDateTime(p.startTime)}</small>}</article>)}
+      {!(board?.props || []).some(p => p.sport === sport) && <p className="wm-bookmaker-empty">{t('No public player-prop sample for this game.', '当前游戏没有公开道具样本。')}</p>}
+    </div>}
+    {board && <details className="wm-bookmaker-sources"><summary>{t('Sources & coverage', '来源与覆盖')} · {board.availableFixtures} {t('fixtures', '场比赛')}</summary>
+      {board.sources.map(s => <div key={s.id}><strong>{s.label}</strong><span>{s.usable ? s.stale || s.error ? t('Saved data', '保留数据') : t('Acquired', '已采集') : t('Unavailable', '暂不可用')}</span><small>{s.lastSuccessAt ? formatDateTime(s.lastSuccessAt) : '—'}</small></div>)}
+      {board.omittedFixtures > 0 && <p>{board.omittedFixtures} {t('fixtures omitted by response size limit.', '场比赛未包含在本次有界响应中。')}</p>}
+    </details>}
+  </Panel>;
+}

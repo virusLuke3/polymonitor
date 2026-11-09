@@ -89,6 +89,7 @@ class SportsOddsWatcher:
         if proxy:
             self.requests.proxies.update({"http": proxy, "https": proxy})
         self.last_http_quota: Dict[str, int] = {}
+        self.last_raw_odds: bytes | None = None
 
     def ttl_seconds(self) -> int:
         configured = int(os.environ.get("POLYDATA_SPORTS_ODDS_SEED_TTL_SECONDS", "0") or 0)
@@ -121,6 +122,7 @@ class SportsOddsWatcher:
         def read(response):
             record_quota(response)
             body = read_response_bytes(response, 8 * 1024 * 1024, deadline=deadline)
+            self.last_raw_odds = body
             return json.loads(body) if body else None
 
         try:
@@ -210,6 +212,7 @@ class SportsOddsWatcher:
 
     def run_once(self) -> Dict[str, Any]:
         previous = self.load_previous_payload()
+        self.last_raw_odds = None
         try:
             payload = sports_odds_service.fetch_live_sports_odds_payload(self.service_context(), limit=self.limit)
         except Exception as exc:
@@ -221,6 +224,11 @@ class SportsOddsWatcher:
             raise
 
         record_count = len(payload.get("items") or [])
+        if self.last_raw_odds is not None:
+            from api.services.bookmaker_panels.snapshot_service import save_the_odds
+            state = save_the_odds(self.snapshot_store, self.last_raw_odds)
+            if state.get("error"):
+                print("[sports-odds] WARN full bookmaker evidence was not saved", file=sys.stderr)
         healthy_empty = (payload.get("status") == "empty"
                          and (payload.get("sources") or {}).get("theOddsApi") == "ok")
         if previous and record_count <= 0 and not healthy_empty:

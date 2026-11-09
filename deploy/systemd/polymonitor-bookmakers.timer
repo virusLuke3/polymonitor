@@ -1,0 +1,12 @@
+[Unit]
+Description=Check due public bookmaker sources
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+RandomizedDelaySec=20s
+Persistent=true
+Unit=polymonitor-external-panels@bookmakers.service
+
+[Install]
+WantedBy=timers.target

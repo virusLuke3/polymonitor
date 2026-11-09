@@ -766,7 +766,7 @@ def _safe_live_grid_esports_payload(
         return _degraded_error_payload(dependencies, limit=limit, error=exc)
 
 
-def get_grid_esports_snapshot(
+def _get_legacy_grid_esports_snapshot(
     ctx: GridEsportsContext,
     limit: int = DEFAULT_GRID_ESPORTS_LIMIT,
 ) -> Dict[str, Any]:
@@ -795,3 +795,8 @@ def get_grid_esports_snapshot(
         )
 
     return {"items": [], "generatedAt": "", "status": "warming", "cacheMode": "warming"}
+
+
+def get_grid_esports_snapshot(ctx: GridEsportsContext, limit: int = DEFAULT_GRID_ESPORTS_LIMIT) -> Dict[str, Any]:
+    from api.services.bookmaker_panels.snapshot_service import attach_board
+    return attach_board(_dependencies(ctx).snapshot_store, _get_legacy_grid_esports_snapshot(ctx, limit), game=True)
