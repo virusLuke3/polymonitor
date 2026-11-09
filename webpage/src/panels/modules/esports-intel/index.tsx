@@ -10,6 +10,8 @@ export const panel = runtimePanelFromRenderer({
   description: 'Esports bookmaker comparison, official GRID series state and player props.',
   defaultEnabled: true, snapshot: bookmakerSnapshot(true),
 }, {
+  // GRID and bookmaker availability must not depend on another panel's batch.
+  batch: false, requestTimeoutMs: 45000,
   tier: 'slow', intervalMs: 120000, staleAfterMs: 1800000,
   limit: 10, fetchData: (context, limit) => fetchRuntimeGridEsports(limit, context?.signal),
 });
