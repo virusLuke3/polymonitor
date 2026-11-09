@@ -20,7 +20,7 @@ function MatchBoard({ event, game }: { event: Fixture; game: boolean }) {
   const quotes = choices.filter(q => lineKey(q) === chosenLine);
   const labels = (quotes[0]?.outcomes || []).map(o => o.name).sort((a, b) =>
     Number(same(b, event.home)) - Number(same(a, event.home)) || Number(same(a, 'Draw')) - Number(same(b, 'Draw')));
-  const winner = event.quotes.filter(q => q.market === 'h2h' && q.category === 'sportsbook' && quoteCurrent(q));
+  const winner = event.quotes.filter(q => event.tier !== 'daily-sample' && q.market === 'h2h' && q.category === 'sportsbook' && quoteCurrent(q));
   const hasDraw = winner.some(q => q.outcomes.length === 3);
   const eligible = [...new Map(winner.filter(q => q.outcomes.length === (hasDraw ? 3 : 2)).map(q => [q.book, q])).values()];
   const sides = [event.home, ...(hasDraw ? ['Draw'] : []), event.away];
@@ -70,7 +70,7 @@ function MatchBoard({ event, game }: { event: Fixture; game: boolean }) {
     </details>}
     <details className="wm-bookmaker-method"><summary>{t('Prices & coverage', '报价与覆盖口径')}</summary>
       <p>{t('Decimal odds; the smaller percentage below each price removes that bookmaker’s margin proportionally. Older or undated quotes are excluded from the headline. Full match/series only; bookmaker rules can differ.', '上方为十进制赔率，下方为该公司比例去水概率。旧报价和时间未知报价不计入主数字。这里只比较完整比赛或系列赛，博彩公司结算规则可能不同。')}</p>
-      <p>{event.provider} · {t('Received', '采集于')} {formatDateTime(event.fetchedAt)}</p>
+      <p>{[...new Set(event.quotes.map(q => q.provider))].join(' + ')} · {t('Received', '采集于')} {formatDateTime(event.fetchedAt)}</p>
     </details>
   </>;
 }

@@ -63,6 +63,13 @@ def test_unknown_clock_remains_unknown():
     assert parse_board(body(row), 'soccer')['fixtures'][0]['quotes'][0]['sourceUpdatedAt'] is None
 
 
+def test_exchange_is_not_counted_as_bookmaker_when_aggregator_omits_kind():
+    row = raw_fixture()
+    row['bookmakers'][0].update(key='sx.bet')
+    row['bookmakers'][0].pop('kind')
+    assert parse_board(body(row), 'soccer')['fixtures'][0]['quotes'][0]['category'] == 'exchange'
+
+
 def test_wrong_board_and_corrupt_empty_rejected():
     for raw in [{'error': 'unavailable'}, {'sport_key': 'lol', 'fixtures': []}, {'sport_key': 'soccer', 'fixtures': None}]:
         with pytest.raises(ValueError):

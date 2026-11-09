@@ -106,6 +106,8 @@ def fixture(raw, *, provider='oddslink', american=True, tier='public-board'):
                 category = book.get('kind', 'sportsbook')
                 if book['key'].lower() in {'polymarket', 'kalshi'}:
                     category = 'prediction_market'
+                elif name(book['key']) in {'betfair', 'matchbook', 'novig', 'prophetx', 'sxbet', '4casters'} or book['key'].startswith('betfair_ex_'):
+                    category = 'exchange'
                 if category not in {'sportsbook', 'exchange', 'prediction_market'}:
                     category = 'unknown'
                 result['quotes'].append({'book': book['key'], 'label': str(book.get('title') or book['key']),
