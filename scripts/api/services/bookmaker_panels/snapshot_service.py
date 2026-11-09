@@ -8,7 +8,7 @@ from urllib.parse import urlencode
 
 from api.services.panel_evidence_store import SourceSpec, collect_one, fetch_bytes, read_source
 from data_sources import source_value
-from .model import GAMES, name, parse_board, parse_guest, parse_props, parse_the_odds
+from .model import GAMES, book_category, name, parse_board, parse_guest, parse_props, parse_the_odds
 from .budget import reserve_guest
 
 SPORTS = ('nba', 'soccer', 'nfl', 'nhl', 'mlb', 'tennis')
@@ -119,7 +119,10 @@ def read_board(store, game=False):
         data, meta = read_source(store, spec)
         sources.append(meta)
         for row in data.get('fixtures', []):
-            fixtures.append({**row, 'fetchedAt': meta['lastSuccessAt'], 'sourceStale': meta['stale'],
+            # Apply taxonomy fixes to retained evidence without fetching again or
+            # rewriting its acquisition clock (notably the daily guest sample).
+            quotes = [{**q, 'category': book_category(q['book'], q['category'])} for q in row['quotes']]
+            fixtures.append({**row, 'quotes': quotes, 'fetchedAt': meta['lastSuccessAt'], 'sourceStale': meta['stale'],
                              'sourceError': meta['error']})
         props.extend({**p, 'fetchedAt': meta['lastSuccessAt']} for p in data.get('props', []))
     # A daily guest fixture must not duplicate the same provider's current board.

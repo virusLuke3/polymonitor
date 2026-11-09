@@ -128,6 +128,20 @@ def test_public_projection_never_fetches(tmp_path, monkeypatch):
     assert result['generatedAt'] is None
 
 
+def test_retained_exchange_classification_does_not_refresh_source_clock(monkeypatch):
+    import scripts.api.services.bookmaker_panels.snapshot_service as service
+    fixture = parse_board(body(raw_fixture()), 'soccer')['fixtures'][0]
+    fixture['quotes'][0].update(book='sxbet', category='sportsbook')
+    def read(_store, spec):
+        return ({'fixtures': [fixture]} if ':soccer:' in spec.key else {},
+                {'lastSuccessAt': '2026-11-09T10:00:00Z', 'stale': False, 'error': None, 'usable': True})
+    monkeypatch.setattr(service, 'read_source', read)
+    result = read_board(None)
+    assert result['fixtures'][0]['quotes'][0]['category'] == 'exchange'
+    assert result['fixtures'][0]['fetchedAt'] == '2026-11-09T10:00:00Z'
+    assert fixture['quotes'][0]['category'] == 'sportsbook'
+
+
 def test_guest_quota_is_shared_across_different_snapshot_stores(tmp_path, monkeypatch):
     from scripts.api.services.bookmaker_panels.budget import reserve_guest
     monkeypatch.setenv('POLYDATA_BOOKMAKER_QUOTA_SQLITE_PATH', str(tmp_path/'budget.sqlite3'))

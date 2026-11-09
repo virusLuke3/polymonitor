@@ -23,6 +23,14 @@ def name(value):
     return re.sub(r'[^\w]', '', str(value).casefold())
 
 
+def book_category(key, declared='sportsbook'):
+    if name(key) in {'polymarket', 'kalshi'}:
+        return 'prediction_market'
+    if name(key) in {'betfair', 'matchbook', 'novig', 'prophetx', 'sxbet', '4casters'} or key.startswith('betfair_ex_'):
+        return 'exchange'
+    return declared if declared in {'sportsbook', 'exchange', 'prediction_market'} else 'unknown'
+
+
 def number(value):
     if isinstance(value, bool):
         raise ValueError('Boolean price')
@@ -103,13 +111,7 @@ def fixture(raw, *, provider='oddslink', american=True, tier='public-board'):
                 prices = [decimal(o['price'], american) for o in outcomes]
                 implied = [1 / p for p in prices]
                 total = sum(implied)
-                category = book.get('kind', 'sportsbook')
-                if book['key'].lower() in {'polymarket', 'kalshi'}:
-                    category = 'prediction_market'
-                elif name(book['key']) in {'betfair', 'matchbook', 'novig', 'prophetx', 'sxbet', '4casters'} or book['key'].startswith('betfair_ex_'):
-                    category = 'exchange'
-                if category not in {'sportsbook', 'exchange', 'prediction_market'}:
-                    category = 'unknown'
+                category = book_category(book['key'], book.get('kind', 'sportsbook'))
                 result['quotes'].append({'book': book['key'], 'label': str(book.get('title') or book['key']),
                     'category': category, 'market': kind, 'period': 'full', 'provider': provider,
                     'sourceUpdatedAt': instant(market.get('last_update') or book.get('last_update')),

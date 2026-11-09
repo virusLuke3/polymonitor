@@ -25,6 +25,12 @@ describe('bookmaker snapshots', () => {
   it('expires recovered browser data without another network response', () => {
     expect(expire(base, now + 7200_001).bookmakerBoard.fixtures).toHaveLength(0);
   });
+  it('does not repeatedly degrade live odds when there are no official score rows', () => {
+    const oldOfficial = { ...base, officialGeneratedAt: new Date(now - 3600_000).toISOString() };
+    expect(expire(oldOfficial, now)).toBe(oldOfficial);
+    const expired = expire(base, now + 7200_001);
+    expect(expire(expired, now + 7200_002)).toBe(expired);
+  });
   it('separates two and three outcome markets and prohibits unsafe links', () => {
     expect(lineKey(quote)).toBe('2');
     expect(lineKey({ ...quote, outcomes: [...quote.outcomes, { ...quote.outcomes[0]!, name: 'Draw' }] })).toBe('3');

@@ -62,7 +62,10 @@ export function expire(value: Payload, now: number): Payload {
     const age = now - Date.parse(f.fetchedAt);
     return age >= -60_000 && age < ttl;
   });
-  const items = value.officialGeneratedAt && now - Date.parse(value.officialGeneratedAt) < 900_000 ? value.items : [];
+  // Once official rows have expired, keep the empty array stable. Sports has
+  // no GRID rows at all; its older quota-feed clock must not degrade live odds.
+  const items = value.items.length && (!value.officialGeneratedAt || now - Date.parse(value.officialGeneratedAt) >= 900_000)
+    ? [] : value.items;
   const props = value.bookmakerBoard.props.filter(p => now - Date.parse(p.fetchedAt) < 86400_000);
   if (fixtures.length === value.bookmakerBoard.fixtures.length && props.length === value.bookmakerBoard.props.length && items === value.items) return value;
   return { ...value, items, bookmakerBoard: { ...value.bookmakerBoard, fixtures, props } };

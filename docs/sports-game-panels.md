@@ -22,7 +22,7 @@ OddsPapi、认证版 OddsLink / KashRock 需要尚未配置的密钥，不能把
 - 复用 `panel_evidence_store`：原始响应与规范化版本先写压缩 SQLite evidence，再发布源状态到 `SnapshotStore`。失败保留原始成功时间，不把空失败写成成功；429 遵守 Retry-After，401/403 不轮换出口绕过限制。
 - 公共看板源状态新鲜阈值 30 分钟、最长保留 2 小时。每家公司的 `sourceUpdatedAt` 单独决定报价时效；重新下载不刷新旧报价时间。日级试用单独标识，不能混入当前共识。
 - 原始 evidence 共用现有 2 GiB 硬上限。响应最多 8 MiB、规范化最多 2 MiB、每个面板最多 60 场。浏览器共享 Runtime 缓存有固定版本、完整 panel 身份、时效和大小上限；页面刷新只读取持久快照。
-- 两个响应含完整博彩公司矩阵，使用共享 Runtime 的独立请求模式（`batch:false`），45 秒读取截止时间；不排在其他 Panel 的批量队列后等待。Sports 每五分钟、Game 每两分钟重读，网络失败走 Runtime 已有退避，不加快来源采集。
+- 两个响应含完整博彩公司矩阵，使用共享 Runtime 的独立请求模式（`batch:false`），45 秒资源总预算，其中 HTTP 与响应体读取最多 30 秒；不排在其他 Panel 的批量队列后等待，仍遵守全站请求并发预算。Sports 每五分钟、Game 每两分钟重读，网络失败走 Runtime 已有退避，不加快来源采集。
 - 代理使用现有 `SourceSession` 和 `.env` 的来源路由；不改变主 Clash。失败次数、最近尝试、成功时间、下一次尝试、原始版本哈希在源状态中保留。
 
 ## 比较规则
