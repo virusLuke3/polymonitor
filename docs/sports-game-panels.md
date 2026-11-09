@@ -44,3 +44,28 @@ Polymarket 匹配要求游戏、球队、比赛时间和胜负市场类型一致
 ## 验收
 
 解析测试覆盖三项胜负、正负美式赔率、不同盘口线、损坏响应、失败保留和来源时效；真实请求需取得博彩公司报价且完成落库读回。已有 The Odds API / GRID 的成功不代替新来源验证。发布后从普通首页确认两张面板、筛选与数据展示，并分别记录桌面和手机证据。单轮成功不能声称全部渠道持续正常。
+
+
+### 2026-11-09 接入与发布验收
+
+- 数据链路：15 个配置来源状态（Sports 7、Game 8）均已取得有效响应并落库；空列表同样是可验证的响应，不代表该项目有赔率。正式 SQLite 为后端数据目录中的 `panel_snapshots.sqlite3` / `external-panel-evidence.sqlite3`，guest 额度账本由 `.env` 单独指向同一持久位置。
+- 19:26 北京时间快照：Sports 来源共 24 场，当前有界响应 11 场、34 家博彩公司；Game 11 场、16 家博彩公司。计数随来源窗口变化，不作为固定覆盖承诺。Sports 的完整矩阵有 450 KB 响应上限，按项目轮转保留；未包含场数明确报告。
+- 实际读到了 Pinnacle、bet365、Stake、Thunderpick，以及 DraftKings、FanDuel 等报价。NBA、LoL、CS2、Dota 2 的多轮持久版本中，源报价时间随下一轮前进；更新成功不是仅改 `fetchedAt`。公共看板采集服务由五分钟 timer 唤醒，来源自身十五分钟到期才请求。
+- 82 项 Python 回归测试与 45 项前端测试通过，TypeScript、边界、样式归属和干净发布构建通过。测试包含保留值过期、来源时钟、不同盘口线、交易所分类、匿名配额跨存储共享、30 秒 HTTP 截止与传输取消。
+- 普通 `www` 首页能直接发现 Sports / Game，保存布局后重新打开顺序及尺寸一致；在 1920px 和 390px 视口检查真实接口数据。截图保存在 `webpage/design-previews/sports-game/`。没有替换接口、地图瓦片或注入虚构响应。
+- 本次新来源走 `.env` 中已配置的腾讯出口，未改变主 Clash 选择。当前实际服务在腾讯前端与本机后端，不恢复已停止的旧 GCP 采集器。
+
+明确保留的边界：Valorant 本轮公开窗口没有比赛；KashRock 只接公开演示，当前演示也可能为空，不能算完整 GG.BET 实时接口；GRID 的 LoL / Valorant 官方赛况权限未取得。OddsPapi 等需要未提供密钥的认证接口仍未启用。公开 guest 总预算共享改造前的两份账本被保守合并为当天已用 7 次，当天不再发请求，次日按 UTC 重置，不能把先前超额记成未发生。
+
+公网验收期间出现过反向链路慢响应、502 和浏览器连接变化；共享 Runtime 重试后两面板取得真实数据。这个观察证明恢复路径工作，不代表全天稳定或每次首屏都快速成功。退避期间已有未过期数据继续展示，真实请求失败与来源无比赛分开提示。
+
+
+最终功能版本：`1789055ed23b37656ae58c745fcfccb956b914ca`。`www` 与裸域名的 `/release-sha` 一致；页面实际载入 `index-Bhprnarm.js`，后端本次修改的文件与该提交逐字节相同。部署使用推送提交的 `git archive` 干净构建，构建目录已清理。
+
+最终浏览器验证中，两个 Panel 均为 `ready`；切换第二场 NBA 比赛、让分（`Charlotte Hornets +8.5 / Cleveland Cavaliers -8.5`）、大小分均出现 8 条默认比较行；CS2 官方赛况显示 3 条记录。Valorant 空窗口与未取得 GRID 权限分别显示。再次载入保存布局后，桌面与手机均读到真实快照。最后一轮浏览器使用 HTTP/1.1 排除测试代理的 HTTP/2 干扰；此前默认协议也已取得两面板实际报价，测试过程中均未替换网络响应。
+
+- [Sports 桌面](../webpage/design-previews/sports-game/production-sports-odds-desktop.png)
+- [Sports 赔率表桌面](../webpage/design-previews/sports-game/production-sports-prices-desktop.png)
+- [Game 桌面](../webpage/design-previews/sports-game/production-esports-intel-desktop.png)
+- [Sports 手机](../webpage/design-previews/sports-game/production-sports-odds-mobile.png)
+- [Game 手机](../webpage/design-previews/sports-game/production-esports-intel-mobile.png)
