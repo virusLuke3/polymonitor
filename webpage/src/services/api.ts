@@ -280,11 +280,11 @@ export function fetchRuntimeNbaMatchupPredictor(limit = 8, signal?: AbortSignal)
 }
 
 export function fetchRuntimeGridEsports(limit = 10, signal?: AbortSignal) {
-  return apiGet<RuntimeGridEsportsPayload>(`/runtime/esports/grid-intel?limit=${limit}`, signal);
+  return apiGetWithTimeout<RuntimeGridEsportsPayload>(`/runtime/esports/grid-intel?limit=${limit}`, 30000, signal);
 }
 
 export function fetchRuntimeSportsOdds(limit = 8, signal?: AbortSignal) {
-  return apiGet<RuntimeSportsOddsPayload>(`/runtime/sports/odds-monitor?limit=${limit}`, signal);
+  return apiGetWithTimeout<RuntimeSportsOddsPayload>(`/runtime/sports/odds-monitor?limit=${limit}`, 30000, signal);
 }
 
 export function fetchRuntimeInflationNowcast(signal?: AbortSignal) {

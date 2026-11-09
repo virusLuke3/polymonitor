@@ -101,7 +101,8 @@ export function BookmakerPanel({ payload, game = false }: { payload?: Payload; g
       {event ? <><label className="wm-bookmaker-event-select"><select aria-label={t('Select match', '选择比赛')} value={event.id} onChange={e => setEventId(e.currentTarget.value)}>
         {fixtures.map(f => <option key={f.id} value={f.id}>{f.home} / {f.away} · {f.provider}</option>)}
       </select></label><MatchBoard key={event.id} event={event} game={game} /></> :
-        <div className="wm-bookmaker-empty"><strong>{short(sport)}</strong><p>{!payload ? t('Loading saved source data…', '正在读取已采集的数据…') : source?.usable ?
+        <div className="wm-bookmaker-empty"><strong>{short(sport)}</strong><p>{!payload ? runtime?.status?.error
+          ? t('The saved data could not be loaded. Retry the connection.', '已采集数据读取失败，请重试连接。') : t('Loading saved source data…', '正在读取已采集的数据…') : source?.usable ?
           t('No fixtures in the public board’s current window.', '公开看板当前时间窗内没有比赛记录。') : t('Source data is temporarily unavailable.', '来源数据暂时不可用。')}</p>
           {source?.usable && <small>{t('Window: 4 hours after start to 36 hours before start.', '窗口：开赛后 4 小时至开赛前 36 小时。')}</small>}</div>}
     </>}
