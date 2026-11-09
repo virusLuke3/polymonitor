@@ -53,7 +53,9 @@ unvalidated bootstrap preview into the complete resource.
 - HTTP 503 and legacy unavailable/empty HTTP 200 enter the error path. Healthy
   empty results stay distinct. Automatic retry observes Retry-After, bounded
   exponential backoff and jitter. Non-retryable HTTP/identity failures await a
-  parameter change or manual retry. Persistent failure slows to five minutes.
+  parameter change or manual retry. Persistent failure follows the shared
+  15/30/60/120/180-second recovery sequence independently of normal polling;
+  explicit quick attempts, jitter and Retry-After remain authoritative.
 - Fresh validated partial responses replace older complete snapshots: a temporary
   source failure must not freeze persistence while verified items keep changing.
   Invalid/stale data never becomes the new saved snapshot. This does not exempt displayed content

@@ -22,19 +22,22 @@ export function useMarketFocus({ bootstrap, markets, marketGroups, catalogLoaded
   const selected = useRef<number | null>(null);
   const touched = useRef(false);
   const initialized = useRef(false);
+  const missingSelection = useRef<number | null>(null);
   const latestMarkets = useRef(markets);
   latestMarkets.current = markets;
 
   const selectMarket = (marketId: number | null, automatic = false) => {
+    missingSelection.current = null;
     if (!automatic) touched.current = true;
     if (selected.current === marketId) return;
     selected.current = marketId;
     setMarketId(marketId); setGroupId(null); setGroupDetail(null); setSelectedMarketGroupOutcomeKey(null);
-    const market = markets.find((row) => row.id === marketId);
+    const market = latestMarkets.current.find((row) => row.id === marketId);
     setBundle(market ? optimisticBundleFromMarket(market) : emptyWorkspaceBundle());
     setError(null);
   };
   const focusMarketGroup = (group: MarketGroupItem, outcomeKey?: string | null, marketId?: number | null) => {
+    missingSelection.current = null;
     touched.current = true;
     const outcome = pickDefaultGroupOutcome(group, outcomeKey, marketId);
     const id = outcome?.marketId ?? marketId ?? null;
@@ -60,9 +63,22 @@ export function useMarketFocus({ bootstrap, markets, marketGroups, catalogLoaded
   }, [selectedMarketId]);
 
   const detailFeed = usePanelResource(marketDetailResource(selectedMarketId, () => {
+    if (selected.current !== selectedMarketId) return;
+    missingSelection.current = selectedMarketId;
     const fallback = pickDefaultMarketId(latestMarkets.current);
-    if (selected.current === selectedMarketId && fallback !== selectedMarketId) selectMarket(fallback, true);
+    // Empty catalog during an outage is not an explicit user deselection.
+    if (fallback != null && fallback !== selectedMarketId) selectMarket(fallback, true);
   }), selectedMarketId != null);
+  useEffect(() => {
+    if (!catalogLoaded || !markets.length || missingSelection.current == null
+      || missingSelection.current !== selected.current) return;
+    const fallback = pickDefaultMarketId(markets);
+    if (fallback != null && fallback !== missingSelection.current) selectMarket(fallback, true);
+    else {
+      missingSelection.current = null;
+      void detailFeed.refresh();
+    }
+  }, [catalogLoaded, markets]);
   const chartFeed = usePanelResource(marketChartResource(selectedMarketId, selectedMarketGroupChartRange), selectedMarketId != null);
   useEffect(() => {
     const value = detailFeed.data;

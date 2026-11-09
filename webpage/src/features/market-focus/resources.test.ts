@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { marketCatalogResource, marketDetailResource, marketChartResource } from './resources';
-import { readResourceCacheEntry, writeResourceCache } from '@/panels/resource-cache';
+import { readResourceCacheEntry, writeResourceCache, type PanelSnapshotContract } from '@/panels/resource-cache';
+import { parseRuntimeSnapshot } from '@/panels/runtime-store';
+import type { PanelModule } from '@/panels/types';
 
 const generatedAt = new Date().toISOString();
 const market = { id: 42, title: 'Market', slug: 'market', tags: [] };
@@ -23,6 +25,14 @@ describe('market context shares the public resource owner', () => {
     expect(contract.parse(value)).toMatchObject({ market, lob: null, chart: null, oracle: null, trades: [] });
     expect(() => contract.parse({ ...value, identity: { localMarketId: 43 } })).toThrow();
     expect(() => contract.parse({ ...value, focusStatus: 'warming' })).toThrow();
+  });
+  it('accepts stale navigation context after a refresh boundary but rejects the hard retention boundary', () => {
+    const contract = marketCatalogResource('volume');
+    const panel: PanelModule = { id: 'catalog', title: 'Catalog', eyebrow: 'Test', description: 'Catalog fixture', snapshot: contract as PanelSnapshotContract<unknown> };
+    const value = { items: [market], pagination: { page: 1, pageSize: 50 }, sort: 'volume' };
+    const retained = { ...value, generatedAt: new Date(Date.now() - 6 * 60_000).toISOString() };
+    expect(parseRuntimeSnapshot(panel, retained)).toEqual(retained);
+    expect(() => parseRuntimeSnapshot(panel, { ...value, generatedAt: new Date(Date.now() - 15 * 60_000).toISOString() })).toThrow('overdue');
   });
   it('isolates history market/range and rejects malformed points', () => {
     const contract = marketChartResource(42, '1d');

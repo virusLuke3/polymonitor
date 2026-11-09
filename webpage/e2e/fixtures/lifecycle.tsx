@@ -7,6 +7,7 @@ import { RUNTIME_PANEL_MODULES } from '../../src/panels/registry';
 import { usePanelRuntime } from '../../src/panels/usePanelRuntime';
 import { ApiHttpError } from '../../src/services/api';
 import { PanelResourceProvider } from '../../src/panels/usePanelResource';
+import { useMarketCatalog } from '../../src/features/market-focus/useMarketCatalog';
 import { useMarketFocus } from '../../src/features/market-focus/useMarketFocus';
 import { useMarketDossier } from '../../src/features/market-focus/useMarketDossier';
 import { useNaturalHazards } from '../../src/features/world-event-map/data/useNaturalHazards';
@@ -22,19 +23,22 @@ import { fixtureMarkets } from './dashboard';
 import { GENERATED_AT } from './world-event-map';
 
 const root = document.getElementById('root')!;
-type HarnessKind = 'indexed-runtime' | 'cached-runtime' | 'runtime-defaults' | 'runtime' | 'runtime-policy' | 'runtime-batch-policy' | 'observed-runtime' | 'registered-runtime' | 'dashboard' | 'focus' | 'book' | 'book-pair' | 'workspace' | 'hazards' | 'dossier' | 'geometry' | 'aviation' | 'map-signals' | 'map-infrastructure';
+type HarnessKind = 'recovery-runtime' | 'catalog' | 'indexed-runtime' | 'cached-runtime' | 'runtime-defaults' | 'runtime' | 'runtime-policy' | 'runtime-batch-policy' | 'observed-runtime' | 'registered-runtime' | 'dashboard' | 'focus' | 'book' | 'book-pair' | 'workspace' | 'hazards' | 'dossier' | 'geometry' | 'aviation' | 'map-signals' | 'map-infrastructure';
 type HazardView = { layers: string[]; zoom: number; center: [number, number]; active: boolean };
 const noPanels: PanelModule[] = [];
 const translate = (key: string) => key;
-type Pending = { id: string; signal: AbortSignal; resolve: (value: unknown) => void; reject: (error: Error) => void };
+type Pending = { id: string; signal: AbortSignal; startedAt?: number; resolve: (value: unknown) => void; reject: (error: Error) => void };
 const requests: Pending[] = [];
 const modules: PanelModule[] = [{
   id: 'shared', title: 'Shared fixture', eyebrow: 'TEST', description: 'Lifecycle fixture',
   refreshPolicy: { tier: 'fast', intervalMs: 20_000, retry: { attempts: 2, baseDelayMs: 1000 } },
   fetchData: (context) => new Promise((resolve, reject) => {
-    requests.push({ id: 'shared', signal: context!.signal, resolve, reject });
+    requests.push({ id: 'shared', signal: context!.signal, startedAt: Date.now(), resolve, reject });
   }),
 }, { id: 'shared-view', dataSourceId: 'shared', title: 'Second view', eyebrow: 'TEST', description: 'Same source' }];
+const recoveryModules = modules.map(panel => panel.id !== 'shared' ? panel : ({ ...panel,
+  refreshPolicy: { tier: 'slow' as const, intervalMs: 900_000 },
+}));
 const policyModules: PanelModule[] = ['frequent', 'blocked'].map(id => ({
   id, title: id, eyebrow: 'TEST', description: 'Independent scheduling fixture', batch: false,
   refreshPolicy: { tier: 'slow', intervalMs: 5000, requestTimeoutMs: id === 'blocked' ? 10_000 : 30_000,
@@ -60,6 +64,9 @@ const batchPolicyModules: PanelModule[] = policyModules.map(panel => ({ ...panel
 const bootstrap = { generatedAt: GENERATED_AT, activeMarketsPreview: fixtureMarkets, activeMarketGroupsPreview: [] } as unknown as BootstrapPayload;
 const api = {
   requests,
+  rejectHttp: (index: number, status: number, after?: string) => requests[index].reject(new ApiHttpError(status, 'fixture', after)),
+  setFocusMarkets: (_markets: MarketListItem[]) => {},
+  catalog: null as ReturnType<typeof useMarketCatalog> | null,
   rejectVerification: (index: number) => requests[index].reject(new ApiHttpError(503, 'fixture', '1', true)),
   signals: null as ReturnType<typeof useMapSignals> | null,
   infrastructure: null as ReturnType<typeof useMapInfrastructure> | null,
@@ -84,6 +91,8 @@ const api = {
   setHazardView: (_patch: Partial<HazardView>) => {},
   setGeometryEnabled: (_enabled: boolean) => {},
   mount: (kind: HarnessKind) => {
+    if (kind === 'recovery-runtime') { render(<Runtime recovery />, root); return; }
+    if (kind === 'catalog') { render(<PanelResourceProvider><Catalog /></PanelResourceProvider>, root); return; }
     if (kind === 'indexed-runtime') { render(<Runtime indexed />, root); return; }
     if (kind === 'cached-runtime') { render(<Runtime cached />, root); return; }
     render(kind === 'runtime-defaults' ? <Runtime defaults /> : kind === 'map-signals' ? <Signals /> : kind === 'map-infrastructure' ? <Infrastructure /> : kind === 'dashboard' ? <PanelResourceProvider><Dashboard /></PanelResourceProvider> : kind === 'observed-runtime' ? <Runtime observed /> : kind === 'registered-runtime' ? <Runtime registered /> : kind === 'runtime-batch-policy' ? <Runtime policy batch /> : kind === 'runtime-policy' ? <Runtime policy /> : kind === 'runtime' ? <Runtime /> : kind === 'focus' ? <PanelResourceProvider><Focus /></PanelResourceProvider> : kind === 'book' || kind === 'book-pair' ? <PanelResourceProvider><Book pair={kind === 'book-pair'} /></PanelResourceProvider>
@@ -103,10 +112,10 @@ function Infrastructure() {
   api.infrastructure=useMapInfrastructure(active,viewport);
   return <output>{api.infrastructure.events.length}</output>;
 }
-function Runtime({ indexed = false, cached = false, defaults = false, registered = false, observed = false, policy = false, batch = false }: { indexed?: boolean; cached?: boolean; defaults?: boolean; registered?: boolean; observed?: boolean; policy?: boolean; batch?: boolean }) {
+function Runtime({ recovery = false, indexed = false, cached = false, defaults = false, registered = false, observed = false, policy = false, batch = false }: { recovery?: boolean; indexed?: boolean; cached?: boolean; defaults?: boolean; registered?: boolean; observed?: boolean; policy?: boolean; batch?: boolean }) {
   const [ids, setIds] = useState(defaults ? ['fast', 'slow'] : registered ? ['price-implications', 'oracle-timeline', 'sample-chain-trades'] : policy ? ['frequent', 'blocked'] : ['shared']);
   api.setPanels = setIds;
-  api.runtime = usePanelRuntime({ panels: indexed ? indexedModules : cached ? cachedModules : defaults ? defaultModules : registered ? RUNTIME_PANEL_MODULES : batch ? batchPolicyModules : policy ? policyModules : modules, activePanelIds: ids, waitForVisibility: observed });
+  api.runtime = usePanelRuntime({ panels: recovery ? recoveryModules : indexed ? indexedModules : cached ? cachedModules : defaults ? defaultModules : registered ? RUNTIME_PANEL_MODULES : batch ? batchPolicyModules : policy ? policyModules : modules, activePanelIds: ids, waitForVisibility: observed });
   return <output>runtime</output>;
 }
 function Dashboard() {
@@ -115,8 +124,14 @@ function Dashboard() {
   api.dashboard = useDashboardData(workspace, runtime);
   return <output>{api.dashboard.loading ? 'loading' : 'released'}</output>;
 }
+function Catalog() {
+  api.catalog = useMarketCatalog(bootstrap, true);
+  return <output>{api.catalog.markets.map(m => m.title).join(",")}</output>;
+}
 function Focus() {
-  api.focus = useMarketFocus({ bootstrap, markets: fixtureMarkets as MarketListItem[], marketGroups: [], catalogLoaded: true });
+  const [markets, setMarkets] = useState(fixtureMarkets as MarketListItem[]);
+  api.setFocusMarkets = setMarkets;
+  api.focus = useMarketFocus({ bootstrap, markets, marketGroups: [], catalogLoaded: true });
   return <output>{api.focus.selectedMarketId}</output>;
 }
 function Book({ pair = false }: { pair?: boolean }) {

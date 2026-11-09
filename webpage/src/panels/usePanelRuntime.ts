@@ -87,10 +87,12 @@ function metadataPhase(metadata?: RuntimePanelMetadata): PanelRuntimeStatus['pha
   return null;
 }
 
-function retryDelay(panel: PanelModule, failureCount: number): number | null {
+function retryDelay(panel: PanelModule, failureCount: number): number {
   const retry = panel.refreshPolicy?.retry;
-  const attempts = Math.max(0, retry?.attempts ?? 2);
-  if (failureCount > attempts) return null;
+  const attempts = Math.max(0, retry?.attempts ?? 0);
+  // WorldMonitor's Panel.showError recovery sequence is independent of polling.
+  // Preserve explicitly configured quick attempts before the shared slow retry.
+  if (failureCount > attempts) return Math.min(180_000, 15_000 * 2 ** Math.min(4, failureCount - attempts - 1));
   const base = Math.max(250, retry?.baseDelayMs ?? 1_000);
   const ceiling = Math.max(base, retry?.maxDelayMs ?? 30_000);
   return Math.min(ceiling, base * (2 ** Math.max(0, failureCount - 1)));
@@ -229,6 +231,7 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
       const running = inflight.current.get(panel.id);
       if (running) { pending.add(running); return false; }
       const status = statusesRef.current[panel.id];
+      if ((status?.retryAfterAt ?? 0) > Date.now()) return false;
       if (!options.force && status?.error && (status.retryable === false || (status.nextRetryAt ?? 0) > Date.now())) return false;
       return true;
     });
@@ -236,6 +239,8 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
       const panelIds = eligible.map(panel => panel.id);
       const now = Date.now();
       const lanes = new Map(eligible.map(panel => {
+        window.clearTimeout(retries.current.get(panel.id));
+        retries.current.delete(panel.id);
         const controller = new AbortController();
         let complete!: (value: PanelRuntimeData) => void;
         const promise = new Promise<PanelRuntimeData>(resolve => { complete = resolve; });
@@ -279,7 +284,10 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
             } catch { /* A cache failure cannot fail the displayed snapshot. */ }
           }
           setRuntimeData(merged);
-          updateStatuses([id], () => ({ phase, updatedAt, lastAttemptAt: now, checkedAt, fetching: false, failureCount: 0, error: null,
+          updateStatuses([id], current => retained ? { ...current, phase: 'degraded', lastAttemptAt: now, fetching: false,
+            nextRetryAt: current.error ? Math.max(current.retryAfterAt || 0,
+              Date.now() + retryDelay(eligible.find(panel => panel.id === id)!, Math.max(1, current.failureCount))) : current.nextRetryAt,
+          } : ({ phase, updatedAt, lastAttemptAt: now, checkedAt, fetching: false, failureCount: 0, error: null,
             cacheMode: metadata?.cache?.mode || null, freshness: metadata?.freshness?.state || null,
             ageSeconds: metadata?.freshness?.ageSeconds ?? null,
           }));
@@ -294,19 +302,19 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
             if (pending && Date.now() - pendingSince < (owner.refreshPolicy?.requestTimeoutMs ?? 30_000)) {
               return { ...current, phase: dataRef.current[id] === undefined ? 'loading' : current.phase,
                 lastAttemptAt: now, fetching: false, retryPending: true, pendingSince, retryable: true,
-                nextRetryAt: Date.now() + Math.min(5_000, Math.max(1_000, advised)) };
+                retryAfterAt: advised > 0 ? Date.now() + advised : null,
+                nextRetryAt: Date.now() + Math.max(1_000, advised) };
             }
             const failures = current.failureCount + 1;
             const retryable = !(error && typeof error === 'object' && 'retryable' in error && error.retryable === false)
               && (!(error instanceof ApiHttpError) || [408, 425, 429].includes(error.status) || error.status >= 500);
-            const interval = (owner.refreshPolicy?.intervalMs ?? DEFAULT_REFRESH_INTERVAL_MS[owner.refreshPolicy?.tier || 'slow']) || 60_000;
-            const ceiling = Math.max(interval, owner.refreshPolicy?.retry?.maxDelayMs ?? 60_000);
-            const backoff = retryDelay(owner, failures) ?? Math.min(ceiling, interval * 2 ** Math.min(4, Math.max(0, failures - 3)));
+            const backoff = retryDelay(owner, failures);
             const delay = Math.max(advised, backoff) + Math.floor(Math.random() * backoff * 0.1);
             return { ...current,
             phase: dataRef.current[id] === undefined ? 'error' : 'degraded', lastAttemptAt: now,
             fetching: false, failureCount: failures, error: errorMessage(error), retryable,
             retryPending: false, pendingSince: pending ? pendingSince : undefined,
+            retryAfterAt: advised > 0 ? Date.now() + advised : null,
             nextRetryAt: retryable ? Date.now() + delay : null,
           }; });
         },
@@ -327,11 +335,38 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
     refreshPanels(panels, { ...options, panelIds })
   ), [panels, refreshPanels]);
 
+  const recoverResources = useCallback((reconnected = false) => {
+    if (suspendedRef.current || document.hidden || navigator.onLine === false) return;
+    const due = panels.filter(panel => {
+      const status = statusesRef.current[panel.id] || EMPTY_STATUS;
+      return demandRef.current.has(panel.id) && panel.fetchData && panel.refreshPolicy?.tier !== 'manual'
+        && (status.error || reconnected) && !status.fetching && status.retryable !== false;
+    }).sort((a, b) => (a.refreshPolicy?.intervalMs ?? DEFAULT_REFRESH_INTERVAL_MS[a.refreshPolicy?.tier || 'slow'])
+      - (b.refreshPolicy?.intervalMs ?? DEFAULT_REFRESH_INTERVAL_MS[b.refreshPolicy?.tier || 'slow']));
+    let stagger = 0;
+    due.forEach((panel, index) => {
+      window.clearTimeout(retries.current.get(panel.id));
+      retries.current.delete(panel.id);
+      const nextCheck = Date.now() + stagger;
+      updateStatuses([panel.id], status => ({ ...status,
+        retryPending: !status.error,
+        nextRetryAt: Math.max(nextCheck, status.retryAfterAt ?? 0, (status.lastAttemptAt ?? 0) + 1_000),
+      }));
+      stagger += index < 4 ? 100 : 300;
+    });
+  }, [panels, updateStatuses]);
+
   useEffect(() => {
     const onVisibility = () => setDocumentHidden(document.hidden);
     document.addEventListener('visibilitychange', onVisibility);
     return () => document.removeEventListener('visibilitychange', onVisibility);
   }, []);
+  const previouslySuspended = useRef(runtimeSuspended);
+  useEffect(() => {
+    const resumed = previouslySuspended.current && !runtimeSuspended;
+    previouslySuspended.current = runtimeSuspended;
+    if (resumed) recoverResources();
+  }, [runtimeSuspended, recoverResources]);
   useEffect(() => {
     // The transport releases a batch only after all resource demand is gone.
     const unused = new Set(controllers.current.values());
@@ -362,7 +397,8 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
         const policy = panel.refreshPolicy;
         if (!policy || policy.tier === 'manual') return false;
         const status = statusesRef.current[panel.id];
-        if (status?.error && (status.retryable === false || (status.nextRetryAt ?? 0) > now)) return false;
+        // Failed/pending resources have their own timer, never the normal cadence.
+        if (status?.error || status?.retryPending) return false;
         if (status?.lastAttemptAt == null) {
           // Cached check time is distinct from source freshness. Never restart
           // its lifetime on reload, or defer a stale/failed resource's check.
@@ -402,10 +438,10 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
   useEffect(() => {
     if (runtimeSuspended) return;
     panels.forEach((panel) => {
-      const status = statuses[panel.id];
+      // Resume can update the deadline in an earlier effect of this render.
+      const status = statusesRef.current[panel.id];
       if ((!status?.error && !status?.retryPending) || status.fetching || status.retryable === false || !demandRef.current.has(panel.id) || retries.current.has(panel.id)) return;
-      const delay = !status.retryPending && retryDelay(panel, status.failureCount) == null ? null : Math.max(0, (status.nextRetryAt ?? Date.now()) - Date.now());
-      if (delay == null) return;
+      const delay = Math.max(0, (status.nextRetryAt ?? Date.now()) - Date.now());
       retries.current.set(panel.id, window.setTimeout(() => {
         retries.current.delete(panel.id);
         if (demandRef.current.has(panel.id)) void refreshPanels([panel], { reason: 'retry' });
@@ -413,23 +449,10 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
     });
   }, [demandKey, panels, refreshPanels, runtimeSuspended, statuses]);
   useEffect(() => {
-    const reconnect = () => {
-      if (suspendedRef.current || document.hidden || navigator.onLine === false) return;
-      const due = panels.filter(panel => demandRef.current.has(panel.id) && panel.fetchData
-        && panel.refreshPolicy && panel.refreshPolicy.tier !== 'manual'
-        && statusesRef.current[panel.id]?.retryable !== false);
-      due.forEach(panel => {
-        const timer = retries.current.get(panel.id);
-        if (timer != null) window.clearTimeout(timer);
-        retries.current.delete(panel.id);
-      });
-      // Connectivity recovery bypasses an old network backoff. Inflight work is
-      // still joined, and only accepted data clears errors or advances clocks.
-      due.forEach(panel => { void refreshPanels([panel], { panelIds: [panel.id], reason: 'retry', force: true }); });
-    };
+    const reconnect = () => recoverResources(true);
     window.addEventListener('online', reconnect);
     return () => window.removeEventListener('online', reconnect);
-  }, [panels, refreshPanels]);
+  }, [recoverResources]);
   useEffect(() => {
     mounted.current = true;
     return () => {

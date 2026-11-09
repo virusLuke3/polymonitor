@@ -97,7 +97,9 @@ reads. Finance and other non-market seed jobs retain their existing ownership.
 Catalog, metadata and history now use `usePanelResource` instead of private
 polling loops. Public cache keys include sort/page/limit for catalog, market ID
 for detail, and market ID/range/interval for history. Catalog uses a five-minute
-check and source retention limit; metadata checks every minute with at most
+check/freshness window and a fifteen-minute browser navigation retention limit;
+stale/error labels remain visible and individual quote clocks are not renewed.
+The server's five-minute fallback limit is unchanged. Metadata checks every minute with at most
 five-minute retention; history checks every 90 seconds with five-minute retention.
 Source and successful-check clocks survive reload unchanged. Cached catalog
 quotes retain their own quote timestamps and existing validity checks.
@@ -118,3 +120,9 @@ Unit checks cover parameter identity, original retention and stripped live data;
 browser checks cover selection/range cancellation and restore-before-request.
 See [shared lifecycle](panel-runtime-lifecycle.md) for storage budgets and release
 acceptance. Restored context alone is not live market-data acceptance.
+
+A detail 404 while the catalog is empty preserves the selected ID and records
+pending reconciliation. The next nonempty catalog selects its default market
+or rechecks the same ID; it never strands selection at null. User selection,
+explicit deselection and group focus cancel that pending reconciliation. Recovery
+uses the shared Runtime's independent retry/resume policy, not another poller.

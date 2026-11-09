@@ -605,6 +605,7 @@ function ActiveMarketsPanel({
         <em>{t('atlasMarket.catalog.sync', { time: generatedAtLabel })} · {t('atlasMarket.catalog.auto', { minutes: MARKET_CATALOG_AUTO_REFRESH_MS / 60_000 })}</em>
       </div>
       {searchResult.loading ? <p>{t('atlasMarket.catalog.refreshing')}</p> : searchResult.unavailable ? <p>{t('atlasMarket.catalog.error')}</p> : null}
+      {panelCount > 0 && marketCatalogError && !search.trim() ? <p role="status">{t('atlasMarket.catalog.retained')}</p> : null}
       <CatalogClock.Provider value={clockNow}>
         {!panelCount && (marketCatalogError || searchResult.unavailable || marketCatalogRefreshing)
           ? emptyState(t(marketCatalogError || searchResult.unavailable ? 'atlasMarket.catalog.error' : 'atlasMarket.catalog.refreshing'), localizedEmptyCopy(i18n))

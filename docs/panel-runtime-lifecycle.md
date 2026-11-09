@@ -37,6 +37,48 @@ status and manual refresh to shared family controls.
 
 ## Reload recovery
 
+### Failure recovery adopted from WorldMonitor
+
+Reference: WorldMonitor commit `fc1e04743e340fdfcc1de13633c4424d88fe8a18`,
+[`Panel.showError`](https://github.com/koala73/worldmonitor/blob/fc1e04743e340fdfcc1de13633c4424d88fe8a18/src/components/Panel.ts#L1131),
+[`CircuitBreaker.execute`](https://github.com/koala73/worldmonitor/blob/fc1e04743e340fdfcc1de13633c4424d88fe8a18/src/utils/circuit-breaker.ts#L418)
+and [`RefreshScheduler`](https://github.com/koala73/worldmonitor/blob/fc1e04743e340fdfcc1de13633c4424d88fe8a18/src/app/refresh-scheduler.ts#L126).
+Adopt their behavior in the existing Runtime for every resource owner and view:
+
+- Normal polling, failure retry and maximum retained source age are independent.
+  Retryable errors use 15/30/60/120/180-second delays, capped at 180 seconds plus
+  up to 10% jitter, until accepted recovery or demand ends. Explicit quick
+  attempts precede this sequence; exhaustion never falls back to normal polling.
+- One retry timer and one in-flight request per resource. HTTP Retry-After is a
+  separate lower bound. Non-retryable failures await manual retry or a new identity.
+  Hiding/offscreen demand suspends retries without clearing failures.
+- Visibility/connectivity recovery schedules failed demanded owners by interval,
+  staggered by 100 ms for the first four gaps and 300 ms afterward. It may shorten
+  client backoff, never Retry-After; at least one second separates attempts.
+  Connectivity recovery also rechecks healthy demanded owners using that stagger.
+- Fresh-age expiry marks data stale; only domain retention expiry removes it.
+  Failure preserves data and original clocks. Accepted responses immediately
+  publish to subscribers and clear errors/retries/backoff. Restored or retained
+  fallback data is not successful recovery.
+
+WorldMonitor's five-minute breaker cooldown is not another scheduler here:
+Runtime already bounds requests and publishes accepted results reactively. Keep
+domain hard expiry instead of unbounded stale fallback; WorldMonitor's 24-hour
+persistent hydration ceiling is not a universal display-validity guarantee.
+
+Market catalog keeps five-minute checks/freshness and retains navigation context
+for fifteen minutes, visibly stale/degraded. Existing API/storage identity and
+per-quote validity remain unchanged; book/flow/Oracle keep independent clocks.
+A detail 404 with an empty catalog preserves selection intent until catalog
+recovery. Explicit user selection/deselection cancels pending reconciliation.
+WorldMonitor's external-link prediction list has no equivalent selection owner.
+
+Acceptance covers repeated failures beyond quick attempts, resume, Retry-After,
+single-flight/cancellation, immediate successful publication/error clearing,
+stale catalog during pending/failed reads, valid empty/hard expiry, 404/empty/
+catalog recovery and explicit selection. Production uses actual desktop/mobile
+APIs and reports source failures separately.
+
 Public persistence is an explicit resource contract, not a second collector or
 scheduler. Restore validated data and its original source/check clocks before
 network admission. Bootstrap loading must not cover restored content. A fresh
@@ -178,7 +220,7 @@ Newly covered owners retain their existing acquisition and server storage:
 | Energy / CPI calendar / nowcast: existing macro snapshot APIs | 6 h / 1 h / 30 min | 18 h / 3 h / 90 min, no further stale extension | panel + configured limit where applicable + version |
 | Commodity transmission: existing composition API | 5 min | 5 min / 15 min from original response generation | panel + limit 8 + version |
 | Crypto strategy/history: existing aggregate API and domain parser | existing domain intervals | existing independent per-source validity | existing full resource identity + version |
-| Market catalog: existing bounded PostgreSQL-backed API | 5 min | 5 min / 5 min | active + page 1 + limit 50 + sort + version |
+| Market catalog: existing bounded PostgreSQL-backed API | 5 min | 5 min / 15 min | active + page 1 + limit 50 + sort + version |
 | Market detail: existing stored metadata API | 1 min | 1 min / 5 min | market ID + version |
 | Market history: existing bounded OrderFilled history API | 90 s | 90 s / 5 min | market ID + range + interval + version |
 

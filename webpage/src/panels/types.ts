@@ -30,6 +30,7 @@ export type PanelRefreshConfig = {
   /** Whole request budget, including admission, fallback and response parsing. */
   requestTimeoutMs?: number;
   retry?: {
+    /** Optional quick attempts before the shared 15–180 second recovery loop. */
     attempts?: number;
     baseDelayMs?: number;
     maxDelayMs?: number;
@@ -61,6 +62,8 @@ export type PanelRuntimeStatus = {
   ageSeconds?: number | null;
   retryable?: boolean;
   nextRetryAt?: number | null;
+  /** Server-directed lower bound; visibility/online/manual cannot bypass it. */
+  retryAfterAt?: number | null;
 };
 
 export type PanelModule = PanelDefinition & {

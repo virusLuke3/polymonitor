@@ -485,6 +485,7 @@
   "atlasMarket.sortHelp.trades": "按已报告的 24 小时交易数从高到低排序。",
   "atlasMarket.sortHelp.new": "按市场上架时间从新到旧排序。",
   "atlasMarket.catalog.error": "刷新失败",
+  "atlasMarket.catalog.retained": "正在恢复更新，当前显示上次可用的市场列表。",
   "atlasMarket.catalog.refreshing": "正在刷新",
   "atlasMarket.catalog.sync": "目录同步于 {time}",
   "atlasMarket.catalog.auto": "每 {minutes} 分钟自动刷新",

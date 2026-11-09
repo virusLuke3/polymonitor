@@ -347,7 +347,7 @@ test('online recovery bypasses old backoff and joins work without clearing retai
   await page.evaluate(() => window.frontendHarness.requests[1].reject(new TypeError('Failed to fetch')));
   await page.clock.runFor(100);
   await page.evaluate(() => { window.dispatchEvent(new Event('online')); window.dispatchEvent(new Event('online')); });
-  await page.clock.runFor(100);
+  await page.clock.runFor(1100);
   expect(await count(page)).toBe(3);
   expect(await page.evaluate(() => window.frontendHarness.runtime!.getStatus('shared')))
     .toMatchObject({ fetching: true, phase: 'degraded', error: 'Failed to fetch', updatedAt: Date.parse(GENERATED_AT) });
@@ -393,7 +393,7 @@ test('reconnect starts batch-capable sources separately so a slow sibling cannot
   await expect.poll(() => page.evaluate(() => window.frontendHarness.runtime!.getStatus('frequent').phase)).toBe('ready');
   expect(batches).toBe(1);
   await page.evaluate(() => window.dispatchEvent(new Event('online')));
-  await page.clock.runFor(100);
+  await page.clock.runFor(1200);
   expect(await count(page)).toBe(2);
   expect(batches).toBe(1);
   await page.evaluate(generatedAt => window.frontendHarness.requests.find(r => r.id === 'frequent')!.resolve({ generatedAt, items: ['recovered'] }), GENERATED_AT);
@@ -403,14 +403,14 @@ test('reconnect starts batch-capable sources separately so a slow sibling cannot
   expect(await page.evaluate(() => window.frontendHarness.runtime!.getStatus('blocked').fetching)).toBe(true);
 });
 
-test('repeated network failures keep retry waiting bounded by the refresh policy', async ({ page }) => {
+test('repeated network failures keep retry waiting bounded independently of polling', async ({ page }) => {
   await harness(page, 'runtime');
   for (let i = 0; i < 7; i++) {
     await page.evaluate(() => window.frontendHarness.requests.at(-1)!.reject(new TypeError('Failed to fetch')));
     await page.clock.runFor(100);
     const delay = await page.evaluate(() => window.frontendHarness.runtime!.getStatus('shared').nextRetryAt! - Date.now());
     expect(delay).toBeGreaterThan(0);
-    expect(delay).toBeLessThanOrEqual(66_000);
+    expect(delay).toBeLessThanOrEqual(198_000);
     await page.clock.runFor(delay + 1200);
     expect(await count(page)).toBe(i + 2);
   }

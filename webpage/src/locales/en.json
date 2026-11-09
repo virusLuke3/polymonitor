@@ -485,6 +485,7 @@
   "atlasMarket.sortHelp.trades": "Highest reported 24h transaction count first.",
   "atlasMarket.sortHelp.new": "Most recently listed markets first.",
   "atlasMarket.catalog.error": "Refresh failed",
+  "atlasMarket.catalog.retained": "Showing the last available market list while updates recover.",
   "atlasMarket.catalog.refreshing": "Refreshing",
   "atlasMarket.catalog.sync": "Catalog synced {time}",
   "atlasMarket.catalog.auto": "Auto {minutes}m",

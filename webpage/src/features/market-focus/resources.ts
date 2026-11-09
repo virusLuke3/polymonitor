@@ -14,7 +14,7 @@ const market = (value: unknown) => record(value) && Number.isSafeInteger(value.i
 export function marketCatalogResource(sort: MarketGroupSort): PanelResource<MarketsPayload> {
   return { ...publicSnapshot<MarketsPayload>({
     key: `markets:active:page:1:limit:50:sort:${sort}:v1`, version: 1,
-    maxAgeMs: MARKET_CATALOG_AUTO_REFRESH_MS, staleAgeMs: MARKET_CATALOG_AUTO_REFRESH_MS,
+    maxAgeMs: MARKET_CATALOG_AUTO_REFRESH_MS, staleAgeMs: 15 * 60_000, acceptStale: true,
     updatedAt: runtimeTimestamp,
     parse(value) {
       if (!record(value) || !records(value.items) || !value.items.every(market)
