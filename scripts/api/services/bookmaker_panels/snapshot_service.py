@@ -4,12 +4,12 @@ from __future__ import annotations
 from functools import partial
 import json
 import time
-from datetime import datetime, timezone
 from urllib.parse import urlencode
 
 from api.services.panel_evidence_store import SourceSpec, collect_one, fetch_bytes, read_source
 from data_sources import source_value
-from .model import GAMES, parse_board, parse_guest, parse_props, parse_the_odds
+from .model import GAMES, name, parse_board, parse_guest, parse_props, parse_the_odds
+from .budget import reserve_guest
 
 SPORTS = ('nba', 'soccer', 'nfl', 'nhl', 'mlb', 'tennis')
 GAME_LIST = ('lol', 'valorant', 'cs2', 'dota2')
@@ -46,14 +46,8 @@ def _acquire(store, spec, deadline):
         url += ('&' if '?' in url else '?') + urlencode({'sport': sport})
     else:
         # Share the conservative daily allowance with the existing research tool.
-        namespace = 'research:esports:anonymous-odds:v1'
-        quota = 'quota:oddslink:' + datetime.now(timezone.utc).date().isoformat()
-        with store.fetch_lock(namespace, 'guest-budget', timeout=1):
-            used = (store.get_stale(namespace, quota) or {}).get('attempts', 0)
-            if used >= 5:
-                raise GuestBudgetExhausted('Daily guest budget exhausted')
-            if not store.set(namespace, quota, {'attempts': used + 1}, 86400, max_entries=16):
-                raise RuntimeError('Guest budget was not saved')
+        if not reserve_guest(store):
+            raise GuestBudgetExhausted('Daily guest budget exhausted')
         url += ('&' if '?' in url else '?') + urlencode({'path': f'/v1/sports/{sport}/odds?markets=h2h&oddsFormat=american'})
         # Guest attempts are billable even on failure. No retry or route failover.
         from api.clients.source_transport import source_session, read_with_retry, read_response_bytes
@@ -94,6 +88,28 @@ def save_the_odds(store, body):
     return collect_one(store, THE_ODDS, acquire=lambda: (body, data), force=True)
 
 
+def merge_exact_events(fixtures):
+    """Join only exact sport, normalized teams and kickoff; never fuzzy aliases."""
+    groups = {}
+    for row in fixtures:
+        key = (row['sport'], tuple(sorted([name(row['home']), name(row['away'])])), row['startTime'])
+        if key not in groups:
+            groups[key] = {**row, 'quotes': list(row['quotes']), 'providerFixtureIds': [row['id']]}
+            continue
+        target = groups[key]
+        target['providerFixtureIds'].append(row['id'])
+        def identity(q):
+            return (name(q['book']), q['category'], q['market'], q['period'],
+                    tuple(sorted((name(o['name']), o['point']) for o in q['outcomes'])))
+        quotes = {identity(q): q for q in target['quotes']}
+        for q in row['quotes']:
+            old = quotes.get(identity(q))
+            if old is None or (q['sourceUpdatedAt'] or '') > (old['sourceUpdatedAt'] or ''):
+                quotes[identity(q)] = q
+        target['quotes'] = list(quotes.values())
+    return list(groups.values())
+
+
 def read_board(store, game=False):
     chosen = [s for s in specs() if (s.key.split(':')[2] in GAMES) == game]
     if not game:
@@ -113,6 +129,7 @@ def read_board(store, game=False):
         if row['id'] not in seen:
             seen.add(row['id'])
             unique.append(row)
+    unique = merge_exact_events(unique)
     total = len(unique)
     # Round-robin projects: a full soccer board cannot suppress all other sports.
     grouped = {}

@@ -19,6 +19,7 @@ from api.clients.source_transport import SourceSession, read_response_bytes, rea
 from data_sources import source_value
 from runtime.environment import load_environment
 from runtime.snapshot_store import SnapshotStore
+from api.services.bookmaker_panels.budget import reserve_guest
 
 NAMESPACE = "research:esports:anonymous-odds:v1"
 TARGET_BOOKS = {"bet365", "pinnacle", "stake", "ggbet", "thunderpick"}
@@ -168,13 +169,8 @@ def read_sample(session, store, source, game, *, live, deadline):
     if source == "oddslink":
         # Persist a conservative local cap across CLI sessions, even if guest
         # cookies or upstream quota headers reset. Reserve before the request.
-        quota_key = "quota:oddslink:" + datetime.now(timezone.utc).date().isoformat()
-        with store.fetch_lock(NAMESPACE, "guest-budget", timeout=1):
-            used = (store.get_stale(NAMESPACE, quota_key) or {}).get("attempts", 0)
-            if used >= 5:
-                return {"status": "daily_budget_exhausted", "data": None}
-            if not store.set(NAMESPACE, quota_key, {"attempts": used + 1}, RETAIN_SECONDS, max_entries=16):
-                return {"status": "budget_write_failed", "data": None}
+        if not reserve_guest(store):
+            return {"status": "daily_budget_exhausted", "data": None}
     params = {"path": f"/v1/sports/{game}/odds?markets=h2h&oddsFormat=american"} if source == "oddslink" else {"sport": game}
     attempted = utc_now()
 

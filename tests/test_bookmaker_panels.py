@@ -119,3 +119,30 @@ def test_public_projection_never_fetches(tmp_path, monkeypatch):
     result = read_board(SnapshotStore(str(tmp_path/'snapshots.sqlite3')), True)
     assert result['fixtures'] == []
     assert result['generatedAt'] is None
+
+
+def test_guest_quota_is_shared_across_different_snapshot_stores(tmp_path, monkeypatch):
+    from scripts.api.services.bookmaker_panels.budget import reserve_guest
+    monkeypatch.setenv('POLYDATA_BOOKMAKER_QUOTA_SQLITE_PATH', str(tmp_path/'budget.sqlite3'))
+    research = SnapshotStore(str(tmp_path/'research.sqlite3'))
+    production = SnapshotStore(str(tmp_path/'production.sqlite3'))
+    for index in range(5):
+        assert reserve_guest(research if index % 2 else production)
+    assert not reserve_guest(research)
+    assert not reserve_guest(production)
+
+
+def test_multiple_providers_do_not_count_the_same_book_twice():
+    from copy import deepcopy
+    from scripts.api.services.bookmaker_panels.snapshot_service import merge_exact_events
+    first = parse_board(body(raw_fixture()), 'soccer')['fixtures'][0]
+    other = deepcopy(first)
+    other['id'] = 'another-provider:id'
+    other['provider'] = 'the-odds-api'
+    other['quotes'][0]['sourceUpdatedAt'] = '2026-11-09T11:00:00+00:00'
+    combined = merge_exact_events([first, other])
+    assert len(combined) == 1
+    assert len(combined[0]['quotes']) == 1
+    assert combined[0]['quotes'][0]['sourceUpdatedAt'] == '2026-11-09T11:00:00+00:00'
+    other['startTime'] = '2026-11-11T18:00:00+00:00'
+    assert len(merge_exact_events([first, other])) == 2
