@@ -114,6 +114,10 @@ per six hours (`POLYDATA_AGENT_MARKET_WIDE_MIN_LIVE_INTERVAL_SECONDS=21600`), an
 publishes all three lenses. Snapshots expire after twelve hours; browsers read
 them every fifteen minutes through `/runtime/agent/market-wide-insights/<lens>`.
 Source observation time, generation time and browser check time remain separate.
+Snapshot GETs have a 15-second transfer deadline after shared admission and a
+45-second total resource lease including queue time. A failed read keeps a valid
+stored snapshot with its original generation/expiry clocks and uses Runtime
+backoff; it never invokes the model or turns an empty error into success.
 An unsuccessful model run remains a rules fallback/error, never an AI success.
 
 Generation is sequential: up to three specialists, a skeptic and a writer per

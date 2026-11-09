@@ -735,7 +735,7 @@ function preferLoadedBundle(primary: WorkspaceBundle, secondary: WorkspaceBundle
 
 const workspaceBundleInflight = new Map<string, Promise<WorkspaceBundle>>();
 
-export function fetchMarketWideAiSnapshot(lens: MarketWideAiInsightLens, timeoutMs = 8000, signal?: AbortSignal) {
+export function fetchMarketWideAiSnapshot(lens: MarketWideAiInsightLens, timeoutMs = 15000, signal?: AbortSignal) {
   return apiGetWithTimeout<MarketWideAiInsightResponse>(
     `/runtime/agent/market-wide-insights/${encodeURIComponent(lens)}`,
     timeoutMs,

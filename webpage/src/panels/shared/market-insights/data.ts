@@ -17,7 +17,7 @@ export function insightSnapshot(lens: MarketWideAiInsightLens) {
 }
 
 export async function fetchInsightSnapshot(lens: MarketWideAiInsightLens, signal?: AbortSignal) {
-  const snapshot = await fetchMarketWideAiSnapshot(lens, 8000, signal);
+  const snapshot = await fetchMarketWideAiSnapshot(lens, 15000, signal);
   if (!isInsight(snapshot, lens)) throw new Error('Invalid analysis snapshot.');
   return snapshot;
 }
