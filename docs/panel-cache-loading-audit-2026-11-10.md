@@ -422,7 +422,7 @@ WorldMonitor DeFi 的不同参数为：后台 bundle 每 30 分钟尝试采集�
 | [Track Aircraft](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/aviation/index.ts#L367) | 15s | False | 1d | 默认 |
 | [Flight Prices](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/aviation/index.ts#L368) | 10m | True | 1d | {"revivePersistedData": "(result) => ({\n    ...result,\n    quotes: result.quotes.map((quote) => ({\n      ...quote,\n      expiresAt: quote.expiresAt === null ? null : reviveDate(quote.expiresAt),\n    })),\n  })"} |
 | [Aviation News](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/aviation/index.ts#L380) | 15m | True | 1d | {"revivePersistedData": "(items) => items.map((item) => ({\n    ...item,\n    publishedAt: reviveDate(item.publishedAt),\n  }))"} |
-| [Google Flights](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/aviation/index.ts#L390) | 0（不轮询） | False | 1d | 默认 |
+| [Google Flights](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/aviation/index.ts#L390) | 0（无新鲜缓存窗口） | False | 1d | 默认 |
 | [Google Dates](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/aviation/index.ts#L392) | 5m | False | 1d | 默认 |
 | [Cable Health](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/cable-health.ts#L8) | 10m | True | 1d | 默认 |
 | [Risk Scores](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/cached-risk-scores.ts#L266) | 30m | True | 1h | 默认 |
@@ -479,7 +479,7 @@ WorldMonitor DeFi 的不同参数为：后台 bundle 每 30 分钟尝试采集�
 | [Maritime Snapshot](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/maritime/index.ts#L12) | 10m | True | 1d | 默认 |
 | [Market Quotes](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/market/index.ts#L21) | 5m | True | 1d | 默认 |
 | [Commodity Quotes](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/market/index.ts#L22) | 5m | True | 1d | 默认 |
-| [Physical Premiums](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/market/index.ts#L23) | 0（不轮询） | False | 1d | 默认 |
+| [Physical Premiums](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/market/index.ts#L23) | 0（无新鲜缓存窗口） | False | 1d | 默认 |
 | [Sector Summary v2](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/market/index.ts#L24) | 5m | True | 1d | 默认 |
 | [Crypto Quotes](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/market/index.ts#L25) | 10m | True | 1d | 默认 |
 | [Crypto Sectors](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/market/index.ts#L26) | 10m | True | 1d | 默认 |
@@ -488,9 +488,9 @@ WorldMonitor DeFi 的不同参数为：后台 bundle 每 30 分钟尝试采集�
 | [Other Tokens](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/market/index.ts#L29) | 10m | True | 1d | 默认 |
 | [Military Flight Tracking](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/military-flights.ts#L102) | 10m | True | 1d | {"maxFailures": 3, "cooldownMs": 300000, "revivePersistedData": "(data) => ({\n    ...data,\n    flights: data.flights.map((f: MilitaryFlight) => ({\n      ...f,\n      lastSeen: f.lastSeen instanceof Date ? f.lastSeen : new Date(f.lastSeen as unknown as string),\n    })),\n  })"} |
 | [Military Vessel Tracking](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/military-vessels.ts#L81) | 30s | True | 1d | {"maxFailures": 3, "cooldownMs": 300000, "revivePersistedData": "(data) => limitVesselSnapshot({\n    ...data,\n    vessels: data.vessels.map((v: MilitaryVessel) => ({\n      ...v,\n      vesselType: isStaleAisMilitaryOpsClaim(v) ? 'unknown' : v.vesselType,\n      lastAisUpdate: v.lastAisUpdate instanceof Date ? v.lastAisUpdate : new Date(v.lastAisUpdate as unknown as string),\n    })),\n  })"} |
-| [NO2 Activity](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/no2-activity.ts#L21) | 0（不轮询） | False | 1d | {"maxCacheEntries": 0} |
+| [NO2 Activity](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/no2-activity.ts#L21) | 0（无新鲜缓存窗口） | False | 1d | {"maxCacheEntries": 0} |
 | [PizzINT](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/pizzint.ts#L15) | 5m | True | 1d | {"maxFailures": 3, "cooldownMs": 300000, "revivePersistedData": "revivePizzIntStatus"} |
-| [WM GDELT Dyad Tensions v1](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/pizzint.ts#L26) | 0（不轮询） | False | 1d | {"maxFailures": 3, "cooldownMs": 300000} |
+| [WM GDELT Dyad Tensions v1](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/pizzint.ts#L26) | 0（无新鲜缓存窗口） | False | 1d | {"maxFailures": 3, "cooldownMs": 300000} |
 | [Positive Geo Events](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/positive-events-geo.ts#L27) | 10m | True | 1d | 默认 |
 | [Polymarket](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/prediction/index.ts#L25) | 10m | True | 1d | 默认 |
 | [Progress Data](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/progress-data.ts#L105) | 1h | True | 1d | 默认 |
@@ -501,7 +501,7 @@ WorldMonitor DeFi 的不同参数为：后台 bundle 每 30 分钟尝试采集�
 | [GitHub Trending](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/research/index.ts#L12) | 10m | True | 1d | 默认 |
 | [Hacker News](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/research/index.ts#L13) | 10m | True | 1d | 默认 |
 | [Sanctions Pressure](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/sanctions-pressure.ts#L60) | 30m | True | 1d | {"revivePersistedData": "reviveSanctionsPressureResult"} |
-| [News Summarization](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/summarization.ts#L93) | 0（不轮询） | False | 1d | 默认 |
+| [News Summarization](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/summarization.ts#L93) | 0（无新鲜缓存窗口） | False | 1d | 默认 |
 | [SummaryResult](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/summarization.ts#L95) | 2h | True | 1d | {"maxCacheEntries": 128} |
 | [Shipping Rates](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/supply-chain/index.ts#L86) | 1h | True | 1d | 默认 |
 | [Chokepoint Status](https://github.com/koala73/worldmonitor/blob/6f1f170def8d8a5b1f89c4615655034d5a4818ef/src/services/supply-chain/index.ts#L89) | 5m | True | 1d | 默认 |
@@ -558,3 +558,52 @@ WorldMonitor DeFi 的不同参数为：后台 bundle 每 30 分钟尝试采集�
 补充修复在既有HTTP共享钩子中，仅对三个明确公开的大快照路径提供gzip，压缩发生在回连之前；不另建缓存、不改源时间、不改采集周期，强ETag降为同语义弱ETag并保留Vary/Cache-Control。同内容gzip级别5估计HTTP编码字节为98,676 / 73,649 / 334,827，这不是SSH实际线上字节或节省量测量。发布后腾讯云本机读取Geo/加密/天气约10.08/8.28/32.91s，仍有明显波动，不能作为稳定提速的证明。Geo总期限60s/网络35s；共享Crypto Strategy和历史总期限45s/网络35s；Contract Reference和LOB不延长。对应回归包括解压逐字节等价、原时间、协商q=0、CORS/Vary、既有编码、流式与私有路径不变，以及延迟21s完整body成功/35s停滞终止。
 
 追加定点复查：Funding Rate 通过自动重试恢复ready；其正式API为76个资产/148条合格报价。Market Summary元数据请求在45s观察中仍受旧6s总期限反复取消，正式API直读约54ms/5,890字节且focusStatus=ready。将这一共享元数据owner的总期限改45s、准入后完整网络预算35s；保持fresh=60s、恢复上限5m、市场身份校验和剥离LOB/Oracle/Trades规则。13s延迟body回归验证保留原时间且不恢复实时字段。
+
+
+### 正式页面验收记录
+
+`ae322adc496e647db2a3dfee82fc983ee14f4a65`从已推送提交的干净archive构建，发布到当前实际承载网站的腾讯云前端。公网根域与www的release-sha、入口 `/assets/index-CXACkN0x.js`、HTML SHA256均一致。后台只安装该提交的共享HTTP文件并HUP重载；没有部署工作区其他后端变更，也没有改动回连/代理路由。
+
+- 桌面真实www地址，1920×1080，使用前一轮留下的浏览器配置和原布局，逐项滚动111个默认Panel。各Panel最后一次可见采样为89 ready、9 degraded、3 stale、3 error、7 idle。idle包含独立业务owner/静态视图，不等于空白；这不是同一时刻的全站健康快照。此次无最后样本处于loading，不能推断未来永不出现Loading。
+- 三个error为Market Summary、Funding Rate、Breaking Radar。定点停留45s复查：Funding自动恢复ready；Market Summary仍受旧6s请求期限取消，已追加上述元数据预算修复；Breaking Radar正式API仍是2026-11-08旧源。Flow Watch本轮已经恢复ready，显示12条large-trade观察，源时间07:21:33 UTC；不再把前述03:26 UTC故障状态冒充当前状态。12条均非Oracle-linked，不能称Oracle-linked覆盖已恢复。
+- IndexedDB已有91份、合计8,728,083个JSON字符，localStorage同步热副本63份。NBA8场、DeFi10条、天气50城约310万字符、Geo约108万字符均成功存储。刷新前后NBA/DeFi/天气的generatedAt和checkedAt未改，布局字符串相同；ESPN后台刷新更新了自己的项，不能宣称整库完全没有变化。
+- 桌面刷新后NBA继续显示8场，无Loading覆盖；原采样从reload开始至读取约5.61s，包含导航和固定等待，不是内容首次绘制耗时。后续独立复查记录真实request事件，在reload至已显示内容的约5.07s区间内没有NBA请求；此时NBA已转stale，旧内容仍可见。这证明当次持久副本恢复，不证明断网冷启动或整夜连续运行。
+- 手机真实根域地址390×844：NBA、NBA Intel、DeFi、Geo为ready，ESPN为stale、小时天气为degraded但有图表；重载NBA仍显示8场，无Loading覆盖。页面scrollWidth=innerWidth=390，未发现横向溢出；未重置布局或替换API/地图瓦片。
+- 桌面未记录到pageerror；网络仍出现3次ERR_NETWORK_CHANGED和26次ERR_ABORTED。取消可能来自滚出视口、重载或期限，不能将全部取消视为后端故障，也不能将本访问环境的连接变化等同用户的网络。
+- 缓存恢复与报价/业务完整性分开：天气部分源缺失，NBA阵容字段仍有空项；Fear & Greed、研究、政策、竞选资金存在partial；ESPN/运输/Oracle参考存在stale。Trade Policy仍为静态REFERENCE。市场实时盘口与来源连续稳定性不在缓存恢复结果中冒充通过。
+
+本轮证据目录中的 `production-after-desktop.json`、`production-after-mobile.json`、`production-final-recheck.json`、`public-release-check.json`、`deployment.json` 保存对应时刻数据；截图 `after-desktop-reload.png`、`after-mobile-reload.png`、`final-mobile-*.png` 来自真实网站。`896ab394-*`为前一版本观察，不能混作本版结果。完整源码表覆盖121项，但10个默认关闭项没有擅自打开做页面验收；每个筛选组合、每个资产与真实隔夜稳定性仍未全量验证。
+
+
+### 最终发布与验收（追加元数据修复）
+
+最终前端发布提交为 **`7bca16b10389510064e731aa951f3021b3bd5286`**，入口 `/assets/index-B5m9fxIb.js`。根域与www的release-sha、HTML SHA256均与干净archive构建一致。上述ae322adc的HTTP改动在这个提交中未变化；后端安装文件hash仍与该源码一致。
+
+最终提交的干净构建通过：前端单元测试 **474通过、1跳过**，类型检查、locales、前端边界和地图bundle检查通过；缓存恢复/自动重试浏览器测试 **22通过**（包含桌面/手机模拟12h旧快照、真实IndexedDB、丢失热副本、存储延迟竞争、失败自动恢复、Retry-After、原始时间不续期）。HTTP压缩与相关信号期限Python回归 **19通过**。浏览器回归使用本地受控来源，是预检，不混作生产数据源验收；未声明全仓质量门禁全部通过。
+
+最后在真实桌面www和手机根域原浏览器配置回看：**Market Summary两端ready、NBA两端stale且保留8场内容、DeFi桌面ready/手机stale但均有报价内容**，均无Loading覆盖。首次回看元数据请求约1.87s/1.73s返回200并被真实UI接纳；最终截图另外等待可见正文，避免把缓存owner的ready误当成懒加载组件已经绘制。这次没有出现旧6s取消，单次通过不构成链路长期稳定证明。两端布局字符串未变，无pageerror，宽度分别1920/1920、390/390。证据为 `metadata-release-acceptance.json`、`release-desktop-market-summary.png`、`release-mobile-market-summary.png`、`release-mobile-nba-scoreboard.png`、`release-mobile-defi-token-watch.png`；最新 `deployment.json` / `public-release-check.json` 对应该最终版本，ae322adc对应回执已加前缀保留。
+
+结论限于：已上线的共用持久缓存、原时间保留、NBA解析、天气字段过期、恢复重试与有界传输期限修复得到代码及当次真实UI证据。Breaking Radar过期采集、若干来源partial/stale、短暂链路异常、真实隔夜连续稳定性仍不能标为全部解决。无需清缓存、重置布局或手动启用默认Panel。
+
+
+线上未全绿的逐项记录（ae322adc全页采样，后续修复另标；不把stale/partial都称空白）：
+
+| Panel ID | 当次显示 | 具体边界 |
+| --- | --- | --- |
+| breaking-event-radar | error/无可接纳快照 | GDELT限流、Wikimedia失败，旧源超过24h；采集未恢复 |
+| related-news | degraded/有内容 | 来源覆盖不全，已有文章继续显示 |
+| broker-research-watch | degraded/有内容 | 部分研究来源不全，不保证覆盖所有券商 |
+| crypto-fear-greed | degraded/有内容 | CNN/AAII缺失，不保证复合指标完整 |
+| weather-market-browser | degraded/有内容 | 目录/观测/模型覆盖分别不足，部分城市盘口缺失 |
+| weather-trend-detail | degraded/有图表 | 共享天气owner部分源缺失，保留模型原时间 |
+| weather-trend-7d | degraded/有图表 | 同一天气owner，不另采集或续期模型 |
+| world-clock | degraded/时间显示 | 状态来自共享天气owner；时钟仍走本地时间，不是时钟停止 |
+| policy-progress | degraded/有内容 | 部分政策来源不全 |
+| politics-campaign-finance | degraded/有内容 | 来源更新延迟，保留已发布FEC观察 |
+| crypto-oracle-reference | stale/有限显示 | 旧观察与原时间仍可见，当前距离字段因观察过期不再计算 |
+| global-transport-shipping | stale/有内容 | 源快照超fresh窗口，不能当成当前机场状态 |
+| espn-matchup-predictor | stale/8场 | 模型快照超fresh，旧预测不应冒充刚更新 |
+| market-summary | error→ready | 追加元数据传输预算后最终桌面/手机确认恢复 |
+| crypto-funding-watch | error→ready | 定点可见停留期间自动重试成功，未修改报价资格或该owner期限 |
+
+此外NBA Intel虽ready，阵容姓名仍存在源空项；Trade Policy的REFERENCE示例也不是已完成动态来源。ready只表示当前owner有可接纳内容，不承诺逐字段完整。
