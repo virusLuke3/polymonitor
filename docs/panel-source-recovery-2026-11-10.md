@@ -27,7 +27,7 @@
 - 已有两条 bulk、interactive 分开；新增公共 Panel 连接，失败回退既有 bulk。公共快照只匹配 registry 精确路径，避免慢地图按需查询使普通 Panel 一起被摘除。关闭 bulk 的整池被动摘除，但保留有界单请求切换和 systemd 重连。服务端 SSH 保活负责释放失联反向端口。
 - 私网路径试验出现较高 RTT/重传，已撤回，生产仍使用原验证过的网站跳板；没有切换主 Clash。
 - 天气 books 和 LOB 传输隔离到交互连接；LOB 原 3s 期限、限流、源资格与 UNKNOWN 保持。隔离后首次回读仍有 504，随后三次真实公网读取为 200、2.965/3.063/2.849s；不能称为彻底消除链路波动。
-- 选中市场 flow 的 ClickHouse 第三步明确报 TOO_MANY_BYTES，32MiB 限额处读到 33.06MiB。三次单独进程内、总额仍 64MiB 的只读预算分配试验也失败（最后 2/12/48/2MiB 分配，第三步读到 51.51MiB 仍被拒绝）；未修改生产预算，未取消限额，未换用未经事实校验的底表。
+- 选中市场 flow 的 ClickHouse 第三步明确报 TOO_MANY_BYTES，32MiB 限额处读到 33.06MiB。三次单独进程内、总额仍 64MiB 的只读预算分配试验也失败（最后 2/12/48/2MiB 分配，第三步读到 51.51MiB 仍被拒绝）；未修改生产预算，未取消限额，未换用未经事实校验的底表。额外只读验证中，移除结果排序仍收到 24 行后跟 JSON exception，而不是完整 51 行；修改查询设置被 readonly=1 拒绝，未放宽权限。公共解析器现拒绝这种 HTTP 200 后追加的 JSON exception，防止把执行失败当成数据行；生产查询和限额保持不变。
 
 ## 尚未解决与既有业务边界
 
@@ -41,9 +41,9 @@
 ## 发布与验证记录
 
 - 前端：干净导出的推送提交 `5eadb52362a0a215bf50c22ad3e5fec96d35f2c6` 构建，部署到实际承载域名的腾讯云。根域名/www 的 release-sha、入口与构建产物一致；没有把通用 GCP 文档当作实际主机。
-- 后端自本轮 `0ef5c95d` 至 `31803aea` 的任务文件逐个核对前版本后发布；后续传输配置至 `4cf3efdd`。私有域名/出口/转发保存在 .env，未提交密钥或私有路由。
+- 后端自本轮 `0ef5c95d` 至 `31803aea` 的任务文件逐个核对前版本后发布；后续传输配置至 `4cf3efdd`；流式 ClickHouse 异常解析修正为 `110f9b72`。私有域名/出口/转发保存在 .env，未提交密钥或私有路由。
 - 初次 Radar 依赖新增字段导致 API 启动失败，约 16:09:52–16:13:50 CST 不可用；已将 collector-only 依赖改为兼容可选字段并恢复服务。这个发布事故保留记录，不以随后成功覆盖。
-- 前端 474 单测通过、1 跳过；构建和类型检查通过。相关后端聚合 208 项通过；随后 Brotli 130 项、天气新闻与路由 41 项、LOB renderer 7 项相关测试通过，计数有重叠，不相加为总覆盖。
+- 前端 474 单测通过、1 跳过；构建和类型检查通过。相关后端聚合 208 项通过；随后 Brotli 130 项、天气新闻与路由 41 项、LOB renderer 7 项相关测试通过，计数有重叠，不相加为总覆盖。最后 JSON exception 修正另从提交的干净 archive 验证 ClickHouse 读取与市场 Panel 共 37 项通过；正式 API 中超预算的 flow 继续返回 503，没有伪造完整结果。
 - 证据目录：`/home/jiahuaiyu/.codex/visualizations/2026/11/10/panel-source-recovery/`。主要文件 acceptance-api.json、acceptance-parser.json、public-all-panels.json、verified-context-api.json、production-desktop-remote.json 与后续恢复/手机记录。临时并行 CDP 控制导致视口交叉的截图不纳入验收，后续按设备顺序复验。
 
 ## 浏览器后续复验（时间独立）
