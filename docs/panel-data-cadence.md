@@ -146,3 +146,13 @@ OFAC 大文件解析缓存按小时刷新，Geo 展示仍按既有五分钟调�
 ## 公司公告与政策进程（首批）
 
 开发与验收遵循 [首批数据/视觉契约](official-disclosures-panels.md)。共用领域采集拥有者，SEC submissions / Federal Register 30 分钟，SEC companyfacts 6 小时，浏览器 10 分钟只读快照。失败逐来源退避并保留原始成功时间；新 Panel 默认合并进旧布局。
+
+### NBA 来源传输与独立资格
+
+NBA 现有 watcher 同时依赖 `site.api.espn.com`（比分/新闻）与
+`sports.core.api.espn.com`（预测详情）。两者均由私有 `.env` 的
+`POLYMONITOR_SOURCE_ROUTES_JSON` 显式配置已经验证的独立出口；只配置后一域名
+不会修复前一域名的直连超时。仍使用既有分钟采集、SQLite sports seed、
+Runtime 共享读取及原源时间，不新增采集器或刷新时钟。官方 NBA 阵容失败和
+ESPN 回退须单独保留来源状态。两轮新发布证据见
+[2026-11-10 恢复记录](panel-source-recovery-2026-11-10.md)。

@@ -1,5 +1,7 @@
 # 全量 Panel 缓存、读取与展示核验（2026-11-10）
 
+后续实际采集、API 与公网修复见 [新数据与传输恢复记录](panel-source-recovery-2026-11-10.md)，两次观察的时间与结果分开保留。
+
 这是指定版本的代码审计与当次运行记录，不是长期健康承诺。当前规范仍以 panel-data-pipeline、panel-resource-contract、panel-runtime-lifecycle、panel-data-cadence 和领域文档为准。所有时长必须注明所属层，不能把“刷新间隔”当成“删除期限”。
 
 ## 范围与证据边界
