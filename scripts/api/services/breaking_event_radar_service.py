@@ -32,6 +32,7 @@ DEFAULT_TOPIC_SEEDS: List[Dict[str, Any]] = [
         "id": "iran-geopolitics",
         "topic": "geopolitics",
         "entity": "Iran",
+        "newsQuery": "Iran",
         "country": "Iran",
         "query": '(Iran OR Tehran) (missile OR nuclear OR sanctions OR attack OR conflict)',
         "wikiTitles": ["Iran", "Iran_nuclear_deal_framework"],
@@ -41,6 +42,7 @@ DEFAULT_TOPIC_SEEDS: List[Dict[str, Any]] = [
         "id": "us-politics",
         "topic": "politics",
         "entity": "US Politics",
+        "newsQuery": "US politics",
         "country": "United States",
         "query": '("United States" OR Washington) (election OR senate OR congress OR president OR campaign)',
         "wikiTitles": ["Politics_of_the_United_States", "2026_United_States_elections"],
@@ -50,6 +52,7 @@ DEFAULT_TOPIC_SEEDS: List[Dict[str, Any]] = [
         "id": "geopolitical-risk",
         "topic": "geopolitics",
         "entity": "Geopolitical Risk",
+        "newsQuery": "ceasefire OR sanctions",
         "country": "Global",
         "query": '(war OR ceasefire OR invasion OR sanctions OR military) (risk OR crisis OR talks OR strike)',
         "wikiTitles": ["Geopolitics", "International_sanctions"],
@@ -59,6 +62,7 @@ DEFAULT_TOPIC_SEEDS: List[Dict[str, Any]] = [
         "id": "crypto-policy",
         "topic": "crypto",
         "entity": "Crypto Policy",
+        "newsQuery": "crypto regulation",
         "country": "Global",
         "query": '(bitcoin OR crypto OR stablecoin OR ethereum) (ETF OR regulation OR SEC OR treasury)',
         "wikiTitles": ["Cryptocurrency", "Bitcoin"],
@@ -68,6 +72,7 @@ DEFAULT_TOPIC_SEEDS: List[Dict[str, Any]] = [
         "id": "extreme-weather",
         "topic": "weather",
         "entity": "Extreme Weather",
+        "newsQuery": "extreme weather",
         "country": "Global",
         "query": '(hurricane OR flood OR wildfire OR heatwave OR storm) (warning OR damage OR forecast OR emergency)',
         "wikiTitles": ["Extreme_weather", "Tropical_cyclone"],
@@ -88,6 +93,7 @@ class BreakingEventRadarDependencies:
     set_cached_json: Callable[..., Any] | None
     application: Any
     public_articles: Callable[..., Any] | None = None
+    news_articles: Callable[..., Any] | None = None
 
     @classmethod
     def from_context(
@@ -108,6 +114,7 @@ class BreakingEventRadarDependencies:
                 "http_json_get",
             ),
             public_articles=resolve_optional_service_callable(context, "public_articles"),
+            news_articles=resolve_optional_service_callable(context, "news_articles"),
             search_markets=resolve_optional_service_callable(
                 context,
                 "search_markets",
@@ -370,7 +377,7 @@ def _build_event_item(
         "wikiPageviewDelta": round(wiki_delta, 2),
         "confidence": round(confidence, 2),
         "severity": "alert" if velocity >= 75 else "watch" if velocity >= 45 else "normal",
-        "tags": [str(seed.get("topic") or "breaking"), "public-feeds" if latest_article.get("publicFeed") else "wire" if articles else "daily-attention"],
+        "tags": [str(seed.get("topic") or "breaking"), "news-rss" if latest_article.get("newsRss") else "public-feeds" if latest_article.get("publicFeed") else "wire" if articles else "daily-attention"],
         "relatedPolymarketMarketIds": [market.get("marketId") for market in markets if market.get("marketId")],
         "markets": markets,
         "evidence": {
@@ -526,6 +533,15 @@ def _build_breaking_event_radar_payload(
             except Exception as exc:
                 sources["publicFeeds"] = {"status": "error", "count": 0}
                 errors.append(f"publicFeeds:{exc.__class__.__name__}")
+        if not articles and dependencies.news_articles is not None:
+            try:
+                articles = dependencies.news_articles(seed, max_records=max_records)
+                state = sources.setdefault("newsRss", {"status": "empty", "count": 0})
+                state["count"] += len(articles)
+                state["status"] = "ok" if state["count"] else "empty"
+            except Exception as exc:
+                sources["newsRss"] = {"status": "error", "count": 0}
+                errors.append(f"newsRss:{exc.__class__.__name__}")
         if wikimedia_enabled and max_wiki_titles > 0:
             for title in (seed.get("wikiTitles") or [])[:max_wiki_titles]:
                 try:
@@ -567,7 +583,7 @@ def _build_breaking_event_radar_payload(
         "status": status,
         "cacheMode": "live-build",
         "freshness": "live" if status == "ok" else "degraded" if limited else "warming",
-        "source": "GDELT + approved public feeds + Wikimedia Pageviews",
+        "source": "GDELT + news RSS + approved public feeds + Wikimedia Pageviews",
         "sourceUrl": _gdelt_url(dependencies),
         "sources": sources,
         "summary": _summary(limited),

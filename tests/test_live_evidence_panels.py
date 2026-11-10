@@ -202,6 +202,65 @@ def test_public_reports_recover_topic_while_gdelt_failure_remains_explicit(monke
     assert result['generatedAt'] == '2026-11-10T07:55:00Z'
 
 
+def test_news_rss_recovers_topic_without_hiding_gdelt_failure(monkeypatch):
+    from unittest.mock import Mock
+    import requests
+    monkeypatch.setenv('POLYDATA_BREAKING_EVENT_WIKIMEDIA_ENABLED', '0')
+    response = requests.Response()
+    response.status_code = 429
+    fetch = Mock(side_effect=requests.HTTPError(response=response))
+    rss = Mock(return_value=[{'title': 'New Iran report', 'url': 'https://example.test/report',
+        'domain': 'Publisher', 'datetime': '2026-11-10T07:50:00Z',
+        'acquiredAt': '2026-11-10T07:55:00Z', 'newsRss': True}])
+    result = breaking_event_radar_service.build_breaking_event_radar_payload({
+        'SETTINGS': object(), 'http_json_get': fetch, 'public_articles': lambda *a, **k: [],
+        'news_articles': rss, 'utc_now_iso': lambda: '2026-11-10T08:00:00Z'},
+        topic_ids=['iran-geopolitics'])
+    assert result['sources']['gdelt']['status'] == 'rate-limited'
+    assert result['sources']['newsRss'] == {'status': 'ok', 'count': 1}
+    assert result['status'] == 'degraded'
+    assert result['items'][0]['tags'][-1] == 'news-rss'
+    assert result['items'][0]['eventTime'] == '2026-11-10T07:50:00Z'
+    assert result['generatedAt'] == '2026-11-10T07:55:00Z'
+    fetch.assert_called_once()
+    rss.assert_called_once()
+
+
+def test_radar_rss_keeps_dated_public_metadata_and_bounded_transport():
+    from email.utils import format_datetime
+    from unittest.mock import Mock
+    from runtime.breaking_event_radar_watcher import BreakingEventRadarWatcher
+    now = datetime.now(timezone.utc)
+    def item(title, url, at):
+        return f'<item><title>{title}</title><link>{url}</link><source>Publisher</source><pubDate>{format_datetime(at)}</pubDate><description>Not an article body</description></item>'
+    text = '<rss><channel>' + ''.join([
+        item('Current', 'https://example.test/current', now - timedelta(minutes=5)),
+        item('Duplicate', 'https://example.test/current', now - timedelta(minutes=5)),
+        item('Old', 'https://example.test/old', now - timedelta(days=2)),
+        item('Future', 'https://example.test/future', now + timedelta(hours=1)),
+        item('Unsafe', 'javascript:alert(1)', now - timedelta(minutes=1)),
+    ]) + '</channel></rss>'
+    response = Mock()
+    response.__enter__ = Mock(return_value=response)
+    response.__exit__ = Mock(return_value=False)
+    response.iter_content.return_value = [text.encode()]
+    watcher = object.__new__(BreakingEventRadarWatcher)
+    watcher.settings = SimpleNamespace(google_news_rss_url='https://feed.test/search')
+    watcher.requests = Mock()
+    watcher.requests.get.return_value = response
+    rows = watcher.news_articles({'newsQuery': 'Iran'}, max_records=20)
+    assert len(rows) == 1 and rows[0]['title'] == 'Current'
+    assert rows[0]['datetime'] != rows[0]['acquiredAt']
+    assert 'description' not in rows[0]
+    kwargs = watcher.requests.get.call_args.kwargs
+    assert kwargs['params']['q'] == 'Iran when:1d' and kwargs['stream']
+    assert kwargs['timeout'] == 12 and kwargs['source_deadline'] > 0
+    response.__exit__.assert_called_once()
+    response.iter_content.return_value = [b'<html>Unavailable</html>']
+    with pytest.raises(ValueError, match='RSS'):
+        watcher.news_articles({'newsQuery': 'Iran'}, max_records=20)
+
+
 def test_breaking_public_reports_require_fresh_owner_and_current_public_permission(tmp_path):
     import json
     from runtime.breaking_event_radar_watcher import BreakingEventRadarWatcher

@@ -154,6 +154,38 @@ class BreakingEventRadarWatcher:
         articles.sort(key=lambda item: item["datetime"], reverse=True)
         return articles[:max_records]
 
+    def news_articles(self, seed: Dict[str, Any], *, max_records: int) -> list[dict]:
+        """Bounded RSS metadata acquisition by this owner, never by the API."""
+        from api.clients.source_transport import read_response_bytes
+        from api.services.finance_watch.news import _parse_rss_items
+        endpoint = str(getattr(self.settings, "google_news_rss_url", "") or "").strip()
+        if not endpoint:
+            raise ValueError("POLYDATA_GOOGLE_NEWS_RSS_URL is not configured")
+        query = str(seed.get("newsQuery") or seed.get("entity") or "").strip()
+        if not query:
+            raise ValueError("News topic is missing")
+        deadline = time.monotonic() + 20
+        with self.requests.get(endpoint, params={"q": query + " when:1d", "hl": "en-US", "gl": "US", "ceid": "US:en"},
+                               timeout=12, source_deadline=deadline, stream=True,
+                               headers={"Accept": "application/rss+xml,application/xml"}) as response:
+            response.raise_for_status()
+            text = read_response_bytes(response, 1024 * 1024, deadline=deadline).decode("utf-8")
+        now = datetime.now(timezone.utc)
+        acquired_at = now.isoformat().replace("+00:00", "Z")
+        rows = _parse_rss_items(text, panel_id="breaking-event-radar", limit=100)
+        articles, seen = [], set()
+        for row in rows:
+            url = str(row.get("url") or "")
+            parsed = urlsplit(url)
+            published = datetime.fromisoformat(row["publishedAt"].replace("Z", "+00:00"))
+            if (parsed.scheme not in {"http", "https"} or not parsed.hostname or url in seen
+                    or not 0 <= (now - published).total_seconds() <= 86400):
+                continue
+            seen.add(url)
+            articles.append({"title": row["title"], "url": url, "domain": row["source"],
+                             "datetime": row["publishedAt"], "acquiredAt": acquired_at, "newsRss": True})
+        return articles[:max(1, min(max_records, 50))]
+
     def service_context(self) -> Dict[str, Any]:
         context: Dict[str, Any] = {
             "SETTINGS": self.settings,
@@ -161,6 +193,7 @@ class BreakingEventRadarWatcher:
             "app": _App(),
             "http_json_get": self.http_json_get,
             "public_articles": self.public_articles,
+            "news_articles": self.news_articles,
             "utc_now_iso": utc_now_iso,
         }
         if str(os.environ.get("POLYDATA_BREAKING_EVENT_PM_SEARCH_ENABLED", "1")).strip().lower() in {"1", "true", "yes", "on"}:

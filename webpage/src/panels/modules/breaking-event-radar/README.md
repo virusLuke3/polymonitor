@@ -25,6 +25,15 @@ Opening or refreshing this Panel must not collect external news.
   Invalid, empty or failed responses do not replace a successful observation.
   Requests identify `PolymonitorBot` and its real website as required by the
   [Wikimedia User-Agent policy](https://foundation.wikimedia.org/wiki/Policy:Wikimedia_Foundation_User-Agent_Policy).
+- If both GDELT and the shared public-content snapshot have no usable reports,
+  the same watcher reads the configured Google News RSS search endpoint
+  (`POLYDATA_GOOGLE_NEWS_RSS_URL`). Reuse the existing RSS metadata parser and
+  source transport; no article-body crawler or additional worker is introduced.
+  One plain topic query follows the existing topic rotation, with a 20-second
+  total deadline and 1 MiB body cap. Keep only dated reports from the past day,
+  at most 20, with HTTP(S) evidence links. Publication time and RSS acquisition
+  time remain separate. Its success never clears GDELT's persisted cooldown or
+  source failure; the API remains seed-only and the browser contract is unchanged.
 - Item `eventTime` is the report publication/seen time or Wikipedia observation
   day; `acquiredAt` is the actual successful source read. A newer daily reading
   cannot renew an older headline. Failed rounds preserve original times and
