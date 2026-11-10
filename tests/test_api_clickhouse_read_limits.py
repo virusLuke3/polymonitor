@@ -136,10 +136,14 @@ def test_http_read_is_deferred_when_process_capacity_is_full() -> None:
     urlopen.assert_not_called()
 
 
-def test_streamed_query_error_discards_partial_rows_without_falling_back_to_docker():
+@pytest.mark.parametrize("failure", [
+    b'Code: 158. DB::Exception: Limit exceeded',
+    b'{"exception":"Code: 307. DB::Exception: Limit for rows or bytes to read exceeded"}',
+])
+def test_streamed_query_error_discards_partial_rows_without_falling_back_to_docker(failure):
     class PartialResponse(Response):
         def read(self):
-            return b'{"block_number": 50}\nCode: 158. DB::Exception: Limit exceeded\n'
+            return b'{"block_number": 50}\n' + failure + b'\n'
 
     with (
         patch.dict(os.environ, {"POLYDATA_ORDERFILLED_CLICKHOUSE_HTTP_URL": "http://localhost"}),

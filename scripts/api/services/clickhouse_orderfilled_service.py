@@ -57,7 +57,9 @@ def _parse_json_rows(output: str) -> Optional[List[Dict[str, Any]]]:
             row = json.loads(line)
         except json.JSONDecodeError:
             return None
-        if not isinstance(row, dict):
+        # ClickHouse can end a successful HTTP stream with a JSON exception.
+        # It is not a data row, even when all preceding lines parsed correctly.
+        if not isinstance(row, dict) or "exception" in row:
             return None
         rows.append(row)
     return rows
