@@ -22,14 +22,29 @@ def required(name: str) -> str:
     return value
 
 
-def target(name: str) -> str:
-    value = required(name)
+def target(name: str, override: str | None = None) -> str:
+    value = required(name) if override is None else override
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"Invalid {name}")
     if value.startswith("-") or any(c.isspace() for c in value):
         raise ValueError(f"Invalid {name}")
     return value
 
 
 def ssh_argv(profile: str | None = None) -> list[str]:
+    overrides = None
+    if profile:
+        try:
+            profiles = json.loads(required("POLYMONITOR_WEB_LINK_PROFILES_JSON"))
+            overrides = profiles[profile]
+            if (not isinstance(overrides, dict)
+                    or not {"remote", "local"} <= set(overrides)
+                    or set(overrides) - {"remote", "local", "target", "jump_node"}
+                    or ("target" in overrides and overrides["target"] is None)
+                    or ("jump_node" in overrides and not isinstance(overrides["jump_node"], str))):
+                raise ValueError()
+        except (KeyError, TypeError, ValueError):
+            raise ValueError("Invalid website forwarding profile") from None
     options = ["-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes",
                "-o", "ConnectTimeout=15", "-o", "ServerAliveInterval=10",
                "-o", "ServerAliveCountMax=3", "-o", "ExitOnForwardFailure=yes",
@@ -37,7 +52,8 @@ def ssh_argv(profile: str | None = None) -> list[str]:
     command = ["/usr/bin/ssh", "-C", "-N", "-T", "-i",
                required("POLYMONITOR_TENCENT_EGRESS_IDENTITY"), *options,
                "-o", "HostKeyAlias=" + required("POLYMONITOR_TENCENT_HOST_KEY_ALIAS")]
-    node = configured_value("POLYMONITOR_WEB_LINK_JUMP_NODE").strip()
+    node = (overrides.get("jump_node", configured_value("POLYMONITOR_WEB_LINK_JUMP_NODE"))
+            if overrides is not None else configured_value("POLYMONITOR_WEB_LINK_JUMP_NODE")).strip()
     if node:
         if node not in {"ireland", "usla"}:
             raise ValueError("Unsupported website jump node")
@@ -47,15 +63,6 @@ def ssh_argv(profile: str | None = None) -> list[str]:
         command += ["-o", "ProxyCommand=" + shlex.join(jump)]
     else:
         command += ["-o", "ProxyCommand=none", "-o", "ProxyJump=none"]
-    overrides = None
-    if profile:
-        try:
-            profiles = json.loads(required("POLYMONITOR_WEB_LINK_PROFILES_JSON"))
-            overrides = profiles[profile]
-            if not isinstance(overrides, dict) or set(overrides) != {"remote", "local"}:
-                raise ValueError()
-        except (KeyError, TypeError, ValueError):
-            raise ValueError("Invalid website forwarding profile") from None
     for direction, flag in (("REMOTE", "-R"), ("LOCAL", "-L")):
         name = "POLYMONITOR_WEB_LINK_" + direction + "_FORWARDS_JSON"
         try:
@@ -72,7 +79,8 @@ def ssh_argv(profile: str | None = None) -> list[str]:
                 command += [flag, item]
         except (TypeError, ValueError, AttributeError):
             raise ValueError(f"Invalid {name}") from None
-    command.append(target("POLYMONITOR_WEB_LINK_TARGET"))
+    command.append(target("POLYMONITOR_WEB_LINK_TARGET",
+                          overrides.get("target") if overrides is not None else None))
     return command
 
 

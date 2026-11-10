@@ -63,3 +63,34 @@ def test_missing_config_is_not_replaced_by_embedded_private_defaults(monkeypatch
     monkeypatch.setattr(website_link, "configured_value", lambda key: "")
     with pytest.raises(ValueError, match="^Missing POLYMONITOR_TENCENT_EGRESS_IDENTITY$"):
         website_link.ssh_argv()
+
+
+def test_website_profile_can_isolate_route_without_changing_other_connections(monkeypatch):
+    import json
+    config = {"POLYMONITOR_TENCENT_EGRESS_IDENTITY": "/keys/web",
+              "POLYMONITOR_TENCENT_HOST_KEY_ALIAS": "web.example.invalid",
+              "POLYMONITOR_WEB_LINK_JUMP_NODE": "ireland",
+              "POLYMONITOR_EGRESS_IDENTITY": "/keys/source",
+              "POLYMONITOR_EGRESS_IRELAND_TARGET": "reader@jump.example.invalid",
+              "POLYMONITOR_WEB_LINK_TARGET": "web@web.example.invalid"}
+    profiles = {"bulk": {"remote": ["127.0.0.1:19503:127.0.0.1:19502"], "local": [],
+                         "target": "web@100.64.0.9", "jump_node": ""},
+                "interactive": {"remote": [], "local": []}}
+    monkeypatch.setattr(website_link, "configured_value", lambda key: config.get(key, ""))
+    config["POLYMONITOR_WEB_LINK_PROFILES_JSON"] = json.dumps(profiles)
+    argv = website_link.ssh_argv("bulk")
+    assert argv[-1] == "web@100.64.0.9"
+    assert "ProxyCommand=none" in argv and "ProxyJump=none" in argv
+    assert "HostKeyAlias=web.example.invalid" in argv
+    interactive = website_link.ssh_argv("interactive")
+    assert interactive[-1] == "web@web.example.invalid"
+    assert any("reader@jump.example.invalid" in part for part in interactive)
+    for value in ("-oProxyCommand=bad", "host name", "", 23):
+        profiles["bulk"]["target"] = value
+        config["POLYMONITOR_WEB_LINK_PROFILES_JSON"] = json.dumps(profiles)
+        with pytest.raises(ValueError, match="Invalid POLYMONITOR_WEB_LINK_TARGET"):
+            website_link.ssh_argv("bulk")
+    profiles["bulk"]["jump_node"] = "unknown"
+    config["POLYMONITOR_WEB_LINK_PROFILES_JSON"] = json.dumps(profiles)
+    with pytest.raises(ValueError, match="Unsupported website jump node"):
+        website_link.ssh_argv("bulk")
