@@ -40,16 +40,28 @@ Preact and shared runtime. No new polling owner lives in a renderer.
   does not block startup, durable reads or successful SQLite publication. The
   collectors read SQLite first, and a first failed attempt leaves lastSuccessAt
   unknown. Retained observations keep their original clocks and are marked stale.
-- Default registry composition is every 30 minutes; FRED driver, energy and food
-  acquisition is every 6 hours. Frontend checks are every 30 seconds while the
-  runtime owns an active visible consumer. Manual Refresh checks the saved seed;
+- Default registry composition and its frontend checks are every 30 minutes;
+  FRED driver, energy and food acquisition is every 6 hours. Their seven source
+  panels check the existing saved seed every 5 minutes while visible, so a new
+  collector publication does not wait another six hours for a browser read.
+  Manual Refresh checks the saved seed;
   it does not make a visitor run external collection.
-- Each selected panel has an independent 12-second request deadline, runtime
+- Each selected macro panel has an independent 45-second request deadline, runtime
   retry/cancellation, validation, and a bounded public browser cache. Registry
   freshness is 45 minutes, allowing the normal 30-minute composition cycle;
-  source health separately checks the underlying collector interval. Recovery
-  cache retention is at most 24 hours. Geo uses its 5-minute source cycle and
+  source health separately checks the underlying collector interval. The six-hour
+  source family uses 9-hour freshness (1.5 collector cycles), with at most 18-hour
+  retention from the original acquisition clock. It must not inherit the registry's
+  45-minute freshness. Registry recovery retention is also 18 hours; Geo retention
+  is 24 hours. Individual source failures and row expiry remain independent.
+  Geo uses its 5-minute source cycle and
   a 10-minute freshness budget. Historical conflict dates are never called live.
+- These checks reuse the existing shared Runtime, SQLite/Redis identities and
+  browser keys. Seven visible source panels add at most seven saved-snapshot
+  reads per five minutes, sharing the normal admission, single-flight, deadline
+  and retry budgets; they never run FRED/EIA acquisition. Acceptance requires a
+  scheduled owner write with new source fetch clocks, followed by an automatic
+  public API response and rendered content in the already-open browser.
 
 ## BLS replacement for daily monitoring and release archives
 

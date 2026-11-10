@@ -77,8 +77,14 @@ reliable display over historical reconstruction.
 
 The production Nginx token-book route uses the existing dedicated market-data
 reader on port 18861 directly, avoiding the main API worker queue. That reader
-shares a 2 s cache, deduplicates same-pair requests, admits at most four snapshot
-reads, retains at most 128 keys, and cools failed reads for 15 s. It reads the
+shares a 2 s cache, deduplicates same-pair requests, executes at most four snapshot
+reads and admits at most sixteen distinct pending pairs. Waiting and reading share
+one 2 s deadline; a burst of four contract references does not immediately reject
+a visible-market read. Transient network/timeout/SQLite failures cool down for 2 s;
+other validation failures cool down for 15 s. Retention remains at most 128 keys.
+Error responses expose only the exception class and matching Retry-After. A socket
+reset during teardown cannot discard an already validated handoff; failed or
+unconfirmed handoffs still fail. It reads the
 committed gateway snapshot using a read-only SQLite identity lookup; this route
 does not open PostgreSQL or ClickHouse connections. Nginx additionally limits
 per-client book requests and concurrent connections. The market-ID and batch endpoints forward to this same reader; there is no

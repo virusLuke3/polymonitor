@@ -40,7 +40,7 @@ export function transportSnapshot(limit: number) {
 }
 
 export function energySnapshot(limit: number) {
-  return publicListSnapshot({ id: 'energy-gasoline-shock', limit, maxAgeMs: 18 * 3_600_000, staleAgeMs: 18 * 3_600_000,
+  return publicListSnapshot({ id: 'energy-gasoline-shock', limit, maxAgeMs: 9 * 3_600_000, staleAgeMs: 18 * 3_600_000,
     validate: value => rows(value.items) && optional(value.summary, summary => record(summary)
       && textFields(summary, ['signal', 'bias']) && optional(summary.linkedMarkets, strings)),
   });

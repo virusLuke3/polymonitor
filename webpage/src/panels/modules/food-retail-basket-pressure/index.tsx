@@ -1,4 +1,4 @@
-import { macroSnapshot } from '@/panels/shared/macro-runtime';
+import { macroSnapshot, macroSourceRefreshPolicy } from '@/panels/shared/macro-runtime';
 import { panelStatus as panelTone } from '@/panels/shared/formatters';
 import { useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
@@ -149,9 +149,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   description: 'Official CPI food-component pressure for inflation market positioning.',
   defaultEnabled: false,
 }, {
-  tier: 'slow',
-  staleAfterMs: 64800000,
-  intervalMs: 21600000,
+  ...macroSourceRefreshPolicy,
   limit: 8,
   fetchData: (context, limit) => fetchRuntimeFoodRetailBasket(limit, context?.signal),
 });

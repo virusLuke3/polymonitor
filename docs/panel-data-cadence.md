@@ -37,7 +37,7 @@
 | Geo／Sanctions | 5 分钟 | 既有 5 分钟 | 继续与地图共享数据 |
 | CPI／宏观五个注册视图 | 30 分钟 | 既有 30 分钟组装 | 基础序列大多 6 小时采集 |
 | Macro Market Map／CPI Calendar／Nowcast | 3 分钟／1 小时／30 分钟 | 保持对应既有周期 | 显式声明，避免落入 20 秒默认值 |
-| Energy／Food／Supply／Shelter／Labor／Growth／Rates 基础面板 | 6 小时 | 既有 6 小时 | 发布型统计；本次未新建发布窗口日历调度器 |
+| Energy／Food／Supply／Shelter／Labor／Growth／Rates 基础面板 | 5 分钟只读 seed | 既有 6 小时 | 新鲜度 9 小时，原始时钟起最多保留 18 小时；采集、发布期、浏览器检查独立，见宏观领域契约 |
 | 天气城市概览／预报 | 15 分钟 | 既有 1 小时 | 天气目录独立 5 分钟读取；官方盘口按 30 秒检查，详见天气领域契约 |
 | Weather News／Transport | 5 分钟／15 分钟，保持 | 既有 5 分钟／1 小时 | 保留共享拥有者 |
 | NBA／Jin10／BWE／Esports | 60 秒／60 秒／3 分钟／2 分钟 | 保持对应既有周期 | 减少重复读取 |

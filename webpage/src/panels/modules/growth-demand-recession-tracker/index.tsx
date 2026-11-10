@@ -1,4 +1,4 @@
-import { macroSnapshot } from '@/panels/shared/macro-runtime';
+import { macroSnapshot, macroSourceRefreshPolicy } from '@/panels/shared/macro-runtime';
 import { fetchRuntimeGrowthDemandRecessionTracker } from '@/services/api';
 import type { RuntimeMacroDriverPayload, RuntimePolymarketMacroMapPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
@@ -38,9 +38,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   description: 'Demand and recession indicators for macro market positioning.',
   defaultEnabled: false,
 }, {
-  tier: 'slow',
-  staleAfterMs: 64800000,
-  intervalMs: 21600000,
+  ...macroSourceRefreshPolicy,
   limit: 8,
   fetchData: (context, limit) => fetchRuntimeGrowthDemandRecessionTracker(limit, context?.signal),
 });

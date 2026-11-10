@@ -1,4 +1,4 @@
-import { macroSnapshot } from '@/panels/shared/macro-runtime';
+import { macroSnapshot, macroSourceRefreshPolicy } from '@/panels/shared/macro-runtime';
 import { fetchRuntimeLaborWageServicesPressure } from '@/services/api';
 import type { RuntimeMacroDriverPayload, RuntimePolymarketMacroMapPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
@@ -38,9 +38,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   description: 'Labor-market and wage pressure for services CPI and Fed markets.',
   defaultEnabled: false,
 }, {
-  tier: 'slow',
-  staleAfterMs: 64800000,
-  intervalMs: 21600000,
+  ...macroSourceRefreshPolicy,
   limit: 8,
   fetchData: (context, limit) => fetchRuntimeLaborWageServicesPressure(limit, context?.signal),
 });

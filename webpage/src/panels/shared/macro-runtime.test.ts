@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { macroRefreshPolicy, macroSnapshot, projectMacroDisplay } from './macro-runtime';
+import { macroRefreshPolicy, macroSourceRefreshPolicy, macroSnapshot, projectMacroDisplay } from './macro-runtime';
+import { energySnapshot } from './context-snapshots';
 import { revalidateRuntimeSnapshots } from '../usePanelRuntime';
 import { macroMapSnapshot } from '../modules/polymarket-macro-map/model';
 import type { PanelModule } from '../types';
@@ -17,6 +18,20 @@ describe('macro snapshot and refresh contract', () => {
     expect(macroRefreshPolicy.batch).toBe(false);
     expect(macroRefreshPolicy.requestTimeoutMs).toBe(45_000);
     expect(contract.maxAgeMs).toBeGreaterThan(30 * 60_000);
+  });
+  it('keeps six-hour source snapshots fresh across their scheduled cycle and bounds stale retention', () => {
+    for (const source of [macroSnapshot('supply-tariff-import-watch', false, 'source'), energySnapshot(6)]) {
+      expect(source.maxAgeMs).toBe(9 * 3_600_000);
+      expect(source.staleAgeMs).toBe(18 * 3_600_000);
+      const sixHoursOld = { status: 'ok', generatedAt: new Date(now - 6 * 3_600_000).toISOString(),
+        items: [{ key: 'ppi', value: 1, fetchedAt: new Date(now - 6 * 3_600_000).toISOString() }] };
+      const parsed = source.parse(sixHoursOld);
+      expect(source.updatedAt(parsed)).toBe(now - 6 * 3_600_000);
+      expect(projectMacroDisplay(parsed, now + 12 * 3_600_000)).toMatchObject({ items: [], status: 'expired' });
+    }
+    expect(macroSourceRefreshPolicy.intervalMs).toBe(5 * 60_000);
+    expect(macroSourceRefreshPolicy.requestTimeoutMs).toBe(45_000);
+    expect(contract.maxAgeMs).toBe(45 * 60_000);
   });
   it('rejects wrong families, malformed rows and missing collection clocks', () => {
     expect(contract.parse(payload)).toEqual(payload);

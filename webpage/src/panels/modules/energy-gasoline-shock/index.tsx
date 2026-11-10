@@ -1,3 +1,4 @@
+import { macroSourceRefreshPolicy } from '@/panels/shared/macro-runtime';
 import { energySnapshot } from '@/panels/shared/context-snapshots';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeEnergyGasolineShock } from '@/services/api';
@@ -98,9 +99,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   description: 'EIA WTI, gasoline, and diesel pressure for headline CPI markets.',
   defaultEnabled: false,
 }, {
-  tier: 'slow',
-  staleAfterMs: 64800000,
-  intervalMs: 21600000,
+  ...macroSourceRefreshPolicy,
   limit: 6,
   fetchData: (context, limit) => fetchRuntimeEnergyGasolineShock(limit, context?.signal),
 });

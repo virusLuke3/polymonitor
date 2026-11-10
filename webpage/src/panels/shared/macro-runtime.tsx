@@ -9,6 +9,11 @@ export const macroRefreshPolicy = {
   requestTimeoutMs: DEFAULT_PANEL_REQUEST_TIMEOUT_MS, batch: false,
 };
 
+// Saved-seed checks are independent of the six-hour acquisition owner.
+export const macroSourceRefreshPolicy = {
+  ...macroRefreshPolicy, intervalMs: 5 * 60_000, staleAfterMs: 9 * 3_600_000,
+};
+
 /** Reapply on cache restore and the existing Runtime expiry sweep; never renew clocks. */
 export function projectMacroDisplay(value: unknown, now = Date.now()): unknown {
   if (!value || typeof value !== 'object') return value;
@@ -51,7 +56,8 @@ export function projectMacroDisplay(value: unknown, now = Date.now()): unknown {
 }
 
 export function macroSnapshot(panelId: string, geo = false, family: 'registry' | 'source' = 'registry'): PanelSnapshotContract<unknown> {
-  const maxAgeMs = geo ? 10 * 60_000 : macroRefreshPolicy.staleAfterMs;
+  const maxAgeMs = geo ? 10 * 60_000 : family === 'source'
+    ? macroSourceRefreshPolicy.staleAfterMs : macroRefreshPolicy.staleAfterMs;
   return {
     key: `macro:${panelId}:latest:v2`, maxAgeMs, staleAgeMs: (geo ? 24 : 18) * 60 * 60_000,
     acceptStale: true, cache: geo ? { version: 2, storage: 'indexeddb', maxChars: 2_000_000 } : { version: 2, maxChars: 256_000 },
