@@ -122,3 +122,12 @@ def test_reverse_link_pool_does_not_eject_all_peers_after_slow_source_reads():
     for bulk in ([], ['0.0.0.0:80'], ['127.0.0.1:65536'], ['127.0.0.1:80;extra']):
         with pytest.raises(ValueError):
             render_upstreams(bulk, '127.0.0.1:19504', '127.0.0.1:19505')
+
+
+def test_optional_book_pool_preserves_loopback_only_reader():
+    from deploy.render_panel_transport import render_upstreams
+    rendered = render_upstreams(['127.0.0.1:19500'], '127.0.0.1:19504', '127.0.0.1:19505', '127.0.0.1:19862')
+    assert 'upstream polymonitor_book_api' in rendered
+    assert 'server 127.0.0.1:19862;' in rendered
+    with pytest.raises(ValueError):
+        render_upstreams(['127.0.0.1:19500'], '127.0.0.1:19504', '127.0.0.1:19505', '0.0.0.0:19862')

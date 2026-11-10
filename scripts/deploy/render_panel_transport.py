@@ -31,7 +31,7 @@ def render() -> str:
     return template.read_text().replace("__PUBLIC_PANEL_SNAPSHOT_PATHS__", public_snapshot_pattern())
 
 
-def render_upstreams(bulk: list[str], interactive: str, panel: str) -> str:
+def render_upstreams(bulk: list[str], interactive: str, panel: str, book: str | None = None) -> str:
     def address(value: str) -> str:
         host, port = value.split(":")
         if not ipaddress.ip_address(host).is_loopback or not 1 <= int(port) <= 65535:
@@ -43,7 +43,7 @@ def render_upstreams(bulk: list[str], interactive: str, panel: str) -> str:
     # Two slow source responses do not mean both loopback SSH listeners died.
     # Still retry a failed request on the other connection, without temporarily
     # excluding every peer and turning unrelated reads into immediate 502s.
-    return (template.read_text().replace("__POLYMONITOR_WEB_API_UPSTREAM_SERVERS__",
+    rendered = (template.read_text().replace("__POLYMONITOR_WEB_API_UPSTREAM_SERVERS__",
             "\n    ".join(f"server {address(item)} max_fails=0;" for item in bulk))
             .replace("__POLYMONITOR_WEB_INTERACTIVE_UPSTREAM_SERVER__",
                      f"server {address(interactive)};")
@@ -51,6 +51,9 @@ def render_upstreams(bulk: list[str], interactive: str, panel: str) -> str:
             + f"    server {address(panel)} max_fails=0;\n"
             + f"    server {address(bulk[-1])} backup max_fails=0;\n"
             + "    keepalive 4;\n    keepalive_timeout 15s;\n    keepalive_requests 100;\n}\n")
+    if book:
+        rendered += "\nupstream polymonitor_book_api {\n    server " + address(book) + ";\n}\n"
+    return rendered
 
 
 if __name__ == "__main__":
@@ -63,4 +66,5 @@ if __name__ == "__main__":
         args.upstreams_output.write_text(render_upstreams(
             json.loads(configured_value("POLYMONITOR_WEB_API_UPSTREAMS_JSON")),
             configured_value("POLYMONITOR_WEB_INTERACTIVE_UPSTREAM"),
-            configured_value("POLYMONITOR_WEB_PANEL_UPSTREAM")))
+            configured_value("POLYMONITOR_WEB_PANEL_UPSTREAM"),
+            configured_value("POLYMONITOR_WEB_LOB_UPSTREAM") or None))

@@ -35,3 +35,7 @@ AI Insights、Special Radar、Trend Watch 复用 `agent:market-wide:snapshot / v
 2. 同时请求市场目录、详情、图表和较大批量响应；对比本机、远端回环、公网的状态、耗时、记录数和原始时间。空列表需要来源证据，历史日汇总不能当实时流。
 3. 从普通公网首页使用真实 API/瓦片加载，保留已有布局；桌面、手机分别截图。验证缓存刷新、离线保留及离线重载、联网自动取得下一份有效响应。不能用手动注入 online 事件或替换响应代替线上验收。
 4. 新代码仅发布本任务提交；源码、部署版本、数据结果和长时间稳定性分别记录。已有源缺失、业务语义限制与本次传输修复分开报告。
+
+## LOB 读取的传输隔离
+
+已有 market-data HTTP book reader 的本机端口、程序、源数据、资格与时间语义不变。反向部署可在现有 interactive profile 中增加单独回环转发，并配置 `POLYMONITOR_WEB_LOB_UPSTREAM`。renderer 生成 `polymonitor_book_api` 后，只把站点现有 token book location 的 upstream 改为该 pool；保留该 location 的限流、连接 1 秒、读取 3 秒和无 HTTP 缓存。旧转发保留给现有消费者，不改 LOB 密钥，也不重启采集器。响应送达与源 `upstreamCompleteness`、事件时间、连续性资格分别验收；HTTP 200 不能把 UNKNOWN 改成完整。
