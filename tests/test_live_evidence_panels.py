@@ -81,6 +81,7 @@ def test_breaking_radar_daily_pageviews_keep_provider_day_and_completed_day_boun
     day = (datetime.now(timezone.utc).date() - timedelta(days=1)).strftime("%Y%m%d")
     def get(url, **kwargs):
         calls.append(url)
+        assert kwargs['headers']['User-Agent'] == 'PolymonitorBot/1.0 (https://polymonitor.club)'
         return {"items": [{"views": 0, "timestamp": day + "00"}]}
     dependencies = breaking_event_radar_service.BreakingEventRadarDependencies.from_context(
         {"SETTINGS": object(), "http_json_get": get})

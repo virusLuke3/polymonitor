@@ -280,7 +280,8 @@ def _fetch_pageviews(
         timeout=timeout,
         headers={
             "Accept": "application/json",
-            "User-Agent": "Polymonitor/1.0",
+            # Wikimedia requires a descriptive bot identity with operator contact.
+            "User-Agent": "PolymonitorBot/1.0 (https://polymonitor.club)",
         },
     )
     items = payload.get("items") if isinstance(payload, dict) else None

@@ -23,6 +23,8 @@ Opening or refreshing this Panel must not collect external news.
   keyed by SHA-256 of the date-specific URL, for 6 hours, at most 32 entries.
   Cached reads preserve acquisition time and the provider's observation day.
   Invalid, empty or failed responses do not replace a successful observation.
+  Requests identify `PolymonitorBot` and its real website as required by the
+  [Wikimedia User-Agent policy](https://foundation.wikimedia.org/wiki/Policy:Wikimedia_Foundation_User-Agent_Policy).
 - Item `eventTime` is the report publication/seen time or Wikipedia observation
   day; `acquiredAt` is the actual successful source read. A newer daily reading
   cannot renew an older headline. Failed rounds preserve original times and
