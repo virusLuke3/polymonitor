@@ -1855,6 +1855,8 @@ export type RuntimeBreakingEventRadarItem = {
   title?: string | null;
   summary?: string | null;
   eventTime?: string | null;
+  acquiredAt?: string | null;
+  evidenceFreshness?: string | null;
   source?: string | null;
   sourceUrl?: string | null;
   evidenceType?: string | null;

@@ -6,6 +6,8 @@ import json
 import os
 import sys
 import time
+import hashlib
+import re
 from datetime import datetime, timezone
 from urllib.parse import urlsplit
 from pathlib import Path
@@ -88,6 +90,12 @@ class BreakingEventRadarWatcher:
     def http_json_get(self, url: str, params: Optional[Dict[str, Any]] = None, timeout: int = 12, headers: Optional[Dict[str, str]] = None) -> Any:
         from api.services.free_content.collector import retry_delay
         is_gdelt = urlsplit(url).hostname == "api.gdeltproject.org"
+        is_pageviews = urlsplit(url).hostname == "wikimedia.org" and "/metrics/pageviews/per-article/" in url
+        pageview_key = hashlib.sha256(url.encode()).hexdigest()
+        if is_pageviews:
+            saved = self.snapshot_store.get("source:breaking-pageviews", pageview_key)
+            if isinstance(saved, dict) and saved.get("acquiredAt") and saved.get("items"):
+                return saved
         state = self.snapshot_store.get_stale("state:content", "gdelt-backoff") or {} if is_gdelt else {}
         remaining = float(state.get("nextAttemptAt") or 0) - time.time()
         if is_gdelt and remaining > 0:
@@ -106,7 +114,45 @@ class BreakingEventRadarWatcher:
         result = response.json()
         if is_gdelt:
             self.snapshot_store.set("state:content", "gdelt-backoff", {"nextAttemptAt": 0, "failures": 0}, 86400)
+        if (is_pageviews and isinstance(result, dict) and isinstance(result.get("items"), list) and result["items"]
+                and all(isinstance(row, dict) and isinstance(row.get("views"), int) and row["views"] >= 0
+                        and re.fullmatch(r"\d{10}", str(row.get("timestamp", ""))) for row in result["items"])):
+            result = {**result, "acquiredAt": utc_now_iso()}
+            self.snapshot_store.set("source:breaking-pageviews", pageview_key, result, 21600, max_entries=32)
         return result
+
+    def public_articles(self, seed: Dict[str, Any], *, max_records: int) -> list[dict]:
+        """Reuse the existing content owner; no HTTP or database query fallback."""
+        from api.services.free_content import public, snapshots
+        now = datetime.now(timezone.utc)
+        snapshot = self.snapshot_store.get_stale(snapshots.NAMESPACE, snapshots.CACHE_KEY)
+        if snapshots._age(snapshot, now) > snapshots.MAX_STALE_SECONDS:
+            raise RuntimeError("Public content owner unavailable")
+        sources = public.source_map()
+        terms = [str(term).strip() for term in (seed.get("publicTerms") or [seed.get("entity", "")]) if str(term or "").strip()]
+        if not terms:
+            return []
+        pattern = re.compile(r"\b(?:" + "|".join(re.escape(term) for term in terms) + r")\b", re.I)
+        cutoff = datetime.fromtimestamp(now.timestamp() - 86400, timezone.utc).isoformat().replace("+00:00", "Z")
+        states = {r["id"]: public.decode_state(r["payload"], r["id"])
+                  for r in snapshot["records"] if r["record_kind"] == "source"}
+        articles = []
+        for record in snapshot["records"]:
+            if record["record_kind"] != "item":
+                continue
+            item, _ = public.eligible_item(record["payload"], sources, cutoff, now)
+            if not item or not item.get("published_at") or not pattern.search(item["title"] + " " + item.get("summary", "")):
+                continue
+            state = states.get(item.get("source_id"), {})
+            if state.get("status") not in {"ok", "unchanged", "healthy_empty"} or public.source_is_stale(state, now):
+                continue
+            articles.append({"title": item["title"], "url": item["url"],
+                             "domain": sources[item["source_id"]]["publisher_name"],
+                             "datetime": item["published_at"], "description": item.get("summary", "")[:260],
+                             "acquiredAt": state.get("last_success_at"), "publicFeed": True,
+                             "contentId": record["id"]})
+        articles.sort(key=lambda item: item["datetime"], reverse=True)
+        return articles[:max_records]
 
     def service_context(self) -> Dict[str, Any]:
         context: Dict[str, Any] = {
@@ -114,6 +160,7 @@ class BreakingEventRadarWatcher:
             "SNAPSHOT_STORE": self.snapshot_store,
             "app": _App(),
             "http_json_get": self.http_json_get,
+            "public_articles": self.public_articles,
             "utc_now_iso": utc_now_iso,
         }
         if str(os.environ.get("POLYDATA_BREAKING_EVENT_PM_SEARCH_ENABLED", "1")).strip().lower() in {"1", "true", "yes", "on"}:
@@ -150,12 +197,12 @@ class BreakingEventRadarWatcher:
             redis_client=self.redis_client, redis_cache_key=self.redis_key(),
         )
 
-    def store_seed_meta(self, *, status: str, record_count: int, source_states: Dict[str, Any], error_summary: str | None, preserve_last_success: bool = False) -> None:
+    def store_seed_meta(self, *, status: str, record_count: int, source_states: Dict[str, Any], error_summary: str | None, preserve_last_success: bool = False, source_success_at: str | None = None) -> None:
         previous = self.seed_meta_store.load(SEED_META_NAMESPACE, SEED_META_CACHE_KEY) or {}
         attempted_at = utc_now_iso()
         last_success_at = previous.get("lastSuccessAt")
         if not preserve_last_success and (status == "ok" or (status == "degraded" and record_count > 0)):
-            last_success_at = attempted_at
+            last_success_at = source_success_at or attempted_at
         payload = build_seed_meta_payload(
             panel_id=SEED_META_CACHE_KEY,
             namespace=SEED_META_NAMESPACE,
@@ -228,7 +275,7 @@ class BreakingEventRadarWatcher:
             raise
 
         record_count = len(payload.get("items") or [])
-        if previous and record_count <= 0:
+        if previous and record_count <= 0 and payload.get("errors"):
             preserved = retained_snapshot(previous)
             self.store_payload(preserved)
             self.store_seed_meta(
@@ -252,6 +299,7 @@ class BreakingEventRadarWatcher:
             preserve_last_success=bool(payload.get("errors")) and not any(
                 int(value.get("count") or 0) > 0 for value in (payload.get("sources") or {}).values()
                 if isinstance(value, dict)),
+            source_success_at=payload.get("generatedAt"),
         )
         return {"status": status, "payload": payload}
 

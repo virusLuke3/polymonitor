@@ -35,6 +35,7 @@ DEFAULT_TOPIC_SEEDS: List[Dict[str, Any]] = [
         "country": "Iran",
         "query": '(Iran OR Tehran) (missile OR nuclear OR sanctions OR attack OR conflict)',
         "wikiTitles": ["Iran", "Iran_nuclear_deal_framework"],
+        "publicTerms": ["iran", "tehran"],
     },
     {
         "id": "us-politics",
@@ -43,6 +44,7 @@ DEFAULT_TOPIC_SEEDS: List[Dict[str, Any]] = [
         "country": "United States",
         "query": '("United States" OR Washington) (election OR senate OR congress OR president OR campaign)',
         "wikiTitles": ["Politics_of_the_United_States", "2026_United_States_elections"],
+        "publicTerms": ["united states", "congress", "senate", "white house"],
     },
     {
         "id": "geopolitical-risk",
@@ -51,6 +53,7 @@ DEFAULT_TOPIC_SEEDS: List[Dict[str, Any]] = [
         "country": "Global",
         "query": '(war OR ceasefire OR invasion OR sanctions OR military) (risk OR crisis OR talks OR strike)',
         "wikiTitles": ["Geopolitics", "International_sanctions"],
+        "publicTerms": ["ceasefire", "war", "sanctions", "military", "diplomacy"],
     },
     {
         "id": "crypto-policy",
@@ -59,6 +62,7 @@ DEFAULT_TOPIC_SEEDS: List[Dict[str, Any]] = [
         "country": "Global",
         "query": '(bitcoin OR crypto OR stablecoin OR ethereum) (ETF OR regulation OR SEC OR treasury)',
         "wikiTitles": ["Cryptocurrency", "Bitcoin"],
+        "publicTerms": ["bitcoin", "cryptocurrency", "stablecoin", "ethereum"],
     },
     {
         "id": "extreme-weather",
@@ -67,6 +71,7 @@ DEFAULT_TOPIC_SEEDS: List[Dict[str, Any]] = [
         "country": "Global",
         "query": '(hurricane OR flood OR wildfire OR heatwave OR storm) (warning OR damage OR forecast OR emergency)',
         "wikiTitles": ["Extreme_weather", "Tropical_cyclone"],
+        "publicTerms": ["hurricane", "flood", "wildfire", "heatwave", "storm"],
     },
 ]
 
@@ -77,6 +82,7 @@ class BreakingEventRadarDependencies:
     utc_now_iso: Callable[..., Any] | None
     settings: Any
     http_json_get: Callable[..., Any] | None
+    public_articles: Callable[..., Any] | None
     search_markets: Callable[..., Any] | None
     get_cached_json: Callable[..., Any] | None
     snapshot_store: Any
@@ -101,6 +107,7 @@ class BreakingEventRadarDependencies:
                 context,
                 "http_json_get",
             ),
+            public_articles=resolve_optional_service_callable(context, "public_articles"),
             search_markets=resolve_optional_service_callable(
                 context,
                 "search_markets",
@@ -230,6 +237,7 @@ def _fetch_gdelt_articles(
             "format": "json",
             "maxrecords": max(1, min(max_records, 50)),
             "sort": "hybridrel",
+            "timespan": "24h",
         },
         timeout=timeout,
         headers={"Accept": "application/json", "User-Agent": "Polymonitor/1.0"},
@@ -286,7 +294,9 @@ def _fetch_pageviews(
     delta = latest - baseline
     pct = (delta / baseline * 100) if baseline else (100.0 if latest else 0.0)
     return {"title": title, "latestViews": latest, "baselineViews": round(baseline, 2), "deltaViews": round(delta, 2), "deltaPct": round(pct, 2),
-            "sourceDay": items[-1].get("timestamp"), "fetchedAt": _utc_now_iso(dependencies)}
+            "sourceDay": items[-1].get("timestamp"),
+            "sourceUrl": url,
+            "fetchedAt": payload.get("acquiredAt") or _utc_now_iso(dependencies)}
 
 
 def _article_title(article: Dict[str, Any]) -> str:
@@ -308,6 +318,9 @@ def _build_event_item(
     countries = sorted({str(row.get("sourcecountry") or row.get("country") or "").strip() for row in articles if row.get("sourcecountry") or row.get("country")})
     latest_article = max(articles, key=lambda row: _timestamp(row.get("seendate") or row.get("datetime") or row.get("date")), default={})
     mention_count = len(articles)
+    now = _timestamp(_utc_now_iso(dependencies))
+    counts = {seconds: sum(0 <= now - _timestamp(_article_time(row)) <= seconds for row in articles)
+              for seconds in (900, 3600, 86400)}
     wiki_delta = sum(float(row.get("deltaPct") or 0) for row in pageviews)
     source_diversity = len(domains)
     country_spread = len(countries)
@@ -320,7 +333,16 @@ def _build_event_item(
         topic=str(seed.get("topic") or ""),
         limit=4,
     )
-    source_url = str(latest_article.get("url") or latest_article.get("shareurl") or GDELT_DOC_API_URL)
+    source_url = str(latest_article.get("url") or latest_article.get("shareurl")
+                     or next((row.get("sourceUrl") for row in pageviews if row.get("sourceUrl")), ""))
+    evidence_day = max((str(row.get("sourceDay") or "") for row in pageviews), default="")
+    try:
+        evidence_time = datetime.strptime(evidence_day, "%Y%m%d%H").replace(tzinfo=timezone.utc).isoformat()
+    except ValueError:
+        evidence_time = ""
+    acquired_at = max((str(row.get("fetchedAt") or "") for row in pageviews), default="")
+    if articles:
+        acquired_at = str(latest_article.get("acquiredAt") or _utc_now_iso(dependencies))
     return {
         "id": _stable_id(seed.get("id"), _article_title(latest_article), source_url),
         "topicId": str(seed.get("id") or ""),
@@ -328,17 +350,18 @@ def _build_event_item(
         "entity": str(seed.get("entity") or seed.get("id") or "Breaking Event"),
         "country": str(seed.get("country") or "Global"),
         "team": None,
-        "title": _article_title(latest_article) if latest_article else str(seed.get("entity") or "Source warming"),
-        "summary": str(latest_article.get("description") or latest_article.get("summary") or seed.get("query") or "")[:260],
-        "eventTime": _article_time(latest_article)
-        or _utc_now_iso(dependencies),
-        "source": str(latest_article.get("domain") or latest_article.get("sourceCommonName") or "GDELT"),
+        "title": _article_title(latest_article) if latest_article else f"{seed.get('entity')}: daily Wikipedia attention",
+        "summary": (str(latest_article.get("description") or latest_article.get("summary") or seed.get("query") or "")
+                    if articles else f"Completed UTC day {evidence_day[:8]}; pageview activity, not a breaking-news report.")[:260],
+        "eventTime": _article_time(latest_article) or evidence_time,
+        "acquiredAt": acquired_at,
+        "source": str(latest_article.get("domain") or latest_article.get("sourceCommonName") or "Wikimedia Pageviews"),
         "sourceUrl": source_url,
-        "evidenceType": "WIRE",
+        "evidenceType": "WIRE" if articles else "PAGEVIEWS",
         "mentionCount": mention_count,
-        "mentionCount15m": mention_count,
-        "mentionCount1h": mention_count,
-        "mentionCount24h": mention_count,
+        "mentionCount15m": counts[900],
+        "mentionCount1h": counts[3600],
+        "mentionCount24h": counts[86400],
         "velocityScore": velocity,
         "sourceDiversity": source_diversity,
         "countrySpread": country_spread,
@@ -346,7 +369,7 @@ def _build_event_item(
         "wikiPageviewDelta": round(wiki_delta, 2),
         "confidence": round(confidence, 2),
         "severity": "alert" if velocity >= 75 else "watch" if velocity >= 45 else "normal",
-        "tags": [str(seed.get("topic") or "breaking"), "wire" if articles else "proxy"],
+        "tags": [str(seed.get("topic") or "breaking"), "public-feeds" if latest_article.get("publicFeed") else "wire" if articles else "daily-attention"],
         "relatedPolymarketMarketIds": [market.get("marketId") for market in markets if market.get("marketId")],
         "markets": markets,
         "evidence": {
@@ -382,6 +405,8 @@ def _match_markets(
         return []
     try:
         rows = dependencies.search_markets(query, limit=limit)
+        if isinstance(rows, dict):
+            rows = rows.get("items") or []
     except Exception:
         return []
     markets: List[Dict[str, Any]] = []
@@ -491,6 +516,15 @@ def _build_breaking_event_radar_payload(
                 sources["gdelt"].get("errorCount") or 0
             ) + 1
             errors.append(f"gdelt:{seed.get('id')}:{failure_label}")
+        if not articles and dependencies.public_articles is not None:
+            try:
+                articles = dependencies.public_articles(seed, max_records=max_records)
+                public_state = sources.setdefault("publicFeeds", {"status": "empty", "count": 0})
+                public_state["count"] += len(articles)
+                public_state["status"] = "ok" if public_state["count"] else "empty"
+            except Exception as exc:
+                sources["publicFeeds"] = {"status": "error", "count": 0}
+                errors.append(f"publicFeeds:{exc.__class__.__name__}")
         if wikimedia_enabled and max_wiki_titles > 0:
             for title in (seed.get("wikiTitles") or [])[:max_wiki_titles]:
                 try:
@@ -527,11 +561,12 @@ def _build_breaking_event_radar_payload(
     status = "ok" if limited and not errors else "degraded" if limited else "empty" if not errors else "degraded"
     return {
         "panelId": PANEL_ID,
-        "generatedAt": _utc_now_iso(dependencies),
+        "generatedAt": max((str(item.get("acquiredAt") or "") for item in limited), default="") or _utc_now_iso(dependencies),
+        "lastAttemptAt": _utc_now_iso(dependencies),
         "status": status,
         "cacheMode": "live-build",
         "freshness": "live" if status == "ok" else "degraded" if limited else "warming",
-        "source": "GDELT + Wikimedia Pageviews",
+        "source": "GDELT + approved public feeds + Wikimedia Pageviews",
         "sourceUrl": _gdelt_url(dependencies),
         "sources": sources,
         "summary": _summary(limited),
@@ -564,6 +599,7 @@ def merge_breaking_event_radar_payloads(
         for item in (previous.get("items") or [])
         if isinstance(item, dict)
         and _topic_id_for_item(item) in allowed_topic_ids
+        and 0 <= _timestamp(current.get("lastAttemptAt") or current.get("generatedAt")) - _timestamp(item.get("acquiredAt") or previous.get("generatedAt")) <= 86400
     }
     current_items = {
         _topic_id_for_item(item): item
@@ -571,27 +607,13 @@ def merge_breaking_event_radar_payloads(
         if isinstance(item, dict)
         and _topic_id_for_item(item) in allowed_topic_ids
     }
-    merged_items = dict(previous_items)
-    for topic_id, item in current_items.items():
-        articles = (
-            (item.get("evidence") or {}).get("articles")
-            if isinstance(item.get("evidence"), dict)
-            else []
-        )
-        previous_item = previous_items.get(topic_id)
-        previous_articles = (
-            (previous_item.get("evidence") or {}).get("articles")
-            if isinstance(previous_item, dict)
-            and isinstance(previous_item.get("evidence"), dict)
-            else []
-        )
-        if articles or not previous_articles:
-            merged_items[topic_id] = item
-        else:
-            merged_items[topic_id] = {
-                **previous_item,
-                "evidenceFreshness": "preserved",
-            }
+    merged_items = {key: {**item, "evidenceFreshness": "preserved"} for key, item in previous_items.items()}
+    # A new daily-attention observation must not renew an old headline's clock.
+    # Replace this topic with the evidence actually acquired in this round.
+    merged_items.update(current_items)
+    topic_id = (current.get("rotation") or {}).get("topicId")
+    if topic_id and not current_items and not current.get("errors"):
+        merged_items.pop(topic_id, None)
     ranked = sorted(
         merged_items.values(),
         key=lambda row: (
@@ -600,12 +622,13 @@ def merge_breaking_event_radar_payloads(
         ),
         reverse=True,
     )[: max(1, min(int(limit or DEFAULT_LIMIT), 80))]
-    failed_refresh = bool(current.get("errors")) and not current_items and bool(ranked)
+    failed_refresh = bool(current.get("errors")) and not current_items and bool(previous.get("items"))
     return {
         **current,
         "items": ranked,
         "summary": _summary(ranked),
-        **({"generatedAt": previous.get("generatedAt"), "lastAttemptAt": current.get("generatedAt"),
+        "generatedAt": max((str(item.get("acquiredAt") or "") for item in ranked), default="") or current.get("generatedAt"),
+        **({"generatedAt": previous.get("generatedAt"), "lastAttemptAt": current.get("lastAttemptAt") or current.get("generatedAt"),
             "status": "stale", "cacheMode": "stale-seed", "freshness": "stale"} if failed_refresh else {}),
     }
 

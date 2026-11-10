@@ -104,3 +104,7 @@ parse, IndexedDB publication and cached reload, not just HTTP 200 headers.
 ### 浏览器混合快照恢复边界（2026-11-10）
 
 市场目录更新不能延长旧预报：浏览器除整包展示期限外，按每个城市的 `forecastFetchedAt` 单独检查24小时恢复上限，超过后清除小时/日序列和预报派生值。2小时后仍标旧；当前METAR、市场目录和报价沿用自己的来源时钟。新整包夹带25小时前预报的回归需同时验证12小时旧预报可恢复，以及有效观测/合约不会被一并删除。全量链路见 [121 Panel核验](panel-cache-loading-audit-2026-11-10.md)。
+
+### Independent source recovery state
+
+The API join recomputes the catalog/books contribution when their existing owner publishes recovery between hourly forecast rounds. An earlier catalog/book failure no longer keeps an otherwise healthy weather snapshot degraded for the rest of the hour. Failed/partial model or observation sources and expired books remain degraded; a stale forecast stays stale. Original forecast and observation clocks never advance during the join. Regression coverage lives in `test_weather_market_snapshots.py`; current source completeness is measured separately for all configured cities, not inferred from this status correction.

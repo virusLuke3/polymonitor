@@ -193,7 +193,17 @@ def overlay_weather(payload, store, now=None):
                   "partial" if acquired else "unavailable")
     sources = {**payload.get("sources", {}), "marketDatabase": catalog.get("status"), "clob": book_state}
     status = payload.get("status")
-    if status == "ok" and catalog.get("status") != "ok":
+    failures = {"error", "partial", "stale", "unavailable", "warming"}
+    # The catalog/books have an independent owner and can recover between the
+    # hourly forecast publications. Do not keep their previous failure latched
+    # onto an otherwise complete forecast, or renew that forecast's clock.
+    original_sources = payload.get("sources", {})
+    market_recovered = (original_sources.get("marketDatabase") in failures
+                        or original_sources.get("clob") in failures)
+    remaining_failure = any(value in failures for value in sources.values())
+    if status == "degraded" and market_recovered and not remaining_failure:
+        status = "ok"
+    if status == "ok" and (catalog.get("status") != "ok" or remaining_failure):
         status = "degraded"
     return {**payload, "status": status, "sources": sources, "items": items,
             "marketCatalogAt": catalog.get("generatedAt"), "marketCatalogStatus": catalog.get("status"),

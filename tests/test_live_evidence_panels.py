@@ -149,6 +149,88 @@ def test_breaking_radar_failed_first_attempt_has_no_success_clock():
     assert watcher.seed_meta_store.store.call_args.args[2]["lastSuccessAt"] is None
 
 
+def test_daily_cache_reuses_completed_day_without_renewing_acquisition(tmp_path):
+    from runtime.breaking_event_radar_watcher import BreakingEventRadarWatcher
+    from runtime.snapshot_store import SnapshotStore
+    from unittest.mock import Mock
+    watcher = object.__new__(BreakingEventRadarWatcher)
+    watcher.snapshot_store = SnapshotStore(str(tmp_path / 'cache.sqlite'))
+    watcher.requests = Mock()
+    watcher.requests.get.return_value.json.return_value = {'items': [{'views': 12, 'timestamp': '2026110900'}]}
+    url = 'https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/en.wikipedia.org/all-access/user/Iran/daily/20261102/20261109'
+    first = watcher.http_json_get(url)
+    second = watcher.http_json_get(url)
+    assert second['acquiredAt'] == first['acquiredAt']
+    assert watcher.requests.get.call_count == 1
+
+
+def test_current_pageviews_replace_expired_headline_without_impersonating_news():
+    dependencies = breaking_event_radar_service.BreakingEventRadarDependencies.from_context({
+        'utc_now_iso': lambda: '2026-11-10T08:00:00Z', 'SETTINGS': object()})
+    item = breaking_event_radar_service._build_event_item(dependencies,
+        {'id': 'iran-geopolitics', 'entity': 'Iran'}, [],
+        [{'sourceDay': '2026110900', 'fetchedAt': '2026-11-10T07:00:00Z', 'deltaPct': 10,
+          'sourceUrl': 'https://wikimedia.org/fixture'}])
+    old = {'generatedAt': '2026-11-08T03:00:00Z', 'items': [{'topicId': 'iran-geopolitics',
+        'title': 'old headline', 'evidence': {'articles': [{'title': 'old headline'}]}}]}
+    merged = breaking_event_radar_service.merge_breaking_event_radar_payloads(old,
+        {'generatedAt': item['acquiredAt'], 'items': [item], 'errors': ['gdelt:rate-limited']})
+    assert merged['items'][0]['source'] == 'Wikimedia Pageviews'
+    assert merged['items'][0]['evidenceType'] == 'PAGEVIEWS'
+    assert merged['items'][0]['eventTime'].startswith('2026-11-09T00:00:00')
+    assert merged['generatedAt'] == '2026-11-10T07:00:00Z'
+    assert 'old headline' not in str(merged)
+
+
+def test_public_reports_recover_topic_while_gdelt_failure_remains_explicit(monkeypatch):
+    monkeypatch.setenv('POLYDATA_BREAKING_EVENT_WIKIMEDIA_ENABLED', '0')
+    def fail(*args, **kwargs):
+        raise TimeoutError()
+    articles = [{'title': 'Iran talks', 'url': 'https://example.test/news', 'domain': 'Approved publisher',
+                 'datetime': '2026-11-10T07:50:00Z', 'acquiredAt': '2026-11-10T07:55:00Z', 'publicFeed': True},
+                {'title': 'Iran report', 'datetime': '2026-11-10T06:00:00Z', 'domain': 'Approved publisher'}]
+    result = breaking_event_radar_service.build_breaking_event_radar_payload({
+        'SETTINGS': object(), 'http_json_get': fail, 'public_articles': lambda *a, **k: articles,
+        'search_markets': lambda *a, **k: {'items': [{'id': 42, 'title': 'Iran talks?'}]},
+        'utc_now_iso': lambda: '2026-11-10T08:00:00Z'}, topic_ids=['iran-geopolitics'])
+    row = result['items'][0]
+    assert (row['mentionCount15m'], row['mentionCount1h'], row['mentionCount24h']) == (1, 1, 2)
+    assert result['status'] == 'degraded' and result['sources']['gdelt']['status'] == 'timeout'
+    assert result['sources']['publicFeeds']['count'] == 2
+    assert row['markets'][0]['marketId'] == 42
+    assert result['generatedAt'] == '2026-11-10T07:55:00Z'
+
+
+def test_breaking_public_reports_require_fresh_owner_and_current_public_permission(tmp_path):
+    import json
+    from runtime.breaking_event_radar_watcher import BreakingEventRadarWatcher
+    from runtime.snapshot_store import SnapshotStore
+    from api.services.free_content import snapshots
+    watcher = BreakingEventRadarWatcher.__new__(BreakingEventRadarWatcher)
+    watcher.snapshot_store = SnapshotStore(str(tmp_path / 'radar.sqlite'))
+    now = datetime.now(timezone.utc)
+    stamp = now.isoformat().replace('+00:00', 'Z')
+    base = {'title': 'United States monetary policy', 'url': 'https://www.federalreserve.gov/newsevents/pressreleases/monetary20261110a.htm',
+            'summary': 'Public release', 'source_id': 'fed-monetary', 'publisher_id': 'fed',
+            'source_kind': 'official_release', 'display_allowed': True, 'published_at': stamp}
+    state = {'status': 'ok', 'last_success_at': stamp, 'next_check_at': (now + timedelta(minutes=10)).isoformat()}
+    rows = [{'record_kind': 'source', 'id': 'fed-monetary', 'payload': json.dumps(state)}]
+    for index, patch in enumerate([{}, {'display_allowed': False}, {'url': 'https://unapproved.test/report'},
+                                   {'published_at': (now - timedelta(days=2)).isoformat()},
+                                   {'published_at': (now + timedelta(days=1)).isoformat()}]):
+        rows.append({'record_kind': 'item', 'id': str(index), 'payload': json.dumps({**base, **patch})})
+    snapshot = {'schemaVersion': 1, 'generatedAt': stamp, 'records': rows}
+    watcher.snapshot_store.set(snapshots.NAMESPACE, snapshots.CACHE_KEY, snapshot, 90)
+    actual = watcher.public_articles({'publicTerms': ['united states']}, max_records=20)
+    assert len(actual) == 1 and actual[0]['contentId'] == '0'
+    assert actual[0]['acquiredAt'] == stamp and actual[0]['datetime'] == stamp
+    assert watcher.public_articles({}, max_records=20) == []
+    snapshot['generatedAt'] = (now - timedelta(minutes=6)).isoformat()
+    watcher.snapshot_store.set(snapshots.NAMESPACE, snapshots.CACHE_KEY, snapshot, 90)
+    with pytest.raises(RuntimeError, match='owner unavailable'):
+        watcher.public_articles({'publicTerms': ['united states']}, max_records=20)
+
+
 def test_world_cup_match_ops_transforms_dashboard_payload() -> None:
     dashboard = {
         "generatedAt": "2026-06-16T10:00:00Z",

@@ -116,6 +116,23 @@ def test_overlay_source_health_uses_independent_catalog_and_books(store):
     assert empty['sources']['clob'] == 'empty' and not empty['items'][0]['bins']
 
 
+def test_recovered_catalog_clears_its_failure_without_hiding_forecast_failure(store):
+    service.publish(store, service.CATALOG_KEY, catalog())
+    service.publish(store, service.BOOKS_KEY, {'books': {
+        token: service.validate_book(raw(token), token, NOW, 90) for token in ('1', '2')}})
+    generated = service.iso(NOW - 1200)
+    old = {'status': 'degraded', 'generatedAt': generated,
+           'sources': {'marketDatabase': 'error', 'clob': 'unavailable', 'openMeteo': 'ok', 'wttr': 'empty'},
+           'items': [{'cityId': 'new-york', 'forecastFetchedAt': generated}]}
+    recovered = service.overlay_weather(old, store, NOW)
+    assert recovered['status'] == 'ok'
+    assert recovered['generatedAt'] == recovered['items'][0]['forecastFetchedAt'] == generated
+    forecast_failed = {**old, 'sources': {**old['sources'], 'openMeteo': 'partial'}}
+    assert service.overlay_weather(forecast_failed, store, NOW)['status'] == 'degraded'
+    assert service.overlay_weather(old, store, NOW + 91)['status'] == 'degraded'
+    assert service.overlay_weather({**old, 'status': 'stale'}, store, NOW)['status'] == 'stale'
+
+
 class Reply:
     status_code = 200
     headers = {}

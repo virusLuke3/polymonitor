@@ -47,7 +47,7 @@ function modeLabel(mode: SortMode, shared: ReturnType<typeof useSpecialistCopy>[
 
 function heatBars(items: RuntimeBreakingEventRadarItem[]) {
   const values = items.slice(0, 14).map((item) => clamp(Number(item.velocityScore || item.mentionCount || 0)));
-  return values.length ? values : [18, 24, 31, 44, 38, 52, 47, 61, 55, 69, 63, 75, 71, 84];
+  return values;
 }
 
 function topicInitial(value?: string | null) {
@@ -89,7 +89,7 @@ function RadarScope({ items, payload }: { items: RuntimeBreakingEventRadarItem[]
 }
 
 function RadarRow({ item }: { item: RuntimeBreakingEventRadarItem }) {
-  const { copy, shared } = useSpecialistCopy('breaking-event-radar');
+  const { copy, shared, formatRelativeTime } = useSpecialistCopy('breaking-event-radar');
   const severity = severityClass(item);
   const tags = (item.tags || []).slice(0, 2);
   const points = [
@@ -111,6 +111,7 @@ function RadarRow({ item }: { item: RuntimeBreakingEventRadarItem }) {
           <em>{item.source || item.country || 'GDELT'}</em>
           <i className={severity}>{severity.toUpperCase()}</i>
           {tags.map((tag) => <i key={tag}>{tag.toUpperCase()}</i>)}
+          {item.eventTime && <time dateTime={item.eventTime}>{formatRelativeTime(item.eventTime)}</time>}
         </span>
         <strong>{item.title || copy('sourceWarming', 'Breaking source warming')}</strong>
         <small>{item.summary || copy('evidenceStream', '{region} evidence stream', { region: item.country || shared('global', 'Global') })}</small>
@@ -139,7 +140,7 @@ function BreakingEventRadarPanel({ payload }: { payload?: RuntimeBreakingEventRa
       headerOverlay={showHelp ? (
         <div className="wm-panel-help-popover">
           <strong>{copy('helpTitle', 'Breaking Event Radar')}</strong>
-          <p>{copy('helpText', 'Seeded GDELT headlines plus Wikimedia pageview proxies, ranked by velocity and linked to related Polymarket markets when available.')}</p>
+          <p>{copy('helpText', 'Recent reports from GDELT and approved public feeds, plus separate daily Wikipedia attention. Counts cover observed reports, not all global news.')}</p>
         </div>
       ) : null}
       className="wm-market-panel wm-evidence-panel wm-breaking-radar-panel"
@@ -166,7 +167,7 @@ export const panel = runtimePanelFromRenderer(renderers, {
   id: 'breaking-event-radar',
   title: 'Breaking Event Radar',
   eyebrow: 'evidence',
-  description: 'GDELT and Wikimedia evidence velocity linked to Polymarket topics.',
+  description: 'Recent public reports and daily Wikipedia attention linked to Polymarket topics.',
   size: 'wide',
   defaultEnabled: true,
 }, {
