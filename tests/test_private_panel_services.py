@@ -108,3 +108,16 @@ def test_snapshot_failover_matches_registry_without_capturing_slow_map_or_stream
                  "/runtime/weather/books", "/runtime/external/arbitrary"):
         assert not pattern.fullmatch("/wm-api" + path)
     assert "__PUBLIC_PANEL_SNAPSHOT_PATHS__" not in render()
+
+
+def test_reverse_link_pool_does_not_eject_all_peers_after_slow_source_reads():
+    from deploy.render_panel_transport import render_upstreams
+    rendered = render_upstreams(['127.0.0.1:19500', '127.0.0.1:19503'], '127.0.0.1:19504', '127.0.0.1:19505')
+    assert rendered.count('max_fails=0') == 4
+    assert 'server 127.0.0.1:19504;' in rendered
+    assert 'server 127.0.0.1:19505 max_fails=0;' in rendered
+    assert 'server 127.0.0.1:19503 backup max_fails=0;' in rendered
+    assert '__POLYMONITOR_' not in rendered
+    for bulk in ([], ['0.0.0.0:80'], ['127.0.0.1:65536'], ['127.0.0.1:80;extra']):
+        with pytest.raises(ValueError):
+            render_upstreams(bulk, '127.0.0.1:19504', '127.0.0.1:19505')
