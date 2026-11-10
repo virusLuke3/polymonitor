@@ -860,7 +860,7 @@ def bounded_big_tech_caps(payload: dict) -> dict:
     return {**payload, "items": rows}
 
 
-def _fetch_big_tech_inputs(ctx: TechPanelsContext, symbol: str) -> tuple[Any, Any]:
+def _fetch_big_tech_cap(ctx: TechPanelsContext, symbol: str) -> Any:
     getter = _dependencies(ctx).get_nasdaq_market_cap
     cap = None
     if getter is not None:
@@ -870,7 +870,7 @@ def _fetch_big_tech_inputs(ctx: TechPanelsContext, symbol: str) -> tuple[Any, An
             logger = getattr(_dependencies(ctx).application, "logger", None)
             if logger:
                 logger.exception("tech market cap fetch failed symbol=%s", symbol)
-    return _fetch_quote(ctx, symbol), cap
+    return cap
 
 
 def build_big_tech_market_cap_payload(ctx: dict, limit: int) -> Dict[str, Any]:
@@ -878,9 +878,12 @@ def build_big_tech_market_cap_payload(ctx: dict, limit: int) -> Dict[str, Any]:
     failed = []
     dependencies = _dependencies(ctx)
     mapper = dependencies.map_yahoo or map
-    quotes = mapper(lambda spec: _fetch_big_tech_inputs(ctx, spec[1]), BIG_TECH_SYMBOLS)
+    # Finish the quote batch before a slow independent market-cap provider can
+    # consume the owner's remaining deadline. Reuse the same bounded pool.
+    quotes = list(mapper(lambda spec: _fetch_quote(ctx, spec[1]), BIG_TECH_SYMBOLS))
+    cap_values = mapper(lambda spec: _fetch_big_tech_cap(ctx, spec[1]), BIG_TECH_SYMBOLS)
     caps = {}
-    for (label, symbol, group), (quote, cap) in zip(BIG_TECH_SYMBOLS, quotes):
+    for (label, symbol, group), quote, cap in zip(BIG_TECH_SYMBOLS, quotes, cap_values):
         if isinstance(cap, dict) and _market_cap_from_quote(symbol, cap)[0] is not None:
             caps[symbol] = cap
         if not isinstance(quote, dict):

@@ -167,6 +167,27 @@ def test_big_tech_market_cap_payload_ranks_by_market_cap():
     assert payload["summary"]["tracked"] >= 20
 
 
+def test_slow_cap_provider_cannot_starve_remaining_quote_symbols():
+    ctx = _ctx()
+    original_quote = ctx['get_yahoo_market_snapshot']
+    cap_started = False
+    quotes = []
+    def quote(symbol, **kwargs):
+        assert not cap_started, 'An independent cap failure consumed the quote batch budget'
+        quotes.append(symbol)
+        return original_quote(symbol, **kwargs)
+    def cap(symbol):
+        nonlocal cap_started
+        cap_started = True
+        raise TimeoutError('cap provider exhausted its remaining budget')
+    ctx.update(get_yahoo_market_snapshot=quote, get_nasdaq_market_cap=cap)
+    result = tech_panels_service.build_big_tech_market_cap_payload(ctx, 24)
+    assert len(quotes) == len(tech_panels_service.BIG_TECH_SYMBOLS)
+    assert result['summary']['fetchedCount'] == 24
+    assert result['sources']['yahoo'] == 'ok'
+    assert result['sources']['nasdaqMarketCap'] == 'unavailable'
+
+
 def test_big_tech_missing_cap_keeps_quotes_without_inventing_cap_or_rank():
     ctx = _ctx()
 

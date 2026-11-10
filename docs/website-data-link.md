@@ -7,6 +7,7 @@
 - `scripts/runtime/website_link.py` 读取 `POLYMONITOR_WEB_LINK_TARGET`、跳板名称、现有专用 SSH 身份及转发列表。可选 `POLYMONITOR_WEB_LINK_PROFILES_JSON` 为 `bulk`、`interactive` 等独立连接声明 `remote`/`local` 转发列表。每个方向最多八项，仅允许回环地址；配置缺失或无效则停止启动。
 - 默认连接保留现有消费者。额外 `polymonitor-website-link@bulk.service` 为公共批量响应提供第二条连接；`@interactive` 专门承载市场目录、详情、图表、成交、Oracle、bootstrap 和 health。大新闻/地图响应的 TCP 丢包不再阻塞市场连接。Nginx 的 bulk pool 有两个目标，interactive pool 有一个目标；部署时核对空闲端口，禁止抢占其他服务。
 - 每条 SSH 连接开启压缩，连接超时 15 秒，保活 10 秒、连续三次无回应退出；转发失败退出，systemd 五秒后重连。SSH 存活不证明 HTTP 能正常通过，必须检查实际业务响应。跳板使用独立网站 SSH 进程，不复用或重启采集器连接，不修改主 Clash 选择、LOB 密钥和端口。
+- 网站主机同时配置服务端保活：`deploy/ssh/50-polymonitor-link-keepalive.conf` 对部署用户设置 15 秒探测、三次未响应释放连接，避免客户端失联后旧反向端口长期占用。先 `sshd -t` 再 reload，分开重连 bulk/interactive 并验证 HTTP；不重启 SSH 主服务或其他采集连接。该配置不会消除网络延迟，也不保证每次丢包都在精确 45 秒内恢复。
 - 跳板授权仅给网站已有专用身份增加目标 SSH 端口的 `permitopen`；不得放开全地址转发。最终生产配置与测试过但未使用的出口分开记录。
 - Gunicorn `gthread` 的默认首数据等待及 keepalive 组合会提前关闭高延迟转发连接。`POLYDATA_GUNICORN_KEEPALIVE_SECONDS=30`；Nginx pool 的 idle keepalive 为 15 秒、每连接最多 100 请求，bulk/interactive 每个 worker 分别最多保留 8/4 条空闲连接。使用 HTTP/1.1 并清空 upstream `Connection` 头，才会真正复用。
 - Nginx pool 地址由 `POLYMONITOR_WEB_API_UPSTREAMS_JSON` 和 `POLYMONITOR_WEB_INTERACTIVE_UPSTREAM` 渲染进 `deploy/nginx/polydata-relay-upstreams.conf.example`。站点的普通 API 指向 bulk pool，市场路由及 bootstrap/health 指向 interactive pool。现有 LOB 专用路由、限流和实时性保持各自契约。配置校验失败立即恢复原配置，成功后 reload。
