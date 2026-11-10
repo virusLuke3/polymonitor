@@ -43,6 +43,18 @@ def test_fixture_poll_cannot_renew_unknown_market_clock():
     assert read(raw)['fixtures'][0]['quotes'][0]['sourceCheckedAt'] is None
 
 
+@pytest.mark.parametrize('fraction,expected', [('355481677', '355481'), ('1', '100000'), ('12345', '123450')])
+def test_native_subsecond_clocks_survive_on_collector_python(fraction, expected):
+    raw = sample()
+    stamp = f'2026-11-10T12:00:00.{fraction}Z'
+    raw['matches'][0]['group_status']['1510001']['polled_at'] = stamp
+    for q in raw['matches'][0]['quotes']:
+        q['ts'] = stamp
+    quote = read(raw)['fixtures'][0]['quotes'][0]
+    assert quote['sourceCheckedAt'] == f'2026-11-10T12:00:00.{expected}+00:00'
+    assert quote['sourceUpdatedAt'] == f'2026-11-10T12:00:00.{expected}+00:00'
+
+
 def test_suspension_stale_and_phase_survive_normalization():
     raw = sample()
     raw['matches'][0]['quotes'][0]['suspended'] = True

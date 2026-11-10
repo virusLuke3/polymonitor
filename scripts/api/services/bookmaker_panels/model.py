@@ -13,7 +13,12 @@ PRIORITY = ('bet365', 'pinnacle', 'stake', 'ggbet', 'thunderpick', 'draftkings',
 
 def instant(value):
     try:
-        dt = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+        # Providers emit nanoseconds; Python 3.10 (the collector runtime) only
+        # accepts three or six fractional digits. Preserve microseconds without
+        # substituting the local receipt time for an unparseable source clock.
+        stamp = re.sub(r'(\d{2}:\d{2}:\d{2})\.(\d+)',
+                       lambda m: m[1] + '.' + m[2][:6].ljust(6, '0'), str(value))
+        dt = datetime.fromisoformat(stamp.replace('Z', '+00:00'))
         return dt.astimezone(timezone.utc).isoformat() if dt.tzinfo else None
     except (TypeError, ValueError):
         return None
