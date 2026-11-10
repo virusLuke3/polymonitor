@@ -54,6 +54,7 @@ WorldMonitor DeFi 的不同参数为：后台 bundle 每 30 分钟尝试采集�
 | 隔夜副本不可恢复 | NBA原15m、DeFi原30m；读取时超过源时间上限即删除本缓存项 | 公共概览统一采用24h展示恢复，fresh与后台采集周期不变；显示stale及原时间 |
 | 缓存容量彼此挤占 | 当次可解析公共响应按原localStorage分配约317万字符；Geo约108万超过单项25.6万，排除它后仍约210万超过总200万 | 所有非null缓存资源写同一IndexedDB，16M字符/256项；原2M/96项只作同步热副本；Geo单项2M |
 | NBA格式拒收 | API有8场比赛，新增 homePeriods/awayPeriods/leaders/season 被旧校验器拒绝 | 接受这些实际结构，继续拒绝非法嵌套；添加真实结构回归 |
+| 混合天气快照续期旧预报 | 整包generatedAt可因目录刷新推进，而forecastFetchedAt仍旧 | 逐城市以forecastFetchedAt限制24h恢复；剔除过期小时/日预报及派生值，保留有效METAR与合约 |
 | 大天气响应被截断 | 一次真实完整body约2.76MB/21s；旧外层10s、传输12s先取消，HTTP200仍未完成JSON | weather网络完整body35s、总期限60s；保留共享并发预算 |
 | 宏观请求排队失败 | 生产Geo及多个宏观Panel显示 request exceeded 12000ms；独立API可读 | 宏观共享总期限改为45s（含排队），实际API网络超时仍独立；不无限排队 |
 | 恢复时反复满屏Loading | 无内容失败后自动重试又覆盖成Loading | 保留错误/已有内容，成功才清除；有界重试仍继续 |

@@ -83,4 +83,20 @@ describe('public context restore validation', () => {
     expect(() => contract.parse({ ...value, lens: 'trend' })).toThrow();
     expect(() => contract.parse({ ...value, snapshotExpiresAt: new Date(now - 1).toISOString() })).toThrow();
   });
+  it('a fresh catalog publication cannot renew an expired forecast or erase a current observation', () => {
+    const forecastFetchedAt = new Date(now - 12 * 3_600_000).toISOString();
+    const value = { generatedAt, items: [{ cityId: 'london', timezone: 'Europe/London', forecastFetchedAt,
+      marketFetchedAt: generatedAt, currentTemp: 18, metarTemp: 19,
+      marketDate: '2099-01-01', eventSlug: 'current', bins: [{ label: '20', yesTokenId: 'token' }],
+      forecastHigh: 20, marketForecastHigh: 20, hourly: [{ time: generatedAt, temp: 18 }], daily: [] }] };
+    const retained = weatherSnapshot(60).parse(value) as typeof value;
+    expect(retained.items[0].hourly).toEqual(value.items[0].hourly);
+    const expired = weatherSnapshot(60).parse({ ...value, items: [{ ...value.items[0],
+      forecastFetchedAt: new Date(now - 25 * 3_600_000).toISOString() }] });
+    expect(expired).toMatchObject({ generatedAt, status: 'degraded', items: [{
+      forecastHigh: null, marketForecastHigh: null, hourly: [], daily: [], currentTemp: 18, metarTemp: 19,
+      eventSlug: 'current', bins: [{ yesTokenId: 'token' }],
+    }] });
+    expect(projectWeatherSnapshot(expired, now)).toBe(expired);
+  });
 });
