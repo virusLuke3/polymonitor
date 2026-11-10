@@ -146,6 +146,10 @@ HTTP、查询、连接、并发和容量预算：
 
 `tradfi-perp-radar`、`crypto-etf-flow` 和旧 Finance `stablecoin-monitor` 接口直接读取既有外源 owner 的 `runtime:finance:external-sources / v1` SQLite 快照，再做有界纯转换；SQLite 缺失时沿用已有可选镜像读取。GET 不发上游请求、不写派生快照、不依赖 Finance watcher 下一轮转换，外源 owner 仍按原 900 秒周期获取并发布。已有 Finance 兼容快照不新增发布者或缓存层。
 
+该外源 owner 的 CFTC 分支也复用明确配置的 `SourceSession` 路由；连接恢复不改变官方每周报告日期。正式读取与入库时间、报告期分别验证，不能把重新获取旧报告称为新报告发布。
+
+Broker Research 继续由 Finance watch owner 采集并写入 `runtime:finance:broker-research-watch / v1`，API 只读、浏览器复用原 Runtime。Edison 配置应指向官网公开研报列表，而不是研究业务介绍页；当前列表身份存于私有配置。报告标题未含股票代码时，只读取报告表格中明确的 `Code` 字段，不从正文任意大写词猜测。公司名、报告发布时间和原文链接保留；缺少目标价不补造目标价。每个来源仍最多 10 篇候选，列表 16 秒、单详情 12 秒，沿用原刷新、缓存与共享资源预算。来源没有可解析代码或仅提供客户端页面时保持 empty/no-links/partial，不能仅因列表 HTTP 200 标为采集成功。当前验收另见当次数据可靠性记录。
+
 组合 `generatedAt` 和每行 `fetchedAt` 保持原始来源时间；沿用 15 分钟新鲜阈值及 30 分钟最大保留时间，单行先按自己的时钟过期，缺失或无效组合时钟不能改用读取时间。浏览器检查周期、字段单位、来源退避和网络预算不变；每次读取仅查询既有有界快照，最多返回 36 行。针对测试验证最新源立即可见、禁止 HTTP/写入、保留行时钟及过期边界；部署后仍需核对正式 API 的源时钟与 SQLite，不能用单元测试代替运行验收。
 
 这里的旧 Finance Stablecoin 接口只投影外源供应/价格数据；当前前端 `stablecoin-monitor` 使用 [Crypto Strategy owner](crypto-strategy-panels.md)，不属于此次接口修复。

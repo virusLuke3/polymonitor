@@ -124,6 +124,29 @@ def test_original_research_feed_does_not_inherit_parent_news_exclusion(context):
     assert not research._is_original_research_url('https://www.zacks.com/commentary/research-summary')
 
 
+@pytest.mark.parametrize('code,expected', [('FOUR', 'FOUR'), ('', None), ('not a ticker', None)])
+def test_edison_report_uses_explicit_security_code_and_original_date(context, code, expected):
+    from api.services.finance_watch import research
+    listing = 'https://www.edisongroup.com/equities/'
+    report = 'https://www.edisongroup.com/research/resilience/BM-4269/'
+    context['SETTINGS'] = SimpleNamespace(finance_broker_research_edison_url=listing)
+    pages = {listing: f'<a href="{report}">Read report</a>', report: f'''
+      <title>4imprint Group — Resilience and encouragement</title>
+      <meta property="article:published_time" content="2026-11-10T06:42:01Z">
+      <meta name="description" content="A company update without a ticker in its title.">
+      <table><tr><th scope="row" class="fw-normal">Code</th><td class="text-end">{code}</td></tr></table>'''}
+    context['http_text_get'] = lambda url, **kw: pages[url]
+    payload = research.build_broker_research_payload(context, 12)
+    if expected:
+        row = payload['items'][0]
+        assert row['label'] == expected and row['company'] == '4imprint Group'
+        assert row['source'] == 'Edison' and row['url'] == report
+        assert row['publishedAt'] == '2026-11-10T06:42:01Z'
+        assert row['metric'] is None and row['targetPriceLabel'] == 'PT --'
+    else:
+        assert payload['items'] == []
+
+
 @pytest.mark.parametrize("panel_id", ["defi-security-watch", "ipo-news-watch", "blockchain-policy-news"])
 @pytest.mark.parametrize("failed", [False, True])
 def test_news_worker_replaces_old_window_only_after_success(monkeypatch, panel_id, failed):

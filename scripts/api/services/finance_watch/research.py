@@ -631,6 +631,14 @@ def _build_broker_rows_from_open_sources(
             summary = _extract_html_summary(page_text)
             published_at = _extract_html_published_at(page_text)
             symbol = _symbol_from_text(f"{title} {summary} {candidate_url} {report_url}")
+            company = ""
+            if provider.lower() == "edison" and detail_html:
+                # Edison titles name the company; the security code is an
+                # explicit report-table field, not necessarily in the summary.
+                code = re.search(r'<th\b[^>]*>\s*Code\s*</th>\s*<td\b[^>]*>\s*([A-Z0-9][A-Z0-9.:-]{0,13})\s*</td>', detail_html)
+                if code:
+                    symbol = _normalize_security_code(code.group(1)) or symbol
+                    company = title.split(" — ", 1)[0].strip()
             row = _broker_research_row(
                 ctx,
                 title=title,
@@ -640,6 +648,7 @@ def _build_broker_rows_from_open_sources(
                 published_at=published_at,
                 quote_cache=quote_cache,
                 explicit_symbol=symbol,
+                explicit_company=company,
             )
             if row:
                 rows.append(row)
