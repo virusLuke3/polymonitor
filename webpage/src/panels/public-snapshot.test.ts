@@ -90,7 +90,7 @@ describe('public context restore validation', () => {
       marketDate: '2099-01-01', eventSlug: 'current', bins: [{ label: '20', yesTokenId: 'token' }],
       forecastHigh: 20, marketForecastHigh: 20, hourly: [{ time: generatedAt, temp: 18 }], daily: [] }] };
     const retained = weatherSnapshot(60).parse(value) as typeof value;
-    expect(retained.items[0].hourly).toEqual(value.items[0].hourly);
+    expect(retained.items[0]?.hourly).toEqual(value.items[0]?.hourly);
     const expired = weatherSnapshot(60).parse({ ...value, items: [{ ...value.items[0],
       forecastFetchedAt: new Date(now - 25 * 3_600_000).toISOString() }] });
     expect(expired).toMatchObject({ generatedAt, status: 'degraded', items: [{
