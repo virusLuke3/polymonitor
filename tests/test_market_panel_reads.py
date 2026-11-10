@@ -198,7 +198,7 @@ def test_empty_flow_is_a_fixed_window_not_an_expanding_scan(runtime, monkeypatch
     result = reader.flow(1)
     assert result["items"] == [] and result["status"] == "ok"
     assert len(calls) == 2
-    assert "PREWHERE" in calls[1] and "fact_variant_count > 0" in calls[1]
+    assert "PREWHERE" in calls[1] and "fact_base_matches = 1" in calls[1]
     assert "BETWEEN 89913601 AND 90000000" in calls[1]
     assert result["coverage"]["globalCompleteness"] == "NOT_PROVEN"
 
@@ -235,15 +235,17 @@ def test_trade_keys_are_resolved_to_exact_source_facts_within_total_budget(runti
         if len(budgets) == 1:
             return [{"block_number": 90000000, "timestamp": "2026-11-03T00:00:00Z"}]
         if len(budgets) == 2:
-            assert sql.count('fact_variant_count > 0') == 2
+            assert sql.count('fact_base_matches = 1') == 2
             assert sql.count('LIMIT 51') == 3
             assert 'ORDER BY token_id DESC, block_number DESC' in sql
             return [key]
         if len(budgets) == 3:
-            assert 'orderfilled_fact_primary_v1' in sql
-            assert 'canonical_log_index,canonical_tx_hash)' in sql and key['tx_hash'] in sql
-            assert 'canonical_token_id IN' in sql
-            assert 'canonical_block_number BETWEEN 90000000 AND 90000000' in sql
+            assert 'FROM orderfilled_events_v1 f' in sql and 'f.fact_base_matches = 1' in sql
+            assert 'f.log_index,f.tx_hash)' in sql and key['tx_hash'] in sql
+            # Qualify raw predicates: the SELECT token_id alias includes 0x.
+            assert 'AND f.token_id IN' in sql and 'AND token_id IN' not in sql
+            assert 'f.block_number BETWEEN 90000000 AND 90000000' in sql
+            assert "accurateCastOrNull(f.maker_amount,'UInt64')" in sql
             return [{**key, 'token_id': '0x' + key['token_id'], 'price': '0.42', 'size': '10'}]
         return [{"block_number": 90000000, "timestamp": "2026-11-03T00:00:00Z"}]
     monkeypatch.setattr(panel_trade_reader.ch, '_query_json_rows', query)
@@ -251,6 +253,7 @@ def test_trade_keys_are_resolved_to_exact_source_facts_within_total_budget(runti
     result = reader.flow(7)
     assert result['status'] == 'ok' and len(result['items']) == 1
     assert result['items'][0]['price'] == '0.42'
+    assert result['coverage']['selection'] == 'verified-base-facts'
     assert sum(budgets) == 64 * 1024**2
 
 

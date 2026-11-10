@@ -8,8 +8,8 @@ has no collection, exchange fallback, schema migration, replay, or trading task.
 | Catalog | PostgreSQL; 50 rows from at most 5,000 newest registry candidates, canonical identity and active lifecycle checks; indexed text search for other markets | browser 5 min / bounded server cache |
 | Metadata | PostgreSQL market ID lookup; existing stored trade quote, with its source timestamp | 60 s / 60 s |
 | Oracle | PostgreSQL exact identity indexes; newest 50 distinct events and stored lifecycle state | 20 s / 20 s |
-| OrderFilled | ClickHouse canonical token and partition/block predicates; one fixed block window, newest 50 events | 10 s / 8 s |
-| Chart | Same existing OrderFilled facts; at most 600 events in the requested time range and a bounded block window | 90 s / 90 s |
+| OrderFilled | ClickHouse verified base facts, exact token and partition/block predicates; one fixed block window, newest 50 matching events | 10 s / 8 s |
+| Chart | Same verified base-fact subset; at most 600 events in the requested time range and a bounded block window | 90 s / 90 s |
 | LOB | Existing market-data snapshot reader; selected token pair only, no collection | 2 s / 2 s |
 
 The catalog is a bounded page, not a complete global volume leaderboard. Sorting
@@ -18,6 +18,20 @@ observations deliberately omit changing prices/volumes; they cannot supply a
 price chart. Chart coverage is partial and never represented as a complete time
 series. No quote is duplicated to fabricate history. An empty trade window does
 not prove an empty market history.
+
+The simple recent-fills preview uses `orderfilled_events_v1` only where
+`fact_base_matches = 1`, exactly the source's first published
+`orderfilled_fact_primary_v1` branch. The producer's flag verifies that the base
+matches every source fact; it is not a raw-row fallback. Variant-only records
+and their expensive reconstruction are deliberately excluded, including from
+the chart. No full-history or complete-volume claim is made. Numeric amount
+casts retain the published view's UInt64/null behavior; all token predicates
+are qualified to avoid collision with the display token's `0x` alias.
+Key and value reads both enforce the flag and compare exact identities; changes
+during the read fail closed. Source tables, collectors and grants are unchanged.
+The shared cache identity is `verified-base-v3`; `coverage.selection` explicitly
+identifies the subset. This bounded scope follows the request to favor a simple,
+reliable display over historical reconstruction.
 
 ## Resource boundaries
 

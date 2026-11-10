@@ -81,16 +81,17 @@ def read_flow(reader, market_id, *, limit=50, before=None, chart_range=None):
             token_sql = ",".join(f"'{token}'" for token in tokens)
             cursor_sql = f"AND (block_number, log_index, tx_hash) < ({before[0]}, {before[1]}, '{before[2]}')" if before else ""
             # Seek narrow event keys before reading wide variant/amount columns.
-            # Values still come from the published fact view, never unchecked
-            # base rows; its source variants and identity checks are preserved.
+            # The preview uses only the source's verified base-fact branch.
+            # fact_base_matches=1 proves the base equals every source fact;
+            # variant-only history reconstruction is outside this small view.
             # Each token is the leading primary-key field. Seek its own top-N
             # before merging; the global top-N is contained in these two sets.
-            # Keep fact eligibility on both seeks, including variant-only rows.
+            # Keep that same qualification on both seeks and the value read.
             seeks = [f"""SELECT * FROM (SELECT market_id, token_id, block_number, log_index, tx_hash
                 FROM orderfilled_events_v1
                 PREWHERE intDiv(block_number,1000000) BETWEEN {lower // 1000000} AND {upper // 1000000}
                   AND block_number BETWEEN {lower} AND {upper} AND token_id = '{token}'
-                WHERE fact_variant_count > 0 {cursor_sql}
+                WHERE fact_base_matches = 1 {cursor_sql}
                 ORDER BY token_id DESC, block_number DESC, log_index DESC, tx_hash DESC LIMIT {limit + 1})"""
                 for token in tokens]
             chosen = read(f"""SELECT market_id, token_id, block_number, log_index, tx_hash
@@ -106,11 +107,14 @@ def read_flow(reader, market_id, *, limit=50, before=None, chart_range=None):
                 partitions = ",".join(str(p) for p in sorted({int(r["block_number"]) // 1000000 for r in chosen}))
                 fields = ("f.tx_hash, f.log_index, f.market_id, concat('0x', f.token_id) AS token_id, "
                           "toString(f.price) AS price, f.block_number") if chart_range else ch._orderfilled_projection_sql(include_time=False)
-                rows = read(f"""SELECT {fields} FROM orderfilled_fact_primary_v1 f
-                    WHERE intDiv(canonical_block_number,1000000) IN ({partitions})
-                    AND canonical_token_id IN ({token_sql})
-                    AND canonical_block_number BETWEEN {min(int(r['block_number']) for r in chosen)} AND {max(int(r['block_number']) for r in chosen)}
-                    AND (canonical_market_id,canonical_token_id,canonical_block_number,canonical_log_index,canonical_tx_hash)
+                # Match the published fact view's UInt64 projection exactly.
+                for column in ('maker_amount', 'taker_amount', 'fee'):
+                    fields = fields.replace(f'toString(f.{column})', f"toString(accurateCastOrNull(f.{column},'UInt64'))")
+                rows = read(f"""SELECT {fields} FROM orderfilled_events_v1 f
+                    WHERE f.fact_base_matches = 1 AND intDiv(f.block_number,1000000) IN ({partitions})
+                    AND f.token_id IN ({token_sql})
+                    AND f.block_number BETWEEN {min(int(r['block_number']) for r in chosen)} AND {max(int(r['block_number']) for r in chosen)}
+                    AND (f.market_id,f.token_id,f.block_number,f.log_index,f.tx_hash)
                         IN ({identities})
                     ORDER BY block_number DESC,log_index DESC,tx_hash DESC FORMAT JSONEachRow""")
                 identity = lambda r: (int(r["block_number"]), int(r["log_index"]), str(r["tx_hash"]))
@@ -136,7 +140,8 @@ def read_flow(reader, market_id, *, limit=50, before=None, chart_range=None):
             return {"marketId": int(market_id), "range": chart_range, "interval": "trades", "kind": "probability",
                     "points": points, "historyStatus": "partial" if points else "empty", "priceSource": "stored-orderfilled",
                     "coverage": {"from": start.isoformat(), "to": end.isoformat(), "maxPoints": 600,
-                                 "fromBlock": lower, "toBlock": upper, "complete": False},
+                                 "fromBlock": lower, "toBlock": upper, "complete": False,
+                                 "selection": "verified-base-facts"},
                     "sourceUpdatedAt": watermarks[0]["timestamp"]}
         items = semantics.annotate_raw_trade_rows(context, [normalize_trade({**row, "market_id": int(market_id)}) for row in visible])
         last = rows[limit - 1] if len(rows) > limit else None
@@ -144,10 +149,11 @@ def read_flow(reader, market_id, *, limit=50, before=None, chart_range=None):
                 "nextCursor": f"{last['block_number']}:{last['log_index']}:{last['tx_hash']}" if last else None,
                 "source": "market-data/clickhouse", "sourceUpdatedAt": watermarks[0]["timestamp"],
                 "coverage": {"fromBlock": lower, "toBlock": upper, "scope": "selected-token-block-window",
+                             "selection": "verified-base-facts", "maxItems": limit,
                              "globalCompleteness": "NOT_PROVEN", "hasMoreInWindow": len(rows) > limit}}
 
     return {"marketId": int(market_id), "localMarketId": int(market_id),
-            **reader.cache.get("chart" if chart_range else "flow", ["indexed-keys-v2", int(market_id), limit, before, chart_range], build,
+            **reader.cache.get("chart" if chart_range else "flow", ["verified-base-v3", int(market_id), limit, before, chart_range], build,
                                ttl=90 if chart_range else 8, max_age=300 if chart_range else 60, background=False)}
 
 

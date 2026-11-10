@@ -1386,13 +1386,13 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
           className="wm-focus-panel wm-focus-trades-panel wm-orderfilled-panel"
         >
           <div className="wm-focus-trades">
-            {ctx.bundle?.flowCoverage && bundleMatchesSelected ? <p>Blocks {ctx.bundle.flowCoverage.fromBlock}–{ctx.bundle.flowCoverage.toBlock} · Last 50 events in this window</p> : null}
+            {ctx.bundle?.flowCoverage && bundleMatchesSelected ? <p>Recent trades · up to 50 matching events. This is a limited sample.</p> : null}
             {ctx.bundle?.flowSourceUpdatedAt && bundleMatchesSelected ? <p>Source updated {formatRelative(ctx.bundle.flowSourceUpdatedAt)}</p> : null}
             {!executionAvailable && detail
               ? emptyState('Select an outcome with local sync to inspect orderfilled flow.')
               : trades.length
               ? orderfilledList(trades, 12, (trade) => resolveMarketTitle(ctx, trade), { compact: true })
-              : emptyState(tradesVerified ? 'No OrderFilled rows in this block window. Earlier history has not been searched.' : 'Trade reads are unavailable. Catalog volume does not establish whether fills exist.')}
+              : emptyState(tradesVerified ? 'No matching verified fills in this recent window. Full history has not been searched.' : 'Trade reads are unavailable. Catalog volume does not establish whether fills exist.')}
           </div>
         </Panel>
       ))}

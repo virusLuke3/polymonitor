@@ -2,7 +2,7 @@
 # never install this unrendered template. Keepalive idle time must be shorter
 # than POLYDATA_GUNICORN_KEEPALIVE_SECONDS (30 seconds).
 upstream polymonitor_bulk_api {
-    least_conn;
+    # First configured path is primary; the remaining paths are backups.
     __POLYMONITOR_WEB_API_UPSTREAM_SERVERS__
     keepalive 8;
     keepalive_timeout 15s;

@@ -8,6 +8,7 @@ import os
 import shlex
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -39,9 +40,10 @@ def ssh_argv(profile: str | None = None) -> list[str]:
             overrides = profiles[profile]
             if (not isinstance(overrides, dict)
                     or not {"remote", "local"} <= set(overrides)
-                    or set(overrides) - {"remote", "local", "target", "jump_node"}
+                    or set(overrides) - {"remote", "local", "target", "jump_node", "http_proxy"}
                     or ("target" in overrides and overrides["target"] is None)
-                    or ("jump_node" in overrides and not isinstance(overrides["jump_node"], str))):
+                    or ("jump_node" in overrides and not isinstance(overrides["jump_node"], str))
+                    or ("http_proxy" in overrides and not isinstance(overrides["http_proxy"], str))):
                 raise ValueError()
         except (KeyError, TypeError, ValueError):
             raise ValueError("Invalid website forwarding profile") from None
@@ -54,7 +56,21 @@ def ssh_argv(profile: str | None = None) -> list[str]:
                "-o", "HostKeyAlias=" + required("POLYMONITOR_TENCENT_HOST_KEY_ALIAS")]
     node = (overrides.get("jump_node", configured_value("POLYMONITOR_WEB_LINK_JUMP_NODE"))
             if overrides is not None else configured_value("POLYMONITOR_WEB_LINK_JUMP_NODE")).strip()
-    if node:
+    proxy = overrides.get("http_proxy", "") if overrides is not None else ""
+    if proxy:
+        try:
+            parsed = urlsplit(proxy)
+            if (node or parsed.scheme != "http" or not parsed.hostname
+                    or not ipaddress.ip_address(parsed.hostname).is_loopback
+                    or parsed.username or parsed.password or parsed.path not in {"", "/"}
+                    or parsed.query or parsed.fragment or not parsed.port or not 1 <= parsed.port <= 65535):
+                raise ValueError()
+            host = f"[{parsed.hostname}]" if ":" in parsed.hostname else parsed.hostname
+            connect = ["/usr/bin/nc", "-X", "connect", "-x", f"{host}:{parsed.port}", "%h", "%p"]
+        except (TypeError, ValueError):
+            raise ValueError("Website HTTP proxy must be an explicit loopback endpoint without a jump") from None
+        command += ["-o", "ProxyCommand=" + shlex.join(connect), "-o", "ProxyJump=none"]
+    elif node:
         if node not in {"ireland", "usla"}:
             raise ValueError("Unsupported website jump node")
         jump = ["/usr/bin/ssh", "-i", required("POLYMONITOR_EGRESS_IDENTITY"), *options,

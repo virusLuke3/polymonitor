@@ -111,11 +111,44 @@ def test_snapshot_failover_matches_registry_without_capturing_slow_map_or_stream
     assert "__PUBLIC_PANEL_SNAPSHOT_PATHS__" not in render()
 
 
+def test_website_profile_uses_explicit_local_connect_proxy_without_changing_default(monkeypatch):
+    import json
+    config = {"POLYMONITOR_TENCENT_EGRESS_IDENTITY": "/keys/web",
+              "POLYMONITOR_TENCENT_HOST_KEY_ALIAS": "web.example.invalid",
+              "POLYMONITOR_WEB_LINK_JUMP_NODE": "ireland",
+              "POLYMONITOR_EGRESS_IDENTITY": "/keys/source",
+              "POLYMONITOR_EGRESS_IRELAND_TARGET": "reader@jump.example.invalid",
+              "POLYMONITOR_WEB_LINK_TARGET": "web@web.example.invalid"}
+    profiles = {"panels": {"remote": ["127.0.0.1:19505:127.0.0.1:19502"], "local": [],
+                           "jump_node": "", "http_proxy": "http://127.0.0.1:19590"},
+                "old": {"remote": [], "local": []}}
+    monkeypatch.setattr(website_link, "configured_value", lambda key: config.get(key, ""))
+    config['POLYMONITOR_WEB_LINK_PROFILES_JSON'] = json.dumps(profiles)
+    argv = website_link.ssh_argv('panels')
+    connect = next(x.removeprefix('ProxyCommand=') for x in argv if x.startswith('ProxyCommand='))
+    assert shlex.split(connect) == ['/usr/bin/nc', '-X', 'connect', '-x', '127.0.0.1:19590', '%h', '%p']
+    assert argv[-1] == config['POLYMONITOR_WEB_LINK_TARGET']
+    assert 'ProxyJump=none' in argv and '127.0.0.1:19505:127.0.0.1:19502' in argv
+    assert any('reader@jump.example.invalid' in arg for arg in website_link.ssh_argv('old'))
+    for bad in ['http://outside.test:80', 'http://127.0.0.1', 'http://127.0.0.1:80/path',
+                'http://user:password@127.0.0.1:80', 'http://127.0.0.1:80?x=1', 'socks5://127.0.0.1:80']:
+        profiles['panels']['http_proxy'] = bad
+        config['POLYMONITOR_WEB_LINK_PROFILES_JSON'] = json.dumps(profiles)
+        with pytest.raises(ValueError, match='loopback'):
+            website_link.ssh_argv('panels')
+    profiles['panels'].update(http_proxy='http://127.0.0.1:19590', jump_node='ireland')
+    config['POLYMONITOR_WEB_LINK_PROFILES_JSON'] = json.dumps(profiles)
+    with pytest.raises(ValueError, match='without a jump'):
+        website_link.ssh_argv('panels')
+
+
 def test_reverse_link_pool_does_not_eject_all_peers_after_slow_source_reads():
     from deploy.render_panel_transport import render_upstreams
     rendered = render_upstreams(['127.0.0.1:19500', '127.0.0.1:19503'], '127.0.0.1:19504', '127.0.0.1:19505')
     assert rendered.count('max_fails=0') == 4
     assert 'server 127.0.0.1:19504;' in rendered
+    assert 'server 127.0.0.1:19500 max_fails=0;' in rendered
+    assert 'least_conn;' not in rendered
     assert 'server 127.0.0.1:19505 max_fails=0;' in rendered
     assert 'server 127.0.0.1:19503 backup max_fails=0;' in rendered
     assert '__POLYMONITOR_' not in rendered

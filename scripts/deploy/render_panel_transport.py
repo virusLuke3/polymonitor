@@ -44,7 +44,7 @@ def render_upstreams(bulk: list[str], interactive: str, panel: str, book: str | 
     # Still retry a failed request on the other connection, without temporarily
     # excluding every peer and turning unrelated reads into immediate 502s.
     rendered = (template.read_text().replace("__POLYMONITOR_WEB_API_UPSTREAM_SERVERS__",
-            "\n    ".join(f"server {address(item)} max_fails=0;" for item in bulk))
+            "\n    ".join(f"server {address(item)}{' backup' if index else ''} max_fails=0;" for index, item in enumerate(bulk)))
             .replace("__POLYMONITOR_WEB_INTERACTIVE_UPSTREAM_SERVER__",
                      f"server {address(interactive)};")
             + "\nupstream polymonitor_panel_api {\n"
