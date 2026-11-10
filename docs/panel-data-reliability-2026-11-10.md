@@ -2,7 +2,7 @@
 
 这是有时间边界的验收记录，不是默认部署配置或永久健康声明。承接 [上一轮来源恢复记录](panel-source-recovery-2026-11-10.md) 与 [缓存生命周期审计](panel-cache-loading-audit-2026-11-10.md)。采集、存储、API、共享 Runtime 的当前契约见 [数据管线](panel-data-pipeline.md)、[采集时钟](panel-data-cadence.md)、[资源预算](panel-resource-contract.md)、[生命周期](panel-runtime-lifecycle.md)。
 
-本轮解决 Breaking Radar 无即时报道、ClickHouse 有界查询仍超预算，以及网站回连链路的主要瓶颈；同时修复 CFTC、Edison、体育定时任务及 Cleveland Fed 的实际采集问题。**不能据此声称 121 个 Panel 的所有来源都完整、实时、连续可用。** LOB 源读取的 503、源连续性 UNKNOWN、需要授权的来源和本身没有发布的数据，仍单独保留。
+本轮解决 Breaking Radar 无即时报道、ClickHouse 有界查询仍超预算，以及网站回连链路的主要瓶颈；同时修复 CFTC、Edison、体育定时任务及 Cleveland Fed 的实际采集问题。**不能据此声称 121 个 Panel 的所有来源都完整、实时、连续可用。** LOB 源读取的 503、源连续性 UNKNOWN、需要授权的来源和本身没有发布的数据，仍单独保留。随后 LOB 与慢周期来源的跟进见文末，前面的检查表保留当时状态。
 
 ## 发布身份与检查边界
 
@@ -206,3 +206,72 @@
 - `deployment.json`、构建日志、`desktop-verified-*.jpg`、`mobile-*.jpg`、`desktop-weather-quotes-recovered.jpg` 为发布和真实页面证据。
 
 回滚使用本轮保留的部署前文件/私有 profile 值，按所属文件或 profile 单独回退；不恢复整个脏工作区、不删除已采集数据、不重置用户布局。主链接保持备用；来源路由只改目标域名。此记录后续若发现新失败，应追加新观察，不能以本次 300 个成功响应覆盖未来故障。
+
+## LOB 与慢周期来源跟进（19:46 CST 起）
+
+这一段只验收本次相关消费者，不把前面的 121 项首轮检查升级为全部来源持续通过。
+原始证据位于 `/home/jiahuaiyu/.codex/visualizations/2026/11/10/lob-panel-recovery/`。
+
+### 已发布的修复
+
+- market-data `946a05ea`：HTTP reader 保持最多 4 个实际读取，允许至多 16 个不同 key 在同一 2 秒总预算内等待；重复 key 合并请求。过去四个加密参考读取会直接排斥第五个页面请求。已确认的 snapshot handoff 不再因为关闭连接时的 reset 误报失败；传输错误的负缓存从 15 秒缩短为 2 秒，校验错误仍为 15 秒。7 项并发、取消、截止和连接交接测试通过。19:46:19 重启 reader。生产文件还包含任务开始前已有的 7 行新增、16 行删除（快照语义与 process-only health），这些未纳入本次提交，部署文件 hash 单列在 `deployment.json`。
+- 前端 `d712ea50bf6bad623cb2ee7999f50ebe30e09428`：七个六小时来源的浏览器检查从六小时改为五分钟；freshness 统一为九小时，保留十八小时展示边界和原来源时钟。采集仍由既有六小时 owner 完成。8 项共享宏观缓存测试通过，Node 22 干净 `git archive` 生产构建通过。约 19:57 发布到实际腾讯云入口，根域名和 www 的 `/release-sha` 核对一致，页面主脚本为 `index-Dz8_v7eg.js`。
+- 后端 `fbce718b`：日历和能源使用已有 `collection_delay`，部分成功也按失败轮次调度；5/10/20/30 分钟退避，成功后恢复正常周期，扣除本轮耗时且至少休息 30 秒。17 项针对测试通过。20:35 日历自然轮次出现三个 FRED 日历错误后，日历任务于 20:40:44 发布。能源保留原定时轮次再发布，实际身份另见 `deployment.json`。
+
+### LOB：传输与采集分别验收
+
+两个实际页面市场为 `3848348`（Fed 加息 25bps）与 `3846901`（Fed 不变），分别归属 `0009`、`0041` cohort。19:55 和 20:00 分别将既有 Q-0009/Q-0041 的 `assets_per_connection` 从 2000 调整为 64，保留 token 范围、路由与共享额度。确实出现新 native baseline、source event 和 Gateway cut 推进，页面也自动收到更新；随后又出现来源未就绪，**小批次调整不是连续性修复通过**。21:07:44–21:07:49 已仅将这两个试验字段恢复为原来的 2000 并重启对应 Q 服务，其他当前配置不回退；没有把未通过的试验留作正式修复。
+
+观察期间独立 LOB 发布把来源版本从 2.2.36 连续推进到 2.2.40，并重启 P/Q/G；这些源码/部署不属于本次提交。20:26 的一次公网 LOB 503 对应 Gateway 重启窗口，HTTP reader 日志出现 `ConnectionRefusedError`，随后自动恢复，不能声称零 503。另有五个并行测试页面触发按 IP 的 `2r/s + burst 4` 盘口限流，保留 429；没有放大限流来掩盖测试负载。浏览器所在机器还持续出现 `ERR_NETWORK_CHANGED`，与服务器返回 503 分开统计。
+
+操作边界：20:18 尝试调整 P-0041 时，版本前置检查因来源已升级而失败，配置没有写入；但后续独立 shell 命令仍执行了 P-0041 重启。其 `assets_per_connection` 保持 2000，此次重启不能计为小批次修复，已保存 `p0041-restart-note.json`。后续源变更没有继续扩大，避免与独立发布互相覆盖。
+
+`upstreamCompleteness=UNKNOWN` 是当前来源明确保留的证据边界，不是缓存 TTL 或 HTTP 错误码。原生消息的时间戳/hash 与本地提交序号不能证明没有遗漏每一条上游变化；本次没有伪造 complete/continuous。`upstreamReady`、原事件时间、cut/sourceRef 推进以及期间的 GAP 必须分别记录。窗口内已经看到真实的 `SOURCE_EVENT_LAG`（推进中的事件延迟约 34–71 秒）、恢复额度排队及握手超时，故不能宣布采集连续可用。
+
+### 慢周期轮次与展示验证
+
+浏览器在真实生产 URL 保持开启，无 API/瓦片替换；七个来源在 19:58、20:03、20:08 等轮次自动检查。文化、Nowcast、能源保留了原定时轮次；FRED 日历原轮次失败后进行了来源路由恢复，食品及五个 driver 随之由既有 owner 重启重采。这是故障恢复采集，不能冒充未经干预的定时轮次。没有删除快照或修改系统时间。正式 SQLite、采集元数据、API payload 和页面自动响应分别保存。统计发布日期没有变化不代表未采集；反过来，仅 `generatedAt` 改变也不足以证明逐项来源重采。
+
+已确认六个文化来源在 20:12 的原定时服务轮次重新成功采集，20:19 页面自动收到对应版本；Nowcast 在 20:11、20:41 正常重采，20:19 页面已收到 20:11 版本。五个宏观汇总在 20:28 生成新快照，20:29 页面自动接收；当时多数基础行仍是旧采集时间，未把汇总写入当作基础来源更新。
+
+FRED 两个原出口在 20:44–20:45 的同 URL 比较中出现 ConnectTimeout、ReadTimeout，成功的 CSV 也耗时约 19.9 秒。现有隔离出口同 CSV 0.775 秒、同日历 1.198 秒，日历真实解析出 12 个 CPI 日期。仅替换 `.env` 中 FRED 域名的 primary，保留原第二出口为 backup；其他域名值逐项比对不变，未切换主 Clash。20:47:10 重启日历、食品和五-driver owner；20:50:54 重启既有 registry 应用同一路由并合成新基础数据。该 registry 的既有去重发布器同时发出 1 条 goods/tariff 通知，未新建通知任务。
+
+正式 SQLite 对比：食品 8 条、五个 driver 的 59 条共 **67 条原采集时间全部推进**；这些是条目数，含重复 FRED 序列和公告条目，不是 67 个唯一源。日历 55 条 `verifiedAt` 全部推进，所有必需来源为 ok。EIA 在未重启前于 20:47:54 正常重采 3 项，然后 20:49:13 发布失败重试修复并完成启动采集。EIA 没有逐行 fetchedAt，证据是正式轮次确实执行三次 XLS 获取并成功解析，而不是给统计日期补写当前时间。Cleveland Fed 的原始 Updated 仍为 11/09；经济统计月、公告发布时间和 EIA 观察日保持来源原值。
+
+以下时间均为 CST；自动响应来自持续打开的生产页面，未点击 Refresh/Retry。记录的是新正式快照进入浏览器，不等于每个数值都发生变化。
+
+| Panel ID | 本轮正式新快照 | 页面自动收到 | 数据边界 |
+| --- | --- | --- | --- |
+
+| `energy-gasoline-shock` | 20:49:16 | 20:53:02 | 3 项 XLS；原自然轮次 20:47:54 已于 20:48:01 进入页面 |
+| `food-retail-basket-pressure` | 20:47:15 | 20:48:02 | 正式 8 条采集时间推进；API 响应 8 条 |
+| `supply-tariff-import-watch` | 20:47:32 | 20:48:02 | 正式 15 条采集时间推进；API 响应 8 条 |
+| `shelter-rent-oer-pressure` | 20:47:35 | 20:48:02 | 正式 7 条采集时间推进；API 响应 7 条 |
+| `labor-wage-services-pressure` | 20:47:42 | 20:48:02 | 正式 17 条采集时间推进；API 响应 8 条 |
+| `growth-demand-recession-tracker` | 20:47:46 | 20:48:03 | 正式 10 条采集时间推进；API 响应 8 条 |
+| `fed-rates-polymarket-gap` | 20:47:53 | 20:48:03 | 正式 10 条采集时间推进；API 响应 8 条 |
+| `inflation-nowcast` | 20:41:18 | 20:49:28 | 另有 20:11 自然轮次；原发布 Updated=11/09 |
+| `cpi-release-calendar` | 20:47:17 | 20:49:28 | 55 条重新核验；当前响应 8 条，发布期不伪造 |
+| `cpi-release-command-center` | 20:50:56 | 20:59:19 | 24 条汇总，复用新基础行及其原时钟 |
+| `cpi-components-pressure-registry` | 20:50:56 | 20:59:19 | 25 条汇总，复用新基础行及其原时钟 |
+| `goods-tariff-supply-watch` | 20:50:57 | 20:59:20 | 15 条汇总，复用新基础行及其原时钟 |
+| `labor-services-inflation-monitor` | 20:50:58 | 20:59:20 | 17 条汇总，复用新基础行及其原时钟 |
+| `fed-reaction-growth-risk-board` | 20:50:59 | 20:59:21 | 20 条汇总，复用新基础行及其原时钟 |
+| `ai-leaderboard-watch` | 20:12:21 | 20:19:21 | 既有六小时来源自然轮次；响应 100 条 |
+| `art-auction-watch` | 20:12:27 | 20:19:24 | 既有六小时来源自然轮次；响应 22 条 |
+| `culture-box-office` | 20:12:53 | 20:19:24 | 既有六小时来源自然轮次；响应 50 条 |
+| `culture-awards-race` | 20:12:41 | 20:19:23 | 既有六小时来源自然轮次；响应 10 条 |
+| `reality-show-progress` | 20:12:38 | 20:19:23 | 既有六小时来源自然轮次；响应 13 条 |
+| `research-evidence-watch` | 20:12:46 | 20:19:25 | 既有六小时来源自然轮次；响应 32 条 |
+
+桌面相关消费者逐项 DOM 与自动网络响应见 `desktop-final-panels.json`、`culture-rendered-final.json`。手机实际 390×844 视口：9 个可选宏观 Panel 通过普通库添加，已有布局前缀保留；添加后刷新前后的 120 个 ID/顺序一致。初轮滚动后前方长内容改变高度，目标 Panel 离开视口，出现 idle/取消后错误，不能算通过；最终保持目标在视口后 9/9 为 ready，见 `mobile-stable-panels.json` 与 `mobile-stable-*.png`。没有点 Retry 或清缓存。手机 CPI 日历窄列仍有挤压，数据可见不代表窄屏排版全部通过。
+
+### 最终未通过项与证据边界
+
+- LOB 本地 19:53:02–21:07:49 每个市场采样 300 次，600 次均为 HTTP 200；但 3848348 只有 71 次两侧 upstreamReady，3846901 只有 107 次。最长连续 ready 采样段分别约 255 秒、510 秒，不能证明采样间隙无缺口。第一市场末次原事件停在 20:42:34，重读观察时间推进不算新数据。
+- 同期主页面 LOB HTTP 响应 1694 次均为 200；另外两个关联页面共 2185 次中 2165 个 200、19 个 429、1 个 503。不同采样覆盖不同时间点；不能用本地 600 个 200 抹去公网实际 503。浏览器网络变化造成的失败请求不在 HTTP 响应分母内。
+- Relay 最后直读：Q-0009 对应 Relay 275 条连接，最大发送耗时约 0.35 秒；Q-0041 对应 Relay 326 条连接，曾出现约 **26.65 秒发送阻塞**。这是 Relay→采集端传输压力的证据，不足以独自归因所有上游事件滞后。尝试现有隔离出口访问这两个 Relay 均获来源 IP ACL 403，未改白名单、未换正式 LOB 路径。源恢复排队、native baseline 缺失和推进中事件滞后仍存在，UNKNOWN 保留。
+- 相关页面另记录 11 次选中市场 Flow 503、1 次 weather/books 503；后来自动恢复。当前 ClickHouse 简化查询不等于完全消除了间歇服务失败。Crypto 指定 TWAP 原事件继续推进，但 LOB 报价仍有数分钟旧事件，不能将 TWAP 新数据作为盘口连续性证据。
+- 未到期的其他六小时/日级来源没有借此升级为多周期通过；本轮是上表 20 个相关慢周期消费者的补充验收，并非所有 121 个 Panel 的所有源已持续健康。
+
+新增证据：`acceptance-summary.json`、`macro-sqlite-{before,after}-cycle.json`、`macro-owner-rounds.json`、`fred-route-{probe,recovery}.json`、`canary-rollback.json`、`relay-final-health.json`、`deployment.json`。持续采样的 `.jsonl` 在采样结束后压缩为 `.jsonl.gz`，保存完整原响应/原始时间，不只保留成功摘要。临时浏览器和观察进程已结束；任务构建/探针文件清理，回滚文件另行保留。

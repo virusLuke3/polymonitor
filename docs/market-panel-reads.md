@@ -98,6 +98,19 @@ coverage of all markets; it does no source queries. LOB status is reported with
 each book response. Source timestamps, successful reads, and current connectivity
 are separate facts.
 
+The LOB source selects a native baseline and publishes committed P/Q → G
+snapshots. `upstreamReady` is the source's current qualification; `cut` and
+`sourceRef` identify committed progress, and `eventAt` remains the upstream event
+time. HTTP `observedAt` only dates the snapshot read. `available` therefore means
+a readable snapshot, not proof of every upstream update. The source deliberately
+retains `continuity_unknown` / `upstreamCompleteness=UNKNOWN` across source resets.
+The [official market-channel schemas](https://docs.polymarket.com/market-data/realtime-data)
+document event timestamps and book hashes; this reader has no verified global
+upstream sequence with which to close that evidence gap. Never relabel UNKNOWN
+as complete because a request returned 200, a source restarted, or `cut` advanced.
+Acceptance records repeated source-time/cut advancement and ready qualification
+separately, including any intervening gaps and process/stream changes.
+
 Tests cover process-wide admission and crash release, duplicate cold misses,
 failure cooldown, stale expiry, bounded cache retention, fixed trade windows,
 read-only SQL cleanup, and browser polling cancellation/backoff. Production
