@@ -55,6 +55,12 @@ Preact and shared runtime. No new polling owner lives in a renderer.
 
 The calendar/archive path retains its explicit transport policy for New York Fed
 and FRED release calendars and original BLS release PDFs distributed by FRASER.
+FRED calendar HTTP reads reuse `api.clients.fred_csv.read_fred_text` (the text
+transport, followed by the existing HTML calendar parser): the same working
+request identity as other FRED owners, 2 MiB body cap, two complete 40-second
+attempts within 90 seconds, explicit configured routes, no inherited proxies.
+The calendars keep their original source URLs, release times and reference
+period validation; transport recovery must not invent or shift a release.
 The existing four FRED CPI numerical series use the shared CSV reader and
 configured source routes described above, without changing main Clash. This is a daily
 monitoring/archive contract, not a release-instant trading feed. Cleveland Fed
@@ -67,10 +73,10 @@ nowcasts, BEA, FOMC and Polymarket data keep their existing owners.
   explicit, and reference months require original release evidence. An absent
   reference month must not be inferred by subtracting a month from release time.
   Calendar HTML uses the shared source Session and explicit project host routes,
-  with environment-proxy inheritance disabled. Each of the six normal-year
-  source requests has at most two attempts, a 45-second attempt timeout,
-  a 90-second total read deadline and a 2.5 MB body cap. December adds the three
-  next-year FRED calendars within the same per-request limits. HTTP/body failures
+  with environment-proxy inheritance disabled. Non-FRED calendar requests have
+  at most two attempts, a 45-second attempt timeout, a 90-second total read
+  deadline and a 2.5 MB body cap; FRED uses the shared limits above. December
+  adds the three next-year FRED calendars within those limits. HTTP/body failures
   use shared retry and Retry-After handling; no route attempts are nested.
   Known calendar pages with no valid releases are schema errors, including
   BEA and FOMC, and each failure appears in `sourceErrors`. An event's

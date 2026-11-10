@@ -11,6 +11,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 from typing import Any, Dict
 
 _scripts_root = Path(__file__).resolve().parents[1]
@@ -34,7 +35,8 @@ except ImportError:
 
 from api.config import load_api_settings
 from api.clients.source_transport import read_response_bytes, read_with_retry, source_session
-from api.services import cpi_release_calendar_service, polymarket_macro_map_service
+from api.clients.fred_csv import read_fred_text
+from api.services import bls_calendar, cpi_release_calendar_service, polymarket_macro_map_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot
 from runtime.snapshot_store import SnapshotStore
 
@@ -105,6 +107,10 @@ class CpiReleaseCalendarWatcher:
 
     def _http_text_get(self, url: str, *, timeout: int = 45, headers: Dict[str, str] | None = None) -> str:
         deadline = time.monotonic() + 90
+        if bls_calendar.FRED_URL and urlsplit(url).hostname == urlsplit(bls_calendar.FRED_URL).hostname:
+            # Share the working FRED transport/header contract with macro and
+            # sentiment owners; the calendar parser still validates HTML dates.
+            return read_fred_text(self.requests, url, deadline=deadline)
 
         def read(response):
             body = read_response_bytes(response, 2_500_000, deadline=deadline)

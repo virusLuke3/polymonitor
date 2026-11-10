@@ -267,6 +267,16 @@ def test_api_reads_seeded_sqlite_snapshot_without_live_fetch(tmp_path):
     assert payload["items"][0]["id"] == "seeded-cpi"
 
 
+def test_calendar_reuses_bounded_fred_reader_without_changing_source_url():
+    watcher = cpi_release_calendar_watcher.CpiReleaseCalendarWatcher.__new__(cpi_release_calendar_watcher.CpiReleaseCalendarWatcher)
+    watcher.requests = object()
+    url = bls_calendar.FRED_URL.format(rid=10, year=2026)
+    with patch.object(cpi_release_calendar_watcher, 'read_fred_text', return_value='<html>calendar</html>') as reader:
+        assert watcher._http_text_get(url) == '<html>calendar</html>'
+        assert reader.call_args.args == (watcher.requests, url)
+        assert reader.call_args.kwargs['deadline'] > 0
+
+
 def make_watcher(tmp_path) -> tuple[cpi_release_calendar_watcher.CpiReleaseCalendarWatcher, FakeRedis]:
     fake_redis = FakeRedis()
     settings = make_settings(str(tmp_path / "snapshots.sqlite3"))
