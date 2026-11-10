@@ -37,7 +37,7 @@ from api.config import load_api_settings
 from api.clients.source_transport import read_response_bytes, read_with_retry, source_session
 from api.clients.fred_csv import read_fred_text
 from api.services import bls_calendar, cpi_release_calendar_service, polymarket_macro_map_service
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot, collection_delay
 from runtime.snapshot_store import SnapshotStore
 
 
@@ -309,12 +309,18 @@ def main() -> int:
         return 0
 
     interval_seconds = max(300, int(args.interval or DEFAULT_INTERVAL_SECONDS))
+    failures = 0
     while True:
+        started_at = time.monotonic()
         try:
-            print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
+            result = watcher.run_once()
+            healthy = result.get("status") == "stored" and result.get("payload", {}).get("status") == "ok"
+            failures = 0 if healthy else failures + 1
+            print(json.dumps(result, ensure_ascii=False), file=sys.stderr)
         except KeyboardInterrupt:
             return 0
         except Exception as exc:
+            failures += 1
             watcher.store_seed_meta_fail_soft(
                 status="error",
                 record_count=0,
@@ -323,7 +329,7 @@ def main() -> int:
                 preserve_last_success=True,
             )
             print(f"[cpi-calendar] ERROR watch loop failed: {exc}", file=sys.stderr)
-        time.sleep(interval_seconds)
+        time.sleep(collection_delay(interval_seconds, failures, time.monotonic() - started_at))
 
 
 if __name__ == "__main__":

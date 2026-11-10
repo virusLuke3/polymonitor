@@ -23,7 +23,7 @@ import xlrd
 
 from api.config import load_api_settings
 from api.services import energy_gasoline_shock_service
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot, retained_snapshot
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot, retained_snapshot, collection_delay
 from runtime.snapshot_store import SnapshotStore
 
 DEFAULT_INTERVAL_SECONDS = 21600
@@ -199,15 +199,21 @@ def main() -> int:
     if not args.watch:
         print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
         return 0
+    failures = 0
     while True:
+        started_at = time.monotonic()
         try:
-            print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
+            result = watcher.run_once()
+            healthy = result.get("status") == "stored" and result.get("payload", {}).get("status") == "ok"
+            failures = 0 if healthy else failures + 1
+            print(json.dumps(result, ensure_ascii=False), file=sys.stderr)
         except KeyboardInterrupt:
             return 0
         except Exception as exc:
+            failures += 1
             watcher.store_meta_fail_soft(status="error", record_count=0, source_states={"eia": "error"}, error_summary=str(exc), preserve=True)
             print(f"[energy-shock] ERROR {exc}", file=sys.stderr)
-        time.sleep(max(1800, args.interval))
+        time.sleep(collection_delay(watcher.interval_seconds, failures, time.monotonic() - started_at))
 
 
 if __name__ == "__main__":

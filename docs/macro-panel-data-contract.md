@@ -34,6 +34,13 @@ Preact and shared runtime. No new polling owner lives in a renderer.
   API reads never fetch FRED or rebuild CPI events. SQLite recovery keeps original
   clocks. A failed individual source retains its previous observation with a
   failure label; it does not become a successful new source observation.
+- Calendar and energy watch loops use the existing `collection_delay` policy:
+  healthy rounds retain their one-hour/six-hour start-to-start cadence; partial,
+  preserved or failed rounds retry after 5, 10, 20, then at most 30 minutes,
+  subtracting collection elapsed time and resting at least 30 seconds. A stored
+  partial payload is still a failed collection round for scheduling. Success
+  resets backoff. This reuses each source owner, transport limits and original
+  snapshot clocks; a retry is not evidence that a failed source recovered.
 - The three macro/food collectors confirm the authoritative SQLite publication
   before mirroring to Redis or advancing a successful seed receipt. A rejected
   SQLite write is a publication failure. Redis is an optional mirror; an outage
