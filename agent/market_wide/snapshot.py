@@ -664,14 +664,14 @@ def store_market_wide_forecast_memory(helpers: dict[str, Any], snapshot: dict[st
 
 def read_market_wide_quant_snapshot(helpers: dict[str, Any], lens: Any, *, allow_stale: bool = True) -> dict[str, Any] | None:
     key = quant_snapshot_cache_key(lens)
-    getter = helpers.get("get_cached_json")
-    if callable(getter):
-        cached = getter(QUANT_SNAPSHOT_NAMESPACE, key)
-        if isinstance(cached, dict):
-            return cached
     store = helpers.get("SNAPSHOT_STORE")
     if store is not None and hasattr(store, "get"):
         cached = store.get(QUANT_SNAPSHOT_NAMESPACE, key)
+        if isinstance(cached, dict):
+            return cached
+    getter = helpers.get("get_cached_json")
+    if callable(getter):
+        cached = getter(QUANT_SNAPSHOT_NAMESPACE, key)
         if isinstance(cached, dict):
             return cached
     if allow_stale and store is not None and hasattr(store, "get_stale"):
@@ -685,14 +685,16 @@ def read_market_wide_quant_snapshot(helpers: dict[str, Any], lens: Any, *, allow
 
 def read_market_wide_snapshot(helpers: dict[str, Any], lens: Any, *, allow_stale: bool = True) -> dict[str, Any] | None:
     key = snapshot_cache_key(lens)
-    getter = helpers.get("get_cached_json")
-    if callable(getter):
-        cached = getter(SNAPSHOT_NAMESPACE, key)
-        if isinstance(cached, dict):
-            return cached
+    # The producer's durable local publication is authoritative. A best-effort
+    # Redis write can fail while its older twelve-hour entry remains valid.
     store = helpers.get("SNAPSHOT_STORE")
     if store is not None and hasattr(store, "get"):
         cached = store.get(SNAPSHOT_NAMESPACE, key)
+        if isinstance(cached, dict):
+            return cached
+    getter = helpers.get("get_cached_json")
+    if callable(getter):
+        cached = getter(SNAPSHOT_NAMESPACE, key)
         if isinstance(cached, dict):
             return cached
     if allow_stale and store is not None and hasattr(store, "get_stale"):

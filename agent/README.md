@@ -57,6 +57,11 @@ The seed and serving API must share `POLYDATA_SNAPSHOT_SQLITE_PATH` and the same
 Redis configuration. The persisted namespace is `agent:market-wide:snapshot`,
 with keys `v1:overview`, `v1:special`, and `v1:trend`. Existing quant/history and
 node-event records stay with that producer. No browser-side generation is added.
+The API reads a valid local SQLite publication before optional Redis. A failed
+best-effort Redis write can leave an older, still-valid twelve-hour entry; it
+must not hide the producer's newer local result. The quant snapshot follows the
+same order. Original generation/expiry and source-state limitations remain;
+this read repair does not trigger a model run or extend snapshot lifetime.
 
 Historical price change is optional for these three panels. When `price24hAgo`
 and `change24h` are absent, skip historical momentum analysis without reporting
