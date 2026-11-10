@@ -153,7 +153,7 @@ def test_guest_quota_is_shared_across_different_snapshot_stores(tmp_path, monkey
     assert not reserve_guest(production)
 
 
-def test_multiple_providers_do_not_count_the_same_book_twice():
+def test_provider_provenance_retained_with_one_event_and_one_company():
     from copy import deepcopy
     from scripts.api.services.bookmaker_panels.snapshot_service import merge_exact_events
     first = parse_board(body(raw_fixture()), 'soccer')['fixtures'][0]
@@ -165,5 +165,9 @@ def test_multiple_providers_do_not_count_the_same_book_twice():
     assert len(combined) == 1
     assert len(combined[0]['quotes']) == 1
     assert combined[0]['quotes'][0]['sourceUpdatedAt'] == '2026-11-09T11:00:00+00:00'
+    other['quotes'][0]['provider'] = 'the-odds-api'
+    combined = merge_exact_events([first, other])
+    assert len(combined[0]['quotes']) == 2
+    assert len({q['book'] for q in combined[0]['quotes']}) == 1
     other['startTime'] = '2026-11-11T18:00:00+00:00'
     assert len(merge_exact_events([first, other])) == 2

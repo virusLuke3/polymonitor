@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { expire, lineKey, parsePayload, quoteCurrent, safeLink, type Payload, type Quote } from './model';
+import { currentWinnerQuotes, expire, lineKey, parsePayload, quoteCurrent, safeLink, type Fixture, type Payload, type Quote } from './model';
 
 const now = Date.now();
 const quote = { book: 'pinnacle', label: 'Pinnacle', provider: 'oddslink', category: 'sportsbook', market: 'h2h', period: 'full',
@@ -11,6 +11,13 @@ const base = { panelId: 'esports-intel', generatedAt: new Date(now).toISOString(
       fetchedAt: new Date(now).toISOString(), sourceStale: false, sourceError: null, quotes: [quote] }] } } satisfies Payload;
 
 describe('bookmaker snapshots', () => {
+  it('counts a company once using its newest eligible quote across providers', () => {
+    const event: Fixture = structuredClone(base.bookmakerBoard.fixtures[0]!);
+    event.quotes = [quote, { ...quote, provider: 'pinnodds', sourceUpdatedAt: null },
+      { ...quote, provider: 'other', sourceUpdatedAt: new Date(now - 30_000).toISOString() }];
+    expect(currentWinnerQuotes(event, now)).toEqual([quote]);
+    expect(event.quotes).toHaveLength(3);
+  });
   it('validates coverage independently of the bounded fixture projection', () => {
     const payload = structuredClone(base) as Payload;
     payload.bookmakerBoard.bookmakerCoverage = [{ book: 'ggbet', label: 'GG.BET', category: 'sportsbook',

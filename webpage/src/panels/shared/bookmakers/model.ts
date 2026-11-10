@@ -1,4 +1,5 @@
 import type { PanelSnapshotContract } from '@/panels/resource-cache';
+import { PUBLIC_OVERVIEW_RETENTION_MS } from '@/panels/resource-cache';
 import { RuntimeResponseError, runtimeTimestamp } from '@/panels/runtime-store';
 import type { RuntimeGridEsportsItem } from '@/types';
 
@@ -32,6 +33,14 @@ export const quoteCurrent = (q: Quote, now = Date.now()) => {
   return !q.suspended && !q.sourceStale && !q.sourceError && !!clock &&
     Date.parse(clock) <= now + 60_000 && now - Date.parse(clock) < maxAge;
 };
+export function currentWinnerQuotes(event: Fixture, now = Date.now()): Quote[] {
+  const winner = event.quotes.filter(q => event.tier !== 'daily-sample' && q.sampleTier !== 'daily-sample' &&
+    q.market === 'h2h' && q.category === 'sportsbook' && quoteCurrent(q, now));
+  const outcomes = winner.some(q => q.outcomes.length === 3) ? 3 : 2;
+  return [...new Map(winner.filter(q => q.outcomes.length === outcomes)
+    .sort((a, b) => Date.parse(a.sourceCheckedAt || a.sourceUpdatedAt || '') - Date.parse(b.sourceCheckedAt || b.sourceUpdatedAt || ''))
+    .map(q => [q.book, q])).values()];
+}
 export const lineKey = (q: Quote) => q.market === 'h2h' ? String(q.outcomes.length) : q.outcomes.map(o => `${o.name}:${o.point}`).sort().join('|');
 export const teamKey = (value: string) => value.toLocaleLowerCase().replace(/[^\p{L}\p{N}_]/gu, '');
 
@@ -97,7 +106,7 @@ export function expire(value: Payload, now: number): Payload {
 }
 export function bookmakerSnapshot(game: boolean): PanelSnapshotContract<unknown> {
   return { key: `bookmakers:${game ? 'esports-intel:10' : 'sports-odds:8'}:v1`,
-    cache: { version: 1, maxChars: 600_000, storage: 'indexeddb' }, maxAgeMs: 1800_000, staleAgeMs: 7200_000,
+    cache: { version: 1, maxChars: 600_000, storage: 'indexeddb' }, maxAgeMs: 1800_000, staleAgeMs: PUBLIC_OVERVIEW_RETENTION_MS,
     acceptStale: true, updatedAt: runtimeTimestamp,
     parse: value => expire(parsePayload(value, game), Date.now()),
     revalidate: (value, now) => expire(value as Payload, now),

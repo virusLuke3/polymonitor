@@ -109,7 +109,7 @@ def merge_exact_events(fixtures):
         if row.get('score') is not None and (row.get('scoreUpdatedAt') or '') > (target.get('scoreUpdatedAt') or ''):
             target.update({k: row.get(k) for k in ('score', 'scoreUpdatedAt', 'period', 'inPlay')})
         def identity(q):
-            return (name(q['book']), q['category'], q['market'], q['period'],
+            return (name(q['book']), q['provider'], q['category'], q['market'], q['period'],
                     tuple(sorted((name(o['name']), o['point']) for o in q['outcomes'])))
         quotes = {identity(q): q for q in target['quotes']}
         for q in row['quotes']:

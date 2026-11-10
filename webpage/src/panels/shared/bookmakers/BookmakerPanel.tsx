@@ -2,7 +2,7 @@ import { useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { useI18n } from '@/services/i18n';
 import { usePanelRuntimeView } from '@/panels/PanelRuntimeView';
-import { lineKey, quoteCurrent, safeLink, teamKey, type Fixture, type Payload, type Quote } from './model';
+import { currentWinnerQuotes, lineKey, quoteCurrent, safeLink, teamKey, type Fixture, type Payload, type Quote } from './model';
 
 const percent = (n: number) => `${(n * 100).toFixed(1)}%`;
 const short = (s: string) => s === 'soccer' ? 'FOOTBALL' : s === 'lol' ? 'LoL' : s.toUpperCase();
@@ -20,9 +20,8 @@ function MatchBoard({ event, game }: { event: Fixture; game: boolean }) {
   const quotes = choices.filter(q => lineKey(q) === chosenLine);
   const labels = (quotes[0]?.outcomes || []).map(o => o.name).sort((a, b) =>
     Number(same(b, event.home)) - Number(same(a, event.home)) || Number(same(a, 'Draw')) - Number(same(b, 'Draw')));
-  const winner = event.quotes.filter(q => event.tier !== 'daily-sample' && q.sampleTier !== 'daily-sample' && q.market === 'h2h' && q.category === 'sportsbook' && quoteCurrent(q));
-  const hasDraw = winner.some(q => q.outcomes.length === 3);
-  const eligible = [...new Map(winner.filter(q => q.outcomes.length === (hasDraw ? 3 : 2)).map(q => [q.book, q])).values()];
+  const eligible = currentWinnerQuotes(event);
+  const hasDraw = eligible.some(q => q.outcomes.length === 3);
   const sides = [event.home, ...(hasDraw ? ['Draw'] : []), event.away];
   const probabilities = sides.map(side => eligible.length ? eligible.reduce((sum, q) =>
     sum + (q.outcomes.find(o => same(o.name, side))?.probability || 0), 0) / eligible.length : null);
