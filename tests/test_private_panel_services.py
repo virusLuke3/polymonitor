@@ -94,3 +94,17 @@ def test_website_profile_can_isolate_route_without_changing_other_connections(mo
     config["POLYMONITOR_WEB_LINK_PROFILES_JSON"] = json.dumps(profiles)
     with pytest.raises(ValueError, match="Unsupported website jump node"):
         website_link.ssh_argv("bulk")
+
+
+def test_snapshot_failover_matches_registry_without_capturing_slow_map_or_streams():
+    import re
+    from deploy.render_panel_transport import public_snapshot_pattern, render
+    from api.runtime_panels import RUNTIME_PANEL_MODULES
+    pattern = re.compile(r"^/wm-api/(v1/)?runtime/(" + public_snapshot_pattern() + r")$")
+    for panel in RUNTIME_PANEL_MODULES:
+        assert pattern.fullmatch("/wm-api" + panel.route)
+    for path in ("/runtime/transport/map", "/runtime/world/signals", "/runtime/world/natural-hazards/map",
+                 "/runtime/lob/token/123", "/runtime/content/hls-proxy", "/auth/session", "/markets",
+                 "/runtime/weather/books", "/runtime/external/arbitrary"):
+        assert not pattern.fullmatch("/wm-api" + path)
+    assert "__PUBLIC_PANEL_SNAPSHOT_PATHS__" not in render()
