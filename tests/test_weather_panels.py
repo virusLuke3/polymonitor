@@ -1142,3 +1142,22 @@ def test_weather_book_batch_is_bounded_and_isolates_interval_failures():
     assert result.json['books']['2']['bookStatus'] == 'unavailable'
     for tokens in ('', 'abc', ','.join(str(i) for i in range(25))):
         assert client.get('/runtime/lob/books?tokens=' + tokens).status_code == 400
+
+
+def test_weather_news_api_prefers_publication_and_never_starts_collection(monkeypatch):
+    fresh = {"generatedAt": "2026-05-12T12:00:00Z", "status": "ok", "items": [{"id": "new", "title": "New weather"}]}
+    old = {**fresh, "generatedAt": "2026-05-12T00:00:00Z", "items": [{"id": "old", "title": "Old weather"}]}
+    ctx = make_ctx(cached=old)
+    ctx['SNAPSHOT_STORE'] = FakeStore(payload=fresh)
+    monkeypatch.setattr(weather_news_service, '_schedule_live_refresh', lambda *a, **k: (_ for _ in ()).throw(AssertionError('API started collector')))
+    result = weather_news_service.get_weather_news_snapshot(ctx, limit=1)
+    assert result['generatedAt'] == fresh['generatedAt']
+    assert result['cacheMode'] == 'sqlite-seed'
+    ctx['SNAPSHOT_STORE'] = FakeStore(stale=old)
+    result = weather_news_service.get_weather_news_snapshot(ctx, limit=1)
+    assert result['generatedAt'] == old['generatedAt']
+    assert result['cacheMode'] == 'stale-seed'
+    ctx = make_ctx()
+    result = weather_news_service.get_weather_news_snapshot(ctx, limit=1)
+    assert result['cacheMode'] == 'seed-miss'
+    assert ctx['_calls']['text'] == 0

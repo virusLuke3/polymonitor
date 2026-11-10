@@ -100,7 +100,8 @@ def test_snapshot_failover_matches_registry_without_capturing_slow_map_or_stream
     import re
     from deploy.render_panel_transport import public_snapshot_pattern, render
     from api.runtime_panels import RUNTIME_PANEL_MODULES
-    pattern = re.compile(r"^/wm-api/(v1/)?runtime/(" + public_snapshot_pattern() + r")$")
+    pattern = re.compile(next(line for line in render().splitlines() if line.startswith("location ~ ")).removeprefix("location ~ ").removesuffix(" {"))
+    assert pattern.fullmatch("/wm-api/content/latest")
     for panel in RUNTIME_PANEL_MODULES:
         assert pattern.fullmatch("/wm-api" + panel.route)
     for path in ("/runtime/transport/map", "/runtime/world/signals", "/runtime/world/natural-hazards/map",

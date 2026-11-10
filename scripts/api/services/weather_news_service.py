@@ -356,20 +356,20 @@ def _read_seeded_snapshot(
     *,
     ttl_seconds: int,
 ) -> Optional[Dict[str, Any]]:
+    # The collector publishes SQLite first; Redis is only a replica fallback.
+    store = dependencies.snapshot_store
+    if store is not None:
+        payload = store.get(WEATHER_NEWS_SNAPSHOT_NAMESPACE, WEATHER_NEWS_CACHE_KEY)
+        if isinstance(payload, dict):
+            return _with_cache_mode(payload, "sqlite-seed")
+        stale = store.get_stale(WEATHER_NEWS_SNAPSHOT_NAMESPACE, WEATHER_NEWS_CACHE_KEY)
+        if isinstance(stale, dict):
+            return _with_cache_mode(stale, "stale-seed")
     reader = dependencies.get_cached_json
     if reader is not None:
         payload = reader(WEATHER_NEWS_SNAPSHOT_NAMESPACE, WEATHER_NEWS_CACHE_KEY)
         if isinstance(payload, dict):
             return _with_cache_mode(payload, "redis-seed")
-    store = dependencies.snapshot_store
-    if store is None:
-        return None
-    payload = store.get(WEATHER_NEWS_SNAPSHOT_NAMESPACE, WEATHER_NEWS_CACHE_KEY)
-    if isinstance(payload, dict):
-        return _with_cache_mode(payload, "sqlite-seed")
-    stale = store.get_stale(WEATHER_NEWS_SNAPSHOT_NAMESPACE, WEATHER_NEWS_CACHE_KEY)
-    if isinstance(stale, dict):
-        return _with_cache_mode(stale, "stale-seed")
     return None
 
 
@@ -429,7 +429,7 @@ def get_weather_news_snapshot(
     ctx: WeatherNewsContext,
     limit: int = DEFAULT_NEWS_LIMIT,
     *,
-    allow_live_build: bool = True,
+    allow_live_build: bool = False,
 ) -> Dict[str, Any]:
     dependencies = _dependencies(ctx)
     ttl_seconds = max(300, int(getattr(dependencies.settings, "weather_news_ttl_seconds", 900) or 900))

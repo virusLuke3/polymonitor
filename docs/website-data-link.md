@@ -13,7 +13,7 @@
 - Gunicorn `gthread` 的默认首数据等待及 keepalive 组合会提前关闭高延迟转发连接。`POLYDATA_GUNICORN_KEEPALIVE_SECONDS=30`；Nginx pool 的 idle keepalive 为 15 秒、每连接最多 100 请求，bulk/interactive 每个 worker 分别最多保留 8/4 条空闲连接。使用 HTTP/1.1 并清空 upstream `Connection` 头，才会真正复用。
 - Nginx pool 地址由 `POLYMONITOR_WEB_API_UPSTREAMS_JSON` 和 `POLYMONITOR_WEB_INTERACTIVE_UPSTREAM` 渲染进 `deploy/nginx/polydata-relay-upstreams.conf.example`。站点的普通 API 指向 bulk pool，市场路由及 bootstrap/health 指向 interactive pool。现有 LOB 专用路由、限流和实时性保持各自契约。配置校验失败立即恢复原配置，成功后 reload。
 - 用 `scripts/deploy/render_panel_transport.py` 从 Runtime API registry 渲染 `deploy/nginx/polymonitor-panel-transport.conf`，再包含于网站 server；只有精确注册路径参与，地图查询和流式路由不匹配。公共快照连接 2 秒、连续无数据等待 8 秒，错误/超时/502/503/504 最多切换一次，总切换窗口 18 秒。只有尚未向客户端发送响应时才能切换；这不是整个下载的绝对截止时间，也不保证消除全部公网波动。天气 books 精确路由复用 interactive，连接 2 秒、等待 6 秒，保持 `no-store`/原报价有效期。LOB、视频流、自然灾害已有精确缓存路由和限流保持原契约；不会对上游 403/429 重试，也不启用非幂等请求重放。
-- 同一 renderer 的 `--upstreams-output` 从私有配置生成 pool：bulk 的 `max_fails=0` 关闭整条连接的被动摘除，避免两个慢来源把所有 peer 同时摘除后产生 `no live upstreams`。每次失败请求仍按前项预算切到另一条连接，SSH 断线仍由 systemd 重连；这不把失败响应变成成功或长期旧缓存。只接受回环 socket、bulk 最多四条，实际部署保持既有两条。`POLYMONITOR_WEB_PANEL_UPSTREAM` 指向独立 `@panels` 连接，精确注册快照复用该连接，失败才回退最后一条 bulk 连接；地图大包继续使用原 bulk pool。Panel pool 最多保留四条空闲连接，15 秒回收、每条最多 100 请求。此隔离降低地图流量的 TCP 队头阻塞，不代表网络带宽已增加。
+- 同一 renderer 的 `--upstreams-output` 从私有配置生成 pool：bulk 的 `max_fails=0` 关闭整条连接的被动摘除，避免两个慢来源把所有 peer 同时摘除后产生 `no live upstreams`。每次失败请求仍按前项预算切到另一条连接，SSH 断线仍由 systemd 重连；这不把失败响应变成成功或长期旧缓存。只接受回环 socket、bulk 最多四条，实际部署保持既有两条。`POLYMONITOR_WEB_PANEL_UPSTREAM` 指向独立 `@panels` 连接，精确注册快照及 `/content/latest` 复用该连接，失败才回退最后一条 bulk 连接；地图大包继续使用原 bulk pool。Panel pool 最多保留四条空闲连接，15 秒回收、每条最多 100 请求。此隔离降低地图流量的 TCP 队头阻塞，不代表网络带宽已增加。
 
 ## 数据与时钟
 

@@ -108,3 +108,7 @@ parse, IndexedDB publication and cached reload, not just HTTP 200 headers.
 ### Independent source recovery state
 
 The API join recomputes the catalog/books contribution when their existing owner publishes recovery between hourly forecast rounds. An earlier catalog/book failure no longer keeps an otherwise healthy weather snapshot degraded for the rest of the hour. Failed/partial model or observation sources and expired books remain degraded; a stale forecast stays stale. Original forecast and observation clocks never advance during the join. Regression coverage lives in `test_weather_market_snapshots.py`; current source completeness is measured separately for all configured cities, not inferred from this status correction.
+
+### 天气新闻的采集与读取边界
+
+天气新闻复用既有 `weather_news_watcher`，一轮预算 240 秒，单响应最多 2.5 MB，单次读取 45 秒、最多两次尝试；具体来源由私有 source routes 配置。API 默认只读正式 SQLite 快照，Redis 仅在本地缺失时回退；缺 seed 返回明确空/不可用，过期副本保留原生成时间。普通 GET 不再派生每个 API worker 的 RSS 采集线程，避免与正式拥有者重复抓取、绕过采集出口和覆盖发布。显式 `allow_live_build=True` 仅保留给独立开发调用，不用于默认生产路由。
