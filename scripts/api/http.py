@@ -20,6 +20,15 @@ PUBLIC_LARGE_SNAPSHOTS = frozenset(panel.route for panel in RUNTIME_PANEL_MODULE
     "/runtime/agent/market-wide-insights/special",
     "/runtime/agent/market-wide-insights/trend",
     "/content/latest",
+    # Public map JSON shares the same browser admission queue as Panels. Large
+    # GeoJSON must also be compressed before crossing the reverse connection.
+    "/runtime/world/natural-hazards/map",
+    "/runtime/world/natural-hazards/related-markets",
+    "/runtime/world/signals",
+    "/runtime/world/infrastructure",
+    "/runtime/transport/map",
+    "/runtime/transport/aviation-viewport",
+    "/runtime/weather/map-query",
 })
 
 
