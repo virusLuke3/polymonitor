@@ -40,9 +40,9 @@ export function marketDetailResource(id: number | null, missing: () => void): Pa
       // are separate resources and cannot be resurrected by its cached response.
       return { ...(value as WorkspaceBundle), lob: null, oracle: null, trades: [], chart: null } as WorkspaceBundle;
     },
-  }), title: 'Market metadata', refreshPolicy: { tier: 'fast', intervalMs: 60_000, requestTimeoutMs: 6000 },
+  }), title: 'Market metadata', refreshPolicy: { tier: 'fast', intervalMs: 60_000, requestTimeoutMs: 45_000 },
   fetch: async context => {
-    try { return await fetchMarketFocusTile(id!, 6000, context?.signal); }
+    try { return await fetchMarketFocusTile(id!, 35_000, context?.signal); }
     catch (error) { if (!context?.signal.aborted && (error as {status?: number})?.status === 404) missing(); throw error; }
   } };
 }

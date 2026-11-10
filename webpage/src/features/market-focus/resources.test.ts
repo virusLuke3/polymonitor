@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { marketCatalogResource, marketDetailResource, marketChartResource } from './resources';
 import { readResourceCacheEntry, writeResourceCache, type PanelSnapshotContract } from '@/panels/resource-cache';
 import { parseRuntimeSnapshot } from '@/panels/runtime-store';
@@ -7,7 +7,27 @@ import type { PanelModule } from '@/panels/types';
 const generatedAt = new Date().toISOString();
 const market = { id: 42, title: 'Market', slug: 'market', tags: [] };
 
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+
 describe('market context shares the public resource owner', () => {
+  it('finishes a delayed metadata body without restoring live fields or changing source time', async () => {
+    vi.useFakeTimers(); vi.stubGlobal('window', globalThis);
+    const payload = { generatedAt, market, identity: { localMarketId: 42 }, focusStatus: 'ready',
+      lob: { marketId: 42 }, trades: [{ marketId: 42 }], oracle: { marketId: 42 } };
+    vi.stubGlobal('fetch', vi.fn(async (_url, options) => ({ ok: true,
+      json: () => new Promise((resolve, reject) => {
+        const timer = setTimeout(() => resolve(payload), 13_000);
+        options.signal.addEventListener('abort', () => { clearTimeout(timer); reject(new DOMException('Aborted', 'AbortError')); });
+      }),
+    })));
+    const resource = marketDetailResource(42, () => {});
+    const result = expect(resource.fetch().then(value => resource.parse(value))).resolves.toMatchObject({
+      generatedAt, market, lob: null, trades: [], oracle: null,
+    });
+    await vi.advanceTimersByTimeAsync(13_010); await result;
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
   it('isolates catalog sort/page/limit and rejects failed semantic verification', () => {
     const contract = marketCatalogResource('volume');
     const value = { generatedAt, sort: 'volume', items: [market], pagination: { page: 1, pageSize: 50 } };

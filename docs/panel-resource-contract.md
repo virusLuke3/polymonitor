@@ -294,3 +294,7 @@ SnapshotStore；不新增采集器或缓存。HTTP 层在后端到腾讯云回�
 Crypto Strategy/历史读取总期限45秒、网络响应35秒。实时Contract Reference与LOB
 保留独立的严格期限。验收须比较解压后的JSON、回连前字节数和真实公网完整响应，
 不能只看响应头200或腾讯云出口已经启用了gzip。
+
+### 市场元数据的传输与有效期
+
+`marketDetailResource`（Market Summary/Featured Market共用）使用45s总期限、准入后35s完整响应预算，避免排队/回连超过旧6s时一直取消已存好的元数据。检查间隔和fresh均60s，展示恢复上限5m；缓存只保存已校验的市场元数据，剥离LOB、Oracle、Trades及Chart，绝不因此延长实时字段资格。实测与剩余来源限制见 [全量缓存核验](panel-cache-loading-audit-2026-11-10.md)。

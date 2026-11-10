@@ -223,7 +223,7 @@ WorldMonitor DeFi 的不同参数为：后台 bundle 每 30 分钟尝试采集�
 | 完整key示例 | 检查 / fresh / 恢复 / 总期限 | cache / cap | GET |
 | --- | --- | --- | --- |
 | `markets:active:page:1:limit:50:sort:volume:v1` | 5m / 5m / 15m / 30s | v1 / 256,000，IDB+LS | `/wm-api/markets?page=1&pageSize=50&status=active&sort=volume` |
-| `market-detail:550186:v1` | 1m / 1m / 5m / 6s | v1 / 256,000，IDB+LS | `/wm-api/markets/550186/focus-tile` |
+| `market-detail:550186:v1` | 1m / 1m / 5m / 45s | v1 / 256,000，IDB+LS | `/wm-api/markets/550186/focus-tile` |
 | `market-chart:550186:range:1d:interval:auto:v1` | 90s / 90s / 5m / 10s | v1 / 2,000,000，IDB | `/wm-api/markets/550186/chart?range=1d&interval=5m` |
 | `market-book:v1:<id>:<yes>:<no>` | 2s / 30s / 30s / 3500ms | null，内存 | `/wm-api/runtime/lob/token/<YES/NO token>?marketId=<id>&_ts=<request>` |
 | `crypto-strategy:four-assets:v1` | 30s / 2m / 15m / 45s | v1 / 1,000,000，IDB | `/wm-api/runtime/crypto/order-flow` |
@@ -547,12 +547,14 @@ WorldMonitor DeFi 的不同参数为：后台 bundle 每 30 分钟尝试采集�
 - 真实生产旧版本现有111个Panel滚动观察：64 ready、22 error、7 degraded、4 loading、3 stale、11 idle（各Panel最后一次可见采样，非同一时刻全屏）；网络同时有ERR_NETWORK_CHANGED和取消。数据是否可用、是否新鲜、UI是否完成是三个指标，不能把93次HTTP200称为全站恢复。
 - 当前全量代码扫描不是每个市场、每个过滤条件、每个来源每条记录的业务正确性证明。10个默认关闭的Panel只做API/代码核验；不会擅自重置用户布局。报价执行资格、历史实时化、来源字段缺口与长期稳定性继续单列。
 
-发布与修复后的真实页面证据在本节后续补充；在完成前不得称已上线或全部Panel健康。
+下面的发布验收记录独立于前述故障时刻；代码修复、线上可见内容、来源完整性分别判断。
 
 ### 真实上线后追加发现：回连压缩与完整响应期限
 
 `896ab394`已发布并核对公网HTML/JS入口。实际桌面恢复记录中，NBA显示8场、DeFi的持久副本10条、天气副本50城/315万字符；82份资源已写入IndexedDB。刷新后NBA没有再次发出API请求，仍显示比赛；布局值未改变。不过Geo完整网络响应仍受12s限制，Crypto Strategy受10s限制，手机冷启动亦有未完成/错误，不能据此宣称全站已恢复。
 
-定位到正式API进程端口18502后，直接完整读取Geo/共享加密/天气分别约0.091/0.424/0.244s，原始字节为1,080,267 / 327,814 / 3,213,198，均未协商出gzip。腾讯云本机经正式反向链路完整读取Geo/加密约9.44/10.13s；腾讯云对浏览器已经启用gzip，但后端到腾讯云这一段仍传输原始大JSON。另有本访问环境的ERR_NETWORK_CHANGED和一次截断响应，不能归咎于未压缩这一项或认为加长超时能消除所有故障。
+定位到正式API进程端口18502后，直接完整读取Geo/共享加密/天气分别约0.091/0.424/0.244s，原始字节为1,080,267 / 327,814 / 3,213,198，均未协商出gzip。腾讯云本机经正式反向链路完整读取Geo/加密约9.44/10.13s；腾讯云对浏览器已经启用gzip；后端HTTP响应未启用Content-Encoding。补查实际interactive/bulk回连进程，两条SSH命令均已有 `-C`，因此不能把HTTP未压缩推断为隧道传输完全未压缩，也不能据此断言新增HTTP gzip显著改善回连速度。另有本访问环境的ERR_NETWORK_CHANGED和截断响应，加长超时也不能消除所有链路故障。
 
-补充修复在既有HTTP共享钩子中，仅对三个明确公开的大快照路径提供gzip，压缩发生在回连之前；不另建缓存、不改源时间、不改采集周期，强ETag降为同语义弱ETag并保留Vary/Cache-Control。实测同内容gzip级别5估计字节为98,676 / 73,649 / 334,827。Geo总期限60s/网络35s；共享Crypto Strategy和历史总期限45s/网络35s；Contract Reference和LOB不延长。对应回归包括解压逐字节等价、原时间、协商q=0、CORS/Vary、既有编码、流式与私有路径不变，以及延迟21s完整body成功/35s停滞终止。
+补充修复在既有HTTP共享钩子中，仅对三个明确公开的大快照路径提供gzip，压缩发生在回连之前；不另建缓存、不改源时间、不改采集周期，强ETag降为同语义弱ETag并保留Vary/Cache-Control。同内容gzip级别5估计HTTP编码字节为98,676 / 73,649 / 334,827，这不是SSH实际线上字节或节省量测量。发布后腾讯云本机读取Geo/加密/天气约10.08/8.28/32.91s，仍有明显波动，不能作为稳定提速的证明。Geo总期限60s/网络35s；共享Crypto Strategy和历史总期限45s/网络35s；Contract Reference和LOB不延长。对应回归包括解压逐字节等价、原时间、协商q=0、CORS/Vary、既有编码、流式与私有路径不变，以及延迟21s完整body成功/35s停滞终止。
+
+追加定点复查：Funding Rate 通过自动重试恢复ready；其正式API为76个资产/148条合格报价。Market Summary元数据请求在45s观察中仍受旧6s总期限反复取消，正式API直读约54ms/5,890字节且focusStatus=ready。将这一共享元数据owner的总期限改45s、准入后完整网络预算35s；保持fresh=60s、恢复上限5m、市场身份校验和剥离LOB/Oracle/Trades规则。13s延迟body回归验证保留原时间且不恢复实时字段。
