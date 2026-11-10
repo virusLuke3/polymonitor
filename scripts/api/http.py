@@ -11,11 +11,15 @@ from werkzeug.exceptions import HTTPException
 
 from api.services import auth_service
 from api.services.signal_reads import SignalReadPending
+from api.runtime_panels import RUNTIME_PANEL_MODULES
 
-PUBLIC_LARGE_SNAPSHOTS = frozenset({
-    "/runtime/world/geo-sanctions-shock",
-    "/runtime/weather/temperature-monitor",
-    "/runtime/crypto/order-flow",
+# The registry contains public read-only snapshot routes, not auth/account/LOB
+# or streaming endpoints. Use the shared contract instead of three special cases.
+PUBLIC_LARGE_SNAPSHOTS = frozenset(panel.route for panel in RUNTIME_PANEL_MODULES) | frozenset({
+    "/runtime/agent/market-wide-insights/overview",
+    "/runtime/agent/market-wide-insights/special",
+    "/runtime/agent/market-wide-insights/trend",
+    "/content/latest",
 })
 
 
@@ -24,7 +28,7 @@ def compress_public_snapshot(response):
     if (request.method != "GET" or request.path not in PUBLIC_LARGE_SNAPSHOTS
             or response.status_code != 200 or response.mimetype != "application/json"
             or response.is_streamed or response.direct_passthrough
-            or response.headers.get("Content-Encoding")):
+            or response.headers.get("Content-Encoding") or response.headers.get("Set-Cookie")):
         return response
     response.vary.add("Accept-Encoding")
     if request.accept_encodings.quality("gzip") <= 0:

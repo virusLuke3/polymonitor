@@ -39,7 +39,7 @@ def test_public_snapshot_roundtrip_preserves_clocks_and_cache_headers(path):
         assert 'Accept-Encoding' in plain.vary
 
 
-@pytest.mark.parametrize('kind', ['private', 'post', 'error', 'small', 'stream', 'encoded'])
+@pytest.mark.parametrize('kind', ['private', 'post', 'error', 'small', 'stream', 'encoded', 'cookie'])
 def test_non_snapshot_or_non_transformable_responses_are_untouched(kind):
     app = Flask(__name__)
     path = '/product/private' if kind == 'private' else '/runtime/crypto/order-flow'
@@ -50,6 +50,8 @@ def test_non_snapshot_or_non_transformable_responses_are_untouched(kind):
                             status=503 if kind == 'error' else 200, mimetype='application/json')
         if kind == 'encoded':
             response.headers['Content-Encoding'] = 'br'
+        if kind == 'cookie':
+            response.set_cookie('session', 'private-session')
         before = dict(response.headers)
         compress_public_snapshot(response)
         assert dict(response.headers) == before or kind == 'small' and response.vary == {'Accept-Encoding'}

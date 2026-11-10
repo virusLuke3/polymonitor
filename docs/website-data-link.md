@@ -18,6 +18,8 @@
 
 传输隔离不改变采集周期、正式落库、快照生成时间、浏览器检查周期或最大旧值保留期。市场目录继续由共享 Runtime 每五分钟检查，最多保留十五分钟；断网显示原快照和原时钟。自然灾害同源 Nginx 缓存遵守已有 30/60 秒有效期，不无限提供过期内容；市场接口继续 `no-store`，不把实时报价转换为网关旧缓存。
 
+共享 API HTTP 层在回连之前压缩 Runtime Panel registry 中的公共只读快照、三个公共市场分析 lens 和 `/content/latest`。接受 gzip 的 GET/200 JSON 且正文至少 1 KiB 才参与；流、已有编码、Set-Cookie、错误和其他路由保持原样。压缩保留原数据、源时间、Cache-Control 和 Vary，不增加缓存寿命；不能只在腾讯云出站时压缩，否则中间回连仍传输大正文。注册表复用避免每次新增公共 Panel 再补一套传输逻辑。
+
 AI Insights、Special Radar、Trend Watch 复用 `agent:market-wide:snapshot / v1:<lens>`。模型与 seed 的运行身份和预算见 [Agent 索引](../agent/README.md)。生成成功、输入覆盖和展示成功分别验证，缺失输入仍保留原限制。
 
 ## 发布验收
