@@ -82,12 +82,12 @@ class BreakingEventRadarDependencies:
     utc_now_iso: Callable[..., Any] | None
     settings: Any
     http_json_get: Callable[..., Any] | None
-    public_articles: Callable[..., Any] | None
     search_markets: Callable[..., Any] | None
     get_cached_json: Callable[..., Any] | None
     snapshot_store: Any
     set_cached_json: Callable[..., Any] | None
     application: Any
+    public_articles: Callable[..., Any] | None = None
 
     @classmethod
     def from_context(
