@@ -1,8 +1,8 @@
-// Large snapshots cannot fit the synchronous localStorage budget. This is a
-// storage backend of resource-cache, not another request/cache lifecycle.
+// Shared durable snapshots outlive eviction from the synchronous display copy.
+// This is a backend of resource-cache, not another request/cache lifecycle.
 const DB = 'polymonitor-panel-snapshots-v1';
 const MAX_CHARS = 16_000_000;
-const MAX_ENTRIES = 96;
+const MAX_ENTRIES = 256;
 
 function transaction<T>(mode: IDBTransactionMode, work: (tx: IDBTransaction, result: (value: T) => void) => void): Promise<T | null> {
   return new Promise(resolve => {

@@ -111,6 +111,33 @@ test('large storage evicts the oldest resource within its shared budget and reje
   expect(result).toEqual({ invalid: null, oldest: null, middle: 6_000_000, newest: 6_000_000 });
 });
 
+test('public resources survive localStorage eviction and reload through the shared durable cache', async ({ page }) => {
+  await installLocalAssets(page);
+  await page.goto('/e2e/lifecycle.html');
+  await page.waitForFunction(() => Boolean(window.frontendHarness));
+  await page.clock.install({ time: new Date(start) });
+  await page.evaluate(async generatedAt => {
+    const cache = await import('/src/panels/resource-cache.ts');
+    const storage = await import('/src/panels/snapshot-storage.ts');
+    for (let i = 0; i < 121; i++) {
+      const key = i === 0 ? 'reload-fixture' : `public-capacity-${i}`;
+      cache.writeResourceCache({ key, cache: { version: 1 }, maxAgeMs: 30_000, staleAgeMs: 90_000,
+        parse: value => value, updatedAt: () => Date.parse(generatedAt) },
+      { generatedAt, items: ['durable public data'], padding: 'x'.repeat(20_000) }, localStorage, Date.now() + i);
+      // A native read transaction runs after the queued write transaction.
+      if (!await storage.readLargeSnapshot(key)) throw new Error(`Missing durable entry ${key}`);
+    }
+    if (localStorage.getItem('polymonitor:panel-resource:reload-fixture')) throw new Error('Test did not exceed the local mirror budget');
+  }, GENERATED_AT);
+  await page.reload();
+  await page.waitForFunction(() => Boolean(window.frontendHarness));
+  await page.clock.install({ time: new Date(start + 1000) });
+  await page.evaluate(() => window.frontendHarness.mount('cached-runtime'));
+  await expect.poll(() => page.evaluate(() => (window.frontendHarness.runtime?.getData('shared') as any)?.items[0])).toBe('durable public data');
+  expect(await page.evaluate(() => window.frontendHarness.requests.length)).toBe(0);
+  expect(await page.evaluate(() => window.frontendHarness.runtime!.getStatus('shared').cacheMode)).toBe('browser');
+});
+
 test('blocked IndexedDB releases the request and cannot hold a panel in restoration', async ({ page }) => {
   await installLocalAssets(page);
   await page.goto('/e2e/lifecycle.html');
@@ -132,7 +159,8 @@ async function mountCached(page: Page, time = start) {
   await page.waitForFunction(() => Boolean(window.frontendHarness));
   await page.clock.install({ time: new Date(time) });
   await page.evaluate(() => window.frontendHarness.mount('cached-runtime'));
-  await page.clock.runFor(100);
+  // A cold resource now checks native IndexedDB before network admission.
+  await page.clock.runFor(1100);
 }
 
 test('reload restores source/check time before any request; manual refresh still replaces with authoritative empty', async ({ page }) => {
@@ -141,7 +169,7 @@ test('reload restores source/check time before any request; manual refresh still
   await page.evaluate(generatedAt => window.frontendHarness.requests[0].resolve({ generatedAt, items: ['saved'] }), GENERATED_AT);
   await page.clock.runFor(100);
   const checked = await page.evaluate(() => window.frontendHarness.runtime!.getStatus('shared').checkedAt);
-  await mountCached(page, start + 1000);
+  await mountCached(page, start + 2000);
   expect(await page.evaluate(() => window.frontendHarness.requests.length)).toBe(0);
   expect(await page.evaluate(() => window.frontendHarness.runtime!.getData('shared'))).toMatchObject({ items: ['saved'], generatedAt: GENERATED_AT });
   expect(await page.evaluate(() => window.frontendHarness.runtime!.getStatus('shared'))).toMatchObject({ phase: 'ready', checkedAt: checked, cacheMode: 'browser' });

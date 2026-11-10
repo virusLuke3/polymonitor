@@ -34,9 +34,9 @@ flowchart LR
 | 服务端展示快照 | [SnapshotStore](../scripts/runtime/snapshot_store.py) 的 SQLite `panel_snapshots`；既有领域按配置使用 Redis 共享缓存 | 记录写入者、namespace/key、schema、TTL、最大保留年龄和容量；复用所属领域的发布与恢复路径 |
 | 首屏和批量读取 | [bootstrap](../scripts/api/services/bootstrap_service.py)、[runtime 批量路由](../scripts/api/routes/runtime_panels.py) | 用现有接口降低首屏请求；重组或重发不改变条目来源时间 |
 | 浏览器会话 | [公共 Runtime](../webpage/src/panels/runtime-store.ts)、[参数化资源](../webpage/src/panels/usePanelResource.ts) | 同一完整 key 共享请求和状态；Panel 不再维护独立轮询或第二份业务缓存 |
-| 浏览器持久缓存 | [resource-cache.ts](../webpage/src/panels/resource-cache.ts) 的显式公共数据缓存，现有调用使用 localStorage；地图另有专用持久缓存 | 复用公共契约的版本、身份、原始年龄和容量校验；存储不可用不能破坏显示或布局偏好 |
+| 浏览器持久缓存 | [resource-cache.ts](../webpage/src/panels/resource-cache.ts) 的显式公共数据缓存，IndexedDB 持久副本＋小资源 localStorage 热副本；地图另有专用资源契约 | 复用公共契约的版本、身份、原始年龄和容量校验；存储不可用不能破坏显示或布局偏好 |
 
-WorldMonitor 的 Upstash Redis、R2／KV 和 IndexedDB 是其架构参考。**不能据此声称本项目所有 Panel 已接入这些服务，也不要求新增 Panel 自行创建这些存储。** 当前地图的 IndexedDB 能力不等于通用 Panel 已统一使用 IndexedDB。需要改变公共存储层时，作为独立的共享能力变更处理，定义迁移、失效、容量、降级及已知消费者验证。
+WorldMonitor 的 Upstash Redis、R2／KV 和 IndexedDB 是其架构参考。**不能据此声称本项目所有 Panel 已接入这些服务，也不要求新增 Panel 自行创建这些存储。** 通用公共资源现在通过同一个 `resource-cache` 写入 IndexedDB；小资源另外保留有界 localStorage 同步副本。`cache: null` 的盘口／合约资源不落盘。容量、失效、降级和迁移见 [共享生命周期](panel-runtime-lifecycle.md#shared-persistence-capacity)。这一结论来自公共层实现和消费者验证，不能从地图拥有 IndexedDB 推导。
 
 `panel_snapshots` 按 namespace/key 更新当前值，浏览器缓存用于展示恢复，都不能充当完整历史档案。需要历史时，明确原始记录、源版本、实际可用时间、保留范围和历史读取入口；事后下载的资料不能自动成为当时可用的策略输入。
 

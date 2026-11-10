@@ -73,10 +73,10 @@ export function writeResourceCache<T>(contract: PanelSnapshotContract<T>, raw: u
     if (!resourceIsCurrent(contract.updatedAt(value), retention, now)) return;
     const encoded = JSON.stringify({ key: contract.key, version: contract.cache.version, cachedAt: now, checkedAt: now, value: raw });
     if (encoded.length > (contract.cache.maxChars ?? MAX_CHARS)) return;
-    if (contract.cache.storage === 'indexeddb') {
-      void writeLargeSnapshot(contract.key, encoded, now);
-      return;
-    }
+    // IndexedDB is the durable copy for every public owner. The small
+    // synchronous cache below may evict entries without losing reload recovery.
+    void writeLargeSnapshot(contract.key, encoded, now);
+    if (contract.cache.storage === 'indexeddb') return;
     if (!storage) return;
     const key = storageKey(contract.key);
     // Bound this cache without touching other application storage.
@@ -97,9 +97,9 @@ export function writeResourceCache<T>(contract: PanelSnapshotContract<T>, raw: u
   } catch { /* Quota, disabled storage or invalid content cannot break a panel. */ }
 }
 
-/** Large public resources use the same envelope/validation with an async backend. */
+/** All public resources share the same durable backend and validation. */
 export async function readIndexedResource<T>(contract: ResourceCacheContract<T>): Promise<RestoredResource<T> | null> {
-  if (contract.cache?.storage !== 'indexeddb') return null;
+  if (!contract.cache) return null;
   const raw = await readLargeSnapshot(contract.key);
   if (!raw) return null;
   try { return decode(contract, raw, Date.now()); }

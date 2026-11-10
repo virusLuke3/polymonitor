@@ -37,6 +37,29 @@ status and manual refresh to shared family controls.
 
 ## Reload recovery
 
+### Shared persistence capacity
+
+The full 121-panel inventory, independent clocks, source acceptance and pinned
+WorldMonitor comparison are recorded in [the 2026-11-10 audit](panel-cache-loading-audit-2026-11-10.md).
+This dated observation does not replace per-domain live health checks.
+
+Every resource with a non-null cache contract writes its validated envelope to
+the shared IndexedDB store. Small resources also keep a bounded localStorage
+copy for synchronous first paint and storage fallback; eviction from that
+2,000,000-character / 96-entry copy does not delete the IndexedDB entry.
+IndexedDB retains at most 256 keys / 16,000,000 encoded characters. This budget
+covers the registered public owners together, rather than assuming the former
+96-entry localStorage-only budget can hold the whole dashboard. Explicit
+`storage: 'indexeddb'` resources skip the synchronous copy. Private and execution
+resources with `cache: null` still never persist. Key/version/domain validation,
+800 ms hydration admission release and 5 s storage transaction bounds apply to
+both static owners and parameterized `usePanelResource` consumers.
+
+Geo/Sanctions shares its existing map owner and 2,000-row limit; its roughly
+1.1-million-character snapshot uses IndexedDB with a 2,000,000-character entry
+cap. A successful network parse is not proof of persistence: acceptance also
+checks the encoded size and reads the entry after localStorage eviction.
+
 ### Overnight public overview recovery
 
 NBA, ESPN, public news, DeFi token overviews, Finance/Tech overviews and the
@@ -58,7 +81,9 @@ limits keep their own contracts. GAME/SPORTS retain their public context for
 expired odds are removed and never made eligible by the envelope age. First visits, evicted/invalid entries and data
 older than the display ceiling still need a successful network read.
 
-The default Runtime deadline includes queueing and is 45 seconds. Weather's
+The default Runtime deadline includes queueing and is 45 seconds; public macro
+owners use this budget too, instead of exhausting 12 seconds in the download
+queue. Their network/body timeout remains separate. Weather's
 multi-megabyte read has a 35-second complete-body transport limit and a
 60-second total Runtime limit, replacing its conflicting 12/10-second limits.
 Desktop/mobile download concurrency remains three/two; these read budgets do
@@ -126,21 +151,23 @@ failure is optional and must not affect layouts or current content. Dedicated
 resource consumers and workspace resources share these rules through
 `usePanelRuntime`; views of a shared owner do not create separate copies.
 
-Small resources retain the existing localStorage namespace, bounded to 96 entries
-and 2,000,000 encoded characters in total (default 256,000 per entry; the nine
-feeds below retain their 128,000 cap). Large resources use the IndexedDB backend
-of the same `resource-cache.ts` contract: database `polymonitor-panel-snapshots-v1`,
-`payloads` and `metadata` stores, at most 96 entries and 16,000,000 encoded
-characters across all large owners. Weather caps an entry at 4,000,000, transport
-and market history at 2,000,000, crypto research/history at 1,000,000. Encoded
+All public resources use the IndexedDB backend of `resource-cache.ts`: database
+`polymonitor-panel-snapshots-v1`, `payloads` and `metadata` stores, at most 256
+entries and 16,000,000 encoded characters across all owners. Small resources
+also keep a synchronous localStorage mirror, bounded to 96 entries and 2,000,000
+encoded characters in total (default 256,000 per entry; the nine feeds below
+retain their 128,000 cap). Eviction from this mirror does not delete the durable
+copy. Weather caps an entry at 4,000,000, Geo/Sanctions, transport and market
+history at 2,000,000, crypto research/history at 1,000,000. Encoded
 characters are capacity units, not a promise of physical disk bytes. Writes and
 oldest-entry eviction are atomic. IndexedDB restore precedes request admission;
 a blocked/disabled store releases admission within 800 ms. The storage operation
 may complete for up to five seconds, so a busy main thread cannot discard a valid
 large snapshot merely by delaying its callbacks. A late restore may fill an empty
 view while the network check remains pending, preserving that attempt/error; it
-can never replace accepted network data or a different parameter identity. No dual writes or
-second scheduler are introduced. The envelope
+can never replace accepted network data or a different parameter identity. Both
+storage backends reuse the same envelope/validator and introduce no second
+scheduler. The envelope
 adds the complete key and last validated `checkedAt`; old entries without that
 check clock may still restore under their existing schema, but must recheck.
 No layout keys are migrated or removed. `public-feed:<id>:limit:<n>:v1` identifies

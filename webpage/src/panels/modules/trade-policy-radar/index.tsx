@@ -248,8 +248,7 @@ function TradePolicyRadarPanel() {
   return (
     <Panel
       title={copy('title', 'Trade Policy')}
-      badge="LIVE"
-      status="live"
+      badge="REFERENCE"
       count={activeItems.length}
       titleControls={(
         <button
@@ -272,6 +271,7 @@ function TradePolicyRadarPanel() {
       dataPanelId="trade-policy-radar"
     >
       <div className="wm-trade-terminal">
+        <p role="note">Static reference examples. Scores and scenarios are illustrative; no live policy feed is connected.</p>
         <div className="wm-trade-tabs" role="tablist" aria-label={copy('viewsAria', 'Trade policy views')}>
           {TABS.map((tab) => (
             <button

@@ -20,7 +20,7 @@ const object = (value: unknown): value is Record<string, unknown> => value != nu
 const failed = new Set(['error', 'failed', 'unavailable', 'warming', 'invalid', 'unknown', 'gateway-error', 'agent-error']);
 const textArrays = new Set(['tags', 'contextTags', 'assetHints']);
 const numberArrays = new Set(['sparkline', 'channelIds']);
-const recordArrays = new Set(['starters', 'quotes', 'teamMetrics']);
+const recordArrays = new Set(['starters', 'quotes', 'teamMetrics', 'homePeriods', 'awayPeriods', 'leaders']);
 const textFields = new Set(['title', 'headline', 'summary', 'name', 'symbol', 'url', 'sportTitle', 'sportKey']);
 
 /** Feed rows are JSON records of scalar fields plus reviewed nested structures.
@@ -34,7 +34,7 @@ function validRow(value: unknown, depth = 0): value is Record<string, unknown> {
     if (textArrays.has(key)) return Array.isArray(field) && field.every(item => typeof item === 'string');
     if (numberArrays.has(key)) return Array.isArray(field) && field.every(item => typeof item === 'number' && Number.isFinite(item));
     if (recordArrays.has(key)) return Array.isArray(field) && field.length <= 64 && field.every(item => validRow(item, depth + 1));
-    return key === 'pm' && validRow(field, depth + 1);
+    return (key === 'pm' || key === 'season') && validRow(field, depth + 1);
   });
 }
 

@@ -1,11 +1,12 @@
 import type { PanelSnapshotContract } from '@/panels/resource-cache';
+import { DEFAULT_PANEL_REQUEST_TIMEOUT_MS } from '@/panels/types';
 import { usePanelRuntimeView } from '@/panels/PanelRuntimeView';
 import type { RuntimeMacroRegistryPayload } from '@/types';
 import './macro-runtime.css';
 
 export const macroRefreshPolicy = {
   tier: 'slow' as const, intervalMs: 30 * 60_000, staleAfterMs: 45 * 60_000,
-  requestTimeoutMs: 12_000, batch: false,
+  requestTimeoutMs: DEFAULT_PANEL_REQUEST_TIMEOUT_MS, batch: false,
 };
 
 /** Reapply on cache restore and the existing Runtime expiry sweep; never renew clocks. */
@@ -53,7 +54,7 @@ export function macroSnapshot(panelId: string, geo = false, family: 'registry' |
   const maxAgeMs = geo ? 10 * 60_000 : macroRefreshPolicy.staleAfterMs;
   return {
     key: `macro:${panelId}:latest:v2`, maxAgeMs, staleAgeMs: (geo ? 24 : 18) * 60 * 60_000,
-    acceptStale: true, cache: { version: 2, maxChars: 256_000 },
+    acceptStale: true, cache: geo ? { version: 2, storage: 'indexeddb', maxChars: 2_000_000 } : { version: 2, maxChars: 256_000 },
     revalidate: geo ? undefined : projectMacroDisplay,
     parse(value) {
       if (!value || typeof value !== 'object') throw new Error('Invalid macro snapshot');

@@ -15,7 +15,7 @@ describe('macro snapshot and refresh contract', () => {
   it('polls independently with a deadline and a freshness budget longer than the seed cycle', () => {
     expect(macroRefreshPolicy.intervalMs).toBe(30 * 60_000);
     expect(macroRefreshPolicy.batch).toBe(false);
-    expect(macroRefreshPolicy.requestTimeoutMs).toBe(12_000);
+    expect(macroRefreshPolicy.requestTimeoutMs).toBe(45_000);
     expect(contract.maxAgeMs).toBeGreaterThan(30 * 60_000);
   });
   it('rejects wrong families, malformed rows and missing collection clocks', () => {

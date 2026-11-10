@@ -197,7 +197,13 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
 
   useEffect(() => {
     panels.forEach(panel => {
-      if (panel.snapshot?.cache?.storage !== 'indexeddb' || hydration.current.has(panel.id)) return;
+      if (!panel.snapshot?.cache || hydration.current.has(panel.id)) return;
+      // A validated synchronous copy already released this resource. Read the
+      // durable copy only on a miss; never delay a background refresh for it.
+      if (dataRef.current[panel.id] != null) {
+        hydration.current.set(panel.id, { pending: false });
+        return;
+      }
       const token: { pending: boolean; timer?: number } = { pending: true };
       hydration.current.set(panel.id, token);
       token.timer = window.setTimeout(() => {
@@ -278,7 +284,8 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
           const checkedAt = Date.now();
           if (contract) {
             try {
-              const previous = contract.shouldPersist && contract.cache?.storage !== 'indexeddb' ? readResourceCache(contract, window.localStorage) : null;
+              const previous = contract.shouldPersist ? dataRef.current[id]
+                ?? (contract.cache?.storage !== 'indexeddb' ? readResourceCache(contract, window.localStorage) : null) : null;
               if (!retained && !['warming', 'invalid', 'unknown'].includes(String((value as { status?: string })?.status))
                 && (!contract.shouldPersist || contract.shouldPersist(value, previous))) writeResourceCache(contract, raw ?? value,
                   contract.cache?.storage === 'indexeddb' ? null : window.localStorage, checkedAt);

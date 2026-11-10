@@ -42,4 +42,13 @@ describe('public feed persistence contracts', () => {
       status: 'stale', items: [{ id: 'new' }], generatedAt,
     });
   });
+  it('accepts the published NBA periods, season and leaders without accepting malformed nested data', () => {
+    const contract = publicFeedSnapshot('nba-scoreboard', 10);
+    const row = { id: 'game', name: 'LAL @ ATL', season: { year: 2027, type: 2, slug: 'regular-season' },
+      homePeriods: [{ period: 1, value: 22 }], awayPeriods: [{ period: 1, value: 31 }],
+      leaders: [{ athleteId: 'a', name: 'Player', category: 'points', side: 'home', value: 21 }] };
+    expect(contract.parse({ generatedAt, items: [row] })).toMatchObject({ items: [row] });
+    expect(() => contract.parse({ generatedAt, items: [{ ...row, leaders: [{ name: {} }] }] })).toThrow();
+    expect(() => contract.parse({ generatedAt, items: [{ ...row, homePeriods: {} }] })).toThrow();
+  });
 });
