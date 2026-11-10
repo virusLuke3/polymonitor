@@ -6,6 +6,11 @@ import gzip
 import time
 import uuid
 
+try:
+    import brotli
+except ImportError:
+    brotli = None
+
 from flask import g, jsonify, request
 from werkzeug.exceptions import HTTPException
 
@@ -40,16 +45,19 @@ def compress_public_snapshot(response):
             or response.headers.get("Content-Encoding") or response.headers.get("Set-Cookie")):
         return response
     response.vary.add("Accept-Encoding")
-    if request.accept_encodings.quality("gzip") <= 0:
+    gzip_quality = request.accept_encodings.quality("gzip")
+    br_quality = request.accept_encodings.quality("br") if brotli is not None else 0
+    if max(gzip_quality, br_quality) <= 0:
         return response
     body = response.get_data()
     if len(body) < 1024:
         return response
-    packed = gzip.compress(body, compresslevel=5, mtime=0)
+    encoding = "br" if br_quality > 0 and br_quality >= gzip_quality else "gzip"
+    packed = brotli.compress(body, quality=4) if encoding == "br" else gzip.compress(body, compresslevel=5, mtime=0)
     if len(packed) >= len(body):
         return response
     response.set_data(packed)
-    response.headers["Content-Encoding"] = "gzip"
+    response.headers["Content-Encoding"] = encoding
     etag, _weak = response.get_etag()
     if etag is not None:
         response.set_etag(etag, weak=True)

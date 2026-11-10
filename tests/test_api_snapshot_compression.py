@@ -32,11 +32,32 @@ def test_public_snapshot_roundtrip_preserves_clocks_and_cache_headers(path):
     assert set(response.vary) == {'Accept-Encoding', 'Origin', 'X-Test-Scope'}
     assert response.headers['Cache-Control'] == 'no-store'
     assert response.get_etag() == ('stored-source-revision', True)
-    for accept in ('', 'gzip;q=0, identity;q=1', 'br'):
+    for accept in ('', 'gzip;q=0, br;q=0, identity;q=1'):
         plain = client.get(path, headers={'Accept-Encoding': accept})
         assert 'Content-Encoding' not in plain.headers
         assert plain.data == body
         assert 'Accept-Encoding' in plain.vary
+
+
+def test_brotli_negotiation_and_optional_dependency_fallback(monkeypatch):
+    import api.http as http
+    brotli = pytest.importorskip('brotli')
+    app = Flask(__name__)
+    body = json.dumps({'generatedAt': '2026-11-10T08:47:47Z', 'rows': ['original source data'] * 300}).encode()
+    for accept, encoding in [('gzip, br', 'br'), ('gzip;q=1, br;q=0.5', 'gzip'), ('br', 'br')]:
+        with app.test_request_context('/runtime/weather/temperature-monitor', headers={'Accept-Encoding': accept}):
+            response = compress_public_snapshot(Response(body, mimetype='application/json'))
+            assert response.headers['Content-Encoding'] == encoding
+            assert (brotli.decompress if encoding == 'br' else gzip.decompress)(response.data) == body
+    monkeypatch.setattr(http, 'brotli', None)
+    with app.test_request_context('/runtime/weather/temperature-monitor', headers={'Accept-Encoding': 'gzip, br'}):
+        response = compress_public_snapshot(Response(body, mimetype='application/json'))
+        assert response.headers['Content-Encoding'] == 'gzip'
+        assert gzip.decompress(response.data) == body
+    with app.test_request_context('/runtime/weather/temperature-monitor', headers={'Accept-Encoding': 'br'}):
+        response = compress_public_snapshot(Response(body, mimetype='application/json'))
+        assert 'Content-Encoding' not in response.headers
+        assert response.data == body
 
 
 @pytest.mark.parametrize('kind', ['private', 'post', 'error', 'small', 'stream', 'encoded', 'cookie'])

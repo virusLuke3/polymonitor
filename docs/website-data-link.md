@@ -25,6 +25,8 @@
 
 地图公共 JSON（hazards map/related-markets、world signals/infrastructure、transport map/aviation-viewport、weather map-query）也在后端压缩，避免其大响应占用同一浏览器下载队列。它们仅复用压缩规则，不加入前述只读快照的短等待切换；按需查询仍遵守自身源预算。瓦片、流媒体、LOB、错误响应不参与此转换。
 
+部署环境已具备可选 Brotli 时，按客户端 `Accept-Encoding` 的权重选择 br（quality 4）或 gzip（level 5）；缺少该库时保持 gzip 回退，不让 API 启动失败，也不向不接受该编码的客户端发送压缩正文。原文小于 1 KiB 或压缩后没有缩小时不转换。浏览器还原后字段完全一致；这只减少传输，不把源缺失或旧快照改成实时数据。
+
 AI Insights、Special Radar、Trend Watch 复用 `agent:market-wide:snapshot / v1:<lens>`。模型与 seed 的运行身份和预算见 [Agent 索引](../agent/README.md)。生成成功、输入覆盖和展示成功分别验证，缺失输入仍保留原限制。
 
 ## 发布验收
