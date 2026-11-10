@@ -242,7 +242,6 @@ FRED 两个原出口在 20:44–20:45 的同 URL 比较中出现 ConnectTimeout�
 
 | Panel ID | 本轮正式新快照 | 页面自动收到 | 数据边界 |
 | --- | --- | --- | --- |
-
 | `energy-gasoline-shock` | 20:49:16 | 20:53:02 | 3 项 XLS；原自然轮次 20:47:54 已于 20:48:01 进入页面 |
 | `food-retail-basket-pressure` | 20:47:15 | 20:48:02 | 正式 8 条采集时间推进；API 响应 8 条 |
 | `supply-tariff-import-watch` | 20:47:32 | 20:48:02 | 正式 15 条采集时间推进；API 响应 8 条 |
