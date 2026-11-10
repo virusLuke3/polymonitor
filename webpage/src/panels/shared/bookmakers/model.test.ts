@@ -11,6 +11,14 @@ const base = { panelId: 'esports-intel', generatedAt: new Date(now).toISOString(
       fetchedAt: new Date(now).toISOString(), sourceStale: false, sourceError: null, quotes: [quote] }] } } satisfies Payload;
 
 describe('bookmaker snapshots', () => {
+  it('validates coverage independently of the bounded fixture projection', () => {
+    const payload = structuredClone(base) as Payload;
+    payload.bookmakerBoard.bookmakerCoverage = [{ book: 'ggbet', label: 'GG.BET', category: 'sportsbook',
+      fixtures: 30, providers: ['oddsportal'], sports: ['lol'] }];
+    expect(parsePayload(payload, true).bookmakerBoard.bookmakerCoverage?.[0]?.fixtures).toBe(30);
+    payload.bookmakerBoard.bookmakerCoverage[0]!.fixtures = Number.NaN;
+    expect(() => parsePayload(payload, true)).toThrow('Invalid bookmaker coverage');
+  });
   it('rejects cross-panel cache and broken probabilities', () => {
     expect(() => parsePayload(base, false)).toThrow();
     const corrupt = structuredClone(base);

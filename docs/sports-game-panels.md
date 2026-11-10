@@ -10,10 +10,53 @@
 | The Odds API | 已有体育博彩公司报价 | 复用 Sports Odds watcher，在同一次请求保存完整报价 | 保持原额度和采集周期，不因新增面板重复请求 |
 | OddsLink guest | LoL、Valorant 窗口外的赛前补充 | 每项目每日一次；持久化全局 5 次/日预算，与原研究工具共用 | 试用补充，不能声称是连续实时 feed |
 | KashRock public demo | GG.bet 等玩家道具样本 | 每项目每日一次，独立保存 | 单条公开演示，无报价时间不能充当当前市场价格 |
+| MoviOdds | bet365 七类运动/电竞的主盘口 | 同一个 bookmaker owner | 第三方镜像；逐市场核实时钟、封盘与期间独立保存 |
+| FanDuel public | NBA/NFL/NHL/MLB 胜负、让分、大小分 | 公开网页同源 JSON → bookmaker owner | 只有开赛时间，没有逐报价变价时间；不能用开赛时间当报价时间 |
+| Bovada public | 上述四项及 NCAAF/NCAAB 主盘口 | 公开 coupon JSON → 同一 owner | event.lastModified 仅为事件修改时间；排除球员、半场和单节盘 |
+| BetRivers / Kambi | 四大联赛公开列表中的主盘口 | 公开 listView → 同一 owner | 列表未必含每个市场；保留暂停状态、双方变价时间与千分位单位 |
+| Pinnodds public | Pinnacle 七类看板，包括 LoL/CS2/Dota2/R6 | HTML 表格 → 同一 owner | 页面快照时间与逐报价时间分开；无原生 ID 的行使用精确内容身份 |
+| OddsPortal public | NBA 与 LoL Worlds 多家公司独赢报价 | 页面公开 JSON + 每日公司目录 → 同一 owner | 每家公司双边独立配对；不把两侧最高价拼成一家。目录首页不等于全部联赛覆盖 |
 | GRID | 官方赛程、比分、地图与选手统计 | 复用 GRID watcher | 账号权限决定覆盖；取得 CS2/Dota 不代表获得 LoL/Valorant 权限 |
 | ESPN / OpenDota | 体育排名、比赛详情；Dota 历史结果 | 复用 sports expansion 与 NBA owner | 事实、预测与博彩公司赔率分开显示 |
 
-OddsPapi、认证版 OddsLink / KashRock 需要尚未配置的密钥，不能把介绍页面当成已接入 API。Pinnacle 报价优先从已经可用的聚合接口获取；重复抓取 Pinnodds 页面不会新增独立报价证据。API 域名、URL 模板、密钥、代理均来自个人 `.env`；`.env.example` 只列空值。浏览器不收到服务密钥或代理地址。
+OddsPapi、认证版 OddsLink / KashRock / Pinnodds 需要个人账号密钥，不能把介绍页面当成已接入 API。Pinnodds 与 OddsPortal 的公开通道独立接入，以扩大事件覆盖；同一家公司的多个通道不增加独立博彩公司数量。API 域名、URL 模板、密钥、代理均来自个人 `.env`；`.env.example` 只列空值。浏览器不收到服务密钥或代理地址。
+
+### 完整调研来源清单与边界（2026-11-10 修订）
+
+“来源通道”与“博彩公司”分别统计。一个 OddsLink / OddsPortal 通道可以承载多家公司的报价；oddswrap 和 OddsHarvester 是获取工具，不是另外两家博彩公司。不得只列 MoviOdds，也不得把已保存的 30 多家公司说成仅有八家。
+
+| 调研过的通道 | 本轮处理 | 可核实边界 |
+| --- | --- | --- |
+| The Odds API | 保持既有持久采集及个人密钥，复用整份响应 | 不新增消耗额度的重复请求 |
+| OddsLink public board | 扩到其公开目录列出的 14 个项目，包括 MMA、NCAAB、NCAAF、WNBA | 实测多数项目只返回 3 场；是公开样本窗口，不是完整付费目录 |
+| OddsLink guest | 保留两项日级补充与全局 5 次/日配额 | 不当连续 feed，不额外消耗匿名额度去反复探测 |
+| MoviOdds | 保持七项目生产快照 | WS/历史等额外能力不能写成已常驻采集 |
+| KashRock public demo | 保留演示样本，独立标识 | 不当完整 GG.BET 实时数据；正式密钥接口未配置 |
+| Pinnodds public | 新接七看板 | 页面可用；认证 REST/WS 是另一项权限，不假定已有 key |
+| FanDuel public（oddswrap 调研路线） | 新接四大联赛 | 已取得真实价格；原生报价时钟缺失保持未知 |
+| Bovada public（oddswrap 路线） | 新接六联赛 | 已取得真实价格；不按数组位置猜球队 |
+| BetRivers/Kambi public（oddswrap 路线） | 新接四大联赛 | 有真实报价；空赛季目录与请求失败分别处理 |
+| OddsPortal（OddsHarvester 调研路线） | 新接 NBA / LoL Worlds，读取公开页面 JSON | 不需要另装浏览器抓取库；不执行页面 JS；电竞总目录只有客户端占位数据，不能记成零场成功 |
+| Pinnacle guest API | 本轮公开配置返回 403，未启用直连 | Pinnacle 价格仍可经 OddsLink / Pinnodds 获得 |
+| DraftKings public（oddswrap 路线） | 本轮返回 403，未启用直连 | DraftKings 价格仍由 The Odds API / OddsLink 提供 |
+| BetMGM public（oddswrap 路线） | 本轮 clientconfig 返回 403，未启用直连 | BetMGM 价格仍由已有聚合通道提供 |
+| Caesars public（oddswrap 路线） | 本轮 schedule 返回 403，未启用直连 | Caesars 价格仍由 OddsLink 提供 |
+| Oddschecker | 本轮普通 HTTP 返回 403，未启用采集 | 不能把一次拒绝说成永久不可用，也不能当作已接入 |
+| OddsPapi authenticated | 未找到个人密钥，未启用 | 没有以他人密钥代替；不是虚构的“已连通备用” |
+| OddsLink / KashRock / Pinnodds authenticated | 私有配置占位与边界登记 | 公开通道可用不代表认证通道有权限；需要密钥后仍须校验相应 schema |
+| GRID | 保留官方赛况 owner | 不是赔率来源；不纳入博彩公司数量 |
+
+以上拒绝访问记录是本轮探测结果，非永久健康状态。探测元数据保存在现有 `research:bookmakers:source-audit:v1`；成功原文与规范化响应沿用正式 evidence 存储。生产源状态以最新持久记录为准。未接通的认证/拒绝通道不会每五分钟空转请求，也不通过换出口规避 403。
+
+新增解析归属 `scripts/api/services/bookmaker_panels/public_books.py`，没有新增 Panel、重复数据库或采集守护进程。每个来源/项目有独立 `bookmakers:<provider>:<sport>:v1` 身份；OddsPortal 公司目录 `bookmakers:portalbooks:catalog:v1` 每日获取、最长保留七天，先验证目录再发布价格，不猜公司 ID。
+
+新增报价源目标周期 15 分钟，30 分钟标旧、两小时停止展示；同一 owner 每五分钟检查到期状态。仍使用 240 秒整轮上限、45 秒完整单次、最多两次、8 MiB 响应与 2 MiB 规范化上限；超预算下轮优先，不压缩备用出口的请求时间。源预算不足时明确 deferred，不能宣称全部项目准点。超时保留旧原文/成功时间，恢复后由下一轮到期采集重新验证并入库。
+
+FanDuel 的 marketTime、Bovada 的 lastModified、Pinnodds 的 dateModified 都不冒充逐报价时钟。页面可展示这些真实观测价格，但未知时钟不进入“当前博彩公司均值”。Kambi 取双方中较早的 changedDate，封盘与不完整市场不进入当前均值。Stake.com / Stake、GG.BET / GGBET 等明确别名统一公司身份；Betfair Exchange 单独归为交易所。跨来源队名/时间不一致时保留不同事件，不强行合并。
+
+前端“全部公司”统计投影前的完整存储覆盖，显示公司、通道及赛事数量；赔率页可按通道筛选，每行标注实际 provider。API 仍有 60 场/450 KB 投影上限，先保证每个可用 provider 至少一场，再按项目轮转；未含场次明确显示，完整覆盖计数不能误称这些比赛全部已经在下拉列表中。两种时效各自显示，禁止把“有保留价格”说成“当前可成交”。
+
+实现依据：[oddswrap](https://github.com/sjhouston23/oddswrap)、[OddsLink 公开看板](https://oddslink.app/docs/api-reference/operations/publicboard/)、[Pinnodds 公开电竞板](https://pinnodds.com/pinnacle-odds/esports)、[OddsPortal LoL Worlds](https://www.oddsportal.com/esports/league-of-legends/league-of-legends-world-championship/)。实际报价以采集证据为准。
 
 ## 获取、存储与恢复
 

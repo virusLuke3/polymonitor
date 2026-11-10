@@ -28,10 +28,14 @@ def name(value):
     return re.sub(r'[^\w]', '', str(value).casefold())
 
 
+def book_key(value):
+    return {'stakecom': 'stake', 'betfairexchange': 'betfair', 'betonlineag': 'betonline'}.get(name(value), name(value))
+
+
 def book_category(key, declared='sportsbook'):
     if name(key) in {'polymarket', 'kalshi'}:
         return 'prediction_market'
-    if name(key) in {'betfair', 'matchbook', 'novig', 'prophetx', 'sxbet', '4casters'} or key.startswith('betfair_ex_'):
+    if book_key(key) in {'betfair', 'matchbook', 'novig', 'prophetx', 'sxbet', '4casters'} or key.startswith('betfair_ex_'):
         return 'exchange'
     return declared if declared in {'sportsbook', 'exchange', 'prediction_market'} else 'unknown'
 
@@ -117,7 +121,7 @@ def fixture(raw, *, provider='oddslink', american=True, tier='public-board'):
                 implied = [1 / p for p in prices]
                 total = sum(implied)
                 category = book_category(book['key'], book.get('kind', 'sportsbook'))
-                result['quotes'].append({'book': book['key'], 'label': str(book.get('title') or book['key']),
+                result['quotes'].append({'book': book_key(book['key']), 'label': str(book.get('title') or book['key']),
                     'category': category, 'market': kind, 'period': 'full', 'provider': provider,
                     'sourceUpdatedAt': instant(market.get('last_update') or book.get('last_update')),
                     'url': link(book.get('link')), 'overround': total - 1,

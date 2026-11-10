@@ -10,11 +10,13 @@ export type Quote = { book: string; label: string; category: string; market: str
 export type Fixture = { id: string; provider: string; tier: string; sport: string; competition: string;
   home: string; away: string; startTime: string; fetchedAt: string; sourceStale: boolean; sourceError: string | null; quotes: Quote[];
   inPlay?: boolean; score?: string | null; scoreUpdatedAt?: string | null; period?: string | number | null };
-export type Source = { id: string; label: string; usable: boolean; stale: boolean; error: string | null; lastSuccessAt: string | null };
+export type Source = { id: string; label: string; usable: boolean; stale: boolean; error: string | null; lastSuccessAt: string | null;
+  fixtureCount?: number; quoteCount?: number };
 export type Prop = { id: string; sport: string; player: string; stat: string; line: number; decimal: number;
   direction: string; book: string; startTime: string | null; url: string | null; fetchedAt: string };
 export type Board = { schemaVersion: number; family: string; fixtures: Fixture[]; props: Prop[]; sources: Source[];
-  generatedAt: string | null; availableFixtures: number; omittedFixtures: number };
+  generatedAt: string | null; availableFixtures: number; omittedFixtures: number;
+  bookmakerCoverage?: { book: string; label: string; category: string; fixtures: number; providers: string[]; sports: string[] }[] };
 export type Payload = { panelId: string; generatedAt: string; status: string; bookmakerBoard: Board;
   officialGeneratedAt?: string; items: RuntimeGridEsportsItem[];
   sportsContext: { source: Source; rows: { title: string; value: string; detail: string | null; url: string | null }[] }[] };
@@ -55,6 +57,11 @@ export function parsePayload(value: unknown, game: boolean): Payload {
   const id = game ? 'esports-intel' : 'sports-odds';
   if (!object(value) || value.panelId !== id || !date(value.generatedAt) || !object(value.bookmakerBoard)) throw new RuntimeResponseError('Bookmaker data is unavailable');
   const b = value.bookmakerBoard;
+  if (b.bookmakerCoverage !== undefined && (!Array.isArray(b.bookmakerCoverage) || b.bookmakerCoverage.length > 300 ||
+      !b.bookmakerCoverage.every(c => object(c) && text(c.book) && text(c.label) && text(c.category) && finite(c.fixtures) &&
+      Array.isArray(c.providers) && c.providers.every(text) && Array.isArray(c.sports) && c.sports.every(text)))) {
+    throw new RuntimeResponseError('Invalid bookmaker coverage');
+  }
   if (b.schemaVersion !== 1 || b.family !== (game ? 'game' : 'sports') || !Array.isArray(b.fixtures) || b.fixtures.length > 60 ||
       !Array.isArray(b.sources) || !b.sources.every(validSource) || !finite(b.omittedFixtures) || !finite(b.availableFixtures) ||
       !Array.isArray(b.props) || b.props.length > 10) throw new RuntimeResponseError('Invalid bookmaker board');

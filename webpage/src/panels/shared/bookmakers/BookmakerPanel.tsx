@@ -33,7 +33,7 @@ function MatchBoard({ event, game }: { event: Fixture; game: boolean }) {
         <small>{q.suspended ? t('Suspended', '已封盘') : q.sourceCheckedAt
           ? `${t('Confirmed', '核实于')} ${formatRelativeTime(q.sourceCheckedAt)}`
           : q.sourceUpdatedAt ? formatRelativeTime(q.sourceUpdatedAt) : t('Time unknown', '报价时间未知')}</small>
-        {q.provider === 'moviodds' && <small>MoviOdds · {q.phase === 'inplay' ? t('In play', '滚球') : t('Pre-match', '赛前')}</small>}</th>
+        <small>{q.provider}{q.phase && ` · ${q.phase === 'inplay' ? t('In play', '滚球') : t('Pre-match', '赛前')}`}</small></th>
       {labels.map((label, j) => { const o = q.outcomes.find(o => same(o.name, label)); return <td key={label} data-side={j === 0 ? 'a' : j === labels.length - 1 ? 'b' : 'draw'}>
         <b>{q.suspended ? '—' : o?.decimal.toFixed(2) ?? '—'}</b><small>{o && !q.suspended ? `${o.point == null ? '' : `${o.point > 0 ? '+' : ''}${o.point} · `}${percent(o.probability)}` : '—'}</small>
       </td>; })}
@@ -88,8 +88,12 @@ export function BookmakerPanel({ payload, game = false }: { payload?: Payload; g
   const [sport, setSport] = useState(game ? 'lol' : 'nba');
   const [eventId, setEventId] = useState('');
   const [tab, setTab] = useState('odds');
+  const [provider, setProvider] = useState('');
   const board = payload?.bookmakerBoard;
-  const fixtures = useMemo(() => (board?.fixtures || []).filter(f => f.sport === sport), [board, sport]);
+  const fixtures = useMemo(() => (board?.fixtures || []).filter(f => f.sport === sport &&
+    (!provider || f.quotes.some(q => q.provider === provider))), [board, sport, provider]);
+  const providers = [...new Set((board?.fixtures || []).filter(f => f.sport === sport).flatMap(f => f.quotes.map(q => q.provider)))].sort();
+  const coverage = (board?.bookmakerCoverage || []).filter(c => c.sports.includes(sport));
   const event = fixtures.find(f => f.id === eventId) || fixtures[0];
   const sports = [...new Set([...(game ? ['lol', 'valorant', 'cs2', 'dota2'] : ['nba', 'soccer', 'nfl', 'nhl', 'mlb', 'tennis']), ...(board?.fixtures.map(f => f.sport) || [])])];
   const source = board?.sources.find(s => s.id === `bookmakers:board:${sport}:v1`);
@@ -97,13 +101,16 @@ export function BookmakerPanel({ payload, game = false }: { payload?: Payload; g
     className={`wm-bookmaker-panel ${game ? 'wm-bookmaker-game' : 'wm-bookmaker-sports'}`}
     controls={<button type="button" className="wm-panel-action-button" aria-label={t('Refresh snapshot', '刷新快照')} onClick={() => runtime?.refresh?.()}>↻</button>}>
     <div className="wm-bookmaker-sports-tabs" role="group" aria-label={t('Sport or game', '体育或游戏项目')}>
-      {sports.map(key => <button type="button" key={key} aria-pressed={sport === key} onClick={() => { setSport(key); setEventId(''); }}>{short(key)}<small>{board?.fixtures.filter(f => f.sport === key).length || '·'}</small></button>)}
+      {sports.map(key => <button type="button" key={key} aria-pressed={sport === key} onClick={() => { setSport(key); setEventId(''); setProvider(''); }}>{short(key)}<small>{board?.fixtures.filter(f => f.sport === key).length || '·'}</small></button>)}
     </div>
     <div className="wm-bookmaker-tabs" role="group" aria-label={t('View', '视图')}>
-      {[['odds', t('Bookmakers', '博彩公司')], ['facts', t(game ? 'Official scores' : 'Standings', game ? '官方赛况' : '排名与赛程')], ...(game ? [['props', t('Player props', '选手道具')]] : [])].map(([key, label]) =>
+      {[['odds', t('Odds', '赔率')], ['coverage', t('All books', '全部公司')], ['facts', t(game ? 'Official scores' : 'Standings', game ? '官方赛况' : '排名与赛程')], ...(game ? [['props', t('Player props', '选手道具')]] : [])].map(([key, label]) =>
         <button type="button" key={key} aria-pressed={tab === key} onClick={() => setTab(key || 'odds')}>{label}</button>)}
     </div>
     {tab === 'odds' && <>
+      {providers.length > 1 && <label className="wm-bookmaker-event-select"><select aria-label={t('Odds provider', '赔率数据通道')} value={provider} onChange={e => { setProvider(e.currentTarget.value); setEventId(''); }}>
+        <option value="">{t('All providers', '全部数据通道')}</option>{providers.map(p => <option key={p} value={p}>{p}</option>)}
+      </select></label>}
       {event ? <><label className="wm-bookmaker-event-select"><select aria-label={t('Select match', '选择比赛')} value={event.id} onChange={e => setEventId(e.currentTarget.value)}>
         {fixtures.map(f => <option key={f.id} value={f.id}>{f.home} / {f.away} · {f.provider}</option>)}
       </select></label><MatchBoard key={event.id} event={event} game={game} /></> :
@@ -112,6 +119,14 @@ export function BookmakerPanel({ payload, game = false }: { payload?: Payload; g
           t('No fixtures in the public board’s current window.', '公开看板当前时间窗内没有比赛记录。') : t('Source data is temporarily unavailable.', '来源数据暂时不可用。')}</p>
           {source?.usable && <small>{t('Window: 4 hours after start to 36 hours before start.', '窗口：开赛后 4 小时至开赛前 36 小时。')}</small>}</div>}
     </>}
+    {tab === 'coverage' && <div className="wm-bookmaker-facts">
+      <p className="wm-bookmaker-caption">{short(sport)} · {coverage.filter(c => c.category === 'sportsbook').length} {t('bookmakers in retained source data', '家博彩公司有保留报价')}</p>
+      <p className="wm-bookmaker-caption">{t('Counts cover stored feeds, including aged quotes. They are not a count of current executable offers.', '计数来自完整存储，包含保留的旧报价；不代表当前可成交报价数量。')}</p>
+      {coverage.map(c => <div className="wm-bookmaker-fact-row" key={c.book}><span><strong>{c.label}</strong><small>{c.providers.join(' · ')}</small>
+        {c.category !== 'sportsbook' && <small>{c.category === 'exchange' ? t('Exchange', '交易所') : t('Prediction market', '预测市场')}</small>}</span>
+        <b>{c.fixtures} <small>{t('matches', '场')}</small></b></div>)}
+      {!coverage.length && <p className="wm-bookmaker-empty">{t('No acquired bookmaker quotes for this project.', '此项目目前没有已采集的博彩公司报价。')}</p>}
+    </div>}
     {tab === 'facts' && <div className="wm-bookmaker-facts">
       {game && <><p className="wm-bookmaker-caption">{t('GRID · official series state; CS2 / Dota coverage depends on access.', 'GRID 官方系列赛赛况；CS2 / Dota 覆盖取决于账号权限。')}</p>
         {(payload?.items || []).filter(i => sport === 'cs2' ? /counter|cs2/i.test(i.gameTitle || '') : sport === 'dota2' ? /dota/i.test(i.gameTitle || '') : sport === 'lol' ? /league/i.test(i.gameTitle || '') : /valorant/i.test(i.gameTitle || '')).map(i =>
@@ -133,7 +148,8 @@ export function BookmakerPanel({ payload, game = false }: { payload?: Payload; g
       {!(board?.props || []).some(p => p.sport === sport) && <p className="wm-bookmaker-empty">{t('No public player-prop sample for this game.', '当前游戏没有公开道具样本。')}</p>}
     </div>}
     {board && <details className="wm-bookmaker-sources"><summary>{t('Sources & coverage', '来源与覆盖')} · {board.availableFixtures} {t('fixtures', '场比赛')}</summary>
-      {board.sources.map(s => <div key={s.id}><strong>{s.label}</strong><span>{s.usable ? s.stale || s.error ? t('Saved data', '保留数据') : t('Acquired', '已采集') : t('Unavailable', '暂不可用')}</span><small>{s.lastSuccessAt ? formatDateTime(s.lastSuccessAt) : '—'}</small></div>)}
+      {board.sources.map(s => <div key={s.id}><strong>{s.label}</strong><span>{s.usable ? s.stale || s.error ? t('Saved data', '保留数据') : t('Acquired', '已采集') : t('Unavailable', '暂不可用')}</span><small>{s.lastSuccessAt ? formatDateTime(s.lastSuccessAt) : '—'}
+        {s.fixtureCount !== undefined && ` · ${s.fixtureCount} ${t('matches', '场')} · ${s.quoteCount || 0} ${t('markets', '盘口')}`}</small></div>)}
       {board.omittedFixtures > 0 && <p>{board.omittedFixtures} {t('fixtures omitted by response size limit.', '场比赛未包含在本次有界响应中。')}</p>}
     </details>}
   </Panel>;

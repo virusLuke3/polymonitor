@@ -8,11 +8,11 @@ from urllib.parse import urlencode
 
 from api.services.panel_evidence_store import SourceSpec, collect_one, fetch_bytes, read_source
 from data_sources import source_value
-from .model import GAMES, book_category, name, parse_board, parse_guest, parse_props, parse_the_odds
+from .model import GAMES, book_category, book_key, name, parse_board, parse_guest, parse_props, parse_the_odds
 from .budget import reserve_guest
-from . import moviodds
+from . import moviodds, public_books
 
-SPORTS = ('nba', 'soccer', 'nfl', 'nhl', 'mlb', 'tennis')
+SPORTS = ('nba', 'soccer', 'nfl', 'nhl', 'mlb', 'tennis', 'mma', 'ncaab', 'ncaaf', 'wnba')
 GAME_LIST = ('lol', 'valorant', 'cs2', 'dota2')
 THE_ODDS = SourceSpec('bookmakers:the-odds-api:v1', 'The Odds API',
     'POLYDATA_THE_ODDS_API_BASE_URL', parse_the_odds, cadence=7200, stale_after=10800, retain_for=21600)
@@ -27,13 +27,12 @@ def specs():
         'POLYDATA_ODDSLINK_PUBLIC_BOARD_URL', partial(parse_board, sport=s),
         cadence=900, stale_after=1800, retain_for=7200) for s in SPORTS + GAME_LIST]
     for s in ('lol', 'valorant'):
-        result.extend([
-            SourceSpec(f'bookmakers:guest:{s}:v1', f'OddsLink daily sample · {s}',
-                'POLYDATA_ODDSLINK_TRY_URL', partial(parse_guest, sport=s), cadence=86400, stale_after=86400, retain_for=86400),
-            SourceSpec(f'bookmakers:props:{s}:v1', f'KashRock public demo · {s}',
-                'POLYDATA_KASHROCK_DEMO_PROPS_URL', partial(parse_props, sport=s), cadence=86400, stale_after=86400, retain_for=86400),
-        ])
-    return result + moviodds.specs()
+        result.append(SourceSpec(f'bookmakers:guest:{s}:v1', f'OddsLink daily sample · {s}',
+            'POLYDATA_ODDSLINK_TRY_URL', partial(parse_guest, sport=s), cadence=86400, stale_after=86400, retain_for=86400))
+    for s in GAME_LIST:
+        result.append(SourceSpec(f'bookmakers:props:{s}:v1', f'KashRock public demo · {s}',
+            'POLYDATA_KASHROCK_DEMO_PROPS_URL', partial(parse_props, sport=s), cadence=86400, stale_after=86400, retain_for=86400))
+    return result + moviodds.specs() + public_books.specs()
 
 
 def _acquire(store, spec, deadline):
@@ -43,6 +42,8 @@ def _acquire(store, spec, deadline):
         raise ValueError('Source not configured')
     if kind == 'movi':
         return moviodds.acquire(spec, deadline)
+    if kind in {*public_books.LABELS, 'portalbooks'}:
+        return public_books.acquire(store, spec, deadline)
     if kind == 'board':
         url = url.format(sport=sport)
     elif kind == 'props':
@@ -67,7 +68,8 @@ def _acquire(store, spec, deadline):
 def collect(store, *, force=False):
     deadline = time.monotonic() + 240
     from api.services.panel_evidence_store import NAMESPACE
-    ordered = sorted(specs(), key=lambda s: (store.get_stale(NAMESPACE, s.key) or {}).get('lastAttemptAt', 0))
+    ordered = sorted(specs(), key=lambda s: (s.key != public_books.PORTAL_BOOKS.key,
+        (store.get_stale(NAMESPACE, s.key) or {}).get('lastAttemptAt', 0)))
     result = {}
     for spec in ordered:
         if deadline - time.monotonic() < 45:
@@ -125,11 +127,13 @@ def read_board(store, game=False):
     sources, fixtures, props = [], [], []
     for spec in chosen:
         data, meta = read_source(store, spec)
+        meta = {**meta, 'fixtureCount': len(data.get('fixtures', [])),
+                'quoteCount': sum(len(row['quotes']) for row in data.get('fixtures', []))}
         sources.append(meta)
         for row in data.get('fixtures', []):
             # Apply taxonomy fixes to retained evidence without fetching again or
             # rewriting its acquisition clock (notably the daily guest sample).
-            quotes = [{**q, 'category': book_category(q['book'], q['category']),
+            quotes = [{**q, 'book': book_key(q['book']), 'category': book_category(q['book'], q['category']),
                        'receivedAt': meta['lastSuccessAt'], 'retentionSeconds': spec.retain_for,
                        'sampleTier': row['tier'],
                        'sourceStale': bool(q.get('sourceStale') or meta['stale']),
@@ -146,6 +150,19 @@ def read_board(store, game=False):
             unique.append(row)
     unique = merge_exact_events(unique)
     total = len(unique)
+    # Coverage is measured before bounded UI projection. Do not mistake eight
+    # visible rows or a small public window for the entire acquired universe.
+    coverage = {}
+    for row in unique:
+        for q in row['quotes']:
+            key = name(q['book'])
+            item = coverage.setdefault(key, {'book': q['book'], 'label': q['label'], 'category': q['category'],
+                'fixtures': set(), 'providers': set(), 'sports': set()})
+            item['fixtures'].add(row['id'])
+            item['providers'].add(q['provider'])
+            item['sports'].add(row['sport'])
+    coverage = [{**item, 'fixtures': len(item['fixtures']), 'providers': sorted(item['providers']),
+                 'sports': sorted(item['sports'])} for _, item in sorted(coverage.items())]
     # Round-robin projects: a full soccer board cannot suppress all other sports.
     grouped = {}
     for row in unique:
@@ -163,7 +180,15 @@ def read_board(store, game=False):
                 if candidates:
                     ordered.append(candidates.pop(0))
         grouped[sport] = ordered
-    interleaved = []
+    # First reserve one whole fixture per available provider. Otherwise a wide
+    # sports matrix can hide a newly acquired provider behind the 60-row bound.
+    interleaved, represented = [], set()
+    for rows in grouped.values():
+        for row in rows[:]:
+            if row['provider'] not in represented:
+                interleaved.append(row)
+                represented.add(row['provider'])
+                rows.remove(row)
     while any(grouped.values()) and len(interleaved) < 60:
         for rows in grouped.values():
             if rows and len(interleaved) < 60:
@@ -173,7 +198,7 @@ def read_board(store, game=False):
     clocks = [s['lastSuccessAt'] for s in sources if s['usable']]
     return {'schemaVersion': 1, 'family': 'game' if game else 'sports', 'fixtures': interleaved,
         'props': props, 'sources': sources, 'generatedAt': max(clocks) if clocks else None,
-        'availableFixtures': total, 'omittedFixtures': total - len(interleaved)}
+        'availableFixtures': total, 'omittedFixtures': total - len(interleaved), 'bookmakerCoverage': coverage}
 
 
 def attach_board(store, legacy, *, game=False):
