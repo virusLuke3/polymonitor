@@ -234,7 +234,7 @@ export function fetchRuntimeCrypto(signal?: AbortSignal) {
 }
 
 export function fetchCryptoStrategyInputs(signal?: AbortSignal): Promise<unknown> {
-  return apiGetWithTimeout('/runtime/crypto/order-flow', 10000, signal);
+  return apiGetWithTimeout('/runtime/crypto/order-flow', 35000, signal);
 }
 
 export function fetchCryptoReferenceInputs(signal?: AbortSignal): Promise<unknown> {
@@ -381,7 +381,7 @@ export function fetchRuntimeFedReactionGrowthRiskBoard(limit = 36, signal?: Abor
 }
 
 export function fetchRuntimeGeoSanctionsShock(limit = 2000, signal?: AbortSignal) {
-  return apiGet<RuntimeGeoSanctionsShockPayload>(`/runtime/world/geo-sanctions-shock?limit=${limit}`, signal);
+  return apiGetWithTimeout<RuntimeGeoSanctionsShockPayload>(`/runtime/world/geo-sanctions-shock?limit=${limit}`, 35000, signal);
 }
 
 export function fetchNaturalHazardMapSource(

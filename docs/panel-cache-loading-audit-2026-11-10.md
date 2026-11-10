@@ -104,7 +104,7 @@ WorldMonitor DeFi 的不同参数为：后台 bundle 每 30 分钟尝试采集�
 | [crypto-fear-greed](../webpage/src/panels/modules/crypto-fear-greed/index.tsx) | `finance:crypto-fear-greed:limit:6:v1`<br>IDB+LS / 128,000 | 10m / 15m / 1d / 45s | `/wm-api/runtime/finance/crypto-fear-greed?limit=6` | partial；2026-11-10T06:19:50.776666Z |
 | [crypto-etf-flow](../webpage/src/panels/modules/crypto-etf-flow/index.tsx) | `finance:crypto-etf-flow:limit:8:v1`<br>IDB+LS / 128,000 | 10m / 15m / 1d / 45s | `/wm-api/runtime/finance/crypto-etf-flow?limit=8` | proxy；2026-11-10T06:09:08.044183Z |
 | [blockchain-policy-news](../webpage/src/panels/modules/blockchain-policy-news/index.tsx) | `finance:blockchain-policy-news:limit:12:v1`<br>IDB+LS / 128,000 | 10m / 15m / 1d / 45s | `/wm-api/runtime/finance/blockchain-policy-news?limit=12` | ok；2026-11-10T06:19:54.063445Z |
-| [geo-sanctions-shock](../webpage/src/panels/modules/geo-sanctions-shock/index.tsx) | `macro:geo-sanctions-shock:latest:v2`<br>IDB / 2,000,000 | 5m / 10m / 1d / 45s | `/wm-api/runtime/world/geo-sanctions-shock?limit=2000` | ok；2026-11-10T06:09:33.922622Z |
+| [geo-sanctions-shock](../webpage/src/panels/modules/geo-sanctions-shock/index.tsx) | `macro:geo-sanctions-shock:latest:v2`<br>IDB / 2,000,000 | 5m / 10m / 1d / 60s | `/wm-api/runtime/world/geo-sanctions-shock?limit=2000` | ok；2026-11-10T06:09:33.922622Z |
 | [global-transport-shipping](../webpage/src/panels/modules/global-transport-shipping/index.tsx) | `public:global-transport-shipping:limit:14:v1`<br>IDB / 2,000,000 | 15m / 2h / 6h / 45s | `/wm-api/runtime/transport/global-shipping?limit=14` | stale；2026-11-10T03:13:26.363167Z |
 | [cpi-release-command-center](../webpage/src/panels/modules/cpi-release-command-center/index.tsx) | `macro:cpi-release-command-center:latest:v2`<br>IDB+LS / 256,000 | 30m / 45m / 18h / 45s | `/wm-api/runtime/macro/cpi-release-command-center?limit=36` | degraded；2026-11-10T06:07:28.773614Z |
 | [cpi-components-pressure-registry](../webpage/src/panels/modules/cpi-components-pressure-registry/index.tsx) | `macro:cpi-components-pressure-registry:latest:v2`<br>IDB+LS / 256,000 | 30m / 45m / 18h / 45s | `/wm-api/runtime/macro/cpi-components-pressure-registry?limit=48` | ok；2026-11-10T06:07:29.264035Z |
@@ -226,8 +226,8 @@ WorldMonitor DeFi 的不同参数为：后台 bundle 每 30 分钟尝试采集�
 | `market-detail:550186:v1` | 1m / 1m / 5m / 6s | v1 / 256,000，IDB+LS | `/wm-api/markets/550186/focus-tile` |
 | `market-chart:550186:range:1d:interval:auto:v1` | 90s / 90s / 5m / 10s | v1 / 2,000,000，IDB | `/wm-api/markets/550186/chart?range=1d&interval=5m` |
 | `market-book:v1:<id>:<yes>:<no>` | 2s / 30s / 30s / 3500ms | null，内存 | `/wm-api/runtime/lob/token/<YES/NO token>?marketId=<id>&_ts=<request>` |
-| `crypto-strategy:four-assets:v1` | 30s / 2m / 15m / 12s | v1 / 1,000,000，IDB | `/wm-api/runtime/crypto/order-flow` |
-| `crypto-history:exchange-inflows:v1` | 0（不轮询） / 1d / 1d / 12s | v1 / 1,000,000，IDB | `/wm-api/runtime/crypto/order-flow` |
+| `crypto-strategy:four-assets:v1` | 30s / 2m / 15m / 45s | v1 / 1,000,000，IDB | `/wm-api/runtime/crypto/order-flow` |
+| `crypto-history:exchange-inflows:v1` | 0（不轮询） / 1d / 1d / 45s | v1 / 1,000,000，IDB | `/wm-api/runtime/crypto/order-flow` |
 | `crypto-reference:market-data:v1` | 5s / 15s / 15m / 12s | null，内存 | `/wm-api/runtime/crypto/oracle-reference` |
 | `alpha-signal:global:token-flow-v1:8` | 2m / 5m / 15m / 45s | v2 / 96,000，IDB+LS | `/wm-api/runtime/signals/alpha?limit=8` |
 | `whale-tracker:global:trade-watch-v1:14` | 2m / 5m / 15m / 45s | v1 / 96,000，IDB+LS | `/wm-api/runtime/trades/whales?limit=14` |
@@ -548,3 +548,11 @@ WorldMonitor DeFi 的不同参数为：后台 bundle 每 30 分钟尝试采集�
 - 当前全量代码扫描不是每个市场、每个过滤条件、每个来源每条记录的业务正确性证明。10个默认关闭的Panel只做API/代码核验；不会擅自重置用户布局。报价执行资格、历史实时化、来源字段缺口与长期稳定性继续单列。
 
 发布与修复后的真实页面证据在本节后续补充；在完成前不得称已上线或全部Panel健康。
+
+### 真实上线后追加发现：回连压缩与完整响应期限
+
+`896ab394`已发布并核对公网HTML/JS入口。实际桌面恢复记录中，NBA显示8场、DeFi的持久副本10条、天气副本50城/315万字符；82份资源已写入IndexedDB。刷新后NBA没有再次发出API请求，仍显示比赛；布局值未改变。不过Geo完整网络响应仍受12s限制，Crypto Strategy受10s限制，手机冷启动亦有未完成/错误，不能据此宣称全站已恢复。
+
+定位到正式API进程端口18502后，直接完整读取Geo/共享加密/天气分别约0.091/0.424/0.244s，原始字节为1,080,267 / 327,814 / 3,213,198，均未协商出gzip。腾讯云本机经正式反向链路完整读取Geo/加密约9.44/10.13s；腾讯云对浏览器已经启用gzip，但后端到腾讯云这一段仍传输原始大JSON。另有本访问环境的ERR_NETWORK_CHANGED和一次截断响应，不能归咎于未压缩这一项或认为加长超时能消除所有故障。
+
+补充修复在既有HTTP共享钩子中，仅对三个明确公开的大快照路径提供gzip，压缩发生在回连之前；不另建缓存、不改源时间、不改采集周期，强ETag降为同语义弱ETag并保留Vary/Cache-Control。实测同内容gzip级别5估计字节为98,676 / 73,649 / 334,827。Geo总期限60s/网络35s；共享Crypto Strategy和历史总期限45s/网络35s；Contract Reference和LOB不延长。对应回归包括解压逐字节等价、原时间、协商q=0、CORS/Vary、既有编码、流式与私有路径不变，以及延迟21s完整body成功/35s停滞终止。

@@ -7,7 +7,7 @@ export const cryptoStrategyResource: PanelResource<StrategyInputs> = {
   key: 'crypto-strategy:four-assets:v1', title: 'Crypto strategy inputs',
   cache: { version: 1, storage: 'indexeddb', maxChars: 1_000_000 },
   maxAgeMs: 120000, staleAgeMs: 900000, acceptStale: true,
-  refreshPolicy: { tier: 'fast', intervalMs: 30000, staleAfterMs: 120000, requestTimeoutMs: 12000 },
+  refreshPolicy: { tier: 'fast', intervalMs: 30000, staleAfterMs: 120000, requestTimeoutMs: 45000 },
   fetch: context => fetchCryptoStrategyInputs(context?.signal), parse: parseInputs,
   updatedAt: value => Date.parse(value.generatedAt),
   statusLabel: value => value.status === 'stale' ? 'STALE' : value.status === 'partial' ? 'PARTIAL' : 'READY',
@@ -15,7 +15,7 @@ export const cryptoStrategyResource: PanelResource<StrategyInputs> = {
 export const cryptoHistoryResource: PanelResource<StrategyInputs> = {
   ...cryptoStrategyResource, key: 'crypto-history:exchange-inflows:v1', title: 'Historical exchange inflows',
   maxAgeMs: 86400000, staleAgeMs: 86400000,
-  refreshPolicy: { tier: 'bootstrap', intervalMs: 0, staleAfterMs: 86400000, requestTimeoutMs: 12000 },
+  refreshPolicy: { tier: 'bootstrap', intervalMs: 0, staleAfterMs: 86400000, requestTimeoutMs: 45000 },
 };
 export const cryptoReferenceResource: PanelResource<StrategyInputs> = {
   ...cryptoStrategyResource, key: 'crypto-reference:market-data:v1', title: 'Contract reference',

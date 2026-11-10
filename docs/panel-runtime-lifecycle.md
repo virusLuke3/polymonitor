@@ -353,3 +353,12 @@ source/check clock advancement without API substitution.
 The shared lifecycle applies broadly. Domain parsers and real upstream readiness
 must still be adopted and verified family by family; this change does not assert
 that every registered Panel is healthy or fully migrated.
+
+### Relay transfer budget
+
+Geo/Sanctions uses 60s total / 35s complete-body transport. Shared crypto strategy
+and historical inputs use 45s total / 35s transport; the contract-reference and
+LOB deadlines remain independent. The API HTTP layer negotiates gzip for these
+large public payloads and the weather payload before the Tencent relay, preserving
+source time and cache headers. See the resource contract for the exact public
+allowlist and the full audit for measured pre-compression latency.

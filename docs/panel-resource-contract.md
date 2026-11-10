@@ -282,3 +282,15 @@ SQLite owner, as specified in [the domain contract](crypto-strategy-panels.md#�
   through the approved key: a working SOCKS listener alone is insufficient.
 
 Current implementation and acceptance: [external-source recovery](external-panel-recovery-2026-11-04.md).
+
+### 大型公共快照的回连传输
+
+Geo/Sanctions、城市天气和共享 Crypto Strategy 复用既有公开只读 API 与正式
+SnapshotStore；不新增采集器或缓存。HTTP 层在后端到腾讯云回连之前，对这三个
+确定不含账户数据的 GET JSON 路径协商 gzip（级别5、至少1024字节、有压缩收益才使用）。
+保留原始payload、来源时钟和Cache-Control，追加Vary: Accept-Encoding；已有强ETag
+转为同内容的弱ETag。流式、已编码、非200、非GET和其他路径不进入此规则。
+这是传输编码，不改变fresh/retention/资格。Geo和天气总请求期限60秒、完整网络响应35秒；
+Crypto Strategy/历史读取总期限45秒、网络响应35秒。实时Contract Reference与LOB
+保留独立的严格期限。验收须比较解压后的JSON、回连前字节数和真实公网完整响应，
+不能只看响应头200或腾讯云出口已经启用了gzip。

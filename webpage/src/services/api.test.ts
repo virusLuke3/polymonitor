@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiHttpError, ApiTimeoutError, withRuntimeRequestBudget, fetchMarketsPage, fetchLatestContent, fetchRuntimePanels, fetchAviationViewport, fetchMarketWideAiSnapshot, fetchNaturalHazardMapSource, fetchRuntimeAlpha, fetchRuntimeGeoSanctionsShock, fetchRuntimeGlobalTemperatureMonitor, fetchSystemHealth, fetchWorkspaceBundle } from './api';
+import { ApiHttpError, ApiTimeoutError, withRuntimeRequestBudget, fetchMarketsPage, fetchLatestContent, fetchRuntimePanels, fetchAviationViewport, fetchMarketWideAiSnapshot, fetchNaturalHazardMapSource, fetchRuntimeAlpha, fetchRuntimeGeoSanctionsShock, fetchCryptoStrategyInputs, fetchRuntimeGlobalTemperatureMonitor, fetchSystemHealth, fetchWorkspaceBundle } from './api';
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
@@ -54,6 +54,8 @@ describe('HTTP lifecycle', () => {
   });
   it.each([
     ['temperature', () => fetchRuntimeGlobalTemperatureMonitor(), 35_000],
+    ['sanctions', () => fetchRuntimeGeoSanctionsShock(), 35_000],
+    ['crypto inputs', () => fetchCryptoStrategyInputs(), 35_000],
     ['aviation', () => fetchAviationViewport([-10, 30, 10, 50], 3), 15_000],
     ['AI snapshot', () => fetchMarketWideAiSnapshot('special'), 15_000],
   ] as const)('times out stalled %s response bodies and releases its timer', async (_name, requestData, deadline) => {
@@ -80,7 +82,9 @@ describe('HTTP lifecycle', () => {
     await vi.advanceTimersByTimeAsync(14_000); await result;
     expect(vi.getTimerCount()).toBe(0);
   });
-  it('finishes a large saved weather body after twenty seconds with one request', async () => {
+  it.each([['weather', () => fetchRuntimeGlobalTemperatureMonitor()],
+    ['sanctions', () => fetchRuntimeGeoSanctionsShock()],
+    ['crypto inputs', () => fetchCryptoStrategyInputs()]] as const)('finishes a large saved %s body after twenty seconds with one request', async (_name, requestData) => {
     vi.useFakeTimers(); vi.stubGlobal('window', globalThis);
     const payload = { status: 'ok', items: [{ cityId: 'london' }] };
     vi.stubGlobal('fetch', vi.fn(async (_url, options) => ({ ok: true,
@@ -89,7 +93,7 @@ describe('HTTP lifecycle', () => {
         options.signal.addEventListener('abort', () => { clearTimeout(timer); reject(new DOMException('Aborted', 'AbortError')); });
       }),
     })));
-    const result = expect(fetchRuntimeGlobalTemperatureMonitor()).resolves.toEqual(payload);
+    const result = expect(requestData()).resolves.toEqual(payload);
     await vi.advanceTimersByTimeAsync(21_010); await result;
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(vi.getTimerCount()).toBe(0);

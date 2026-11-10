@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import time
 import uuid
 
@@ -10,6 +11,36 @@ from werkzeug.exceptions import HTTPException
 
 from api.services import auth_service
 from api.services.signal_reads import SignalReadPending
+
+PUBLIC_LARGE_SNAPSHOTS = frozenset({
+    "/runtime/world/geo-sanctions-shock",
+    "/runtime/weather/temperature-monitor",
+    "/runtime/crypto/order-flow",
+})
+
+
+def compress_public_snapshot(response):
+    """Compress before the remote relay; preserve data and cache semantics."""
+    if (request.method != "GET" or request.path not in PUBLIC_LARGE_SNAPSHOTS
+            or response.status_code != 200 or response.mimetype != "application/json"
+            or response.is_streamed or response.direct_passthrough
+            or response.headers.get("Content-Encoding")):
+        return response
+    response.vary.add("Accept-Encoding")
+    if request.accept_encodings.quality("gzip") <= 0:
+        return response
+    body = response.get_data()
+    if len(body) < 1024:
+        return response
+    packed = gzip.compress(body, compresslevel=5, mtime=0)
+    if len(packed) >= len(body):
+        return response
+    response.set_data(packed)
+    response.headers["Content-Encoding"] = "gzip"
+    etag, _weak = response.get_etag()
+    if etag is not None:
+        response.set_etag(etag, weak=True)
+    return response
 
 
 def register_http_hooks(app, allowed_origins):
@@ -37,7 +68,7 @@ def register_http_hooks(app, allowed_origins):
         origin = request.headers.get("Origin", "").strip()
         if origin and origin in ALLOWED_ORIGINS:
             response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers["Vary"] = "Origin"
+            response.vary.add("Origin")
             response.headers["Access-Control-Allow-Headers"] = (
                 "Content-Type, Accept, X-Requested-With, X-CSRF-Token, Authorization"
             )
@@ -55,6 +86,7 @@ def register_http_hooks(app, allowed_origins):
             or request.path.startswith("/runtime/system/")
         ):
             response.headers["Cache-Control"] = "no-store"
+        response = compress_public_snapshot(response)
         app.logger.info(
             "request-end request_id=%s method=%s path=%s status=%s duration_ms=%.2f",
             request_id,
