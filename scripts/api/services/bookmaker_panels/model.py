@@ -7,7 +7,7 @@ import re
 from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlsplit
 
-GAMES = frozenset({'lol', 'valorant', 'cs2', 'dota2'})
+GAMES = frozenset({'lol', 'valorant', 'cs2', 'dota2', 'r6'})
 PRIORITY = ('bet365', 'pinnacle', 'stake', 'ggbet', 'thunderpick', 'draftkings', 'fanduel', 'betmgm')
 
 

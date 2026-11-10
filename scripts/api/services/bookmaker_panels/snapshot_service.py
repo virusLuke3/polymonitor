@@ -10,6 +10,7 @@ from api.services.panel_evidence_store import SourceSpec, collect_one, fetch_byt
 from data_sources import source_value
 from .model import GAMES, book_category, name, parse_board, parse_guest, parse_props, parse_the_odds
 from .budget import reserve_guest
+from . import moviodds
 
 SPORTS = ('nba', 'soccer', 'nfl', 'nhl', 'mlb', 'tennis')
 GAME_LIST = ('lol', 'valorant', 'cs2', 'dota2')
@@ -32,7 +33,7 @@ def specs():
             SourceSpec(f'bookmakers:props:{s}:v1', f'KashRock public demo · {s}',
                 'POLYDATA_KASHROCK_DEMO_PROPS_URL', partial(parse_props, sport=s), cadence=86400, stale_after=86400, retain_for=86400),
         ])
-    return result
+    return result + moviodds.specs()
 
 
 def _acquire(store, spec, deadline):
@@ -40,6 +41,8 @@ def _acquire(store, spec, deadline):
     url = source_value(spec.url_env)
     if not url:
         raise ValueError('Source not configured')
+    if kind == 'movi':
+        return moviodds.acquire(spec, deadline)
     if kind == 'board':
         url = url.format(sport=sport)
     elif kind == 'props':
@@ -98,20 +101,25 @@ def merge_exact_events(fixtures):
             continue
         target = groups[key]
         target['providerFixtureIds'].append(row['id'])
+        if row.get('fetchedAt') and row['fetchedAt'] > target.get('fetchedAt', ''):
+            target['fetchedAt'] = row['fetchedAt']
+        target['tier'] = 'merged-feed'
+        if row.get('score') is not None and (row.get('scoreUpdatedAt') or '') > (target.get('scoreUpdatedAt') or ''):
+            target.update({k: row.get(k) for k in ('score', 'scoreUpdatedAt', 'period', 'inPlay')})
         def identity(q):
             return (name(q['book']), q['category'], q['market'], q['period'],
                     tuple(sorted((name(o['name']), o['point']) for o in q['outcomes'])))
         quotes = {identity(q): q for q in target['quotes']}
         for q in row['quotes']:
             old = quotes.get(identity(q))
-            if old is None or (q['sourceUpdatedAt'] or '') > (old['sourceUpdatedAt'] or ''):
+            if old is None or (q.get('sourceCheckedAt') or q['sourceUpdatedAt'] or '') > (old.get('sourceCheckedAt') or old['sourceUpdatedAt'] or ''):
                 quotes[identity(q)] = q
         target['quotes'] = list(quotes.values())
     return list(groups.values())
 
 
 def read_board(store, game=False):
-    chosen = [s for s in specs() if (s.key.split(':')[2] in GAMES) == game]
+    chosen = [s for s in specs() if (s.key.split(':')[2] in GAMES or s.key.split(':')[2] == 'esports') == game]
     if not game:
         chosen.append(THE_ODDS)
     sources, fixtures, props = [], [], []
@@ -121,12 +129,16 @@ def read_board(store, game=False):
         for row in data.get('fixtures', []):
             # Apply taxonomy fixes to retained evidence without fetching again or
             # rewriting its acquisition clock (notably the daily guest sample).
-            quotes = [{**q, 'category': book_category(q['book'], q['category'])} for q in row['quotes']]
+            quotes = [{**q, 'category': book_category(q['book'], q['category']),
+                       'receivedAt': meta['lastSuccessAt'], 'retentionSeconds': spec.retain_for,
+                       'sampleTier': row['tier'],
+                       'sourceStale': bool(q.get('sourceStale') or meta['stale']),
+                       'sourceError': meta['error']} for q in row['quotes']]
             fixtures.append({**row, 'quotes': quotes, 'fetchedAt': meta['lastSuccessAt'], 'sourceStale': meta['stale'],
                              'sourceError': meta['error']})
         props.extend({**p, 'fetchedAt': meta['lastSuccessAt']} for p in data.get('props', []))
     # A daily guest fixture must not duplicate the same provider's current board.
-    fixtures.sort(key=lambda x: (x['tier'] != 'public-board', x['startTime'], x['id']))
+    fixtures.sort(key=lambda x: (not bool(x['quotes']), x['tier'] == 'daily-sample', x['startTime'], x['id']))
     seen, unique = set(), []
     for row in fixtures:
         if row['id'] not in seen:
@@ -138,6 +150,19 @@ def read_board(store, game=False):
     grouped = {}
     for row in unique:
         grouped.setdefault(row['sport'], []).append(row)
+    # A wide aggregate matrix must not consume the response before the newly
+    # acquired independent provider is visible for that sport. Identity remains
+    # exact; this is projection order, not fuzzy merging of team aliases.
+    for sport, rows in grouped.items():
+        providers = {}
+        for row in rows:
+            providers.setdefault(row['provider'], []).append(row)
+        ordered = []
+        while any(providers.values()):
+            for candidates in providers.values():
+                if candidates:
+                    ordered.append(candidates.pop(0))
+        grouped[sport] = ordered
     interleaved = []
     while any(grouped.values()) and len(interleaved) < 60:
         for rows in grouped.values():

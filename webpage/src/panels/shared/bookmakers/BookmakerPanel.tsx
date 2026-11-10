@@ -20,7 +20,7 @@ function MatchBoard({ event, game }: { event: Fixture; game: boolean }) {
   const quotes = choices.filter(q => lineKey(q) === chosenLine);
   const labels = (quotes[0]?.outcomes || []).map(o => o.name).sort((a, b) =>
     Number(same(b, event.home)) - Number(same(a, event.home)) || Number(same(a, 'Draw')) - Number(same(b, 'Draw')));
-  const winner = event.quotes.filter(q => event.tier !== 'daily-sample' && q.market === 'h2h' && q.category === 'sportsbook' && quoteCurrent(q));
+  const winner = event.quotes.filter(q => event.tier !== 'daily-sample' && q.sampleTier !== 'daily-sample' && q.market === 'h2h' && q.category === 'sportsbook' && quoteCurrent(q));
   const hasDraw = winner.some(q => q.outcomes.length === 3);
   const eligible = [...new Map(winner.filter(q => q.outcomes.length === (hasDraw ? 3 : 2)).map(q => [q.book, q])).values()];
   const sides = [event.home, ...(hasDraw ? ['Draw'] : []), event.away];
@@ -30,14 +30,19 @@ function MatchBoard({ event, game }: { event: Fixture; game: boolean }) {
   function rows(items: Quote[]) {
     return items.map((q, i) => <tr key={`${q.book}:${q.market}:${i}`} className={quoteCurrent(q) ? '' : 'wm-bookmaker-aged'}>
       <th scope="row"><span>{safeLink(q.url) ? <a href={safeLink(q.url)} target="_blank" rel="noopener noreferrer">{q.label} ↗</a> : q.label}</span>
-        <small>{q.sourceUpdatedAt ? formatRelativeTime(q.sourceUpdatedAt) : t('Time unknown', '报价时间未知')}</small></th>
+        <small>{q.suspended ? t('Suspended', '已封盘') : q.sourceCheckedAt
+          ? `${t('Confirmed', '核实于')} ${formatRelativeTime(q.sourceCheckedAt)}`
+          : q.sourceUpdatedAt ? formatRelativeTime(q.sourceUpdatedAt) : t('Time unknown', '报价时间未知')}</small>
+        {q.provider === 'moviodds' && <small>MoviOdds · {q.phase === 'inplay' ? t('In play', '滚球') : t('Pre-match', '赛前')}</small>}</th>
       {labels.map((label, j) => { const o = q.outcomes.find(o => same(o.name, label)); return <td key={label} data-side={j === 0 ? 'a' : j === labels.length - 1 ? 'b' : 'draw'}>
-        <b>{o?.decimal.toFixed(2) ?? '—'}</b><small>{o ? `${o.point == null ? '' : `${o.point > 0 ? '+' : ''}${o.point} · `}${percent(o.probability)}` : '—'}</small>
+        <b>{q.suspended ? '—' : o?.decimal.toFixed(2) ?? '—'}</b><small>{o && !q.suspended ? `${o.point == null ? '' : `${o.point > 0 ? '+' : ''}${o.point} · `}${percent(o.probability)}` : '—'}</small>
       </td>; })}
     </tr>);
   }
   return <>
     <div className="wm-bookmaker-event-meta"><span>{event.competition}</span><time dateTime={event.startTime}>{formatDateTime(event.startTime)}</time></div>
+    {event.score && <p className="wm-bookmaker-caption">{t('Bookmaker-reported score', '博彩来源报告比分')} · <strong>{event.score}</strong>
+      {event.scoreUpdatedAt && ` · ${formatRelativeTime(event.scoreUpdatedAt)}`}</p>}
     <div className={`wm-bookmaker-versus ${hasDraw ? 'three-way' : ''}`}>
       {sides.map((side, i) => <div key={side} data-side={i === 0 ? 'a' : i === sides.length - 1 ? 'b' : 'draw'}>
         <strong>{side}</strong><b>{probabilities[i] == null ? '—' : percent(probabilities[i]!)}</b>
@@ -70,6 +75,7 @@ function MatchBoard({ event, game }: { event: Fixture; game: boolean }) {
     </details>}
     <details className="wm-bookmaker-method"><summary>{t('Prices & coverage', '报价与覆盖口径')}</summary>
       <p>{t('Decimal odds; the smaller percentage below each price removes that bookmaker’s margin proportionally. Older or undated quotes are excluded from the headline. Full match/series only; bookmaker rules can differ.', '上方为十进制赔率，下方为该公司比例去水概率。旧报价和时间未知报价不计入主数字。这里只比较完整比赛或系列赛，博彩公司结算规则可能不同。')}</p>
+      <p>{t('For MoviOdds, market confirmation time is separate from the last price change. Suspended or unconfirmed markets do not enter the average. Snapshots are collected every five minutes; in-play quotes older than two minutes are excluded.', 'MoviOdds 的市场核实时间与最后变价时间分开。封盘或未核实的市场不计入均值。每五分钟采集快照，滚球报价超过两分钟即退出当前均值。')}</p>
       <p>{[...new Set(event.quotes.map(q => q.provider))].join(' + ')} · {t('Received', '采集于')} {formatDateTime(event.fetchedAt)}</p>
     </details>
   </>;

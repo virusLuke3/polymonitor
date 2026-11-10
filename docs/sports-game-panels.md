@@ -17,6 +17,24 @@ OddsPapi、认证版 OddsLink / KashRock 需要尚未配置的密钥，不能把
 
 ## 获取、存储与恢复
 
+### MoviOdds 补充链路
+
+MoviOdds 是第三方 bet365 报价来源，补进同一 Sports / Game，不替代 GRID 的官方赛况身份。配置读取 `POLYDATA_MOVIODDS_BASE_URL`、可选 `POLYDATA_MOVIODDS_API_KEY`，代理沿用 `.env` 的来源路由。它的免费访问规则以当前响应为准，401/403 停止并保留错误，不寻找他人的密钥。
+
+当前落地范围为七个项目的有界 REST 主盘口快照：足球、篮球、网球、美式足球、冰球、棒球及电竞，每五分钟到期采集；按来源实际 group 过滤，赛前和滚球 group 分开。沿用 bookmaker owner、正式 evidence SQLite、SnapshotStore 和只读 API，不再创建重复历史库或页面取数。单来源 45 秒完整尝试、最多两次，整轮仍 240 秒；响应上限 8 MiB、规范化 2 MiB，未执行来源下轮优先。新源 10 分钟标旧、30 分钟停止展示；来源级失败保留原成功时间。原有来源周期与付费额度不变。
+
+`ts` 是价格变化时间，`group_status[group].polled_at` 是该市场最近核实时间，两者单独保存；不能拿本次抓取时间给旧报价续期。该来源缺少 group 核实时钟的报价不参与主概率。封盘、上游 stale、采集失败的保留值及滚球采集超过两分钟的值不参与当前共识。匿名 API 不承诺一秒更新，本轮页面消费仍按已有分钟级 Runtime。
+
+方向只读取来源明确的 `side` / `label` 并核对双方实体；`sel_id` 仅作为身份，禁止按数字大小或数组位置猜主客。不同 group、market_id、盘口线、比赛阶段及期间先隔离再验完整双边／三边。足球保留平局；地图盘不能混进系列赛；电竞篮球不能归为 NBA。源端预热空响应是失败，合法空窗口才可覆盖旧目录。不同源只有精确队名与开赛时间一致才合并；报价独立保留采集时间和错误，避免其他源给旧值续期。
+
+WebSocket、历史、收盘和赛果接口分别验证能力，不因握手 101 就宣称增量采集已上线；本轮 REST 快照与既有历史证据是生产更新链。Pinnacle 报价继续复用已接入聚合源；公开访客配置访问失败不能描述成已接入直连。后续流式接入需另外验证 snapshot/delta/remove/resync、断线封旧、重新快照及历史容量预算。
+
+2026-11-10 北京时间约 10:10–10:24 实测：匿名 MoviOdds REST 返回有效 JSON；七个主盘口源分别写入正式 evidence 与 snapshot，原始哈希和规范化读回逐一相同。电竞当轮 22 场（LoL 4、CS2 4、Dota 2 8、R6 6），Valorant 无当轮记录；篮球当轮 133 场规范化记录中含 NBA 13 场，明确排除了电竞篮球。棒球过滤后的主盘口为空，未伪造报价。网站单次响应仍有 60 场及字节上限，按项目及来源轮转展示，并报告未包含场数。
+
+同轮 LoL 四场与本机 Polymarket 目录独立匹配：FENNEL / Nothin'Here、Ground Zero Gaming / Frank Esports、Bilibili Gaming / Gen.G 三场满足游戏、双方与开赛时间；Saigon Warriors / Team Gromp 因别名未核实保留未匹配。结算规则等价四场均未核实，不计算可执行套利。WS 单次 20 秒连接收到两份真实 snapshot 及 polled 消息，超过仅握手的验证，但不是生产常驻订阅验收。Pinnacle 公开配置在现有出口返回 403，未启用新访客直连；现有聚合报价继续工作。
+
+协议依据：[MoviOdds 当前文档](https://moviodds.com/doc)、[项目及盘口类型](https://moviodds.com/docs/sports/)。当前文档说明 API key 暂时可选；不得把旧“永久无密钥、所有字段都实时”的描述固化为契约。解析与恢复测试覆盖明确 side、缺失 label、封盘、市场核实与变价时钟、混合盘口线、完整三项胜负、预热响应拒绝、跨来源保留期限。此段为采集实测记录，最终公网展示另行验收。
+
 - 公共看板每 15 分钟检查；调度器每 5 分钟唤醒，持久化 `nextAttemptAt` 防止多实例重复获取。单次 45 秒，两次完整尝试，整轮 240 秒，未执行的来源下轮优先。
 - guest 额度通过 `.env` 的 `POLYDATA_BOOKMAKER_QUOTA_SQLITE_PATH` 指向同一个持久账本；研究工具和正式采集即使使用不同快照库，也不能各自获得 5 次额度。额度耗尽后等到下一个 UTC 日。
 - 复用 `panel_evidence_store`：原始响应与规范化版本先写压缩 SQLite evidence，再发布源状态到 `SnapshotStore`。失败保留原始成功时间，不把空失败写成成功；429 遵守 Retry-After，401/403 不轮换出口绕过限制。

@@ -22,6 +22,23 @@ describe('bookmaker snapshots', () => {
     expect(quoteCurrent({ ...quote, sourceUpdatedAt: new Date(now - 1900_000).toISOString() }, now)).toBe(false);
     expect(quoteCurrent(quote, now)).toBe(true);
   });
+  it('uses provider market confirmation without overwriting the price-change clock', () => {
+    const unchanged = { ...quote, sourceUpdatedAt: new Date(now - 86400_000).toISOString(), sourceCheckedAt: new Date(now).toISOString() };
+    expect(quoteCurrent(unchanged, now)).toBe(true);
+    expect(quoteCurrent({ ...unchanged, sourceCheckedAt: null }, now)).toBe(false);
+    expect(quoteCurrent({ ...unchanged, suspended: true }, now)).toBe(false);
+    expect(quoteCurrent({ ...unchanged, sourceStale: true }, now)).toBe(false);
+    expect(quoteCurrent({ ...unchanged, sourceError: 'HTTP 502' }, now)).toBe(false);
+    expect(quoteCurrent({ ...unchanged, phase: 'inplay' }, now + 120_001)).toBe(false);
+  });
+  it('expires each source quote even when another provider renews the fixture', () => {
+    const mixed: Payload = structuredClone(base);
+    mixed.bookmakerBoard.fixtures[0]!.quotes.push({ ...quote, provider: 'moviodds',
+      receivedAt: new Date(now - 1800_001).toISOString(), retentionSeconds: 1800 });
+    const expired = expire(mixed, now);
+    expect(expired.bookmakerBoard.fixtures[0]!.quotes).toHaveLength(1);
+    expect(expire(expired, now)).toBe(expired);
+  });
   it('expires recovered browser data without another network response', () => {
     expect(expire(base, now + 7200_001).bookmakerBoard.fixtures).toHaveLength(0);
   });

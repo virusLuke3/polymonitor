@@ -4,9 +4,12 @@ import type { RuntimeGridEsportsItem } from '@/types';
 
 export type Outcome = { name: string; decimal: number; implied: number; probability: number; point: number | null };
 export type Quote = { book: string; label: string; category: string; market: string; period: string; provider: string;
-  sourceUpdatedAt: string | null; url: string | null; overround: number; outcomes: Outcome[] };
+  sourceUpdatedAt: string | null; sourceCheckedAt?: string | null; suspended?: boolean;
+  phase?: string; sampleTier?: string; sourceStale?: boolean; sourceError?: string | null; receivedAt?: string; retentionSeconds?: number;
+  url: string | null; overround: number; outcomes: Outcome[] };
 export type Fixture = { id: string; provider: string; tier: string; sport: string; competition: string;
-  home: string; away: string; startTime: string; fetchedAt: string; sourceStale: boolean; sourceError: string | null; quotes: Quote[] };
+  home: string; away: string; startTime: string; fetchedAt: string; sourceStale: boolean; sourceError: string | null; quotes: Quote[];
+  inPlay?: boolean; score?: string | null; scoreUpdatedAt?: string | null; period?: string | number | null };
 export type Source = { id: string; label: string; usable: boolean; stale: boolean; error: string | null; lastSuccessAt: string | null };
 export type Prop = { id: string; sport: string; player: string; stat: string; line: number; decimal: number;
   direction: string; book: string; startTime: string | null; url: string | null; fetchedAt: string };
@@ -21,7 +24,12 @@ const text = (x: unknown): x is string => typeof x === 'string' && x.length <= 2
 const date = (x: unknown) => text(x) && Number.isFinite(Date.parse(x));
 const nullableText = (x: unknown) => x === null || text(x);
 export const safeLink = (x: unknown) => { try { const u = new URL(String(x)); return u.protocol === 'https:' && !u.username && !u.password ? u.href : undefined; } catch { return undefined; } };
-export const quoteCurrent = (q: Quote, now = Date.now()) => !!q.sourceUpdatedAt && Date.parse(q.sourceUpdatedAt) <= now + 60_000 && now - Date.parse(q.sourceUpdatedAt) < 30 * 60_000;
+export const quoteCurrent = (q: Quote, now = Date.now()) => {
+  const clock = q.sourceCheckedAt !== undefined ? q.sourceCheckedAt : q.sourceUpdatedAt;
+  const maxAge = q.phase === 'inplay' ? 120_000 : 1800_000;
+  return !q.suspended && !q.sourceStale && !q.sourceError && !!clock &&
+    Date.parse(clock) <= now + 60_000 && now - Date.parse(clock) < maxAge;
+};
 export const lineKey = (q: Quote) => q.market === 'h2h' ? String(q.outcomes.length) : q.outcomes.map(o => `${o.name}:${o.point}`).sort().join('|');
 export const teamKey = (value: string) => value.toLocaleLowerCase().replace(/[^\p{L}\p{N}_]/gu, '');
 
@@ -29,6 +37,12 @@ function validQuote(q: unknown): q is Quote {
   return object(q) && ['book', 'label', 'category', 'market', 'period', 'provider'].every(k => text(q[k])) &&
     ['h2h', 'spreads', 'totals'].includes(String(q.market)) && nullableText(q.url) &&
     (q.sourceUpdatedAt === null || date(q.sourceUpdatedAt)) && finite(q.overround) &&
+    (q.sourceCheckedAt === undefined || q.sourceCheckedAt === null || date(q.sourceCheckedAt)) &&
+    (q.receivedAt === undefined || date(q.receivedAt)) &&
+    (q.retentionSeconds === undefined || finite(q.retentionSeconds) && q.retentionSeconds > 0) &&
+    (q.suspended === undefined || typeof q.suspended === 'boolean') &&
+    (q.sourceStale === undefined || typeof q.sourceStale === 'boolean') &&
+    (q.sourceError === undefined || nullableText(q.sourceError)) &&
     Array.isArray(q.outcomes) && [2, 3].includes(q.outcomes.length) && q.outcomes.every(o => object(o) && text(o.name) &&
       finite(o.decimal) && o.decimal > 1 && finite(o.implied) && o.implied > 0 && o.implied < 1 &&
       finite(o.probability) && o.probability > 0 && o.probability < 1 && (o.point === null || finite(o.point))) &&
@@ -57,8 +71,12 @@ export function parsePayload(value: unknown, game: boolean): Payload {
 }
 
 export function expire(value: Payload, now: number): Payload {
-  const fixtures = value.bookmakerBoard.fixtures.filter(f => {
-    const ttl = f.tier === 'daily-sample' ? 86400_000 : f.tier === 'quota-feed' ? 21600_000 : 7200_000;
+  const fixtures = value.bookmakerBoard.fixtures.map(f => {
+    const quotes = f.quotes.filter(q => !q.receivedAt || q.retentionSeconds === undefined ||
+      now - Date.parse(q.receivedAt) < q.retentionSeconds * 1000);
+    return quotes.length === f.quotes.length ? f : { ...f, quotes };
+  }).filter(f => {
+    const ttl = f.tier === 'daily-sample' ? 86400_000 : f.tier === 'quota-feed' ? 21600_000 : f.tier === 'mirror-feed' ? 1800_000 : 7200_000;
     const age = now - Date.parse(f.fetchedAt);
     return age >= -60_000 && age < ttl;
   });
@@ -67,7 +85,7 @@ export function expire(value: Payload, now: number): Payload {
   const items = value.items.length && (!value.officialGeneratedAt || now - Date.parse(value.officialGeneratedAt) >= 900_000)
     ? [] : value.items;
   const props = value.bookmakerBoard.props.filter(p => now - Date.parse(p.fetchedAt) < 86400_000);
-  if (fixtures.length === value.bookmakerBoard.fixtures.length && props.length === value.bookmakerBoard.props.length && items === value.items) return value;
+  if (fixtures.length === value.bookmakerBoard.fixtures.length && fixtures.every((f, i) => f === value.bookmakerBoard.fixtures[i]) && props.length === value.bookmakerBoard.props.length && items === value.items) return value;
   return { ...value, items, bookmakerBoard: { ...value.bookmakerBoard, fixtures, props } };
 }
 export function bookmakerSnapshot(game: boolean): PanelSnapshotContract<unknown> {
