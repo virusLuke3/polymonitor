@@ -150,6 +150,8 @@ HTTP、查询、连接、并发和容量预算：
 
 Broker Research 继续由 Finance watch owner 采集并写入 `runtime:finance:broker-research-watch / v1`，API 只读、浏览器复用原 Runtime。Edison 配置应指向官网公开研报列表，而不是研究业务介绍页；当前列表身份存于私有配置。报告标题未含股票代码时，只读取报告表格中明确的 `Code` 字段，不从正文任意大写词猜测。公司名、报告发布时间和原文链接保留；缺少目标价不补造目标价。每个来源仍最多 10 篇候选，列表 16 秒、单详情 12 秒，沿用原刷新、缓存与共享资源预算。来源没有可解析代码或仅提供客户端页面时保持 empty/no-links/partial，不能仅因列表 HTTP 200 标为采集成功。当前验收另见当次数据可靠性记录。
 
+部署统一来源配置时必须包含 `polymonitor-external-panels@` 的定时采集任务，不能只更新常驻 watcher。现有启动器调用 `load_environment()`；部署 override 设置 `POLYMONITOR_ENV_FILE` 指向该部署的私有主配置，并用 `UnsetEnvironment=POLYDATA_DISABLE_DOTENV POLYMONITOR_SOURCE_ROUTES_JSON POLYMONITOR_SOURCE_ROUTES_FILE` 去掉旧 EnvironmentFile 的传输覆盖。其他端点、凭据、存储位置和资源预算保留。仅修改磁盘 `.env` 不会覆盖已经存在的进程变量；必须检查下一次正式进程的配置与成功采集时间。已有活跃一次性任务允许完成，下一轮按各来源 due 时间读取，禁止清除限流冷却或强制全量重采。 Cleveland Fed Nowcast 的公开 HTML 也走既有 SourceSession 来源路由；路线配置属于正式采集进程，不能只验证命令行探针。来源报告的 Updated 日期与本次成功采集时间继续分开保留。
+
 组合 `generatedAt` 和每行 `fetchedAt` 保持原始来源时间；沿用 15 分钟新鲜阈值及 30 分钟最大保留时间，单行先按自己的时钟过期，缺失或无效组合时钟不能改用读取时间。浏览器检查周期、字段单位、来源退避和网络预算不变；每次读取仅查询既有有界快照，最多返回 36 行。针对测试验证最新源立即可见、禁止 HTTP/写入、保留行时钟及过期边界；部署后仍需核对正式 API 的源时钟与 SQLite，不能用单元测试代替运行验收。
 
 这里的旧 Finance Stablecoin 接口只投影外源供应/价格数据；当前前端 `stablecoin-monitor` 使用 [Crypto Strategy owner](crypto-strategy-panels.md)，不属于此次接口修复。

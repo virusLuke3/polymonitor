@@ -1,5 +1,6 @@
 # 全量 Panel 新数据与传输恢复记录（2026-11-10）
 
+后续修复与全 121 项线上复验见 [第二轮数据可靠性记录](panel-data-reliability-2026-11-10.md)；以下保留当时的失败和验收边界。
 这是当次修复和观察记录，不是全站长期健康声明。缓存/TTL/WorldMonitor 完整参数仍见 [前次逐项审计](panel-cache-loading-audit-2026-11-10.md)；当前约束见 [数据链路](website-data-link.md)、[天气](weather-panel-runtime.md)、[宏观](macro-panel-data-contract.md) 与 [Agent](../agent/README.md)。
 
 ## 范围与结果边界
