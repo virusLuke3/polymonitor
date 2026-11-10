@@ -433,7 +433,8 @@ test('verification pending polls past the failure retry budget without renewing 
   await page.clock.runFor(100);
   expect(await page.evaluate(() => window.frontendHarness.runtime!.getStatus('shared').retryPending ?? false)).toBe(false);
   await page.evaluate(() => { void window.frontendHarness.runtime!.refreshIds(['shared']); });
-  for (let i = 0; i < 28; i++) {
+  // Exhaust the shared 45-second verification budget without renewing source data.
+  for (let i = 0; i < 40; i++) {
     await page.evaluate(() => window.frontendHarness.rejectVerification(window.frontendHarness.requests.length - 1));
     await page.clock.runFor(1200);
   }

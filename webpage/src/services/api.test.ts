@@ -53,7 +53,7 @@ describe('HTTP lifecycle', () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
   it.each([
-    ['temperature', () => fetchRuntimeGlobalTemperatureMonitor(), 12_000],
+    ['temperature', () => fetchRuntimeGlobalTemperatureMonitor(), 35_000],
     ['aviation', () => fetchAviationViewport([-10, 30, 10, 50], 3), 15_000],
     ['AI snapshot', () => fetchMarketWideAiSnapshot('special'), 15_000],
   ] as const)('times out stalled %s response bodies and releases its timer', async (_name, requestData, deadline) => {
@@ -78,6 +78,20 @@ describe('HTTP lifecycle', () => {
     const request = fetchAviationViewport([-10, 30, 10, 50], 3);
     const result = expect(request).resolves.toEqual(payload);
     await vi.advanceTimersByTimeAsync(14_000); await result;
+    expect(vi.getTimerCount()).toBe(0);
+  });
+  it('finishes a large saved weather body after twenty seconds with one request', async () => {
+    vi.useFakeTimers(); vi.stubGlobal('window', globalThis);
+    const payload = { status: 'ok', items: [{ cityId: 'london' }] };
+    vi.stubGlobal('fetch', vi.fn(async (_url, options) => ({ ok: true,
+      json: () => new Promise((resolve, reject) => {
+        const timer = setTimeout(() => resolve(payload), 21_000);
+        options.signal.addEventListener('abort', () => { clearTimeout(timer); reject(new DOMException('Aborted', 'AbortError')); });
+      }),
+    })));
+    const result = expect(fetchRuntimeGlobalTemperatureMonitor()).resolves.toEqual(payload);
+    await vi.advanceTimersByTimeAsync(21_010); await result;
+    expect(fetch).toHaveBeenCalledTimes(1);
     expect(vi.getTimerCount()).toBe(0);
   });
   it('accepts a stored AI snapshot taking longer than eight seconds without regenerating it', async () => {

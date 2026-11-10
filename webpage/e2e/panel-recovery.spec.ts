@@ -42,6 +42,15 @@ test('fifteen-minute resources recover on the WorldMonitor retry sequence and pu
   expect(await count(page)).toBe(7); // Old failure timer cannot fire after recovery.
 });
 
+test('a failed cold read keeps its error visible while automatic recovery is pending', async ({ page }) => {
+  await mount(page, 'recovery-runtime');
+  await page.evaluate(() => window.frontendHarness.requests[0].reject(new Error('network failed')));
+  await page.clock.runFor(17_000);
+  expect(await count(page)).toBe(2);
+  expect(await page.evaluate(() => window.frontendHarness.runtime!.getStatus('shared')))
+    .toMatchObject({ phase: 'error', fetching: true, error: 'network failed' });
+});
+
 test('returning to the tab recovers failures without reload or overlapping probes', async ({ page }) => {
   await mount(page, 'recovery-runtime');
   await page.evaluate(() => window.frontendHarness.requests[0].reject(new Error('network failed')));

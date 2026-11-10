@@ -1,19 +1,19 @@
 import type { PanelSnapshotContract } from '../resource-cache';
 import { RuntimeResponseError, runtimeTimestamp } from '../runtime-store';
-import { resourceIsCurrent } from '../resource-cache';
+import { PUBLIC_OVERVIEW_RETENTION_MS, resourceIsCurrent } from '../resource-cache';
 
 // Explicit public owners only. Account data, execution quotes and map/weather
 // resources keep their domain contracts; a renderer never opts in implicitly.
 const policies = {
-  'nba-scoreboard': { fresh: 180_000, retain: 900_000, identity: ['id', 'name'] },
-  'nba-intel': { fresh: 180_000, retain: 900_000, identity: ['headline', 'url'] },
-  'espn-matchup-predictor': { fresh: 180_000, retain: 900_000, identity: ['eventId', 'name'] },
-  'esports-intel': { fresh: 240_000, retain: 900_000, identity: ['id'] },
-  'sports-odds': { fresh: 3 * 3_600_000, retain: 6 * 3_600_000, identity: ['id'] },
-  'jin10-flash': { fresh: 300_000, retain: 1_800_000, identity: ['id', 'text', 'title'] },
-  'f1-trackside': { fresh: 300_000, retain: 1_800_000, identity: ['id', 'title'] },
-  'defi-token-watch': { fresh: 900_000, retain: 1_800_000, identity: ['id', 'symbol', 'name'] },
-  'new-market-signals': { fresh: 900_000, retain: 1_800_000, identity: ['marketId', 'title'] },
+  'nba-scoreboard': { fresh: 180_000, identity: ['id', 'name'] },
+  'nba-intel': { fresh: 180_000, identity: ['headline', 'url'] },
+  'espn-matchup-predictor': { fresh: 180_000, identity: ['eventId', 'name'] },
+  'esports-intel': { fresh: 240_000, identity: ['id'] },
+  'sports-odds': { fresh: 3 * 3_600_000, identity: ['id'] },
+  'jin10-flash': { fresh: 300_000, identity: ['id', 'text', 'title'] },
+  'f1-trackside': { fresh: 300_000, identity: ['id', 'title'] },
+  'defi-token-watch': { fresh: 900_000, identity: ['id', 'symbol', 'name'] },
+  'new-market-signals': { fresh: 900_000, identity: ['marketId', 'title'] },
 } as const;
 type PublicFeedId = keyof typeof policies;
 const object = (value: unknown): value is Record<string, unknown> => value != null && typeof value === 'object' && !Array.isArray(value);
@@ -44,13 +44,15 @@ export function publicFeedSnapshot(panelId: PublicFeedId, limit: number): PanelS
   const revalidate = (value: unknown, now: number): unknown => {
     if (panelId !== 'defi-token-watch' || !object(value) || !Array.isArray(value.items)) return value;
     const items = value.items.filter(row => object(row) && resourceIsCurrent(
-      runtimeTimestamp({ generatedAt: row.sourceFetchedAt || row.fetchedAt || value.generatedAt }), policy.retain, now));
-    return items.length === value.items.length ? value : { ...value, items, status: 'stale',
+      runtimeTimestamp({ generatedAt: row.sourceFetchedAt || row.fetchedAt || value.generatedAt }), PUBLIC_OVERVIEW_RETENTION_MS, now));
+    const stale = items.some(row => !resourceIsCurrent(
+      runtimeTimestamp({ generatedAt: row.sourceFetchedAt || row.fetchedAt || value.generatedAt }), policy.fresh, now));
+    return items.length === value.items.length && (!stale || value.status === 'stale') ? value : { ...value, items, status: 'stale',
       summary: { ...(object(value.summary) ? value.summary : {}), count: items.length } };
   };
   return {
     key: `public-feed:${panelId}:limit:${limit}:v1`, cache: { version: 1, maxChars: 128_000 },
-    maxAgeMs: policy.fresh, staleAgeMs: policy.retain, acceptStale: true,
+    maxAgeMs: policy.fresh, staleAgeMs: PUBLIC_OVERVIEW_RETENTION_MS, acceptStale: true,
     updatedAt: runtimeTimestamp,
     revalidate,
     parse: value => {

@@ -21,8 +21,8 @@ describe('public feed persistence contracts', () => {
     const value = { generatedAt: old, status: 'stale', items: [{ id: 'uni', price: 7 }] };
     const panel = { id: 'defi-token-watch', snapshot: contract } as PanelModule;
     expect(parseRuntimeSnapshot(panel, value)).toMatchObject({ generatedAt: old, status: 'stale' });
-    expect(() => parseRuntimeSnapshot(panel, { ...value, generatedAt: new Date(Date.now() - 31 * 60_000).toISOString() })).toThrow('overdue');
-    expect(contract.parse({ ...value, status: 'ok', sources: { provider: 'error' } })).toMatchObject({ status: 'degraded' });
+    expect(() => parseRuntimeSnapshot(panel, { ...value, generatedAt: new Date(Date.now() - 24 * 60 * 60_000).toISOString() })).toThrow('overdue');
+    expect(contract.parse({ ...value, generatedAt, status: 'ok', sources: { provider: 'error' } })).toMatchObject({ status: 'degraded' });
   });
   it('validates nested lineups and feed cards without losing legitimate empty results', () => {
     const nba = publicFeedSnapshot('nba-intel', 12);
@@ -36,7 +36,7 @@ describe('public feed persistence contracts', () => {
   });
   it('expires retained token rows by their own acquisition clock even under a newer seed', () => {
     const contract = publicFeedSnapshot('defi-token-watch', 10);
-    const old = new Date(Date.now() - 29 * 60_000).toISOString();
+    const old = new Date(Date.now() - (24 * 60 - 1) * 60_000).toISOString();
     const value = contract.parse({ generatedAt, items: [{ id: 'old', fetchedAt: old }, { id: 'new', fetchedAt: generatedAt }] });
     expect(contract.revalidate!(value, Date.now() + 2 * 60_000)).toMatchObject({
       status: 'stale', items: [{ id: 'new' }], generatedAt,

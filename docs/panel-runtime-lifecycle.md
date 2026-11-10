@@ -11,7 +11,7 @@ status and manual refresh to shared family controls.
 - Refresh uses the configured interval since the last attempt. Source freshness
   determines READY/STALE and cache eligibility, never whether a check is due.
 - Each resource has its own completion, abort signal and complete-request
-  deadline (`requestTimeoutMs`, default 30 seconds). A provider which ignores
+  deadline (`requestTimeoutMs`, default 45 seconds). A provider which ignores
   abort cannot hold in-flight state forever. Late results cannot publish.
 - A settled resource releases its lane immediately; it does not wait for an
   unrelated resource. A shared HTTP batch can only publish after its response
@@ -36,6 +36,33 @@ status and manual refresh to shared family controls.
   only that consumer's demand. Manual refresh is an explicit override.
 
 ## Reload recovery
+
+### Overnight public overview recovery
+
+NBA, ESPN, public news, DeFi token overviews, Finance/Tech overviews and the
+shared weather forecast retain their last validated display snapshot for 24 hours
+from its original source time. This replaces the former 15/30-minute (weather:
+six-hour) display eviction, which made an overnight visit cold even after a
+successful visit. Freshness and collection/check intervals stay unchanged: an
+overnight snapshot is STALE, shows its original timestamp and triggers a
+background read. A retry must not cover that content or hide an existing error
+behind a fresh full-panel loading overlay. The shared cache engine is reused;
+this is a display policy for public context, not an execution quote lifetime.
+
+DeFi rows expire independently at the same 24-hour display ceiling and old rows
+mark the display stale even beneath a newer envelope. Weather catalog/date and
+book eligibility retain their independent expiry; forecasts do not renew them.
+Private/execution resources, revocable evidence, AI expiry and bookmaker quote
+limits keep their own contracts. GAME/SPORTS retain their public context for
+24 hours too, but restore runs their existing per-quote/per-fixture expiry;
+expired odds are removed and never made eligible by the envelope age. First visits, evicted/invalid entries and data
+older than the display ceiling still need a successful network read.
+
+The default Runtime deadline includes queueing and is 45 seconds. Weather's
+multi-megabyte read has a 35-second complete-body transport limit and a
+60-second total Runtime limit, replacing its conflicting 12/10-second limits.
+Desktop/mobile download concurrency remains three/two; these read budgets do
+not change collection frequency or create a second scheduler.
 
 ### Failure recovery adopted from WorldMonitor
 
@@ -121,13 +148,17 @@ the nine reviewed static feeds below; the declarations remain in each module.
 
 | Public feed / reused owner | Browser check | Fresh / maximum retained source age |
 | --- | --- | --- |
-| NBA scoreboard, intel, ESPN predictor / `nba_watcher.py` | 60 seconds | 3 / 15 minutes |
-| Esports / `grid_esports_watcher.py` | 2 minutes | 4 / 15 minutes |
-| Sports Odds / `sports_odds_watcher.py` | 15 minutes | 3 / 6 hours |
-| Jin10 / `jin10_watcher.py` | 60 seconds | 5 / 30 minutes |
-| BWE (`f1-trackside`) / `f1_watcher.py` | 3 minutes | 5 / 30 minutes |
-| DeFi Tokens / `defi_token_watch_watcher.py` | 5 minutes | 15 / 30 minutes |
-| New Market Signals / `new_market_signal_watcher.py` | 5 minutes | 15 / 30 minutes |
+| NBA scoreboard, intel, ESPN predictor / `nba_watcher.py` | 60 seconds | 3 minutes / 24 hours |
+| Esports / `grid_esports_watcher.py` | 2 minutes | 4 minutes / 24 hours |
+| Sports Odds / `sports_odds_watcher.py` | 15 minutes | 3 / 24 hours |
+| Jin10 / `jin10_watcher.py` | 60 seconds | 5 minutes / 24 hours |
+| BWE (`f1-trackside`) / `f1_watcher.py` | 3 minutes | 5 minutes / 24 hours |
+| DeFi Tokens / `defi_token_watch_watcher.py` | 5 minutes | 15 minutes / 24 hours |
+| New Market Signals / `new_market_signal_watcher.py` | 5 minutes | 15 minutes / 24 hours |
+
+The legacy Esports/Odds rows describe the feed adapter; current GAME/SPORTS
+use the bookmaker owner with independent quote expiry inside the 24-hour
+display envelope.
 
 Their existing SQLite namespaces (`snapshot:sports:nba`, `snapshot:sports:nba-intel`,
 `snapshot:sports:nba-matchup-predictor`, `snapshot:esports:esports-intel`,
@@ -214,8 +245,8 @@ Newly covered owners retain their existing acquisition and server storage:
 | AI Insights: existing agent snapshot API, three lenses | 15 min | 12 h / 12 h, also explicit snapshot expiry | lens + version |
 | TV / YouTube: existing content directory snapshots | 15 min | 30 min / 6 h | panel + limit 60 + version |
 | Breaking radar: existing evidence snapshot | 5 min | 15 min / 30 min | panel + limit 12 + version |
-| Weather: existing forecast + catalog/books join | 1 min | forecast 2 h / 6 h; catalog 15 min; quote clocks independent | panel + limit 60 + version |
-| Weather news: `snapshot:weather:news / panel-v1` | 5 min | 15 min / 30 min | panel + configured limit + version |
+| Weather: existing forecast + catalog/books join | 1 min | forecast 2 h / 24 h; catalog 15 min; quote clocks independent | panel + limit 60 + version |
+| Weather news: `snapshot:weather:news / panel-v1` | 5 min | 15 min / 24 h | panel + configured limit + version |
 | Transport: `snapshot:transport:global-shipping / panel-v3` | 15 min | 2 h / 6 h; source sample clocks unchanged | panel + limit 14 + version |
 | Energy / CPI calendar / nowcast: existing macro snapshot APIs | 6 h / 1 h / 30 min | 18 h / 3 h / 90 min, no further stale extension | panel + configured limit where applicable + version |
 | Commodity transmission: existing composition API | 5 min | 5 min / 15 min from original response generation | panel + limit 8 + version |
@@ -242,8 +273,8 @@ regressions. Real production acceptance remains separate from these fixtures.
 | Family | Browser checks | Collector cadence | Fresh seed | Maximum retained seed |
 | --- | --- | --- | --- | --- |
 | Crypto | 5 minutes | Existing market group watcher, default 5 minutes | 15 minutes | 15 minutes |
-| Finance factory (11 panels) | 10 minutes | Existing finance watcher, default 10 minutes | 15 minutes | 30 minutes |
-| Tech factory (3 panels) | 10 minutes | Existing tech watcher, default 10 minutes | 15 minutes | 30 minutes |
+| Finance factory (11 panels) | 10 minutes | Existing finance watcher, default 10 minutes | 15 minutes | 24 hours (display) |
+| Tech factory (3 panels) | 10 minutes | Existing tech watcher, default 10 minutes | 15 minutes | 24 hours (display) |
 
 See [Panel cadence](panel-data-cadence.md) for domain-specific targets and
 production evidence. Undeclared fast/slow intervals default to 1/10 minutes;

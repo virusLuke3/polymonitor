@@ -1,5 +1,6 @@
 import { publicListSnapshot, publicPayload, publicSnapshot, record, records, strings, textFields } from '../public-snapshot';
 import { RuntimeResponseError, runtimeTimestamp } from '../runtime-store';
+import { PUBLIC_OVERVIEW_RETENTION_MS } from '../resource-cache';
 
 const optional = (value: unknown, validate: (value: any) => boolean) => value == null || validate(value);
 const texts = [ 'title', 'name', 'label', 'summary', 'source', 'sourceUrl', 'url', 'city', 'country', 'status'];
@@ -22,7 +23,7 @@ export function mediaSnapshot(id: string, limit: number) {
 }
 
 export function newsSnapshot(id: string, limit: number) {
-  return publicListSnapshot({ id, limit, maxAgeMs: 15 * 60_000, staleAgeMs: 30 * 60_000,
+  return publicListSnapshot({ id, limit, maxAgeMs: 15 * 60_000, staleAgeMs: PUBLIC_OVERVIEW_RETENTION_MS,
     validate: value => evidenceRows(value.items) && summary(value.summary),
   });
 }

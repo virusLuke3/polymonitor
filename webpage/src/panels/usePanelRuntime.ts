@@ -5,6 +5,7 @@ import {
   runtimeTimestamp,
 } from './runtime-store';
 import {
+  DEFAULT_PANEL_REQUEST_TIMEOUT_MS,
   type PanelFetchContext,
   type PanelModule,
   type PanelRefreshTier,
@@ -252,7 +253,7 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
       }));
       const isCurrent = (id: string) => mounted.current && !lanes.get(id)!.controller.signal.aborted && controllers.current.get(id) === lanes.get(id)!.controller;
       updateStatuses(panelIds, (current, id) => ({ ...current,
-        phase: dataRef.current[id] === undefined ? 'loading' : current.phase,
+        phase: dataRef.current[id] === undefined && !current.error ? 'loading' : current.phase,
         lastAttemptAt: now, fetching: true,
       }));
       void fetchPanelRuntimeData(eligible, {
@@ -299,7 +300,7 @@ export function usePanelRuntime({ panels, activePanelIds, initialData = {}, susp
             const advised = error instanceof ApiHttpError && Number.isFinite(error.retryAfterMs) ? error.retryAfterMs ?? 0 : 0;
             const pending = error instanceof ApiHttpError && error.verificationPending;
             const pendingSince = current.pendingSince ?? Date.now();
-            if (pending && Date.now() - pendingSince < (owner.refreshPolicy?.requestTimeoutMs ?? 30_000)) {
+            if (pending && Date.now() - pendingSince < (owner.refreshPolicy?.requestTimeoutMs ?? DEFAULT_PANEL_REQUEST_TIMEOUT_MS)) {
               return { ...current, phase: dataRef.current[id] === undefined ? 'loading' : current.phase,
                 lastAttemptAt: now, fetching: false, retryPending: true, pendingSince, retryable: true,
                 retryAfterAt: advised > 0 ? Date.now() + advised : null,

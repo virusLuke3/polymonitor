@@ -3,6 +3,7 @@ import type {
   PanelModule,
   PanelRuntimeData,
 } from './types';
+import { DEFAULT_PANEL_REQUEST_TIMEOUT_MS } from './types';
 import {
   fetchRuntimePanels,
   type RuntimePanelMetadata,
@@ -77,7 +78,7 @@ export async function fetchPanelRuntimeData(
     const finished = new Promise<void>(done => { finish = done; });
     const state = { panel, external, controller, resolve, reject, finished, done: false };
     const abort = () => reject(new DOMException('Aborted', 'AbortError'));
-    const timeoutMs = Math.max(1, panel.refreshPolicy?.requestTimeoutMs ?? 30_000);
+    const timeoutMs = Math.max(1, panel.refreshPolicy?.requestTimeoutMs ?? DEFAULT_PANEL_REQUEST_TIMEOUT_MS);
     const timer = setTimeout(() => reject(new RuntimeResponseError(`Panel request exceeded ${timeoutMs}ms`)), timeoutMs);
     external.addEventListener('abort', abort, { once: true });
     options.signal.addEventListener('abort', abort, { once: true });

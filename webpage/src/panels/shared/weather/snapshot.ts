@@ -1,6 +1,6 @@
 import type { RuntimeGlobalWeatherMapPayload, RuntimeGlobalWeatherCity } from '@/types';
 import { publicListSnapshot, record, records, strings, textFields } from '../../public-snapshot';
-import { resourceIsCurrent } from '../../resource-cache';
+import { PUBLIC_OVERVIEW_RETENTION_MS, resourceIsCurrent } from '../../resource-cache';
 
 const optional = (value: unknown, validate: (value: any) => boolean) => value == null || validate(value);
 const bin = (value: any) => record(value) && textFields(value, ['label', 'unit', 'yesTokenId', 'marketSlug', 'bookStatus', 'quoteUpdatedAt', 'quoteStaleAfter'])
@@ -34,7 +34,7 @@ export function projectWeatherSnapshot(raw: unknown, now = Date.now()): unknown 
 
 export function weatherSnapshot(limit: number) {
   const contract = publicListSnapshot({ id: 'global-temperature-monitor', limit,
-    maxAgeMs: 2 * 3_600_000, staleAgeMs: 6 * 3_600_000, storage: 'indexeddb', maxChars: 4_000_000,
+    maxAgeMs: 2 * 3_600_000, staleAgeMs: PUBLIC_OVERVIEW_RETENTION_MS, storage: 'indexeddb', maxChars: 4_000_000,
     validate: value => value.items.every((city: Record<string, any>) => typeof city.cityId === 'string'
       && textFields(city, ['city', 'country', 'timezone', 'unit', 'condition', 'forecastFetchedAt', 'marketFetchedAt'])
       && market(city) && optional(city.marketFamilies, strings)

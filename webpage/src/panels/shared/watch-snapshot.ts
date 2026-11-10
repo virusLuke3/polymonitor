@@ -1,5 +1,6 @@
 import type { RuntimeTechPanelPayload } from '@/types';
 import type { PanelSnapshotContract } from '../resource-cache';
+import { PUBLIC_OVERVIEW_RETENTION_MS } from '../resource-cache';
 import { RuntimeResponseError } from '../runtime-store';
 
 const record = (value: unknown): Record<string, unknown> => value != null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -57,7 +58,7 @@ export function parseWatchSnapshot(value: unknown, panelId: string, limit: numbe
 
 export function watchSnapshot(family: 'finance' | 'tech', panelId: string, limit: number): PanelSnapshotContract<unknown> {
   return {
-    key: `${family}:${panelId}:limit:${limit}:v1`, maxAgeMs: 15 * 60_000, staleAgeMs: 30 * 60_000,
+    key: `${family}:${panelId}:limit:${limit}:v1`, maxAgeMs: 15 * 60_000, staleAgeMs: PUBLIC_OVERVIEW_RETENTION_MS,
     acceptStale: true, cache: { version: 1, maxChars: 128_000 },
     parse: value => parseWatchSnapshot(value, panelId, limit),
     updatedAt: value => { const generatedAt = record(value).generatedAt; return typeof generatedAt === 'string' ? Date.parse(generatedAt) : null; },

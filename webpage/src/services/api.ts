@@ -306,7 +306,7 @@ export function fetchRuntimeEnergyGasolineShock(limit = 6, signal?: AbortSignal)
 }
 
 export function fetchRuntimeGlobalTemperatureMonitor(limit = 60, signal?: AbortSignal) {
-  return apiGet<RuntimeGlobalWeatherMapPayload>(`/runtime/weather/temperature-monitor?limit=${limit}`, signal);
+  return apiGetWithTimeout<RuntimeGlobalWeatherMapPayload>(`/runtime/weather/temperature-monitor?limit=${limit}`, 35_000, signal);
 }
 
 export function fetchRuntimeWeatherNews(limit = 24, signal?: AbortSignal) {

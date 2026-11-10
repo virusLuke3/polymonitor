@@ -170,7 +170,7 @@ test('stale reload keeps content through refresh failure then expires at the ori
   expect(await page.evaluate(() => window.frontendHarness.runtime!.getData('shared'))).toBeUndefined();
 });
 
-for (const width of [1440, 390]) test(`cached NBA and DeFi remain visible during slow bootstrap at ${width}px`, async ({ page }) => {
+for (const width of [1440, 390]) for (const hours of [0, 12]) test(`cached NBA and DeFi remain visible after ${hours} hours during slow bootstrap at ${width}px`, async ({ page }) => {
   await page.setViewportSize({ width, height: 900 });
   await installDashboard(page, 'en', ['nba-scoreboard', 'defi-token-watch']);
   const values = {
@@ -200,6 +200,12 @@ for (const width of [1440, 390]) test(`cached NBA and DeFi remain visible during
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   await page.route('**/wm-api/bootstrap', async route => { await gate; await route.fallback(); });
+  if (hours) {
+    await page.clock.setFixedTime(new Date(start + hours * 3_600_000));
+    await page.route('**/wm-api/**', async route => {
+      await gate; await route.abort('failed');
+    });
+  }
   try {
     await page.reload({ waitUntil: 'domcontentloaded' });
     for (const id of Object.keys(values)) {
@@ -207,6 +213,7 @@ for (const width of [1440, 390]) test(`cached NBA and DeFi remain visible during
       await slot.scrollIntoViewIfNeeded();
       await expect(slot).toContainText(id === 'nba-scoreboard' ? 'Home fixture' : 'UNI');
       await expect(slot.locator('.wm-panel-slot-loading')).toHaveCount(0);
+      if (hours) await expect(slot).toHaveAttribute('data-runtime-phase', 'stale');
     }
     expect(requests).toBe(before);
     expect(await page.evaluate(() => localStorage.getItem('polydata:workspace-panels:v4'))).toBe(layout);

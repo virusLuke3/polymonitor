@@ -44,6 +44,9 @@ export type PanelFetchContext = {
 
 export type PanelFetchData = (context?: PanelFetchContext) => Promise<unknown>;
 
+/** Includes shared admission and the complete response; domain overrides remain explicit. */
+export const DEFAULT_PANEL_REQUEST_TIMEOUT_MS = 45_000;
+
 export type PanelRuntimeStatus = {
   phase: PanelRuntimePhase;
   /** Optional domain label; request failure/age still belong to the runtime. */

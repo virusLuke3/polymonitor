@@ -1,5 +1,8 @@
 import { readLargeSnapshot, writeLargeSnapshot, removeLargeSnapshot } from './snapshot-storage';
 
+/** Display recovery for public overviews; freshness/execution clocks stay separate. */
+export const PUBLIC_OVERVIEW_RETENTION_MS = 24 * 60 * 60_000;
+
 export type ResourceCachePolicy = { version: number; maxChars?: number; storage?: 'indexeddb' };
 /** Public snapshots only. Cache identity includes every request parameter. */
 export interface ResourceCacheContract<T> {

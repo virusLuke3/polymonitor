@@ -71,7 +71,7 @@ Validation includes the clean-commit backend tests, 32 frontend weather/resource
 The existing `global-temperature-monitor` owner and its seven `dataSourceId`
 views share one persistent public snapshot. The key includes the limit (60) and
 schema version. The existing forecast/catalog/books API chain and all collection
-cadences above are unchanged. Forecast retention is six hours from its original
+cadences above are unchanged. Forecast display retention is 24 hours from its original
 generation, with a two-hour fresh limit; city catalog selections expire after
 15 minutes or their city-local date rollover independently. Revalidation removes
 expired selections without changing forecast/catalog/source clocks. The existing
@@ -85,3 +85,18 @@ original check and source clocks. Weather News and Transport use the same Runtim
 persistence contract and their existing source stores described above. Unit and
 browser checks exercise catalog expiry, shared ownership, large reload recovery
 and independent live quote expiry; production source health is reported separately.
+
+### Overnight display and complete-body read budget
+
+The shared `weatherSnapshot(60)` retains public forecast context for 24 hours,
+marks forecast age beyond two hours stale/carry-forward, and still removes old
+catalog dates/selections using the original 15-minute catalog clock. Book quote
+eligibility is unchanged. All seven dependent views reuse this one owner and its
+IndexedDB key; there is no extra collector or view cache.
+
+A saved payload can exceed 2.7 MB. Its same-origin read allows 35 seconds through
+JSON completion inside a 60-second total Runtime budget including admission;
+the former 12-second transport / 10-second owner combination could cancel a
+valid body before it reached persistent storage. Concurrency and 60-second
+browser checks remain unchanged. Production acceptance must prove full body,
+parse, IndexedDB publication and cached reload, not just HTTP 200 headers.
