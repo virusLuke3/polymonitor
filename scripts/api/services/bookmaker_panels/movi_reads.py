@@ -35,7 +35,7 @@ def read(query, archive=None):
             docs = {r['kind']: {'data': unpack(r['data']), 'receivedAt': iso(r['received'])}
                     for r in db.execute('SELECT * FROM documents WHERE fixture=?', (fi,))}
             tasks = [{**dict(r), 'cursor': json.loads(r['cursor'])} for r in db.execute(
-                'SELECT kind,checked,error,cursor FROM tasks WHERE fixture=?', (fi,))]
+                'SELECT kind,attempted,checked,error,cursor FROM tasks WHERE fixture=?', (fi,))]
             where, args = ('fixture=? AND selection=?', [fi, selection]) if selection else ('fixture=?', [fi])
             total = db.execute('SELECT count(*) FROM points WHERE ' + where, args).fetchone()[0]
             # Newest page first; values in each page are rendered chronologically.

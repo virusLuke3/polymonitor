@@ -118,7 +118,10 @@ class Archive:
                     due REAL NOT NULL, checked REAL, failures INTEGER NOT NULL DEFAULT 0,
                     error TEXT, cursor TEXT NOT NULL DEFAULT '{}');
                 CREATE INDEX IF NOT EXISTS tasks_due ON tasks(due);
+                CREATE INDEX IF NOT EXISTS task_sport_checks ON tasks(kind,sport,checked);
             ''')
+            if 'attempted' not in {row[1] for row in db.execute('PRAGMA table_info(tasks)')}:
+                db.execute('ALTER TABLE tasks ADD COLUMN attempted REAL')
 
     def raw(self, db, kind, identity, body, now):
         if len(body) > 8 * 1024**2:
@@ -181,8 +184,15 @@ class Archive:
         with self.connection() as db:
             priority = ("CASE WHEN json_extract(cursor,'$.scope')='primary-groups-v1' AND json_extract(cursor,'$.complete')=0 THEN 0 ELSE 1 END, "
                         if kind == 'history' else "EXISTS(SELECT 1 FROM documents WHERE fixture=tasks.fixture AND kind='result') DESC, " if kind == 'closing' else '')
-            row = db.execute('SELECT * FROM tasks WHERE due<=? AND kind=? ORDER BY ' + priority + 'due,key LIMIT 1', (now, kind)).fetchone()
+            # Round-robin sport lanes by successful work; a large esports
+            # backlog cannot consume every basketball/football history slot.
+            fair = 'COALESCE((SELECT MAX(checked) FROM tasks t WHERE t.kind=tasks.kind AND t.sport=tasks.sport),0), '
+            row = db.execute('SELECT * FROM tasks WHERE due<=? AND kind=? ORDER BY ' + fair + priority + 'due,key LIMIT 1', (now, kind)).fetchone()
             return dict(row) if row else None
+
+    def attempt(self, task, now):
+        with self.connection(True) as db:
+            db.execute('UPDATE tasks SET attempted=? WHERE key=?', (now, task['key']))
 
     def fail(self, task, error, delay, now):
         with self.connection(True) as db:

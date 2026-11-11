@@ -202,6 +202,18 @@ def test_invalid_catalog_is_not_successful_empty():
     assert catalog(encode({'fixtures': [], 'count': 0}), ['esports']) == []
 
 
+def test_history_work_rotates_sports_without_erasing_success_clock(archive):
+    task = archive.due(NOW, 'history')
+    archive.attempt(task, NOW+1)
+    archive.fail(task, 'Timeout', 60, NOW+2)
+    with archive.connection(True) as db:
+        row = db.execute('SELECT * FROM tasks WHERE key=?', (task['key'],)).fetchone()
+        assert row['checked'] is None and row['attempted'] == NOW+1
+        db.execute('UPDATE tasks SET checked=?,due=? WHERE key=?', (NOW, NOW-1000, task['key']))
+        archive.enqueue(db, 'history', 'nba', 'basketball', NOW)
+    assert archive.due(NOW+3, 'history')['sport'] == 'basketball'
+
+
 def test_collector_does_not_apply_failed_write(monkeypatch):
     monkeypatch.setenv('POLYDATA_MOVIODDS_BASE_URL', 'https://source.example')
     from scripts.runtime.moviodds_watcher import Owner

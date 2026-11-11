@@ -81,6 +81,7 @@ def run_job(archive, task, deadline, *, read=request, now=None):
     realtime = now is None
     now = time.time() if now is None else now
     fi, kind = task['fixture'], task['kind']
+    archive.attempt(task, now)
     cursor = json.loads(task['cursor'])
     if kind == 'history':
         groups = list(GROUPS[task['sport']])
