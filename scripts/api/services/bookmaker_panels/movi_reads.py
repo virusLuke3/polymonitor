@@ -51,7 +51,14 @@ def read(query, archive=None):
                 candidates = closing['data']['selections']
                 if selection:
                     candidates = [r for r in candidates if selection_key(r) == selection]
-                candidates = sorted(candidates, key=lambda r: str(r.get('group_id')) not in GROUPS.get(meta_row['sport'], ()))
+                groups = GROUPS.get(meta_row['sport'], ())
+                def closing_order(row):
+                    group = str(row.get('group_id'))
+                    pre = row.get('pre_close') or {}
+                    return (groups.index(group) if group in groups else len(groups),
+                            not bool(pre) or pre.get('suspended', False),
+                            str(row.get('line', '')).casefold() not in ('to win', 'winner', 'result', ''))
+                candidates = sorted(candidates, key=closing_order)
                 closing = {**closing, 'data': {**closing['data'], 'selections': candidates[:200]},
                            'omittedSelections': max(0, len(candidates) - 200)}
             result = {'fixture': unpack(meta_row['data']), 'project': meta_row['project'], 'selections': options,

@@ -187,7 +187,8 @@ class Archive:
             # Round-robin sport lanes by successful work; a large esports
             # backlog cannot consume every basketball/football history slot.
             fair = 'COALESCE((SELECT MAX(checked) FROM tasks t WHERE t.kind=tasks.kind AND t.sport=tasks.sport),0), '
-            row = db.execute('SELECT * FROM tasks WHERE due<=? AND kind=? ORDER BY ' + fair + priority + 'due,key LIMIT 1', (now, kind)).fetchone()
+            retry = 'CASE WHEN error IS NOT NULL AND failures<=2 THEN 0 ELSE 1 END, '
+            row = db.execute('SELECT * FROM tasks WHERE due<=? AND kind=? ORDER BY ' + retry + fair + priority + 'due,key LIMIT 1', (now, kind)).fetchone()
             return dict(row) if row else None
 
     def attempt(self, task, now):

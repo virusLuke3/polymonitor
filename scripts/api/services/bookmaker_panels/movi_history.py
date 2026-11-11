@@ -155,6 +155,6 @@ def collect(archive, sports, should_stop=lambda: False):
                 delay = max(delay, 3600)
             archive.fail(task, f'HTTP {code}' if code else type(exc).__name__, delay, time.time())
             results.append((task['kind'], 'failed'))
-            if code in (401, 403, 429, 503):
+            if code in (401, 403, 429) or code == 503 and response.headers.get('Retry-After'):
                 break
     return results

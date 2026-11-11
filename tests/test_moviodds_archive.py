@@ -211,7 +211,42 @@ def test_history_work_rotates_sports_without_erasing_success_clock(archive):
         assert row['checked'] is None and row['attempted'] == NOW+1
         db.execute('UPDATE tasks SET checked=?,due=? WHERE key=?', (NOW, NOW-1000, task['key']))
         archive.enqueue(db, 'history', 'nba', 'basketball', NOW)
+    assert archive.due(NOW+3, 'history')['sport'] == 'esports'
+    with archive.connection(True) as db:
+        db.execute('UPDATE tasks SET failures=3 WHERE key=?', (task['key'],))
     assert archive.due(NOW+3, 'history')['sport'] == 'basketball'
+
+
+def test_closing_prioritizes_pre_match_winner_over_suspended_live_end(archive):
+    live = {**price(), 'group_id': '112', 'last': {**price(), 'odds_dec': None, 'suspended': True}}
+    pre = {**price(), 'group_id': '1453', 'pre_close': price()}
+    with archive.connection(True) as db:
+        db.execute("UPDATE fixtures SET sport='basketball',project='nba'")
+        archive.document(db, 'closing', 'f', {'selections': [live, pre]}, 1, NOW)
+    value = read(dict(sport='nba',fixture='f',selection='',offset=0,limit=20), archive)
+    assert value['closing']['data']['selections'][0]['group_id'] == '1453'
+
+
+@pytest.mark.parametrize('retry_after,expected', [(None, 3), ('600', 1)])
+def test_single_fixture_503_does_not_block_other_archive_lanes(monkeypatch, retry_after, expected):
+    import requests
+    from scripts.api.services.bookmaker_panels import movi_history
+    calls = []
+    class Queue:
+        def result_tasks(self, *args): pass
+        def due(self, now, kind): return {'kind': kind, 'failures': 0}
+        def fail(self, *args): pass
+    def run(a, task, deadline):
+        calls.append(task['kind'])
+        if task['kind'] == 'results':
+            r = requests.Response(); r.status_code = 503
+            if retry_after: r.headers['Retry-After'] = retry_after
+            raise requests.HTTPError(response=r)
+        return task['kind'], 1
+    monkeypatch.setenv('POLYDATA_MOVIODDS_REST_REQUESTS_PER_CYCLE', '3')
+    monkeypatch.setattr(movi_history, 'run_job', run)
+    movi_history.collect(Queue(), ['basketball'])
+    assert len(calls) == expected
 
 
 def test_collector_does_not_apply_failed_write(monkeypatch):
