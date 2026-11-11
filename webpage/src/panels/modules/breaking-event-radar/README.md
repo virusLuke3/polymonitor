@@ -2,17 +2,17 @@
 
 The existing `scripts/runtime/breaking_event_radar_watcher.py` owns collection.
 It writes the existing `snapshot:evidence:breaking-event-radar` / `panel-v1` seed through
-SQLite and optional Redis; `/runtime/evidence/breaking-event-radar` reads it.
+the shared Redis store; `/runtime/evidence/breaking-event-radar` reads it.
 The shared Panel runtime owns browser persistence, scheduling and recovery.
 Opening or refreshing this Panel must not collect external news.
 
 ## Sources, clocks and bounds
 
-- GDELT searches a bounded 24-hour window, at most 20 records per topic by
-  default. The production owner rotates one of five topics per 300-second
-  round (25 minutes for a complete rotation). Its persisted rate-limit backoff
-  and `Retry-After` remain authoritative; no route switching bypasses a 429.
-- When GDELT has no usable reports, reuse the existing public-content owner's
+- Source priority is the existing public-content snapshot, then news RSS, then
+  GDELT only if neither has usable reports. The owner still rotates one of five
+  topics per 300-second round (at least 25 minutes for a complete rotation).
+  Changing the backup source does not slow healthy public/RSS collection.
+- First reuse the existing public-content owner's
   `snapshot:content:free-public` / `candidates-v4` seed. This is a local read,
   with no extra collector or request-time database query. Require owner age
   at most 300 seconds, current public-display permission, healthy source state,
@@ -25,7 +25,7 @@ Opening or refreshing this Panel must not collect external news.
   Invalid, empty or failed responses do not replace a successful observation.
   Requests identify `PolymonitorBot` and its real website as required by the
   [Wikimedia User-Agent policy](https://foundation.wikimedia.org/wiki/Policy:Wikimedia_Foundation_User-Agent_Policy).
-- If both GDELT and the shared public-content snapshot have no usable reports,
+- If the shared public-content snapshot has no usable reports,
   the same watcher reads the configured Google News RSS search endpoint
   (`POLYDATA_GOOGLE_NEWS_RSS_URL`). Reuse the existing RSS metadata parser and
   source transport; no article-body crawler or additional worker is introduced.
@@ -34,6 +34,19 @@ Opening or refreshing this Panel must not collect external news.
   at most 20, with HTTP(S) evidence links. Publication time and RSS acquisition
   time remain separate. Its success never clears GDELT's persisted cooldown or
   source failure; the API remains seed-only and the browser contract is unchanged.
+- GDELT searches a bounded 24-hour window with at most 20 reports by default.
+  `POLYDATA_BREAKING_EVENT_GDELT_POLL_SECONDS` defaults to 3600 seconds, with a
+  one-hour floor across all topics; success, empty, malformed and failed reads
+  all consume an attempt. Persist admission before HTTP so restart/timeout
+  does not immediately retry. A 429 retains exponential backoff up to six hours
+  and honors a longer `Retry-After`; pre-existing cooldowns are never shortened.
+  The existing `state:content` / `gdelt-backoff` record remains private SQLite
+  scheduling state, while public seeds stay in Redis. The existing Redis owner
+  lease prevents overlapping scheduled collectors. No new source/worker or
+  proxy rotation is introduced. Public state includes actual `lastAttemptAt`,
+  `lastSuccessAt` and `nextAttemptAt` when known; a skipped read does not invent
+  a new 429 or advance provider clocks. The last real failure stays visible,
+  including when an alternate source provides usable news.
 - Item `eventTime` is the report publication/seen time or Wikipedia observation
   day; `acquiredAt` is the actual successful source read. A newer daily reading
   cannot renew an older headline. Failed rounds preserve original times and

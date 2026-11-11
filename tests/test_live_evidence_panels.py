@@ -183,7 +183,7 @@ def test_current_pageviews_replace_expired_headline_without_impersonating_news()
     assert 'old headline' not in str(merged)
 
 
-def test_public_reports_recover_topic_while_gdelt_failure_remains_explicit(monkeypatch):
+def test_public_reports_take_priority_while_previous_gdelt_failure_remains_explicit(monkeypatch):
     monkeypatch.setenv('POLYDATA_BREAKING_EVENT_WIKIMEDIA_ENABLED', '0')
     def fail(*args, **kwargs):
         raise TimeoutError()
@@ -192,6 +192,7 @@ def test_public_reports_recover_topic_while_gdelt_failure_remains_explicit(monke
                 {'title': 'Iran report', 'datetime': '2026-11-10T06:00:00Z', 'domain': 'Approved publisher'}]
     result = breaking_event_radar_service.build_breaking_event_radar_payload({
         'SETTINGS': object(), 'http_json_get': fail, 'public_articles': lambda *a, **k: articles,
+        'gdelt_state': lambda: {'status': 'timeout', 'nextAttemptAt': '2099-01-01T00:00:00Z'},
         'search_markets': lambda *a, **k: {'items': [{'id': 42, 'title': 'Iran talks?'}]},
         'utc_now_iso': lambda: '2026-11-10T08:00:00Z'}, topic_ids=['iran-geopolitics'])
     row = result['items'][0]
@@ -214,6 +215,7 @@ def test_news_rss_recovers_topic_without_hiding_gdelt_failure(monkeypatch):
         'acquiredAt': '2026-11-10T07:55:00Z', 'newsRss': True}])
     result = breaking_event_radar_service.build_breaking_event_radar_payload({
         'SETTINGS': object(), 'http_json_get': fetch, 'public_articles': lambda *a, **k: [],
+        'gdelt_state': lambda: {'status': 'rate-limited', 'nextAttemptAt': '2099-01-01T00:00:00Z'},
         'news_articles': rss, 'utc_now_iso': lambda: '2026-11-10T08:00:00Z'},
         topic_ids=['iran-geopolitics'])
     assert result['sources']['gdelt']['status'] == 'rate-limited'
@@ -222,8 +224,52 @@ def test_news_rss_recovers_topic_without_hiding_gdelt_failure(monkeypatch):
     assert result['items'][0]['tags'][-1] == 'news-rss'
     assert result['items'][0]['eventTime'] == '2026-11-10T07:50:00Z'
     assert result['generatedAt'] == '2026-11-10T07:55:00Z'
-    fetch.assert_called_once()
+    fetch.assert_not_called()
     rss.assert_called_once()
+
+
+def test_radar_public_snapshot_skips_all_news_network_reads(monkeypatch):
+    from unittest.mock import Mock
+    monkeypatch.setenv('POLYDATA_BREAKING_EVENT_WIKIMEDIA_ENABLED', '0')
+    fetch, rss = Mock(side_effect=AssertionError('Unexpected HTTP')), Mock(side_effect=AssertionError('Unexpected RSS'))
+    reports = [{'title': 'Iran talks', 'url': 'https://example.test/report', 'domain': 'Publisher',
+                'datetime': '2026-11-10T07:50:00Z', 'acquiredAt': '2026-11-10T07:55:00Z', 'publicFeed': True}]
+    result = breaking_event_radar_service.build_breaking_event_radar_payload({
+        'SETTINGS': object(), 'http_json_get': fetch, 'public_articles': lambda *a, **k: reports,
+        'news_articles': rss, 'utc_now_iso': lambda: '2026-11-10T08:00:00Z'}, topic_ids=['iran-geopolitics'])
+    assert result['status'] == 'ok'
+    assert result['sources']['gdelt']['status'] == 'not-needed'
+    fetch.assert_not_called()
+    rss.assert_not_called()
+
+
+def test_radar_falls_back_to_gdelt_only_when_primary_reports_are_empty(monkeypatch):
+    from unittest.mock import Mock
+    monkeypatch.setenv('POLYDATA_BREAKING_EVENT_WIKIMEDIA_ENABLED', '0')
+    fetch = Mock(return_value={'articles': [{'title': 'Iran report', 'url': 'https://example.test/report',
+                                           'domain': 'Publisher', 'seendate': '20261110075000'}]})
+    result = breaking_event_radar_service.build_breaking_event_radar_payload({
+        'SETTINGS': object(), 'http_json_get': fetch, 'public_articles': lambda *a, **k: [],
+        'news_articles': lambda *a, **k: [], 'utc_now_iso': lambda: '2026-11-10T08:00:00Z'},
+        topic_ids=['iran-geopolitics'])
+    assert result['sources']['gdelt']['count'] == 1
+    fetch.assert_called_once()
+
+
+def test_radar_empty_primary_respects_gdelt_cooldown_without_http(monkeypatch):
+    from unittest.mock import Mock
+    monkeypatch.setenv('POLYDATA_BREAKING_EVENT_WIKIMEDIA_ENABLED', '0')
+    fetch = Mock(side_effect=AssertionError('Unexpected HTTP'))
+    result = breaking_event_radar_service.build_breaking_event_radar_payload({
+        'SETTINGS': object(), 'http_json_get': fetch, 'public_articles': lambda *a, **k: [],
+        'news_articles': lambda *a, **k: [],
+        'gdelt_state': lambda: {'status': 'rate-limited', 'lastAttemptAt': '2026-11-10T07:00:00Z',
+                               'nextAttemptAt': '2099-01-01T00:00:00Z'},
+        'utc_now_iso': lambda: '2026-11-10T08:00:00Z'}, topic_ids=['iran-geopolitics'])
+    assert result['status'] == 'degraded' and not result['items']
+    assert result['sources']['gdelt']['lastAttemptAt'] == '2026-11-10T07:00:00Z'
+    assert 'errorCount' not in result['sources']['gdelt']
+    fetch.assert_not_called()
 
 
 def test_radar_rss_keeps_dated_public_metadata_and_bounded_transport():

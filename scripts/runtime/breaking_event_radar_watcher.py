@@ -88,33 +88,71 @@ class BreakingEventRadarWatcher:
             breaking_event_radar_service.BREAKING_EVENT_RADAR_CACHE_KEY,
         )
 
-    def http_json_get(self, url: str, params: Optional[Dict[str, Any]] = None, timeout: int = 12, headers: Optional[Dict[str, str]] = None) -> Any:
+    def gdelt_state(self) -> Dict[str, Any]:
+        state = self.snapshot_store.get_stale("state:content", "gdelt-backoff") or {}
+        result = {"status": state.get("lastStatus") or ("rate-limited" if state.get("failures") else "not-needed")}
+        for key in ("lastAttemptAt", "lastSuccessAt", "nextAttemptAt"):
+            value = state.get(key)
+            if value:
+                result[key] = datetime.fromtimestamp(float(value), timezone.utc).isoformat().replace("+00:00", "Z")
+        return result
+
+    def _gdelt_get(self, url: str, **kwargs: Any) -> Any:
+        """One fallback attempt per hour or provider cooldown, across restarts."""
         from api.services.free_content.collector import retry_delay
+        state = self.snapshot_store.get_stale("state:content", "gdelt-backoff") or {}
+        now = time.time()
+        remaining = float(state.get("nextAttemptAt") or 0) - now
+        if remaining > 0:
+            response = requests.Response()
+            response.status_code = 429
+            response.headers["Retry-After"] = str(int(remaining) + 1)
+            raise requests.HTTPError("GDELT next attempt is not due", response=response)
+        interval = max(3600, int(os.environ.get("POLYDATA_BREAKING_EVENT_GDELT_POLL_SECONDS", "3600") or 3600))
+        state = {**state, "nextAttemptAt": now + interval, "lastAttemptAt": now, "lastStatus": "pending"}
+        self.snapshot_store.set("state:content", "gdelt-backoff", state, max(86400, interval))
+        response = None
+        try:
+            response = self.requests.get(url, **kwargs)
+            response.raise_for_status()
+            result = response.json()
+            if not isinstance(result, dict) or not isinstance(result.get("articles"), list):
+                raise ValueError("GDELT response has no article collection")
+        except Exception as exc:
+            status, _ = breaking_event_radar_service._source_failure(exc)
+            state["lastStatus"] = status
+            if status == "rate-limited":
+                failures = int(state.get("failures") or 0) + 1
+                retry_after = getattr(getattr(exc, "response", None), "headers", {}).get("Retry-After")
+                delay = max(interval, retry_delay(retry_after, datetime.now(timezone.utc)),
+                            min(21600, 900 * 2 ** min(failures - 1, 5)))
+                state.update(failures=failures, nextAttemptAt=time.time() + delay)
+            self.snapshot_store.set("state:content", "gdelt-backoff", state,
+                                    max(86400, int(state["nextAttemptAt"] - time.time()) + 1))
+            raise
+        else:
+            state.update(failures=0, lastStatus="ok" if result["articles"] else "empty", lastSuccessAt=time.time())
+            self.snapshot_store.set("state:content", "gdelt-backoff", state, max(86400, interval))
+            return result
+        finally:
+            if response is not None:
+                response.close()
+
+    def http_json_get(self, url: str, params: Optional[Dict[str, Any]] = None, timeout: int = 12, headers: Optional[Dict[str, str]] = None) -> Any:
         is_gdelt = urlsplit(url).hostname == "api.gdeltproject.org"
+        if is_gdelt:
+            return self._gdelt_get(url, params=params, timeout=timeout, headers=headers)
         is_pageviews = urlsplit(url).hostname == "wikimedia.org" and "/metrics/pageviews/per-article/" in url
         pageview_key = hashlib.sha256(url.encode()).hexdigest()
         if is_pageviews:
             saved = self.snapshot_store.get("source:breaking-pageviews", pageview_key)
             if isinstance(saved, dict) and saved.get("acquiredAt") and saved.get("items"):
                 return saved
-        state = self.snapshot_store.get_stale("state:content", "gdelt-backoff") or {} if is_gdelt else {}
-        remaining = float(state.get("nextAttemptAt") or 0) - time.time()
-        if is_gdelt and remaining > 0:
-            response = requests.Response()
-            response.status_code = 429
-            response.headers["Retry-After"] = str(int(remaining) + 1)
-            raise requests.HTTPError("GDELT retry backoff active", response=response)
         response = self.requests.get(url, params=params, timeout=timeout, headers=headers)
-        if is_gdelt and response.status_code == 429:
-            failures = int(state.get("failures") or 0) + 1
-            delay = max(retry_delay(response.headers.get("Retry-After"), datetime.now(timezone.utc)), min(21600, 900 * 2 ** min(failures - 1, 5)))
-            self.snapshot_store.set("state:content", "gdelt-backoff", {"nextAttemptAt": time.time() + delay, "failures": failures}, max(86400, delay))
         response.raise_for_status()
         if not response.content:
             return {}
         result = response.json()
-        if is_gdelt:
-            self.snapshot_store.set("state:content", "gdelt-backoff", {"nextAttemptAt": 0, "failures": 0}, 86400)
         if (is_pageviews and isinstance(result, dict) and isinstance(result.get("items"), list) and result["items"]
                 and all(isinstance(row, dict) and isinstance(row.get("views"), int) and row["views"] >= 0
                         and re.fullmatch(r"\d{10}", str(row.get("timestamp", ""))) for row in result["items"])):
@@ -195,6 +233,7 @@ class BreakingEventRadarWatcher:
             "http_json_get": self.http_json_get,
             "public_articles": self.public_articles,
             "news_articles": self.news_articles,
+            "gdelt_state": self.gdelt_state,
             "utc_now_iso": utc_now_iso,
         }
         if str(os.environ.get("POLYDATA_BREAKING_EVENT_PM_SEARCH_ENABLED", "1")).strip().lower() in {"1", "true", "yes", "on"}:

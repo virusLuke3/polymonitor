@@ -46,6 +46,7 @@ def test_gdelt_backoff_survives_worker_and_honors_retry_after(monkeypatch):
     store = SimpleNamespace(get_stale=lambda *args: state.copy(), set=lambda n, k, p, ttl: state.update(p))
     response = requests.Response()
     response.status_code = 429
+    response._content_consumed = True
     response.headers["Retry-After"] = "3600"
     session = Mock()
     session.get.return_value = response
@@ -57,6 +58,50 @@ def test_gdelt_backoff_survives_worker_and_honors_retry_after(monkeypatch):
             worker.http_json_get("https://api.gdeltproject.org/api/v2/doc/doc")
     assert session.get.call_count == 1
     assert state["nextAttemptAt"] == 4600
+    assert state["lastAttemptAt"] == 1000 and state["failures"] == 1
+
+
+def test_gdelt_success_and_invalid_payload_are_both_paced_across_restarts(monkeypatch, tmp_path):
+    from runtime.snapshot_store import SnapshotStore
+    now = [1000]
+    monkeypatch.setattr("runtime.breaking_event_radar_watcher.time.time", lambda: now[0])
+    store = SnapshotStore(str(tmp_path / 'rate.sqlite'))
+    session = Mock()
+    session.get.return_value.json.return_value = {'articles': []}
+    worker = BreakingEventRadarWatcher.__new__(BreakingEventRadarWatcher)
+    worker.snapshot_store, worker.requests = store, session
+    url = 'https://api.gdeltproject.org/api/v2/doc/doc'
+    assert worker.http_json_get(url) == {'articles': []}
+    assert store.get_stale('state:content', 'gdelt-backoff')['lastSuccessAt'] == 1000
+    restarted = BreakingEventRadarWatcher.__new__(BreakingEventRadarWatcher)
+    restarted.snapshot_store, restarted.requests = store, session
+    now[0] = 4599
+    with pytest.raises(requests.HTTPError):
+        restarted.http_json_get(url)
+    assert session.get.call_count == 1
+    now[0] = 4600
+    session.get.return_value.json.return_value = {'invalid': True}
+    with pytest.raises(ValueError):
+        restarted.http_json_get(url)
+    state = store.get_stale('state:content', 'gdelt-backoff')
+    assert state['lastSuccessAt'] == 1000 and state['nextAttemptAt'] == 8200
+    assert state['lastStatus'] == 'error' and session.get.call_count == 2
+
+
+def test_gdelt_existing_long_cooldown_is_not_shortened(monkeypatch, tmp_path):
+    from runtime.snapshot_store import SnapshotStore
+    now = 1000
+    monkeypatch.setattr('runtime.breaking_event_radar_watcher.time.time', lambda: now)
+    store = SnapshotStore(str(tmp_path / 'rate.sqlite'))
+    previous = {'nextAttemptAt': 22600, 'failures': 17}
+    store.set('state:content', 'gdelt-backoff', previous, 86400)
+    worker = BreakingEventRadarWatcher.__new__(BreakingEventRadarWatcher)
+    worker.snapshot_store, worker.requests = store, Mock()
+    with pytest.raises(requests.HTTPError):
+        worker.http_json_get('https://api.gdeltproject.org/api/v2/doc/doc')
+    assert store.get_stale('state:content', 'gdelt-backoff') == previous
+    assert worker.gdelt_state()['status'] == 'rate-limited'
+    worker.requests.get.assert_not_called()
 
 
 def test_tv_limits_expensive_probes_before_full_catalog(monkeypatch):

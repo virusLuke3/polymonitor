@@ -23,6 +23,7 @@ BREAKING_EVENT_RADAR_SNAPSHOT_NAMESPACE = "snapshot:evidence:breaking-event-rada
 BREAKING_EVENT_RADAR_CACHE_KEY = "panel-v1"
 DEFAULT_LIMIT = 12
 DEFAULT_TTL_SECONDS = 300
+SOURCE_LABEL = "Approved public feeds + news RSS + Wikimedia Pageviews; GDELT fallback"
 GDELT_DOC_API_URL = source_value('POLYDATA_GEO_SHOCK_GDELT_DOC_API_URL')
 WIKIMEDIA_PAGEVIEWS_BASE_URL = source_value('POLYMONITOR_URL_WIKIMEDIA_ORG_API_REST_V1_METRICS_PAGEVIEWS_PER_ARTICLE_EN_WIKIPEDIA_ORG_ALL_ACC_3EE62C')
 
@@ -94,6 +95,7 @@ class BreakingEventRadarDependencies:
     application: Any
     public_articles: Callable[..., Any] | None = None
     news_articles: Callable[..., Any] | None = None
+    gdelt_state: Callable[[], Dict[str, Any]] | None = None
 
     @classmethod
     def from_context(
@@ -115,6 +117,7 @@ class BreakingEventRadarDependencies:
             ),
             public_articles=resolve_optional_service_callable(context, "public_articles"),
             news_articles=resolve_optional_service_callable(context, "news_articles"),
+            gdelt_state=resolve_optional_service_callable(context, "gdelt_state"),
             search_markets=resolve_optional_service_callable(
                 context,
                 "search_markets",
@@ -496,35 +499,15 @@ def _build_breaking_event_radar_payload(
             if str(seed.get("id") or "").strip() in requested_topic_ids
         ]
     items: List[Dict[str, Any]] = []
-    sources: Dict[str, Any] = {"gdelt": {"status": "empty", "count": 0}, "wikimedia": {"status": "empty", "count": 0}}
+    sources: Dict[str, Any] = {"gdelt": {"status": "not-needed", "count": 0, "role": "fallback"}, "wikimedia": {"status": "empty", "count": 0}}
     errors: List[str] = []
     gdelt_failure_statuses: List[str] = []
     last_gdelt_attempt_at: Optional[float] = None
     for seed in seeds:
         articles: List[Dict[str, Any]] = []
         pageviews: List[Dict[str, Any]] = []
-        if last_gdelt_attempt_at is not None and gdelt_min_interval_seconds > 0:
-            wait_seconds = gdelt_min_interval_seconds - (
-                time.monotonic() - last_gdelt_attempt_at
-            )
-            if wait_seconds > 0:
-                time.sleep(wait_seconds)
-        last_gdelt_attempt_at = time.monotonic()
-        try:
-            articles = _fetch_gdelt_articles(
-                dependencies,
-                seed,
-                max_records=max_records,
-            )
-            sources["gdelt"]["count"] += len(articles)
-        except Exception as exc:
-            failure_status, failure_label = _source_failure(exc)
-            gdelt_failure_statuses.append(failure_status)
-            sources["gdelt"]["errorCount"] = int(
-                sources["gdelt"].get("errorCount") or 0
-            ) + 1
-            errors.append(f"gdelt:{seed.get('id')}:{failure_label}")
-        if not articles and dependencies.public_articles is not None:
+        # Reuse already acquired public reports before issuing another request.
+        if dependencies.public_articles is not None:
             try:
                 articles = dependencies.public_articles(seed, max_records=max_records)
                 public_state = sources.setdefault("publicFeeds", {"status": "empty", "count": 0})
@@ -542,6 +525,31 @@ def _build_breaking_event_radar_payload(
             except Exception as exc:
                 sources["newsRss"] = {"status": "error", "count": 0}
                 errors.append(f"newsRss:{exc.__class__.__name__}")
+        gdelt_state = dependencies.gdelt_state() if dependencies.gdelt_state else {}
+        sources["gdelt"].update(gdelt_state)
+        if not articles and _timestamp(gdelt_state.get("nextAttemptAt")) <= time.time():
+            if last_gdelt_attempt_at is not None and gdelt_min_interval_seconds > 0:
+                wait_seconds = gdelt_min_interval_seconds - (time.monotonic() - last_gdelt_attempt_at)
+                if wait_seconds > 0:
+                    time.sleep(wait_seconds)
+            last_gdelt_attempt_at = time.monotonic()
+            try:
+                articles = _fetch_gdelt_articles(dependencies, seed, max_records=max_records)
+                sources["gdelt"]["count"] += len(articles)
+                sources["gdelt"]["status"] = "ok" if articles else "empty"
+            except Exception as exc:
+                failure_status, failure_label = _source_failure(exc)
+                gdelt_failure_statuses.append(failure_status)
+                sources["gdelt"]["errorCount"] = int(sources["gdelt"].get("errorCount") or 0) + 1
+                errors.append(f"gdelt:{seed.get('id')}:{failure_label}")
+            if dependencies.gdelt_state:
+                state = dependencies.gdelt_state()
+                sources["gdelt"].update({key: value for key, value in state.items() if key != "status"})
+        elif gdelt_state.get("status") in {"rate-limited", "timeout", "error"}:
+            # Preserve the last actual failure without pretending a skipped read
+            # made another HTTP attempt or advancing its provider clocks.
+            gdelt_failure_statuses.append(gdelt_state["status"])
+            errors.append(f"gdelt:last-failure:{gdelt_state['status']}")
         if wikimedia_enabled and max_wiki_titles > 0:
             for title in (seed.get("wikiTitles") or [])[:max_wiki_titles]:
                 try:
@@ -583,8 +591,8 @@ def _build_breaking_event_radar_payload(
         "status": status,
         "cacheMode": "live-build",
         "freshness": "live" if status == "ok" else "degraded" if limited else "warming",
-        "source": "GDELT + news RSS + approved public feeds + Wikimedia Pageviews",
-        "sourceUrl": _gdelt_url(dependencies),
+        "source": SOURCE_LABEL,
+        "sourceUrl": str(limited[0].get("sourceUrl") or "") if limited else "",
         "sources": sources,
         "summary": _summary(limited),
         "items": limited,
@@ -662,8 +670,8 @@ def _empty_payload(
         "status": status,
         "cacheMode": cache_mode,
         "freshness": "warming",
-        "source": "GDELT + Wikimedia Pageviews",
-        "sourceUrl": _gdelt_url(dependencies),
+        "source": SOURCE_LABEL,
+        "sourceUrl": "",
         "sources": {},
         "summary": _summary([]),
         "items": [],
@@ -706,9 +714,9 @@ def _normalize_breaking_event_radar_payload(
     result["status"] = str(result.get("status") or ("ok" if result["items"] else "warming"))
     result["cacheMode"] = str(result.get("cacheMode") or "seeded")
     result["freshness"] = str(result.get("freshness") or ("live" if result["status"] == "ok" else "degraded"))
-    result["source"] = str(result.get("source") or "GDELT + Wikimedia Pageviews")
+    result["source"] = str(result.get("source") or SOURCE_LABEL)
     result["sourceUrl"] = str(
-        result.get("sourceUrl") or _gdelt_url(dependencies)
+        result.get("sourceUrl") or next((item.get("sourceUrl") for item in items if item.get("sourceUrl")), "")
     )
     result["sources"] = result.get("sources") if isinstance(result.get("sources"), dict) else {}
     result["summary"] = result.get("summary") if isinstance(result.get("summary"), dict) else _summary(result["items"])
