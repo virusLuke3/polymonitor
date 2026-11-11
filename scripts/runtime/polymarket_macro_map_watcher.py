@@ -22,12 +22,13 @@ try:
 except ImportError:
     redis = None
 
+from runtime.redis_snapshot_store import seed_writer
 from api.config import load_api_settings
 from api.db_pool import build_api_connection_factory
 from api.services import market_service, polymarket_macro_map_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, retained_snapshot, publish_snapshot
 from runtime.macro_collection import start_round, round_evidence, read_text
-from runtime.snapshot_store import SnapshotStore
+from runtime.redis_snapshot_store import create_snapshot_store as SnapshotStore
 from runtime.telegram_panel_publish import publish_cached_panel_snapshot
 
 
@@ -176,6 +177,7 @@ class PolymarketMacroMapWatcher:
             print(f"[polymarket_macro_map] WARN seed meta write failed: {exc.__class__.__name__}", file=sys.stderr)
             return False
 
+    @seed_writer
     def run_once(self) -> Dict[str, Any]:
         start_round(self, 'polymarket_macro_map_round_budget_seconds', 30)
         previous = self.load_previous_payload()

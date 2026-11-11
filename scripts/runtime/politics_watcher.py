@@ -2,7 +2,7 @@
 import argparse
 import os
 from api.services.politics.collector import collect_owner
-from runtime.snapshot_store import SnapshotStore
+from runtime.redis_snapshot_store import create_snapshot_store as SnapshotStore
 
 
 def main():

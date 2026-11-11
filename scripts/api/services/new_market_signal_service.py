@@ -67,6 +67,11 @@ def _is_placeholder_title(value: Any) -> bool:
 
 
 def _read_seeded_snapshot(ctx: dict, *, limit: int) -> Dict[str, Any] | None:
+    store = ctx.get("SNAPSHOT_STORE")
+    if getattr(store, "backend", "sqlite") == "redis":
+        from api.services.macro_data_policy import read_seeded
+        payload = read_seeded(store, None, SNAPSHOT_NAMESPACE, SNAPSHOT_CACHE_KEY)
+        return normalize_new_market_signals_payload(payload, limit=limit) if payload is not None else None
     reader = ctx.get("get_cached_json")
     if callable(reader):
         redis_payload = reader(SNAPSHOT_NAMESPACE, SNAPSHOT_CACHE_KEY)
@@ -114,6 +119,11 @@ def get_new_market_signals_snapshot(ctx: dict, limit: int = 12) -> Dict[str, Any
     seeded_payload = _read_seeded_snapshot(ctx, limit=limit)
     if seeded_payload is not None:
         return seeded_payload
+
+    if getattr(ctx.get("SNAPSHOT_STORE"), "backend", "sqlite") == "redis":
+        return normalize_new_market_signals_payload(
+            {"items": [], "status": "warming", "generatedAt": "", "sources": {"collector": "warming"}},
+            limit=limit, cache_mode="missing")
 
     client = ctx["get_redis_client"]()
     if client is None:

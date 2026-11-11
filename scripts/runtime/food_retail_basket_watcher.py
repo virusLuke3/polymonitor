@@ -17,13 +17,14 @@ if str(_scripts_root) not in sys.path:
 import redis
 import requests
 
+from runtime.redis_snapshot_store import seed_writer
 from api.config import load_api_settings
 from api.clients.source_transport import source_session
 from api.clients.fred_csv import read_fred_text
 from api.services import food_retail_basket_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, retained_snapshot, collection_delay, publish_snapshot
 from runtime.macro_collection import start_round, round_evidence, read_text
-from runtime.snapshot_store import SnapshotStore
+from runtime.redis_snapshot_store import create_snapshot_store as SnapshotStore
 
 DEFAULT_INTERVAL_SECONDS = 21600
 SEED_META_NAMESPACE = "seed-meta:macro"
@@ -84,12 +85,18 @@ class FoodRetailBasketWatcher:
         }
 
     def _get_cached_json(self, namespace: str, cache_key: str) -> Dict[str, Any] | None:
+        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+            return self.snapshot_store.get(namespace, cache_key)
         payload = self.snapshot_store.get(namespace, cache_key)
         if not isinstance(payload, dict):
             payload = self.snapshot_store.get_stale(namespace, cache_key)
         return payload if isinstance(payload, dict) else None
 
     def _set_cached_json(self, namespace: str, cache_key: str, payload: Dict[str, Any], ttl: int) -> None:
+        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+            if not self.snapshot_store.set(namespace, cache_key, payload, ttl):
+                raise RuntimeError("Seed publication rejected")
+            return payload
         if self.redis_client is not None:
             try:
                 self.redis_client.set(_redis_key(self.redis_prefix, namespace, cache_key), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl)
@@ -119,6 +126,7 @@ class FoodRetailBasketWatcher:
         payload["lastSuccessAt"] = success
         self.seed_meta_store.store(SEED_META_NAMESPACE, SEED_META_CACHE_KEY, payload)
 
+    @seed_writer
     def run_once(self) -> Dict[str, Any]:
         start_round(self, 'food_basket_round_budget_seconds', 720)
         previous = self.previous()

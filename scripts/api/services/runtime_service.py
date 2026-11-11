@@ -241,7 +241,8 @@ def get_market_group_snapshot(ctx: RuntimeServiceContext, items: List[tuple[str,
                     _store_seed_fallback(ctx, namespace=namespace, cache_key=cache_key, payload={**merged, "cacheMode": "live-fallback"}, ttl_seconds=ttl_seconds)
                 except Exception:
                     _dependencies(ctx).application.logger.exception("commodity seed recovery failed")
-            commodities_service.recover_seed(recover)
+            if getattr(getattr(_dependencies(ctx), "snapshot_store", None), "backend", "sqlite") != "redis":
+                commodities_service.recover_seed(recover)
         if seeded_payload is not None:
             return commodities_service.seeded_response(normalize_market_group_payload(seeded_payload, kind=kind), now)
         return {"kind": kind, "items": [], "generatedAt": "", "status": "warming", "cacheMode": "warming",
@@ -265,7 +266,8 @@ def get_market_group_snapshot(ctx: RuntimeServiceContext, items: List[tuple[str,
                     _store_seed_fallback(ctx, namespace=namespace, cache_key=cache_key, payload={**merged, "cacheMode": "live-fallback"}, ttl_seconds=ttl_seconds)
             except TimeoutError:
                 return
-        seed_recovery.recover_seed(namespace, recover_crypto)
+        if getattr(getattr(_dependencies(ctx), "snapshot_store", None), "backend", "sqlite") != "redis":
+            seed_recovery.recover_seed(namespace, recover_crypto)
     if seeded_payload is not None and seed_recovery.age_seconds(seeded_payload.get("generatedAt"), now) < crypto_service.RETAIN_SECONDS:
         payload = normalize_market_group_payload(seeded_payload, kind=kind)
         return {**payload, "status": "stale"} if seed_recovery.age_seconds(payload.get("generatedAt"), now) >= crypto_service.MAX_SEED_AGE_SECONDS else payload
@@ -295,6 +297,13 @@ def _with_cache_mode(payload: Dict[str, Any], cache_mode: str) -> Dict[str, Any]
 
 
 def _read_seeded_snapshot(ctx: RuntimeServiceContext, *, namespace: str, cache_key: str, ttl_seconds: int) -> Optional[Dict[str, Any]]:
+    store = _dependencies(ctx).snapshot_store
+    if getattr(store, "backend", "sqlite") == "redis":
+        fresh = store.get(namespace, cache_key)
+        if isinstance(fresh, dict):
+            return _with_cache_mode(fresh, "redis-seed")
+        stale = store.get_stale(namespace, cache_key)
+        return _with_cache_mode(stale, "stale-seed") if isinstance(stale, dict) else None
     reader = _dependencies(ctx).get_cached_json
     if callable(reader):
         redis_payload = reader(namespace, cache_key)

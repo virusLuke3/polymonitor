@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 from api.clients.source_transport import SourceSession, read_response_bytes, read_with_retry
 from data_sources import source_value
 from runtime.environment import load_environment
-from runtime.snapshot_store import SnapshotStore
+from runtime.redis_snapshot_store import create_snapshot_store as SnapshotStore
 from api.services.bookmaker_panels.budget import reserve_guest
 
 NAMESPACE = "research:esports:anonymous-odds:v1"

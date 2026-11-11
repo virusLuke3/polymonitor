@@ -356,12 +356,12 @@ def _read_seeded_snapshot(
     *,
     ttl_seconds: int,
 ) -> Optional[Dict[str, Any]]:
-    # The collector publishes SQLite first; Redis is only a replica fallback.
+    # The collector publishes to the configured canonical seed store.
     store = dependencies.snapshot_store
     if store is not None:
         payload = store.get(WEATHER_NEWS_SNAPSHOT_NAMESPACE, WEATHER_NEWS_CACHE_KEY)
         if isinstance(payload, dict):
-            return _with_cache_mode(payload, "sqlite-seed")
+            return _with_cache_mode(payload, getattr(store, "backend", "sqlite") + "-seed")
         stale = store.get_stale(WEATHER_NEWS_SNAPSHOT_NAMESPACE, WEATHER_NEWS_CACHE_KEY)
         if isinstance(stale, dict):
             return _with_cache_mode(stale, "stale-seed")

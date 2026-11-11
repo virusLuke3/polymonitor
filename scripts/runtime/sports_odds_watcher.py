@@ -27,12 +27,13 @@ try:
 except ImportError:
     requests = None
 
+from runtime.redis_snapshot_store import seed_writer
 from api.config import load_api_settings
 from api.clients.source_transport import read_response_bytes, read_with_retry, source_session
 from api.services import sports_odds_service
 from runtime.market_search import build_market_search
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot, retained_snapshot
-from runtime.snapshot_store import SnapshotStore
+from runtime.redis_snapshot_store import create_snapshot_store as SnapshotStore
 
 
 DEFAULT_INTERVAL_SECONDS = 180
@@ -159,6 +160,8 @@ class SportsOddsWatcher:
         return context
 
     def load_previous_payload(self) -> Dict[str, Any]:
+        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+            return {}
         try:
             raw = self.redis_client.get(self.redis_key())
             if raw:
@@ -210,6 +213,7 @@ class SportsOddsWatcher:
         payload["lastSuccessAt"] = last_success_at
         self.seed_meta_store.store(SEED_META_NAMESPACE, SEED_META_CACHE_KEY, payload)
 
+    @seed_writer
     def run_once(self) -> Dict[str, Any]:
         previous = self.load_previous_payload()
         self.last_raw_odds = None

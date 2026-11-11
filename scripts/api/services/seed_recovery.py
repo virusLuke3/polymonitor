@@ -32,7 +32,7 @@ def read_public_seed(*, namespace: str, cache_key: str, snapshot_store: Any,
                      retain_seconds: int, now: str | None = None) -> dict | None:
     """Read an existing owner's publication; never acquire, write or renew it.
 
-    SQLite is authoritative. Optional Redis is only a missing-local fallback,
+    The configured seed store is authoritative; legacy mirrors are offline-only,
     and all tiers are bounded by the original payload clock, not storage TTL.
     """
     current = now or datetime.now(timezone.utc).isoformat()
@@ -50,10 +50,10 @@ def read_public_seed(*, namespace: str, cache_key: str, snapshot_store: Any,
 
     if snapshot_store is not None:
         for getter in (snapshot_store.get, snapshot_store.get_stale):
-            value = accepted(getter(namespace, cache_key), "sqlite-seed")
+            value = accepted(getter(namespace, cache_key), getattr(snapshot_store, "backend", "sqlite") + "-seed")
             if value is not None:
                 return value
-    if redis_get is not None:
+    if redis_get is not None and getattr(snapshot_store, "backend", "sqlite") != "redis":
         try:
             return accepted(redis_get(namespace, cache_key), "redis-seed")
         except Exception:
@@ -135,8 +135,8 @@ def read_watch_seed(*, namespace: str, cache_key: str, panel_id: str, snapshot_s
         if snapshot_store is not None:
             payload = snapshot_store.get(namespace, cache_key) or snapshot_store.get_stale(namespace, cache_key)
             if isinstance(payload, dict) and payload.get("panelId") == panel_id:
-                return bounded_rows(payload, clock(), retain_seconds), "sqlite-seed"
-        if redis_get is not None:
+                return bounded_rows(payload, clock(), retain_seconds), getattr(snapshot_store, "backend", "sqlite") + "-seed"
+        if redis_get is not None and getattr(snapshot_store, "backend", "sqlite") != "redis":
             try:
                 payload = redis_get(namespace, cache_key)
                 if isinstance(payload, dict) and payload.get("panelId") == panel_id:
@@ -162,6 +162,8 @@ def read_watch_seed(*, namespace: str, cache_key: str, panel_id: str, snapshot_s
         if isinstance(meta, dict):
             interval = min(3600, max(60, int(meta.get("expectedIntervalSeconds") or 600)))
             owner_active = age_seconds(meta.get("lastAttemptAt"), clock()) < interval * 2
+    if getattr(snapshot_store, "backend", "sqlite") == "redis":
+        owner_active = True  # Scheduled collectors own public seed acquisition.
     if not usable(payload, max_age_seconds) and not owner_active:
         def recover() -> None:
             lock = snapshot_store.fetch_lock(namespace, cache_key, timeout=0) if snapshot_store is not None and hasattr(snapshot_store, "fetch_lock") else nullcontext()

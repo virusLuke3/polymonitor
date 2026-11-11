@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Helpers for watcher seed metadata stored in Redis + SQLite snapshot."""
+"""Helpers for confirmed seed publication and collector metadata."""
 
 from __future__ import annotations
 
@@ -21,15 +21,15 @@ class SnapshotPublicationError(RuntimeError):
 def publish_snapshot(*, snapshot_store: Any, namespace: str, cache_key: str,
                      payload: Any, ttl_seconds: int, redis_client: Any = None,
                      redis_cache_key: str = "") -> None:
-    """Confirm SQLite before mirroring; an optional mirror cannot fail publication."""
+    """Confirm the authoritative store; legacy mirrors are offline SQLite compatibility only."""
     try:
         if snapshot_store.set(namespace, cache_key, payload, ttl_seconds) is False:
-            raise SnapshotPublicationError("SQLite snapshot write was not accepted")
+            raise SnapshotPublicationError("Seed snapshot write was not accepted")
     except SnapshotPublicationError:
         raise
     except Exception as exc:
-        raise SnapshotPublicationError(f"SQLite snapshot write failed: {type(exc).__name__}") from exc
-    if redis_client is not None:
+        raise SnapshotPublicationError(f"Seed snapshot write failed: {type(exc).__name__}") from exc
+    if redis_client is not None and getattr(snapshot_store, "backend", "sqlite") != "redis":
         try:
             accepted = redis_client.set(redis_cache_key, json.dumps(payload, ensure_ascii=True, default=str), ex=ttl_seconds)
             if accepted is False:
@@ -72,6 +72,8 @@ class SeedMetaStore:
             stale = self.snapshot_store.get_stale(namespace, cache_key)
             if isinstance(stale, dict):
                 return stale
+        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+            return None
         try:
             raw = self.redis_client.get(self._redis_key(namespace, cache_key))
             if raw:

@@ -23,12 +23,13 @@ try:
 except ImportError:
     requests = None
 
+from runtime.redis_snapshot_store import seed_writer
 from api.config import load_api_settings
 from api.clients.source_transport import read_response_bytes, read_with_retry, source_session
 from api.context import RuntimeResources
 from api.services import global_transport_shipping_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, utc_now_iso, publish_snapshot, retained_snapshot
-from runtime.snapshot_store import SnapshotStore
+from runtime.redis_snapshot_store import create_snapshot_store as SnapshotStore
 from runtime.telegram_panel_publish import publish_cached_panel_snapshot
 
 
@@ -109,6 +110,8 @@ class GlobalTransportShippingWatcher:
         return response.json()
 
     def get_cached_json(self, namespace: str, cache_key: str) -> Optional[Dict[str, Any]]:
+        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+            return self.snapshot_store.get(namespace, cache_key)
         cached = self.snapshot_store.get(namespace, cache_key)
         if isinstance(cached, dict):
             return cached
@@ -123,6 +126,10 @@ class GlobalTransportShippingWatcher:
 
     def set_cached_json(self, namespace: str, cache_key: str, payload: Dict[str, Any], ttl_seconds: int) -> None:
         # Source caches are best effort; formal snapshots use store_payload.
+        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+            if not self.snapshot_store.set(namespace, cache_key, payload, ttl_seconds):
+                raise RuntimeError("Seed publication rejected")
+            return payload
         try:
             self.snapshot_store.set(namespace, cache_key, payload, ttl_seconds)
         except Exception:
@@ -207,6 +214,7 @@ class GlobalTransportShippingWatcher:
             print(f"[global_transport_shipping] WARN seed meta write failed: {exc.__class__.__name__}", file=sys.stderr)
             return False
 
+    @seed_writer
     def run_once(self) -> Dict[str, Any]:
         previous = self.previous()
         self._collection_deadline = time.monotonic() + 240

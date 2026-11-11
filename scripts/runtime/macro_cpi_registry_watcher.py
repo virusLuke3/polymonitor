@@ -17,13 +17,14 @@ if str(_scripts_root) not in sys.path:
 import redis
 import requests
 
+from runtime.redis_snapshot_store import seed_writer
 from api.config import load_api_settings
 from api.clients.source_transport import source_session
 from api.clients.fred_csv import read_fred_text
 from api.services import macro_cpi_registry_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, retained_snapshot, collection_delay, publish_snapshot
 from runtime.macro_collection import start_round, round_evidence, read_text
-from runtime.snapshot_store import SnapshotStore
+from runtime.redis_snapshot_store import create_snapshot_store as SnapshotStore
 from runtime.telegram_panel_publish import publish_cached_panel_snapshot
 
 
@@ -64,12 +65,18 @@ class MacroCpiRegistryWatcher:
         return _redis_key(self.redis_prefix, self.namespace(panel_id), self.cache_key())
 
     def _get_cached_json(self, namespace: str, cache_key: str) -> Dict[str, Any] | None:
+        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+            return self.snapshot_store.get(namespace, cache_key)
         payload = self.snapshot_store.get(namespace, cache_key)
         if not isinstance(payload, dict):
             payload = self.snapshot_store.get_stale(namespace, cache_key)
         return payload if isinstance(payload, dict) else None
 
     def _set_cached_json(self, namespace: str, cache_key: str, payload: Dict[str, Any], ttl: int) -> None:
+        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+            if not self.snapshot_store.set(namespace, cache_key, payload, ttl):
+                raise RuntimeError("Seed publication rejected")
+            return payload
         if self.redis_client is not None:
             try:
                 self.redis_client.set(_redis_key(self.redis_prefix, namespace, cache_key), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl)
@@ -150,6 +157,7 @@ class MacroCpiRegistryWatcher:
         self.store_meta(panel_id, status=status, record_count=len(payload.get("items") or []), source_states=payload.get("sources"), cache_mode="redis-seed", payload_status=payload.get("status"))
         return {"panelId": panel_id, "status": "stored", "payloadStatus": payload.get("status"), "items": len(payload.get("items") or []), "telegramSent": telegram_sent}
 
+    @seed_writer
     def run_once(self) -> Dict[str, Any]:
         start_round(self, 'macro_cpi_registry_round_budget_seconds', 450)
         results = [self.run_panel(panel_id) for panel_id in macro_cpi_registry_service.MACRO_CPI_REGISTRY_PANEL_IDS]

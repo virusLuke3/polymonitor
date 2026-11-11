@@ -27,11 +27,12 @@ try:
 except ImportError:
     requests = None
 
+from runtime.redis_snapshot_store import seed_writer
 from api.config import load_api_settings
 from api.services import breaking_event_radar_service
 from runtime.market_search import build_market_search
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, utc_now_iso, publish_snapshot, retained_snapshot
-from runtime.snapshot_store import SnapshotStore
+from runtime.redis_snapshot_store import create_snapshot_store as SnapshotStore
 
 
 DEFAULT_INTERVAL_SECONDS = 300
@@ -212,6 +213,8 @@ class BreakingEventRadarWatcher:
             return stale
         if self.redis_client is None:
             return {}
+        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+            return {}
         try:
             raw = self.redis_client.get(self.redis_key())
             if raw:
@@ -266,6 +269,7 @@ class BreakingEventRadarWatcher:
             )
             return False
 
+    @seed_writer
     def run_once(self) -> Dict[str, Any]:
         previous = self.load_previous_payload()
         topic_ids = breaking_event_radar_service.breaking_event_topic_ids()

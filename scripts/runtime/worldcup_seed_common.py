@@ -37,7 +37,7 @@ from api.config import load_api_settings
 from api.services import worldcup_dashboard_service
 from db import DEFAULT_DB_PATH, dict_from_row, get_connection
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
-from runtime.snapshot_store import SnapshotStore
+from runtime.redis_snapshot_store import create_snapshot_store as SnapshotStore
 
 SEED_META_NAMESPACE = "seed-meta:sports"
 
@@ -123,6 +123,8 @@ class WorldCupSeedWatcher:
             conn.close()
 
     def get_cached_json(self, namespace: str, cache_key: str) -> Any:
+        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+            return self.snapshot_store.get(namespace, cache_key)
         cached = self.snapshot_store.get(namespace, cache_key)
         if isinstance(cached, dict):
             return cached
@@ -136,6 +138,10 @@ class WorldCupSeedWatcher:
             return None
 
     def set_cached_json(self, namespace: str, cache_key: str, payload: Any, ttl_seconds: int) -> None:
+        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+            if not self.snapshot_store.set(namespace, cache_key, payload, ttl_seconds):
+                raise RuntimeError("Seed publication rejected")
+            return payload
         if self.redis_client is not None:
             try:
                 self.redis_client.set(redis_key(self.redis_prefix, namespace, cache_key), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl_seconds)

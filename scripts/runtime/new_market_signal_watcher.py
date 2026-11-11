@@ -35,6 +35,7 @@ except ImportError:
     requests = None
 
 from db import add_db_cli_args, configure_db_from_args, describe_db_target, dict_from_row, get_connection
+from runtime.redis_snapshot_store import seed_writer
 from api.config import load_api_settings
 from api.services.new_market_signal_service import (
     SNAPSHOT_CACHE_KEY,
@@ -43,7 +44,7 @@ from api.services.new_market_signal_service import (
     normalize_new_market_signals_payload,
 )
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot, retained_snapshot
-from runtime.snapshot_store import SnapshotStore
+from runtime.redis_snapshot_store import create_snapshot_store as SnapshotStore
 from runtime.telegram_panel_publish import publish_cached_panel_snapshot
 
 
@@ -359,7 +360,7 @@ class NewMarketSignalWatcher:
 
     def preserve_current_snapshot(self, *, reason: str) -> Dict[str, Any]:
         payload = self.snapshot_store.get_stale(SNAPSHOT_NAMESPACE, SNAPSHOT_CACHE_KEY)
-        if not isinstance(payload, dict):
+        if not isinstance(payload, dict) and getattr(self.snapshot_store, "backend", "sqlite") != "redis":
             try:
                 raw = self.redis_client.get(self.snapshot_redis_key())
                 payload = json.loads(raw) if raw else {}
@@ -421,6 +422,7 @@ class NewMarketSignalWatcher:
             return "stale_created_at"
         return "fresh"
 
+    @seed_writer
     def run_once(self, *, limit: int = DEFAULT_BATCH_LIMIT) -> Dict[str, Any]:
         self.redis_client.ping()
         last_seen = self.get_last_seen_market_id()

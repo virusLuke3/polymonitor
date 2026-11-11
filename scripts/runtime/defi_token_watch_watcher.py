@@ -27,13 +27,14 @@ try:
 except ImportError:
     requests = None
 
+from runtime.redis_snapshot_store import seed_writer
 from api.clients.source_transport import source_session
 from api.config import load_api_settings
 from api.services import defi_token_watch_service
 from api.services.seed_recovery import bounded_rows, retain_failed_rows
 from runtime.seed_meta import retained_snapshot
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot, SnapshotPublicationError
-from runtime.snapshot_store import SnapshotStore
+from runtime.redis_snapshot_store import create_snapshot_store as SnapshotStore
 
 
 DEFAULT_INTERVAL_SECONDS = 300
@@ -118,6 +119,8 @@ class DefiTokenWatchWatcher:
         stale = self.snapshot_store.get_stale(self.namespace(), self.cache_key())
         if isinstance(stale, dict):
             return stale
+        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+            return {}
         try:
             raw = self.redis_client.get(self.redis_key())
             if raw:
@@ -164,6 +167,7 @@ class DefiTokenWatchWatcher:
         payload["lastSuccessAt"] = last_success_at
         self.seed_meta_store.store(SEED_META_NAMESPACE, SEED_META_CACHE_KEY, payload)
 
+    @seed_writer
     def run_once(self) -> Dict[str, Any]:
         previous = bounded_rows(self.load_previous_payload(), utc_now_iso())
         try:

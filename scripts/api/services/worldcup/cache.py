@@ -20,7 +20,7 @@ def read_cached(
         if isinstance(cached, dict):
             if has_generated_fallback_artifacts(cached):
                 return None
-            return {**normalize_payload(cached), "cacheMode": "sqlite"}
+            return {**normalize_payload(cached), "cacheMode": getattr(store, "backend", "sqlite")}
         stale = store.get_stale(namespace, cache_key)
         if isinstance(stale, dict):
             if has_generated_fallback_artifacts(stale):
@@ -47,7 +47,7 @@ def store_payload(ctx: Dict[str, Any], *, namespace: str, cache_key: str, payloa
             redis_client=None if callable(setter) else ctx.get("redis_client") or ctx.get("REDIS_CLIENT"),
             redis_cache_key=f"{ctx.get('redis_prefix') or ctx.get('REDIS_PREFIX') or ''}{namespace}:{cache_key}",
         )
-    if callable(setter):
+    if callable(setter) and getattr(store, "backend", "sqlite") != "redis":
         try:
             setter(namespace, cache_key, payload, ttl_seconds)
         except Exception:

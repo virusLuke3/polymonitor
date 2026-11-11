@@ -71,7 +71,7 @@
 
 API 注册四个新增视图路径：`/runtime/crypto/order-flow`、`/runtime/crypto/oracle-reference`、`/runtime/crypto/options`、`/runtime/crypto/exchange-inflow`。订单流、期权、流入继续共享公共行情快照。合约指定源独立使用 `/runtime/crypto/oracle-reference` 与公共 Runtime 资源 `crypto-reference:market-data:v1`，5 秒刷新，15 秒观测时效；不依赖公共行情采集是否成功。响应必须匹配 schemaVersion、kind 和资产身份；嵌套序列、盘口、期权与流入记录也校验。
 
-数据拥有者为 `scripts/api/services/crypto_strategy/`。`crypto_strategy_watcher.py` 是单写入者（文件锁），落盘到主 snapshot SQLite 相邻的 `crypto_strategy.sqlite3`，或由 `POLYDATA_CRYPTO_STRATEGY_DB` 指定。API 使用 SQLite `mode=ro`，GET 不采集、不建表。全周期异常保留旧快照与原始时间；单来源失败保留其他来源并标注缺失。观测保留七天；单序列响应最多 300 点；上游价格档案最多 900 点。该存储不是研究级长期原始归档。
+数据拥有者为 `scripts/api/services/crypto_strategy/`。`crypto_strategy_watcher.py` 是单写入者（文件锁），落盘到主 snapshot SQLite 相邻的 `crypto_strategy.sqlite3`，或由 `POLYDATA_CRYPTO_STRATEGY_DB` 指定。历史与来源退避仍保留 SQLite；当前展示聚合改为 `snapshot:crypto-strategy / v1` Redis seed。API 只读同一 Redis 键，GET 不采集、不建表；实时合约引用继续走现有 owner 校验。全周期异常保留旧快照与原始时间；单来源失败保留其他来源并标注缺失。观测保留七天；单序列响应最多 300 点；上游价格档案最多 900 点。该存储不是研究级长期原始归档。
 
 公共源：Bybit 现货/USDT 永续行情、分钟收盘、5m OI、资金费率历史、60 笔现货成交与 50 档深度；Deribit BTC/ETH 期权元数据和双边报价；Coinbase/Kraken USD 稳定币价格。Bybit spot 与 perp 分别请求，基差只有时间差不超过五秒才计算。不能把快照深度失衡叫作增量 OFI。
 

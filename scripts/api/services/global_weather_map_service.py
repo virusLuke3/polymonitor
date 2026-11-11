@@ -1848,7 +1848,7 @@ def _read_seeded_snapshot(
     if store is not None:
         payload = store.get(GLOBAL_WEATHER_MAP_SNAPSHOT_NAMESPACE, GLOBAL_WEATHER_MAP_CACHE_KEY)
         if isinstance(payload, dict):
-            return _with_cache_mode(payload, "sqlite-seed")
+            return _with_cache_mode(payload, getattr(store, "backend", "sqlite") + "-seed")
         stale = store.get_stale(GLOBAL_WEATHER_MAP_SNAPSHOT_NAMESPACE, GLOBAL_WEATHER_MAP_CACHE_KEY)
         if isinstance(stale, dict):
             return _with_cache_mode(stale, "stale-seed")

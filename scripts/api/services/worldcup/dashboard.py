@@ -24,6 +24,10 @@ def get_worldcup_dashboard_snapshot(
         normalize_payload=normalize_payload,
         has_generated_fallback_artifacts=has_generated_fallback_artifacts,
     )
+    if getattr(ctx.get("SNAPSHOT_STORE"), "backend", "sqlite") == "redis":
+        if cached:
+            return {**cached, **({"status": "stale"} if cached.get("cacheMode") == "stale" else {})}
+        return fallback_payload(RuntimeError("Scheduled World Cup seed is warming"), None)
     if cached:
         cached_odds = cached.get("odds") if isinstance(cached.get("odds"), list) else []
         provider_states = cached.get("providerStates") if isinstance(cached.get("providerStates"), dict) else {}

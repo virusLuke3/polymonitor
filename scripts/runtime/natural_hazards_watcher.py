@@ -17,11 +17,12 @@ if str(_scripts_root) not in sys.path:
 
 import requests
 
+from runtime.redis_snapshot_store import seed_writer
 from api.config import load_api_settings
 from api.clients.source_transport import source_session
 from api.context import RuntimeResources
 from api.services import natural_hazards
-from runtime.snapshot_store import SnapshotStore
+from runtime.redis_snapshot_store import create_snapshot_store as SnapshotStore
 
 
 DEFAULT_INTERVAL_SECONDS = 10
@@ -111,6 +112,7 @@ class NaturalHazardsWatcher:
             "http_bytes_get": self._http_bytes_get,
         }
 
+    @seed_writer
     def run_once(self) -> Dict[str, Any]:
         payload = natural_hazards.get_natural_hazards_snapshot(
             self.context(),

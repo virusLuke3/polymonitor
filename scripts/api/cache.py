@@ -10,6 +10,7 @@ from typing import Any, Dict, Optional
 
 from dataclasses import dataclass, field
 from api.context import RuntimeResources
+from runtime.redis_snapshot_store import public_namespace
 
 
 @dataclass
@@ -90,6 +91,8 @@ def _redis_key(ctx: CacheState, namespace: str, cache_key: str) -> str:
 
 
 def get_cached_payload(ctx: CacheState, namespace: str, cache_key: str) -> Optional[Any]:
+    if getattr(ctx.snapshot_store, "backend", "sqlite") == "redis" and public_namespace(namespace):
+        return ctx.snapshot_store.get(namespace, cache_key)
     client = get_redis_client(ctx)
     if client is None:
         return None
@@ -108,6 +111,10 @@ def get_cached_payload(ctx: CacheState, namespace: str, cache_key: str) -> Optio
 
 
 def set_cached_payload(ctx: CacheState, namespace: str, cache_key: str, payload: Any, ttl_seconds: int) -> None:
+    if getattr(ctx.snapshot_store, "backend", "sqlite") == "redis" and public_namespace(namespace):
+        if not ctx.snapshot_store.set(namespace, cache_key, payload, ttl_seconds):
+            raise RuntimeError("Seed publication rejected")
+        return
     client = get_redis_client(ctx)
     if client is None:
         return
@@ -132,7 +139,7 @@ def _store_snapshot_payload(ctx: CacheState, namespace: str, cache_key: str, pay
     if isinstance(payload, dict) and (payload.get("error") or payload.get("status") in {"error", "unavailable"}):
         raise RuntimeError("Snapshot builder returned an unavailable result")
     if ctx.snapshot_store.set(namespace, cache_key, payload, ttl_seconds) is False:
-        raise RuntimeError("SQLite snapshot write was not accepted")
+        raise RuntimeError("Seed snapshot write was not accepted")
 
 
 def _admit_snapshot(ctx, namespace, cache_key):

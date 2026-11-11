@@ -28,6 +28,7 @@ try:
 except ImportError:
     requests = None
 
+from runtime.redis_snapshot_store import seed_writer
 from api.clients import market_data_client
 from api.commodity_symbols import COMMODITY_SYMBOLS
 from api.clients.http_client import http_json_get
@@ -37,7 +38,7 @@ from api.context import RuntimeResources
 from api.services import runtime_service
 from api.services import commodities_service, crypto_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot, SnapshotPublicationError
-from runtime.snapshot_store import SnapshotStore
+from runtime.redis_snapshot_store import create_snapshot_store as SnapshotStore
 
 
 DEFAULT_INTERVAL_SECONDS = 300
@@ -195,6 +196,8 @@ class MarketGroupWatcher:
         stale = self.snapshot_store.get_stale(namespace, cache_key)
         if isinstance(stale, dict):
             return stale
+        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+            return {}
         try:
             raw = self.redis_client.get(_redis_key(self.redis_prefix, namespace, cache_key))
             if raw:
@@ -296,6 +299,7 @@ class MarketGroupWatcher:
         )
         return {"status": status, "recordCount": record_count}
 
+    @seed_writer
     def run_once(self) -> Dict[str, Any]:
         result = {}
         for kind, items in (("commodities", COMMODITY_SYMBOLS), ("crypto", CRYPTO_SYMBOLS)):

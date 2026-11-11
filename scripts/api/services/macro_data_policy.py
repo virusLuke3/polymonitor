@@ -32,11 +32,11 @@ def bounded_rows(payload: dict, *, now: str, max_age: int, clock=row_clock) -> l
 
 
 def read_seeded(store, reader, namespace: str, key: str):
-    """A configured SQLite store owns truth, including an expired TTL or a miss."""
+    """The configured seed store owns truth, including an expired TTL or a miss."""
     if store is not None:
         payload = store.get(namespace, key)
         if isinstance(payload, dict):
-            return {**payload, "cacheMode": "sqlite-seed"}
+            return {**payload, "cacheMode": getattr(store, "backend", "sqlite") + "-seed"}
         payload = store.get_stale(namespace, key)
         return {**payload, "cacheMode": "stale-seed"} if isinstance(payload, dict) else None
     if callable(reader):

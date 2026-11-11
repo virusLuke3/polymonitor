@@ -28,13 +28,14 @@ try:
 except ImportError:
     requests = None
 
+from runtime.redis_snapshot_store import seed_writer
 from api.clients.source_transport import read_response_bytes, read_with_retry, source_session
 from api.config import load_api_settings
 from api.context import RuntimeResources
 from api.clients import market_data_client
 from api.services import finance_external_sources_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot, SnapshotPublicationError, retained_snapshot
-from runtime.snapshot_store import SnapshotStore
+from runtime.redis_snapshot_store import create_snapshot_store as SnapshotStore
 
 
 DEFAULT_INTERVAL_SECONDS = 15 * 60
@@ -184,6 +185,8 @@ class FinanceExternalSourcesWatcher:
         stale = self.snapshot_store.get_stale(self.namespace(), self.cache_key())
         if isinstance(stale, dict):
             return stale
+        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+            return {}
         try:
             raw = self.redis_client.get(self.redis_key())
             if raw:
@@ -230,6 +233,7 @@ class FinanceExternalSourcesWatcher:
         payload["lastSuccessAt"] = last_success_at
         self.seed_meta_store.store(SEED_META_NAMESPACE, SEED_META_CACHE_KEY, payload)
 
+    @seed_writer
     def run_once(self) -> Dict[str, Any]:
         previous = self.load_previous_payload()
         try:

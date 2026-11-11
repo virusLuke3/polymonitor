@@ -22,7 +22,7 @@ from db.trade_v2 import (
     sql_identifier,
 )
 from runtime.content_runtime import RuntimeContentProvider
-from runtime.snapshot_store import SnapshotStore
+from runtime.redis_snapshot_store import create_snapshot_store as SnapshotStore
 
 from api import cache as api_cache
 from api import db as api_db

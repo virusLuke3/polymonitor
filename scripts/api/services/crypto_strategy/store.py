@@ -5,6 +5,21 @@ import json
 import os
 import sqlite3
 from pathlib import Path
+from functools import lru_cache
+
+NAMESPACE = "snapshot:crypto-strategy"
+CACHE_KEY = "v1"
+
+
+@lru_cache(maxsize=4)
+def seed_store(path):
+    from runtime.redis_snapshot_store import create_snapshot_store
+    return create_snapshot_store(str(path))
+
+
+def redis_mode():
+    return os.environ.get("POLYMONITOR_SEED_BACKEND", "redis") == "redis"
+
 
 
 def database_path(snapshot_path):
@@ -12,6 +27,8 @@ def database_path(snapshot_path):
 
 
 def read_snapshot(path):
+    if redis_mode():
+        return seed_store(path).get_stale(NAMESPACE, CACHE_KEY)
     if not Path(path).is_file():
         return None
     with sqlite3.connect(Path(path).resolve().as_uri() + "?mode=ro", uri=True, timeout=.75) as conn:
@@ -21,6 +38,7 @@ def read_snapshot(path):
 
 class Store:
     def __init__(self, path):
+        self.path = path
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(path, timeout=2)
         self.conn.execute("PRAGMA journal_mode=WAL")
@@ -43,7 +61,8 @@ class Store:
 
     def publish(self, value, now, source_entries=None):
         self.conn.execute("DELETE FROM samples WHERE t < ?", (now - 7 * 86400000,))
-        self.conn.execute("INSERT OR REPLACE INTO snapshot VALUES(1,?)", (json.dumps(value, allow_nan=False),))
+        if not redis_mode():
+            self.conn.execute("INSERT OR REPLACE INTO snapshot VALUES(1,?)", (json.dumps(value, allow_nan=False),))
         if source_entries is not None:
             if len(source_entries) > 64:
                 raise ValueError("CRYPTO_SOURCE_CACHE_LIMIT")
@@ -51,6 +70,8 @@ class Store:
             self.conn.executemany("INSERT INTO source_cache VALUES(?,?)",
                                   [(key, json.dumps(entry, allow_nan=False)) for key, entry in source_entries.items()])
         self.conn.commit()
+        if redis_mode() and not seed_store(self.path).set(NAMESPACE, CACHE_KEY, value, 120):
+            raise RuntimeError("Crypto seed publication rejected")
 
 
 def get_snapshot(path, *, reference_only=False):

@@ -13,6 +13,8 @@ from tempfile import TemporaryDirectory
 # this guard, importing API settings can copy secrets from the developer's
 # .env into os.environ and make missing-key/fallback tests order-dependent.
 os.environ["POLYDATA_DISABLE_DOTENV"] = "1"
+# Production uses Redis; unit tests must never connect to the workstation store.
+os.environ["POLYMONITOR_SEED_BACKEND"] = "sqlite"
 
 # Mocked provider tests declare their public addresses explicitly. Never load
 # the workstation .env; missing-config tests may remove any individual key.

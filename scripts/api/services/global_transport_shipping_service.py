@@ -2097,7 +2097,7 @@ def _read_seeded_snapshot(
         return None
     payload = store.get(GLOBAL_TRANSPORT_SNAPSHOT_NAMESPACE, GLOBAL_TRANSPORT_CACHE_KEY)
     if isinstance(payload, dict):
-        return _with_cache_mode(payload, "sqlite-seed")
+        return _with_cache_mode(payload, getattr(store, "backend", "sqlite") + "-seed")
     stale = store.get_stale(GLOBAL_TRANSPORT_SNAPSHOT_NAMESPACE, GLOBAL_TRANSPORT_CACHE_KEY)
     if isinstance(stale, dict):
         return _with_cache_mode(stale, "stale-seed")

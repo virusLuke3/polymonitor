@@ -124,11 +124,11 @@ publisher's quota; quota overflow is explicitly partial, never comprehensive
 recall. Direct statistical relations require positive jurisdiction and matching
 metric/reference period/basis; unknown jurisdiction is at most context.
 
-Local SQLite is checked before optional Redis for fresh and bounded stale seeds,
-avoiding optional Redis delays throughout local recovery. Freshness is 90 seconds; bounded stale SQLite
-recovery is 300 seconds. Cold reads use the existing database under a one-second
-cross-process lock. Failed queries do not replace the previous seed; SQLite and
-Redis writes are independent, and worker success requires a verified write.
+The canonical Redis store serves fresh and bounded stale seeds. Freshness is
+90 seconds; bounded stale recovery is 300 seconds. Approved cold parameterized
+reads use the existing database under a one-second acquisition lock. Failed
+queries do not replace the previous seed; worker success requires a confirmed
+Redis publication. SQLite is not an automatic fallback.
 
 The related-news seed is registered in unified seed health. `contentSync` checks
 seed age/status rather than just table existence. Request, seed, source and
@@ -236,7 +236,8 @@ SQLite owner, as specified in [the domain contract](crypto-strategy-panels.md#åŽ
 
 ### External collector failure isolation (2026-11-04)
 
-- Crypto keeps one existing SQLite owner. Fast quotes/flow/depth publish on the
+- Crypto keeps its existing collector and SQLite observation history; its public
+  current snapshot is published to Redis. Fast quotes/flow/depth publish on the
   30-second loop with their own 30-second allowance. Three persistent slow workers
   handle four asset-history jobs and two options jobs; each key has at most one
   queued/running job, a 90-second allowance, and its original source cadence.
@@ -246,8 +247,8 @@ SQLite owner, as specified in [the domain contract](crypto-strategy-panels.md#åŽ
 - Finance/Tech/API recovery share the same durable acquisition lock and canonical
   snapshot size. View limits do not reduce the shared stored universe. If the
   scheduled owner has attempted within two declared intervals, API recovery does
-  not compete with it, even when that attempt failed. Recovery remains available
-  for absent/overdue owners.
+  not compete with it, even when that attempt failed. Redis public seed GETs
+  remain read-only when owners are absent/overdue and report warming/stale.
 - Tech, Finance, Finance External and commodity overview watchers own persistent Yahoo pools of
   three threads, with one reusable HTTP Session per thread. Batches join before
   the next panel/round. Tech/Finance panels have 180-second budgets; the larger
@@ -258,15 +259,16 @@ SQLite owner, as specified in [the domain contract](crypto-strategy-panels.md#åŽ
 - Last-good retention belongs to each source/identity, with original observed and
   fetched times. Stablecoin spot retention is five minutes; finance/tech/DeFi
   quote retention is thirty minutes. A refreshed envelope cannot renew old rows.
-- SQLite remains authoritative. The modified external watchers bound Redis connect
-  and socket waits to two seconds. Optional mirror failure must not erase a
-  successful SQLite publication or fabricate an upstream success timestamp.
+- Redis is authoritative for public seeds. Connect/socket budgets are one second
+  with no automatic retries. Failed publication cannot advance success metadata;
+  there is no SQLite or legacy mirror fallback. See the storage budgets and
+  migration contract in [the data pipeline](panel-data-pipeline.md#redis-å…¬å…±å¿«ç…§å¥‘çº¦).
 - Valid empty results (ended events, no news) differ from missing price fields or
   exceptions. Coverage must report expected, received and missing identities.
 
 - OFAC uses the official compressed SDN export (8 MiB compressed / 64 MiB
   expanded cap; 90-second body deadline), with the consolidated XML kept separate.
-  Parsed values reuse `source:world:ofac / <original URL>` in the existing SQLite
+  Parsed values reuse `source:world:ofac / <original URL>` in the shared Redis
   store: hourly refresh, at most 24 hours retained with original source clocks.
 - News keeps its approved-host, redirect, conditional-request and 2.5 MB limits.
   Its existing source worker uses the shared transport with a 45-second source
@@ -274,7 +276,7 @@ SQLite owner, as specified in [the domain contract](crypto-strategy-panels.md#åŽ
   remains. Per-source schedules and Retry-After still control subsequent attempts.
 - NWS scheduled acquisition has 20 seconds, including a 6-second connection cap.
   Browser source waits remain 6.5 seconds; its future continues in the existing
-  bounded owner pool and publishes to the same SQLite snapshot. Provider refresh
+  bounded owner pool and publishes to the same Redis snapshot. Provider refresh
   cadence, geometry, observation timestamps and stale limits are unchanged.
 - Prefer verified direct access where available. GRID has a collector-specific
   `POLYDATA_GRID_ESPORTS_TRUST_ENV_PROXY` override; disabling it does not change

@@ -19,11 +19,12 @@ except ImportError:
     redis = None
 import requests
 
+from runtime.redis_snapshot_store import seed_writer
 from api.clients.source_transport import source_session
 from api.config import load_api_settings
 from api.services import live_video_source_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, retained_snapshot, utc_now_iso, publish_snapshot
-from runtime.snapshot_store import SnapshotStore
+from runtime.redis_snapshot_store import create_snapshot_store as SnapshotStore
 
 
 DEFAULT_INTERVAL_SECONDS = 900
@@ -84,6 +85,8 @@ class MarketTvWireWatcher:
         return response.json()
 
     def _get_cached_json(self, namespace: str, cache_key: str) -> Dict[str, Any] | None:
+        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+            return self.snapshot_store.get(namespace, cache_key)
         cached = self.snapshot_store.get(namespace, cache_key)
         if isinstance(cached, dict):
             return cached
@@ -98,6 +101,10 @@ class MarketTvWireWatcher:
 
     def _set_cached_json(self, namespace: str, cache_key: str, payload: Dict[str, Any], ttl: int) -> None:
         # Source caches are best effort; formal snapshots use store_payload.
+        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+            if not self.snapshot_store.set(namespace, cache_key, payload, ttl):
+                raise RuntimeError("Seed publication rejected")
+            return payload
         try:
             self.snapshot_store.set(namespace, cache_key, payload, ttl)
         except Exception:
@@ -208,6 +215,7 @@ class MarketTvWireWatcher:
             )
             return False
 
+    @seed_writer
     def run_once(self) -> Dict[str, Any]:
         previous = self.previous()
         youtube_rss_refresh_due = self._youtube_rss_refresh_due()

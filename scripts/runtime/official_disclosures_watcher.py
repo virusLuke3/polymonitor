@@ -11,7 +11,7 @@ from urllib.parse import urlencode, urlsplit
 
 from api.clients.source_transport import read_response_bytes, read_with_retry, source_session
 from api.services.official_disclosures_service import WATCHLIST, collect_source, facts, filings, policies, presidential_documents, publish
-from runtime.snapshot_store import SnapshotStore
+from runtime.redis_snapshot_store import create_snapshot_store as SnapshotStore
 
 
 class Transport:

@@ -1,0 +1,27 @@
+services:
+  seeds:
+    image: redis:7-alpine
+    container_name: polymonitor_seed_redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6381:6379"
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory
+      - 512mb
+      - --maxmemory-policy
+      - noeviction
+    volumes:
+      - seeds:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 2s
+      retries: 3
+volumes:
+  seeds:
+    name: polymonitor-seeds

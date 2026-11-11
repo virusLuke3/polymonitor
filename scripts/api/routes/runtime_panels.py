@@ -8,10 +8,12 @@ from datetime import datetime
 from typing import Any, cast
 
 from flask import Blueprint, Response, current_app, jsonify, request
+from redis.exceptions import RedisError
 
 from api.contracts import api_envelope, api_error, runtime_panel_metadata
 from api.runtime_panels import RUNTIME_PANEL_MODULES, get_panel_by_id
 from api.runtime_panels.types import RuntimePanelContext
+from api.runtime_panels.seed_reads import batch_reads
 from api.services import hls_proxy_service, youtube_embed_service, youtube_live_probe_service
 
 
@@ -69,6 +71,12 @@ def _get_panel_snapshot(panel, panel_context: RuntimePanelContext, limit: int | 
 def create_runtime_panels_blueprint(dependencies: RuntimePanelRouteDependencies) -> Blueprint:
     bp = Blueprint("runtime_panel_routes", __name__)
 
+    @bp.errorhandler(RedisError)
+    def seed_unavailable(error):
+        current_app.logger.warning("Public seed store unavailable: %s", type(error).__name__)
+        return jsonify({"status": "unavailable", "error": "seed-store-unavailable"}), 503, {
+            "Cache-Control": "no-store", "Retry-After": "30"}
+
     @bp.route('/runtime/weather/books', methods=['GET'])
     def weather_books():
         tokens = list(dict.fromkeys((request.args.get('tokens') or '').split(',')))
@@ -112,6 +120,11 @@ def create_runtime_panels_blueprint(dependencies: RuntimePanelRouteDependencies)
         return list(dict.fromkeys(panel_ids))
 
     def _collect_runtime_panels(panel_ids: list[str]):
+        valid_ids = [panel_id for panel_id in panel_ids if get_panel_by_id(panel_id) is not None]
+        with batch_reads(dependencies.panel_context.snapshot_store, valid_ids):
+            return _collect_runtime_panels_inner(panel_ids)
+
+    def _collect_runtime_panels_inner(panel_ids: list[str]):
         payloads: dict[str, Any] = {}
         legacy_errors: dict[str, str] = {}
         envelope_errors: list[dict[str, Any]] = []

@@ -26,10 +26,11 @@ try:
 except ImportError:
     redis = None
 
+from runtime.redis_snapshot_store import seed_writer
 from api.config import ApiSettings, load_api_settings
 from api.services import signal_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot, retained_snapshot
-from runtime.snapshot_store import SnapshotStore
+from runtime.redis_snapshot_store import create_snapshot_store as SnapshotStore
 from runtime.telegram_panel_publish import publish_cached_panel_snapshot
 
 
@@ -214,6 +215,8 @@ class SignalsWatcher:
             return stale
         if self.redis_client is None:
             return {}
+        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+            return {}
         try:
             raw = self.redis_client.get(self.redis_key())
             if raw:
@@ -337,6 +340,7 @@ class SignalsWatcher:
             print(f"[signals] WARN seed meta write failed: {exc.__class__.__name__}", file=sys.stderr)
             return False
 
+    @seed_writer
     def run_once(self) -> Dict[str, Any]:
         previous = self.load_previous_payload()
         payload = None

@@ -17,6 +17,7 @@ _repo_root = Path(__file__).resolve().parents[2]
 if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
 
+from runtime.redis_snapshot_store import seed_writer
 from api.services import worldcup_dashboard_service
 from runtime.worldcup_seed_common import WorldCupSeedWatcher, env_int, record_count
 
@@ -34,6 +35,7 @@ class WorldCupCoreWatcher(WorldCupSeedWatcher):
             interval_seconds=interval_seconds,
         )
 
+    @seed_writer
     def run_once(self) -> Dict[str, Any]:
         ctx = self.service_context()
         try:

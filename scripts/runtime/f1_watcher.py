@@ -27,11 +27,12 @@ try:
 except ImportError:
     requests = None
 
+from runtime.redis_snapshot_store import seed_writer
 from api.config import load_api_settings
 from api.clients.source_transport import source_session
 from api.services import f1_runtime_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot, retained_snapshot
-from runtime.snapshot_store import SnapshotStore
+from runtime.redis_snapshot_store import create_snapshot_store as SnapshotStore
 
 
 DEFAULT_INTERVAL_SECONDS = 180
@@ -159,6 +160,8 @@ class F1Watcher:
         return self.seed_meta_store.store(self.seed_meta_namespace(), self.seed_meta_cache_key(), payload)
 
     def load_previous_payload(self) -> Dict[str, Any]:
+        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+            return {}
         try:
             raw = self.redis_client.get(self.redis_key())
             if raw:
@@ -185,6 +188,7 @@ class F1Watcher:
                          payload=payload, ttl_seconds=ttl_seconds, redis_client=self.redis_client,
                          redis_cache_key=self.redis_key())
 
+    @seed_writer
     def run_once(self) -> Dict[str, Any]:
         previous = self.load_previous_payload()
         payload = self.build_payload()

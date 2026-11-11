@@ -26,12 +26,12 @@ flowchart LR
 
 ## 2. 按用途选择存储
 
-下表列出当前可复用入口和选择规则。实际读写顺序、Redis 是否启用、路径与保留期限由所属领域和部署配置决定，不强制每个 Panel 经过所有层。
+下表列出当前可复用入口和选择规则。公共展示快照统一使用 Redis；正式历史、私有状态和浏览器副本按各自用途保留。领域决定新鲜度和可展示年龄，不能自行建立第二个公共 seed 权威存储。
 
 | 层次 | 本项目入口与用途 | 新 Panel 的要求 |
 | --- | --- | --- |
 | 正式数据与历史 | 数据拥有者管理的 PostgreSQL、ClickHouse、文件或领域专用存储 | 链接真实表／数据集与读取契约；需要回测或版本时单独确认历史能力 |
-| 服务端展示快照 | [SnapshotStore](../scripts/runtime/snapshot_store.py) 的 SQLite `panel_snapshots`；既有领域按配置使用 Redis 共享缓存 | 记录写入者、namespace/key、schema、TTL、最大保留年龄和容量；复用所属领域的发布与恢复路径 |
+| 服务端展示快照 | [RedisSnapshotStore](../scripts/runtime/redis_snapshot_store.py) 的 Redis 当前快照；SQLite 只保留历史、私有状态和迁移前备份 | 记录写入者、namespace/key、schema、TTL、最大保留年龄和容量；复用所属领域的发布与恢复路径 |
 | 首屏和批量读取 | [bootstrap](../scripts/api/services/bootstrap_service.py)、[runtime 批量路由](../scripts/api/routes/runtime_panels.py) | 用现有接口降低首屏请求；重组或重发不改变条目来源时间 |
 | 浏览器会话 | [公共 Runtime](../webpage/src/panels/runtime-store.ts)、[参数化资源](../webpage/src/panels/usePanelResource.ts) | 同一完整 key 共享请求和状态；Panel 不再维护独立轮询或第二份业务缓存 |
 | 浏览器持久缓存 | [resource-cache.ts](../webpage/src/panels/resource-cache.ts) 的显式公共数据缓存，IndexedDB 持久副本＋小资源 localStorage 热副本；地图另有专用资源契约 | 复用公共契约的版本、身份、原始年龄和容量校验；存储不可用不能破坏显示或布局偏好 |
@@ -48,7 +48,7 @@ WorldMonitor 的 Upstash Redis、R2／KV 和 IndexedDB 是其架构参考。**�
 
 服务端命中 seed 只省去采集与计算，仍有浏览器排队、网络和 API 读取成本。所有公共概览数据拥有者必须声明并复用同一套持久缓存策略，纯视图沿用 owner 的 key；注册检查拒绝遗漏，实时执行资源显式声明只保留内存及原因：挂载时先校验并恢复已有快照，再按既有检查周期更新。恢复不得等待 bootstrap、可见性请求队列或远端 API；bootstrap 加载中也不能遮住已恢复的有效内容。首次访问、缓存缺失或超过领域保留期限时，才显示冷加载状态。
 
-链路为“已有后台 owner → SQLite 正式展示快照／可选 Redis 镜像 → 只读 API → 共享 Runtime → 浏览器持久副本 → Panel”。seed 是预先采集生成的数据，不是样例数据。NBA、资讯等已有定时 owner 的公共读取应在缺失时快速报告 warming/unavailable，不在用户请求中同步重跑上游采集。已批准的按需补齐例外必须逐项声明预算与去重，不能扩大为通用回退。
+链路为“已有后台 owner → Redis 正式展示快照 → 只读 API → 共享 Runtime → 浏览器持久副本 → Panel”。seed 是预先采集生成的数据，不是样例数据。NBA、资讯等已有定时 owner 的公共读取应在缺失时快速报告 warming/unavailable，不在用户请求中同步重跑上游采集。已批准的按需补齐例外必须逐项声明预算与去重，不能扩大为通用回退。
 
 本地副本保存完整资源身份、schema 和原始数据时间；最近成功检查时间与数据新鲜度分别维护。新鲜且尚未到浏览器检查时间时复用；到期但仍在保留期限内时保留内容、后台检查；失败保留旧值及明确异常；合法空结果可以清空。复制、恢复或失败都不推进来源时间。账户私有数据、执行报价及撤销敏感结果不得自动进入公共持久缓存。
 
@@ -62,9 +62,18 @@ WorldMonitor 的参考依据（本地核对版本 `65860c21bb1b9987915609792b985
 
 发布前校验身份、字段、单位、来源时间和覆盖，确认写入结果；旧任务不得覆盖新快照。各来源分别保留最后尝试、最后成功和错误，失败不重置成功时间。保留旧值必须保留原始时钟；合法空结果、错误、过期和未接入分别解释，不能用旧值伪装新值或用空列表伪装成功。
 
-既有 Python snapshot owner 通过 `runtime.seed_meta.publish_snapshot` 确认 SQLite 写入后，才尝试 Redis 镜像并推进业务发布；`False` 或异常均算拒写，不能发送基于该次结果的通知或更新成功元数据。读取 lastGood 优先所属 SQLite namespace/key。Redis 镜像故障不阻塞 SQLite 主路径；`SeedMetaStore.store` 遵循同一顺序，首次失败的 `lastSuccessAt` 为 `null`。WorldCup core/live 与拆分 Panel 复用领域 `worldcup.cache.store_payload`，不另建写入 owner。NewMarket 的 Redis items/pending/cursor 是既有队列状态，仍是必需依赖，但游标只在展示快照确认发布后推进，异常保留快照的原始时间。
+公共 seed 由统一 `create_snapshot_store` 工厂构造，生产默认 Redis。`publish_snapshot` 必须确认正式写入才能推进成功元数据、通知和游标；Redis 故障必须暴露，不切回 SQLite，也不读取旧 Redis 镜像。SQLite 模式只用于显式离线测试与人工回滚。当前生产切换和逐项验收记录见本节末尾，不能以代码已完成代替上线状态。
 
-本地失败注入验收位于 `tests/test_panel_seed_recovery.py`：覆盖 SQLite 拒写、可选 Redis 失败、读取旧镜像、首次失败成功时间、NBA 多组件隔离与 NewMarket 恢复。Market TV 的 YouTube RSS 尝试时钟落入既有 `state:content / market-tv-wire:youtube-rss-refresh`，请求前确认写入，失败和进程重启不缩短既有刷新周期。以上描述代码行为；部署、重启后实际获取与持续发布仍须按具体 owner 分别验收。
+### Redis 公共快照契约
+
+- 存储身份：`POLYMONITOR_SEED_REDIS_URL`（未配置时使用既有 `POLYDATA_REDIS_URL`）和 `POLYDATA_REDIS_PREFIX`，键版本 `seed:v1`；保留原 namespace/cache_key，转义各字段避免碰撞。`snapshot:*`、`runtime:*`、公共 `source:*`、`seed-meta:*` 和 AI 当前结果复用该入口；账户、配额、审计、AI 历史和加密历史仍属于原数据库。
+- 四个独立时钟：来源时间在 payload 内原样保留；`updated_at` 为成功发布；`expires_at` 决定普通读取是否新鲜；Redis 物理保留默认为至少 7 天（原 TTL 更长则沿用）。7 天不代表数据可展示 7 天，领域原有最大年龄和浏览器保留规则继续执行。
+- 写入单键原子替换；拒绝早于当前来源版本的发布。已有采集锁统一使用 Redis 租约，续租必须核对所有者，持锁写入必须在同一 Lua 操作内核对所有者。失败或过期所有者不得覆盖新值。
+- 单条上限 16 MiB；namespace 默认上限 2048 条，已有更小 `max_entries` 优先；Redis 连接/读写各 1 秒，不自动重试。正式部署使用隔离的本机 Redis seed 实例：512 MiB、noeviction、AOF everysec、持久卷；不修改既有 Redis 队列实例。部署文件为 `deploy/redis/compose.yml`。
+- 批量 API 对已声明的 namespace 使用 pipeline 预读，最多 128 键／32 MiB；领域函数仍按完整 key 和原始时钟校验。动态来源按需读取同一 Redis，并在单次批量请求内合并重复读，不建立派生快照。
+- 迁移只读取原 SQLite，保留 payload、更新时间和过期时间；跳过已经超过物理保留的记录。原文件作为回滚备份保留，不作为在线回退源。API 缺失快速返回现有 warming/unavailable；动态参数的有界补齐沿用原领域契约。
+- Redis 集中快照与浏览器 IndexedDB 是两层：前者供所有用户共享、采集器持续更新，后者使刷新页面优先恢复内容。当前盘口、选中合约和撤销敏感数据仍需现有实时校验。
+
 
 网络出口属于运行配置，不是业务数据源。先核对运行主机、代理协议与客户端支持、有效环境变量及真实目标可达性；使用已授权出口，不自动切换用户代理或恢复已停用的服务、网关、隧道。既有授权无需重复询问；缺少必要路由选择时再明确请求。配置示例只写变量名与用途，凭据和私有部署位置留在运行环境。
 
@@ -144,7 +153,7 @@ HTTP、查询、连接、并发和容量预算：
 
 ## Finance 外源纯投影
 
-`tradfi-perp-radar`、`crypto-etf-flow` 和旧 Finance `stablecoin-monitor` 接口直接读取既有外源 owner 的 `runtime:finance:external-sources / v1` SQLite 快照，再做有界纯转换；SQLite 缺失时沿用已有可选镜像读取。GET 不发上游请求、不写派生快照、不依赖 Finance watcher 下一轮转换，外源 owner 仍按原 900 秒周期获取并发布。已有 Finance 兼容快照不新增发布者或缓存层。
+`tradfi-perp-radar`、`crypto-etf-flow` 和旧 Finance `stablecoin-monitor` 接口直接读取既有外源 owner 的 `runtime:finance:external-sources / v1` Redis 快照，再做有界纯转换。GET 不发上游请求、不写派生快照、不依赖 Finance watcher 下一轮转换，外源 owner 仍按原 900 秒周期获取并发布。已有 Finance 兼容快照不新增发布者或缓存层。
 
 该外源 owner 的 CFTC 分支也复用明确配置的 `SourceSession` 路由；连接恢复不改变官方每周报告日期。正式读取与入库时间、报告期分别验证，不能把重新获取旧报告称为新报告发布。
 
@@ -152,7 +161,7 @@ Broker Research 继续由 Finance watch owner 采集并写入 `runtime:finance:b
 
 部署统一来源配置时必须包含 `polymonitor-external-panels@` 的定时采集任务，不能只更新常驻 watcher。现有启动器调用 `load_environment()`；部署 override 设置 `POLYMONITOR_ENV_FILE` 指向该部署的私有主配置，并用 `UnsetEnvironment=POLYDATA_DISABLE_DOTENV POLYMONITOR_SOURCE_ROUTES_JSON POLYMONITOR_SOURCE_ROUTES_FILE` 去掉旧 EnvironmentFile 的传输覆盖。其他端点、凭据、存储位置和资源预算保留。仅修改磁盘 `.env` 不会覆盖已经存在的进程变量；必须检查下一次正式进程的配置与成功采集时间。已有活跃一次性任务允许完成，下一轮按各来源 due 时间读取，禁止清除限流冷却或强制全量重采。 Cleveland Fed Nowcast 的公开 HTML 也走既有 SourceSession 来源路由；路线配置属于正式采集进程，不能只验证命令行探针。来源报告的 Updated 日期与本次成功采集时间继续分开保留。
 
-组合 `generatedAt` 和每行 `fetchedAt` 保持原始来源时间；沿用 15 分钟新鲜阈值及 30 分钟最大保留时间，单行先按自己的时钟过期，缺失或无效组合时钟不能改用读取时间。浏览器检查周期、字段单位、来源退避和网络预算不变；每次读取仅查询既有有界快照，最多返回 36 行。针对测试验证最新源立即可见、禁止 HTTP/写入、保留行时钟及过期边界；部署后仍需核对正式 API 的源时钟与 SQLite，不能用单元测试代替运行验收。
+组合 `generatedAt` 和每行 `fetchedAt` 保持原始来源时间；沿用 15 分钟新鲜阈值及 30 分钟最大保留时间，单行先按自己的时钟过期，缺失或无效组合时钟不能改用读取时间。浏览器检查周期、字段单位、来源退避和网络预算不变；每次读取仅查询既有有界快照，最多返回 36 行。针对测试验证最新源立即可见、禁止 HTTP/写入、保留行时钟及过期边界；部署后仍需核对正式 API 的源时钟与 Redis，不能用单元测试代替运行验收。
 
 这里的旧 Finance Stablecoin 接口只投影外源供应/价格数据；当前前端 `stablecoin-monitor` 使用 [Crypto Strategy owner](crypto-strategy-panels.md)，不属于此次接口修复。
 

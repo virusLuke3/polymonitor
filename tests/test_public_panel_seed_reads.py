@@ -31,7 +31,8 @@ def test_cold_public_reads_do_not_acquire_or_publish(reader, tmp_path):
     }
     value = reader(ctx)
     assert value["status"] == "warming"
-    assert value["generatedAt"] == ""
+    # Bookmaker adapters use null; both forms explicitly represent no source clock.
+    assert value["generatedAt"] in ("", None)
     forbidden.assert_not_called()
 
 

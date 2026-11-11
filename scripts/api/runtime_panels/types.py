@@ -199,6 +199,7 @@ class RuntimePanelContext:
     get_crypto_strategy_snapshot: Callable[..., PanelPayload] | None = None
     get_external_panel_snapshot: Callable[..., PanelPayload] | None = None
     get_politics_snapshot: Callable[..., PanelPayload] | None = None
+    snapshot_store: Any = None
 
     @classmethod
     def from_context(cls, context: Mapping[str, Any]) -> RuntimePanelContext:
@@ -231,6 +232,7 @@ class RuntimePanelContext:
             get_crypto_strategy_snapshot=context.get("get_crypto_strategy_snapshot"),
             get_external_panel_snapshot=context.get("get_external_panel_snapshot"),
             get_politics_snapshot=context.get("get_politics_snapshot"),
+            snapshot_store=context.get("SNAPSHOT_STORE"),
         )
 
 

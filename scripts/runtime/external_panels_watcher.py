@@ -5,7 +5,7 @@ import json
 import os
 from importlib import import_module
 from runtime.environment import load_environment
-from runtime.snapshot_store import SnapshotStore
+from runtime.redis_snapshot_store import create_snapshot_store as SnapshotStore
 
 OWNERS = {
     'geopolitics': 'geopolitics_expansion',

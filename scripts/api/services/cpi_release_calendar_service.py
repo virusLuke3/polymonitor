@@ -487,6 +487,10 @@ def _read_seeded_snapshot(
     *,
     ttl_seconds: int,
 ) -> Optional[Dict[str, Any]]:
+    store = dependencies.snapshot_store
+    if getattr(store, "backend", "sqlite") == "redis":
+        from api.services.macro_data_policy import read_seeded
+        return read_seeded(store, None, CPI_CALENDAR_SNAPSHOT_NAMESPACE, CPI_CALENDAR_CACHE_KEY)
     if dependencies.get_cached_json is not None:
         redis_payload = dependencies.get_cached_json(
             CPI_CALENDAR_SNAPSHOT_NAMESPACE,

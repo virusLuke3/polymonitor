@@ -20,12 +20,13 @@ except ImportError:
     redis = None
 import requests
 
+from runtime.redis_snapshot_store import seed_writer
 from api.config import load_api_settings
 from api.context import RuntimeResources
 from api.services import global_weather_map_service
 from db.db import DEFAULT_DB_PATH, get_connection
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot
-from runtime.snapshot_store import SnapshotStore
+from runtime.redis_snapshot_store import create_snapshot_store as SnapshotStore
 from runtime.telegram_panel_publish import publish_cached_panel_snapshot
 
 DEFAULT_INTERVAL_SECONDS = 3600
@@ -147,6 +148,8 @@ class GlobalWeatherMapWatcher:
         }
 
     def _get_cached_json(self, namespace: str, cache_key: str) -> Dict[str, Any] | None:
+        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+            return self.snapshot_store.get(namespace, cache_key)
         try:
             raw = self.redis_client.get(_redis_key(self.redis_prefix, namespace, cache_key)) if self.redis_client is not None else None
             payload = json.loads(str(raw)) if raw else None
@@ -156,6 +159,10 @@ class GlobalWeatherMapWatcher:
 
     def _set_cached_json(self, namespace: str, cache_key: str, payload: Dict[str, Any], ttl: int) -> None:
         # This callback is an optional cache; business publication is store_payload.
+        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+            if not self.snapshot_store.set(namespace, cache_key, payload, ttl):
+                raise RuntimeError("Seed publication rejected")
+            return payload
         if self.redis_client is not None:
             try:
                 self.redis_client.set(_redis_key(self.redis_prefix, namespace, cache_key), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl)
@@ -193,6 +200,7 @@ class GlobalWeatherMapWatcher:
         payload["lastSuccessAt"] = last_success
         self.seed_meta_store.store(SEED_META_NAMESPACE, SEED_META_CACHE_KEY, payload)
 
+    @seed_writer
     def run_once(self) -> Dict[str, Any]:
         previous = self.previous()
         try:

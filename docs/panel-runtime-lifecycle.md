@@ -187,17 +187,17 @@ The legacy Esports/Odds rows describe the feed adapter; current GAME/SPORTS
 use the bookmaker owner with independent quote expiry inside the 24-hour
 display envelope.
 
-Their existing SQLite namespaces (`snapshot:sports:nba`, `snapshot:sports:nba-intel`,
+Their existing seed namespaces (`snapshot:sports:nba`, `snapshot:sports:nba-intel`,
 `snapshot:sports:nba-matchup-predictor`, `snapshot:esports:esports-intel`,
 `snapshot:sports:sports-odds`, `snapshot:macro:jin10`, `snapshot:sports:f1`,
 `snapshot:finance:defi-token-watch`) and existing key builders remain authoritative.
-New Market keeps its existing Redis queue and confirmed SQLite publication.
+New Market keeps its existing Redis queue; public snapshots now use confirmed Redis seed publication.
 Collectors retain their existing source schedules; this change adds no producer,
 history store, paid fetch or faster acquisition. Finance/Tech and parameterized
 resources reuse the shared recovery/status changes with their own domain limits.
 
 The seven NBA/Jin10/BWE/Esports/Odds GETs now use `read_public_seed` in
-`scripts/api/services/seed_recovery.py`: local SQLite before optional Redis,
+`scripts/api/services/seed_recovery.py`: the canonical Redis seed store,
 original-clock retention, no publication or synchronous upstream work. A cold
 read returns warming with no fabricated timestamp. DeFi already follows the
 same separation. API read success does not establish collector health.

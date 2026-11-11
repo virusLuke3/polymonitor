@@ -30,6 +30,7 @@ try:
 except ImportError:
     requests = None
 
+from runtime.redis_snapshot_store import seed_writer
 from api.clients import market_data_client
 from api.clients.fred_csv import read_fred_text
 from api.clients.source_transport import SourceSession, source_session
@@ -38,7 +39,7 @@ from api.context import RuntimeResources
 from api.services import finance_watch_panels_service
 from api.services.seed_recovery import bounded_rows
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot, SnapshotPublicationError, retained_snapshot
-from runtime.snapshot_store import SnapshotStore
+from runtime.redis_snapshot_store import create_snapshot_store as SnapshotStore
 
 
 DEFAULT_INTERVAL_SECONDS = 10 * 60
@@ -129,6 +130,8 @@ class FinanceWatchPanelsWatcher:
         return response.json() if response.content else None
 
     def get_cached_json(self, namespace: str, cache_key: str) -> Optional[Dict[str, Any]]:
+        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+            return self.snapshot_store.get(namespace, cache_key)
         payload = self.snapshot_store.get(namespace, cache_key)
         if isinstance(payload, dict):
             return payload
@@ -140,6 +143,10 @@ class FinanceWatchPanelsWatcher:
             return None
 
     def set_cached_json(self, namespace: str, cache_key: str, payload: Dict[str, Any], ttl_seconds: int) -> Dict[str, Any]:
+        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+            if not self.snapshot_store.set(namespace, cache_key, payload, ttl_seconds):
+                raise RuntimeError("Seed publication rejected")
+            return payload
         publish_snapshot(snapshot_store=self.snapshot_store, namespace=namespace, cache_key=cache_key,
                          payload=payload, ttl_seconds=ttl_seconds, redis_client=self.redis_client,
                          redis_cache_key=_redis_key(self.redis_prefix, namespace, cache_key))
@@ -221,6 +228,8 @@ class FinanceWatchPanelsWatcher:
         stale = self.snapshot_store.get_stale(finance_watch_panels_service.finance_watch_namespace(panel_id), finance_watch_panels_service.FINANCE_WATCH_CACHE_KEY)
         if isinstance(stale, dict):
             return stale
+        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+            return {}
         try:
             raw = self.redis_client.get(self.redis_key(panel_id))
             if raw:
@@ -264,6 +273,7 @@ class FinanceWatchPanelsWatcher:
         payload["lastSuccessAt"] = last_success_at
         self.seed_meta_store.store(SEED_META_NAMESPACE, panel_id, payload)
 
+    @seed_writer
     def run_once(self) -> Dict[str, Any]:
         ctx = self.service_context()
         result: Dict[str, Any] = {"status": "ok", "panels": {}}

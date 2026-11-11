@@ -859,6 +859,7 @@ def build_blueprints(runtime: ServiceRuntime):
         runtime_panels_routes.create_runtime_panels_blueprint(
             runtime_panels_routes.RuntimePanelRouteDependencies(
                 panel_context=runtime_panel_types.RuntimePanelContext(
+                    snapshot_store=runtime.SNAPSHOT_STORE,
                     get_official_disclosures_snapshot=lambda panel_id, limit=100: get_official_disclosures_snapshot(runtime.SNAPSHOT_STORE, panel_id, limit=limit),
                     get_external_panel_snapshot=lambda panel_id, limit=100: get_external_panel_snapshot(runtime.SNAPSHOT_STORE, panel_id, limit=limit),
                     get_politics_snapshot=lambda panel_id, limit=200: get_politics_snapshot(runtime.SNAPSHOT_STORE, panel_id, limit=limit),

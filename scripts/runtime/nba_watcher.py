@@ -27,11 +27,12 @@ try:
 except ImportError:
     requests = None
 
+from runtime.redis_snapshot_store import seed_writer
 from api.clients.source_transport import source_session
 from api.config import load_api_settings
 from api.services import runtime_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, SnapshotPublicationError, publish_snapshot, retained_snapshot
-from runtime.snapshot_store import SnapshotStore
+from runtime.redis_snapshot_store import create_snapshot_store as SnapshotStore
 from runtime.telegram_panel_publish import publish_cached_panel_snapshot
 
 
@@ -172,6 +173,8 @@ class NbaWatcher:
             return stale
         if self.redis_client is None:
             return {}
+        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+            return {}
         try:
             raw = self.redis_client.get(self.redis_key(namespace, cache_key))
             if raw:
@@ -254,6 +257,7 @@ class NbaWatcher:
         except SnapshotPublicationError as exc:
             return {"status": "error", "recordCount": 0, "error": str(exc)}
 
+    @seed_writer
     def run_once(self) -> Dict[str, Any]:
         components = {
             "scoreboard": self._run_component(

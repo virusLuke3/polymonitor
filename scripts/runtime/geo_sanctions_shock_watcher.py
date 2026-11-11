@@ -32,11 +32,12 @@ try:
 except ImportError:
     requests = None
 
+from runtime.redis_snapshot_store import seed_writer
 from api.config import load_api_settings
 from api.clients.source_transport import read_response_bytes, read_with_retry, source_session
 from api.services import geo_sanctions_shock_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot
-from runtime.snapshot_store import SnapshotStore
+from runtime.redis_snapshot_store import create_snapshot_store as SnapshotStore
 
 
 DEFAULT_INTERVAL_SECONDS = 300
@@ -215,6 +216,8 @@ class GeoSanctionsShockWatcher:
         stale = self.snapshot_store.get_stale(self.namespace(), self.cache_key())
         if isinstance(stale, dict):
             return stale
+        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+            return {}
         try:
             raw = self.redis_client.get(self.redis_key())
             if raw:
@@ -245,6 +248,7 @@ class GeoSanctionsShockWatcher:
                          payload=payload, ttl_seconds=ttl_seconds, redis_client=self.redis_client,
                          redis_cache_key=self.redis_key())
 
+    @seed_writer
     def run_once(self) -> Dict[str, Any]:
         previous = self.load_previous_payload()
         payload = self.build_payload()
