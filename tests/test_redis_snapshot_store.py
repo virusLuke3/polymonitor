@@ -126,3 +126,19 @@ def test_namespace_ownership():
         assert public_namespace(namespace)
     for namespace in ("auth:acled", "state:source-transport", "source:open-meteo", "agent:market-wide:quant-history"):
         assert not public_namespace(namespace)
+
+
+def test_factory_seed_identity_is_independent_of_legacy_queue_prefix(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from api import config
+    from runtime.redis_snapshot_store import create_snapshot_store
+    monkeypatch.setenv("POLYMONITOR_SEED_BACKEND", "redis")
+    monkeypatch.setenv("POLYMONITOR_SEED_REDIS_URL", "redis://127.0.0.1:12345/0")
+    monkeypatch.setenv("POLYMONITOR_SEED_REDIS_PREFIX", "shared:")
+    settings = SimpleNamespace(redis_url="", redis_prefix="worker-queue:")
+    monkeypatch.setattr(config, "load_api_settings", lambda: settings)
+    worker = create_snapshot_store(str(tmp_path / "worker.sqlite"))
+    settings.redis_prefix = "api-queue:"
+    reader = create_snapshot_store(str(tmp_path / "api.sqlite"))
+    assert worker.key("snapshot:test", "v1") == reader.key("snapshot:test", "v1")
+    assert worker.client is reader.client

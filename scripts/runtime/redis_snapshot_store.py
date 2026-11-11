@@ -247,7 +247,8 @@ def create_snapshot_store(db_path, **kwargs):
     url = configured_value("POLYMONITOR_SEED_REDIS_URL", settings.redis_url)
     if not url:
         raise RuntimeError("Redis seed storage requires POLYMONITOR_SEED_REDIS_URL or POLYDATA_REDIS_URL")
-    return RedisSnapshotStore(db_path, client=_client(url), prefix=settings.redis_prefix)
+    prefix = configured_value("POLYMONITOR_SEED_REDIS_PREFIX", settings.redis_prefix)
+    return RedisSnapshotStore(db_path, client=_client(url), prefix=prefix)
 
 
 def seed_writer(method):

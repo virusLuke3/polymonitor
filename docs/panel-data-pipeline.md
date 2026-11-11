@@ -66,7 +66,7 @@ WorldMonitor 的参考依据（本地核对版本 `65860c21bb1b9987915609792b985
 
 ### Redis 公共快照契约
 
-- 存储身份：`POLYMONITOR_SEED_REDIS_URL`（未配置时使用既有 `POLYDATA_REDIS_URL`）和 `POLYDATA_REDIS_PREFIX`，键版本 `seed:v1`；保留原 namespace/cache_key，转义各字段避免碰撞。`snapshot:*`、`runtime:*`、公共 `source:*`、`seed-meta:*` 和 AI 当前结果复用该入口；账户、配额、审计、AI 历史和加密历史仍属于原数据库。
+- 存储身份：`POLYMONITOR_SEED_REDIS_URL`（未配置时使用既有 `POLYDATA_REDIS_URL`）和 `POLYMONITOR_SEED_REDIS_PREFIX`（未配置时使用 `POLYDATA_REDIS_PREFIX`），键版本 `seed:v1`；所有采集器与 API 必须配置相同公共 seed 前缀，不沿用各自队列前缀；保留原 namespace/cache_key，转义各字段避免碰撞。`snapshot:*`、`runtime:*`、公共 `source:*`、`seed-meta:*` 和 AI 当前结果复用该入口；账户、配额、审计、AI 历史和加密历史仍属于原数据库。
 - 四个独立时钟：来源时间在 payload 内原样保留；`updated_at` 为成功发布；`expires_at` 决定普通读取是否新鲜；Redis 物理保留默认为至少 7 天（原 TTL 更长则沿用）。7 天不代表数据可展示 7 天，领域原有最大年龄和浏览器保留规则继续执行。
 - 写入单键原子替换；拒绝早于当前来源版本的发布。已有采集锁统一使用 Redis 租约，续租必须核对所有者，持锁写入必须在同一 Lua 操作内核对所有者。失败或过期所有者不得覆盖新值。
 - 单条上限 16 MiB；namespace 默认上限 2048 条，已有更小 `max_entries` 优先；Redis 连接/读写各 1 秒，不自动重试。正式部署使用隔离的本机 Redis seed 实例：512 MiB、noeviction、AOF everysec、持久卷；不修改既有 Redis 队列实例。部署文件为 `deploy/redis/compose.yml`。
