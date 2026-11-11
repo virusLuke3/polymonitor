@@ -289,6 +289,10 @@ export function fetchRuntimeSportsOdds(limit = 8, signal?: AbortSignal) {
   return apiGetWithTimeout<RuntimeSportsOddsPayload>(`/runtime/sports/odds-monitor?limit=${limit}`, 30000, signal);
 }
 
+export function fetchBookmakerPage(query: Record<string, string>, signal?: AbortSignal) {
+  return apiGetWithTimeout<unknown>(`/runtime/bookmakers/board?${new URLSearchParams(query)}`, 30000, signal, 'no-store');
+}
+
 export function fetchRuntimeInflationNowcast(signal?: AbortSignal) {
   return apiGet<RuntimeInflationNowcastPayload>('/runtime/macro/inflation-nowcast', signal);
 }

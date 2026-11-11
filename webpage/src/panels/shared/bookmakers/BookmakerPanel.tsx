@@ -2,6 +2,8 @@ import { useMemo, useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { useI18n } from '@/services/i18n';
 import { usePanelRuntimeView } from '@/panels/PanelRuntimeView';
+import { usePanelResource } from '@/panels/usePanelResource';
+import { bookmakerPage } from './resource';
 import { currentWinnerQuotes, lineKey, quoteCurrent, safeLink, teamKey, type Fixture, type Payload, type Quote } from './model';
 
 const percent = (n: number) => `${(n * 100).toFixed(1)}%`;
@@ -80,6 +82,36 @@ function MatchBoard({ event, game }: { event: Fixture; game: boolean }) {
   </>;
 }
 
+function FullCatalog({ game, sport, provider, close }: { game: boolean; sport: string; provider: string; close: () => void }) {
+  const { locale } = useI18n();
+  const t = (en: string, zh: string) => locale === 'zh' ? zh : en;
+  const [pages, setPages] = useState([0]);
+  const [search, setSearch] = useState('');
+  const [draft, setDraft] = useState('');
+  const [selected, setSelected] = useState('');
+  const offset = pages[pages.length - 1]!;
+  const resource = usePanelResource(bookmakerPage(game, { sport, provider, search, offset, limit: 20 }));
+  const board = resource.data?.bookmakerBoard;
+  const event = board?.fixtures.find(f => f.id === selected) || board?.fixtures[0];
+  return <>
+    <form className="wm-bookmaker-search" onSubmit={e => { e.preventDefault(); setSearch(draft.trim()); setPages([0]); setSelected(''); }}>
+      <input aria-label={t('Search stored matches', '搜索已采集比赛')} placeholder={t('Team or competition', '队伍或赛事名称')} maxLength={100} value={draft} onInput={e => setDraft(e.currentTarget.value)} />
+      <button type="submit">{t('Search', '搜索')}</button>
+    </form>
+    <div className="wm-bookmaker-pagination">
+      <button type="button" disabled={pages.length < 2} onClick={() => { setPages(p => p.slice(0, -1)); setSelected(''); }}>{t('Previous', '上一页')}</button>
+      <span>{board ? `${board.fixtures.length ? offset + 1 : 0}–${offset + board.fixtures.length} / ${board.matchedFixtures}` : t('Loading…', '加载中…')}</span>
+      <button type="button" disabled={board?.nextOffset == null} onClick={() => { if (board?.nextOffset != null) { setPages(p => [...p, board.nextOffset!]); setSelected(''); } }}>{t('Next', '下一页')}</button>
+    </div>
+    {resource.error && <p className="wm-bookmaker-caption">{t('Could not refresh this page.', '本页刷新失败。')} <button type="button" onClick={() => void resource.refresh()}>{t('Retry', '重试')}</button></p>}
+    {event ? <><label className="wm-bookmaker-event-select"><select aria-label={t('Select match', '选择比赛')} value={event.id} onChange={e => setSelected(e.currentTarget.value)}>
+      {board!.fixtures.map(f => <option key={f.id} value={f.id}>{f.home} / {f.away} · {f.competition}</option>)}
+    </select></label><MatchBoard key={`${event.id}:${provider}`} event={event} game={game} /></> :
+      <p className="wm-bookmaker-empty">{board ? t('No retained matches for these filters.', '此筛选条件下没有保留的比赛。') : resource.error ? t('Match data could not be loaded.', '比赛数据读取失败。') : t('Loading stored matches…', '正在读取已采集比赛…')}</p>}
+    <button type="button" className="wm-bookmaker-more" onClick={close}>{t('Back to overview', '返回概览')}</button>
+  </>;
+}
+
 export function BookmakerPanel({ payload, game = false }: { payload?: Payload; game?: boolean }) {
   const { locale, formatDateTime, formatRelativeTime } = useI18n();
   const t = (en: string, zh: string) => locale === 'zh' ? zh : en;
@@ -88,19 +120,22 @@ export function BookmakerPanel({ payload, game = false }: { payload?: Payload; g
   const [eventId, setEventId] = useState('');
   const [tab, setTab] = useState('odds');
   const [provider, setProvider] = useState('');
+  const [browse, setBrowse] = useState(false);
   const board = payload?.bookmakerBoard;
   const fixtures = useMemo(() => (board?.fixtures || []).filter(f => f.sport === sport &&
     (!provider || f.quotes.some(q => q.provider === provider))), [board, sport, provider]);
-  const providers = [...new Set((board?.fixtures || []).filter(f => f.sport === sport).flatMap(f => f.quotes.map(q => q.provider)))].sort();
+  const providers = [...new Set([...(board?.bookmakerCoverage || []).filter(c => c.sports.includes(sport)).flatMap(c => c.providers),
+    ...(board?.fixtures || []).filter(f => f.sport === sport).flatMap(f => f.quotes.map(q => q.provider))])].sort();
   const coverage = (board?.bookmakerCoverage || []).filter(c => c.sports.includes(sport));
   const event = fixtures.find(f => f.id === eventId) || fixtures[0];
-  const sports = [...new Set([...(game ? ['lol', 'valorant', 'cs2', 'dota2'] : ['nba', 'soccer', 'nfl', 'nhl', 'mlb', 'tennis']), ...(board?.fixtures.map(f => f.sport) || [])])];
+  const sports = [...new Set([...(game ? ['lol', 'valorant', 'cs2', 'dota2'] : ['nba', 'soccer', 'nfl', 'nhl', 'mlb', 'tennis']),
+    ...(board?.bookmakerCoverage || []).flatMap(c => c.sports), ...(board?.fixtures.map(f => f.sport) || [])])];
   const source = board?.sources.find(s => s.id === `bookmakers:board:${sport}:v1`);
   return <Panel title={game ? 'GAME' : 'SPORTS'} dataPanelId={game ? 'esports-intel' : 'sports-odds'}
     className={`wm-bookmaker-panel ${game ? 'wm-bookmaker-game' : 'wm-bookmaker-sports'}`}
     controls={<button type="button" className="wm-panel-action-button" aria-label={t('Refresh snapshot', '刷新快照')} onClick={() => runtime?.refresh?.()}>↻</button>}>
     <div className="wm-bookmaker-sports-tabs" role="group" aria-label={t('Sport or game', '体育或游戏项目')}>
-      {sports.map(key => <button type="button" key={key} aria-pressed={sport === key} onClick={() => { setSport(key); setEventId(''); setProvider(''); }}>{short(key)}<small>{board?.fixtures.filter(f => f.sport === key).length || '·'}</small></button>)}
+      {sports.map(key => <button type="button" key={key} aria-pressed={sport === key} onClick={() => { setSport(key); setEventId(''); setProvider(''); }}>{short(key)}<small>{board?.projectCounts?.[key] ?? board?.fixtures.filter(f => f.sport === key).length ?? '·'}</small></button>)}
     </div>
     <div className="wm-bookmaker-tabs" role="group" aria-label={t('View', '视图')}>
       {[['odds', t('Odds', '赔率')], ['coverage', t('All books', '全部公司')], ['facts', t(game ? 'Official scores' : 'Standings', game ? '官方赛况' : '排名与赛程')], ...(game ? [['props', t('Player props', '选手道具')]] : [])].map(([key, label]) =>
@@ -110,6 +145,8 @@ export function BookmakerPanel({ payload, game = false }: { payload?: Payload; g
       {providers.length > 1 && <label className="wm-bookmaker-event-select"><select aria-label={t('Odds provider', '赔率数据通道')} value={provider} onChange={e => { setProvider(e.currentTarget.value); setEventId(''); }}>
         <option value="">{t('All providers', '全部数据通道')}</option>{providers.map(p => <option key={p} value={p}>{p}</option>)}
       </select></label>}
+      {browse ? <FullCatalog key={`${sport}:${provider}`} game={game} sport={sport} provider={provider} close={() => setBrowse(false)} /> : <>
+      {board && <button type="button" className="wm-bookmaker-more" onClick={() => setBrowse(true)}>{t('Browse all stored matches', '浏览全部已采集比赛')}</button>}
       {event ? <><label className="wm-bookmaker-event-select"><select aria-label={t('Select match', '选择比赛')} value={event.id} onChange={e => setEventId(e.currentTarget.value)}>
         {fixtures.map(f => <option key={f.id} value={f.id}>{f.home} / {f.away} · {f.provider}</option>)}
       </select></label><MatchBoard key={`${event.id}:${provider}`} event={provider
@@ -118,13 +155,14 @@ export function BookmakerPanel({ payload, game = false }: { payload?: Payload; g
           ? t('The saved data could not be loaded. Retry the connection.', '已采集数据读取失败，请重试连接。') : t('Loading saved source data…', '正在读取已采集的数据…') : source?.usable ?
           t('No fixtures in the public board’s current window.', '公开看板当前时间窗内没有比赛记录。') : t('Source data is temporarily unavailable.', '来源数据暂时不可用。')}</p>
           {source?.usable && <small>{t('Window: 4 hours after start to 36 hours before start.', '窗口：开赛后 4 小时至开赛前 36 小时。')}</small>}</div>}
+      </>}
     </>}
     {tab === 'coverage' && <div className="wm-bookmaker-facts">
       <p className="wm-bookmaker-caption">{short(sport)} · {coverage.filter(c => c.category === 'sportsbook').length} {t('bookmakers in retained source data', '家博彩公司有保留报价')}</p>
       <p className="wm-bookmaker-caption">{t('Counts cover stored feeds, including aged quotes. They are not a count of current executable offers.', '计数来自完整存储，包含保留的旧报价；不代表当前可成交报价数量。')}</p>
       {coverage.map(c => <div className="wm-bookmaker-fact-row" key={c.book}><span><strong>{c.label}</strong><small>{c.providers.join(' · ')}</small>
         {c.category !== 'sportsbook' && <small>{c.category === 'exchange' ? t('Exchange', '交易所') : t('Prediction market', '预测市场')}</small>}</span>
-        <b>{c.fixtures} <small>{t('matches', '场')}</small></b></div>)}
+        <b>{c.fixturesBySport?.[sport] ?? c.fixtures} <small>{t('matches', '场')}</small></b></div>)}
       {!coverage.length && <p className="wm-bookmaker-empty">{t('No acquired bookmaker quotes for this project.', '此项目目前没有已采集的博彩公司报价。')}</p>}
     </div>}
     {tab === 'facts' && <div className="wm-bookmaker-facts">

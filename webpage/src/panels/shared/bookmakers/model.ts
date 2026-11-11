@@ -17,7 +17,10 @@ export type Prop = { id: string; sport: string; player: string; stat: string; li
   direction: string; book: string; startTime: string | null; url: string | null; fetchedAt: string };
 export type Board = { schemaVersion: number; family: string; fixtures: Fixture[]; props: Prop[]; sources: Source[];
   generatedAt: string | null; availableFixtures: number; omittedFixtures: number;
-  bookmakerCoverage?: { book: string; label: string; category: string; fixtures: number; providers: string[]; sports: string[] }[] };
+  query?: BoardQuery; matchedFixtures?: number; nextOffset?: number | null;
+  projectCounts?: Record<string, number>;
+  bookmakerCoverage?: { book: string; label: string; category: string; fixtures: number; providers: string[]; sports: string[]; fixturesBySport?: Record<string, number> }[] };
+export type BoardQuery = { sport: string; provider: string; search: string; offset: number; limit: number };
 export type Payload = { panelId: string; generatedAt: string; status: string; bookmakerBoard: Board;
   officialGeneratedAt?: string; items: RuntimeGridEsportsItem[];
   sportsContext: { source: Source; rows: { title: string; value: string; detail: string | null; url: string | null }[] }[] };
@@ -26,6 +29,7 @@ const finite = (x: unknown): x is number => typeof x === 'number' && Number.isFi
 const text = (x: unknown): x is string => typeof x === 'string' && x.length <= 2000;
 const date = (x: unknown) => text(x) && Number.isFinite(Date.parse(x));
 const nullableText = (x: unknown) => x === null || text(x);
+const countMap = (x: unknown) => object(x) && Object.values(x).every(n => finite(n) && Number.isInteger(n) && n >= 0);
 export const safeLink = (x: unknown) => { try { const u = new URL(String(x)); return u.protocol === 'https:' && !u.username && !u.password ? u.href : undefined; } catch { return undefined; } };
 export const quoteCurrent = (q: Quote, now = Date.now()) => {
   const clock = q.sourceCheckedAt !== undefined ? q.sourceCheckedAt : q.sourceUpdatedAt;
@@ -66,9 +70,11 @@ export function parsePayload(value: unknown, game: boolean): Payload {
   const id = game ? 'esports-intel' : 'sports-odds';
   if (!object(value) || value.panelId !== id || !date(value.generatedAt) || !object(value.bookmakerBoard)) throw new RuntimeResponseError('Bookmaker data is unavailable');
   const b = value.bookmakerBoard;
+  if (b.projectCounts !== undefined && !countMap(b.projectCounts)) throw new RuntimeResponseError('Invalid project counts');
   if (b.bookmakerCoverage !== undefined && (!Array.isArray(b.bookmakerCoverage) || b.bookmakerCoverage.length > 300 ||
       !b.bookmakerCoverage.every(c => object(c) && text(c.book) && text(c.label) && text(c.category) && finite(c.fixtures) &&
-      Array.isArray(c.providers) && c.providers.every(text) && Array.isArray(c.sports) && c.sports.every(text)))) {
+      Array.isArray(c.providers) && c.providers.every(text) && Array.isArray(c.sports) && c.sports.every(text) &&
+      (c.fixturesBySport === undefined || countMap(c.fixturesBySport))))) {
     throw new RuntimeResponseError('Invalid bookmaker coverage');
   }
   if (b.schemaVersion !== 1 || b.family !== (game ? 'game' : 'sports') || !Array.isArray(b.fixtures) || b.fixtures.length > 60 ||
@@ -89,9 +95,12 @@ export function parsePayload(value: unknown, game: boolean): Payload {
 export function expire(value: Payload, now: number): Payload {
   const fixtures = value.bookmakerBoard.fixtures.map(f => {
     const quotes = f.quotes.filter(q => !q.receivedAt || q.retentionSeconds === undefined ||
-      now - Date.parse(q.receivedAt) < q.retentionSeconds * 1000);
+      now - Date.parse(q.receivedAt) >= -60_000 && now - Date.parse(q.receivedAt) < q.retentionSeconds * 1000);
     return quotes.length === f.quotes.length ? f : { ...f, quotes };
   }).filter(f => {
+    // New feeds carry their actual domain retention on each quote. A shared
+    // provider name/tier must not silently force a different source cadence.
+    if (f.quotes.every(q => q.receivedAt && q.retentionSeconds !== undefined)) return f.quotes.length > 0;
     const ttl = f.tier === 'daily-sample' ? 86400_000 : f.tier === 'quota-feed' ? 21600_000 : f.tier === 'mirror-feed' ? 1800_000 : 7200_000;
     const age = now - Date.parse(f.fetchedAt);
     return age >= -60_000 && age < ttl;

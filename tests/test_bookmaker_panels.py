@@ -128,6 +128,62 @@ def test_public_projection_never_fetches(tmp_path, monkeypatch):
     assert result['generatedAt'] is None
 
 
+def test_pagination_reaches_beyond_overview_and_filters_quotes(monkeypatch):
+    from copy import deepcopy
+    import scripts.api.services.bookmaker_panels.snapshot_service as service
+    base = parse_board(body(raw_fixture()), 'soccer')['fixtures'][0]
+    rows = []
+    for index in range(75):
+        row = deepcopy(base)
+        row.update(id=f'fixture:{index:03}', home=f'Red {index:03}')
+        row['quotes'].append({**row['quotes'][0], 'provider': 'second-provider'})
+        rows.append(row)
+    def read(_store, spec):
+        return ({'fixtures': rows} if spec.key == 'bookmakers:board:soccer:v1' else {},
+            {'lastSuccessAt': '2026-11-11T08:00:00Z', 'stale': False, 'error': None, 'usable': True})
+    monkeypatch.setattr(service, 'read_source', read)
+    monkeypatch.setattr(service, 'fetch_bytes', lambda *a, **k: pytest.fail('Read must not acquire'))
+    query = dict(sport='soccer', provider='second-provider', search='', offset=0, limit=20)
+    ids = []
+    while True:
+        board = read_board(None, query=query)
+        assert board['matchedFixtures'] == 75
+        assert board['query'] == query
+        assert all(q['provider'] == 'second-provider' for f in board['fixtures'] for q in f['quotes'])
+        ids.extend(f['id'] for f in board['fixtures'])
+        if board['nextOffset'] is None:
+            break
+        query = {**query, 'offset': board['nextOffset']}
+    assert len(ids) == len(set(ids)) == 75
+    found = read_board(None, query={**query, 'offset': 0, 'search': 'red 074'})
+    assert found['matchedFixtures'] == 1
+    assert found['fixtures'][0]['id'] == 'fixture:074'
+    assert read_board(None, query={**query, 'offset': 0, 'search': 'no-such-team'})['fixtures'] == []
+    assert len(rows[0]['quotes']) == 2  # projection cannot mutate persisted truth
+
+
+def test_bookmaker_page_route_validates_bounds_and_uses_existing_store(monkeypatch):
+    from types import SimpleNamespace
+    from flask import Flask
+    from api.routes.runtime_panels import create_runtime_panels_blueprint
+    from api.services.bookmaker_panels import snapshot_service as service
+    calls = []
+    def read(store, game, *, query):
+        calls.append((store, game, query))
+        return {'generatedAt': '2026-11-11T08:00:00Z', 'query': query}
+    monkeypatch.setattr(service, 'read_board', read)
+    app = Flask(__name__)
+    app.register_blueprint(create_runtime_panels_blueprint(SimpleNamespace(panel_context=SimpleNamespace(snapshot_store='existing-store'))))
+    client = app.test_client()
+    for suffix in ('limit=21', 'limit=0', 'offset=-1', 'offset=abc', 'family=other', 'search='+'x'*101):
+        assert client.get('/runtime/bookmakers/board?'+suffix).status_code == 400
+    assert not calls
+    response = client.get('/runtime/bookmakers/board?family=game&sport=lol&provider=pinnodds&offset=20&limit=20')
+    assert response.status_code == 200
+    assert response.json['panelId'] == 'esports-intel'
+    assert calls[0] == ('existing-store', True, dict(sport='lol', provider='pinnodds', search='', offset=20, limit=20))
+
+
 def test_retained_exchange_classification_does_not_refresh_source_clock(monkeypatch):
     import scripts.api.services.bookmaker_panels.snapshot_service as service
     fixture = parse_board(body(raw_fixture()), 'soccer')['fixtures'][0]

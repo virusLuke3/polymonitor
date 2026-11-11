@@ -132,3 +132,14 @@ Polymarket 匹配要求游戏、球队、比赛时间和胜负市场类型一致
 - [Game 桌面](../webpage/design-previews/sports-game/production-esports-intel-desktop.png)
 - [Sports 手机](../webpage/design-previews/sports-game/production-sports-odds-mobile.png)
 - [Game 手机](../webpage/design-previews/sports-game/production-esports-intel-mobile.png)
+
+### 2026-11-11 未完成部分续接（实现与当次验收分别记录）
+
+- 延续既有 `bookmakers` owner，补充 MoviOdds 其余已核实的 15 类比赛：两类橄榄球、板球、澳式足球、乒乓球、排球、手球、羽毛球、拳击、MMA、飞镖、斯诺克、班迪、地板球、盖尔运动。原七类加新增共 22 类，由个人 `.env` 的 `POLYDATA_MOVIODDS_SPORTS` 显式启用。Futsal、Field Hockey 当次公开窗口为空，尚未核实其真实盘口结构，不猜 group ID。赛马及冠军盘是不同的多选项数据结构，不能塞进双方胜负概率。
+- 新增 15 类每 15 分钟到期，30 分钟标旧、两小时停止展示；原七类五分钟周期不变。逐源 45 秒完整尝试、最多两次、整轮 240 秒、8 MiB 原文/2 MiB 规范化上限继续适用。调度器保留公平排序，未执行的来源下轮优先；不增加付费调用。真实原文先归档，经过实体/盘口/单位/源时间校验才发布。
+- 展示快照现通过统一 `create_snapshot_store` 写入生产 Redis，namespace/key 不变；SQLite evidence 仍为压缩原文与版本档案，配额仍用既有独立账本。读取方和采集器使用同一 `.env` 公共 seed 身份，不回读迁移前 SQLite 公共快照。
+- 新增只读 `/runtime/bookmakers/board`，参数包含 `family/sport/provider/search/offset/limit`，每页最多 20 场、报价体 450 KB；全部查询只在现有持久快照中过滤，不访问来源。`nextOffset` 按实际返回条数推进，完整覆盖计数与本页数量分开。跨源相同赛事仍按原规则合并，指定通道时只返回该通道报价。页内排序为开赛时间与事件 ID；实时刷新后目录可能变化，不承诺跨多页历史快照一致性。
+- Sports / Game 的赔率页增加“浏览全部已采集比赛”、队伍/赛事搜索和前后页，补齐原来有统计但下拉框不可见的比赛。参数页复用公共 Runtime，完整 key 含上述六项参数及版本；IndexedDB 每项 600 KB、原有全局缓存容量约束不变。体育五分钟/电竞两分钟重读，30 秒传输、45 秒总期限；隐藏暂停，切换参数隔离、取消及重连仍由 Runtime 管理。失败保留同参数未过期数据，正常空与读取失败分开，逐报价保留时间不被新的分页请求刷新。
+- 原文探测的来源、发布时间、接收时间保留独立；未知报价时钟不填抓取时间。三项胜负必须包含平局，半场、单局、球员盘及不同盘口线不混入整场共识。新增长周期项目的浏览器淘汰使用实际逐报价保留规则，不再被统一 `mirror-feed` 标签提前截断。
+
+本节是实现契约；生产版本、持久读回、自动轮次和桌面/手机结果在完成后追加。此前 403 和缺少个人 key 的通道仍为权限限制，不能用公开样本替代正式授权覆盖。

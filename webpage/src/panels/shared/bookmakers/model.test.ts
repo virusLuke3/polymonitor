@@ -57,6 +57,14 @@ describe('bookmaker snapshots', () => {
   it('expires recovered browser data without another network response', () => {
     expect(expire(base, now + 7200_001).bookmakerBoard.fixtures).toHaveLength(0);
   });
+  it('uses a slow mirror source own retention and rejects future received clocks', () => {
+    const value: Payload = structuredClone(base);
+    value.bookmakerBoard.fixtures[0]!.tier = 'mirror-feed';
+    value.bookmakerBoard.fixtures[0]!.quotes = [{ ...quote, receivedAt: new Date(now).toISOString(), retentionSeconds: 7200 }];
+    expect(expire(value, now + 1900_000).bookmakerBoard.fixtures).toHaveLength(1);
+    expect(expire(value, now + 7200_001).bookmakerBoard.fixtures).toHaveLength(0);
+    expect(expire(value, now - 60001).bookmakerBoard.fixtures).toHaveLength(0);
+  });
   it('does not repeatedly degrade live odds when there are no official score rows', () => {
     const oldOfficial = { ...base, officialGeneratedAt: new Date(now - 3600_000).toISOString() };
     expect(expire(oldOfficial, now)).toBe(oldOfficial);

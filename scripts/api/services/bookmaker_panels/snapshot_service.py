@@ -120,7 +120,7 @@ def merge_exact_events(fixtures):
     return list(groups.values())
 
 
-def read_board(store, game=False):
+def read_board(store, game=False, *, query=None):
     chosen = [s for s in specs() if (s.key.split(':')[2] in GAMES or s.key.split(':')[2] == 'esports') == game]
     if not game:
         chosen.append(THE_ODDS)
@@ -153,16 +153,47 @@ def read_board(store, game=False):
     # Coverage is measured before bounded UI projection. Do not mistake eight
     # visible rows or a small public window for the entire acquired universe.
     coverage = {}
+    project_counts = {}
     for row in unique:
+        project_counts[row['sport']] = project_counts.get(row['sport'], 0) + 1
         for q in row['quotes']:
             key = name(q['book'])
             item = coverage.setdefault(key, {'book': q['book'], 'label': q['label'], 'category': q['category'],
-                'fixtures': set(), 'providers': set(), 'sports': set()})
+                'fixtures': set(), 'providers': set(), 'sports': set(), 'fixturesBySport': {}})
             item['fixtures'].add(row['id'])
+            item['fixturesBySport'].setdefault(row['sport'], set()).add(row['id'])
             item['providers'].add(q['provider'])
             item['sports'].add(row['sport'])
     coverage = [{**item, 'fixtures': len(item['fixtures']), 'providers': sorted(item['providers']),
-                 'sports': sorted(item['sports'])} for _, item in sorted(coverage.items())]
+                 'sports': sorted(item['sports']),
+                 'fixturesBySport': {sport: len(ids) for sport, ids in item['fixturesBySport'].items()}}
+                for _, item in sorted(coverage.items())]
+    if query is not None:
+        # The same retained universe is browsable without collecting on GET or
+        # sending thousands of full matrices through the public relay at once.
+        sport, provider, search = query['sport'], query['provider'], query['search']
+        selected = [row for row in unique if (not sport or row['sport'] == sport) and
+                    (not search or search.casefold() in ' '.join((row['home'], row['away'], row['competition'])).casefold())]
+        if provider:
+            selected = [{**row, 'quotes': [q for q in row['quotes'] if q['provider'] == provider]} for row in selected]
+            selected = [row for row in selected if row['quotes']]
+        selected.sort(key=lambda row: (row['startTime'], row['id']))
+        offset = query['offset']
+        page, size = [], 0
+        for row in selected[offset:offset + query['limit']]:
+            row_size = len(json.dumps(row).encode())
+            if size + row_size > 450_000:
+                break
+            page.append(row)
+            size += row_size
+        if not page and offset < len(selected):
+            raise ValueError('Single fixture exceeds response budget')
+        clocks = [s['lastSuccessAt'] for s in sources if s['usable']]
+        return {'schemaVersion': 1, 'family': 'game' if game else 'sports', 'fixtures': page,
+            'props': [], 'sources': sources, 'generatedAt': max(clocks) if clocks else None,
+            'availableFixtures': total, 'omittedFixtures': total - len(page), 'bookmakerCoverage': coverage,
+            'projectCounts': project_counts, 'query': query, 'matchedFixtures': len(selected),
+            'nextOffset': offset + len(page) if offset + len(page) < len(selected) else None}
     # Round-robin projects: a full soccer board cannot suppress all other sports.
     grouped = {}
     for row in unique:
@@ -198,7 +229,8 @@ def read_board(store, game=False):
     clocks = [s['lastSuccessAt'] for s in sources if s['usable']]
     return {'schemaVersion': 1, 'family': 'game' if game else 'sports', 'fixtures': interleaved,
         'props': props, 'sources': sources, 'generatedAt': max(clocks) if clocks else None,
-        'availableFixtures': total, 'omittedFixtures': total - len(interleaved), 'bookmakerCoverage': coverage}
+        'availableFixtures': total, 'omittedFixtures': total - len(interleaved), 'bookmakerCoverage': coverage,
+        'projectCounts': project_counts}
 
 
 def attach_board(store, legacy, *, game=False):

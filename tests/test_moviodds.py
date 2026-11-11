@@ -97,6 +97,39 @@ def test_virtual_basketball_is_not_nba():
     assert project('esports', 'Unknown game') is None
 
 
+@pytest.mark.parametrize('sport,group,title,line', [
+    ('rugby_union', '80007', 'Game', 'To Win'), ('rugby_league', '190006', 'Game', 'To Win'),
+    ('cricket', '1246', 'To Win the Match', ''), ('australian_rules', '360005', 'Game', 'To Win'),
+    ('table_tennis', '920000', 'To Win Match', 'To Win'), ('volleyball', '910000', 'Winner', 'Winner'),
+    ('handball', '780001', 'Game', 'To Win'), ('badminton', '940002', 'Match Lines', 'To Win'),
+    ('boxing', '148', 'To Win Fight', ''), ('mma', '1620232', 'Fight Lines', 'To Win'),
+    ('darts', '703', 'Match Winner', ''), ('snooker', '952', 'To Win', 'To Win'),
+    ('bandy', '890000', 'To Win', 'To Win'), ('floorball', '900134', 'To Win', 'To Win'),
+    ('gaelic_sports', '750036', 'To Win', 'To Win'),
+])
+def test_additional_verified_match_groups_preserve_direction_and_clock(sport, group, title, line):
+    raw = sample()
+    row = raw['matches'][0]
+    row.update(sport=sport, league='Real competition', group_status={group: {'polled_at': '2026-11-11T08:00:00Z'}})
+    for q in row['quotes']:
+        q.update(group_id=group, group_name=title, line=line)
+    parsed = parse(json.dumps(raw), sport)
+    assert len(parsed['fixtures']) == 1
+    assert parsed['fixtures'][0]['sport'] == sport
+    assert parsed['fixtures'][0]['quotes'][0]['sourceCheckedAt'] == '2026-11-11T08:00:00+00:00'
+    row['quotes'][0]['period'] = '1'
+    assert not parse(json.dumps(raw), sport)['fixtures']
+
+
+def test_draw_missing_from_explicit_three_way_market_is_not_two_way():
+    raw = sample()
+    row = raw['matches'][0]
+    row.update(sport='cricket', league='Test Match')
+    for q in row['quotes']:
+        q.update(group_id='30155', group_name='Match Winner (Incl. Draw)', line='')
+    assert not parse(json.dumps(raw), 'cricket')['fixtures']
+
+
 def test_recent_confirmation_supersedes_old_price_even_if_price_did_not_move():
     old = read(sample())['fixtures'][0]
     old['quotes'][0]['sourceCheckedAt'] = None

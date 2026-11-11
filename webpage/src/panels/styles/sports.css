@@ -1035,3 +1035,9 @@
 .wm-bookmaker-sources > div { display: grid; grid-template-columns: 1fr auto; gap: 3px 7px; margin-top: 9px; font-size: 10px; }
 .wm-bookmaker-sources strong { font-weight: 500; }
 .wm-bookmaker-sources small { grid-column: 1 / -1; color: var(--text-dim, #a0aaa6); }
+.wm-bookmaker-search, .wm-bookmaker-pagination { display: flex; gap: 6px; align-items: center; margin: 8px 0; }
+.wm-bookmaker-search input { flex: 1; min-width: 0; padding: 7px; font: inherit; color: var(--text, #e0e5e2); background: var(--bg, #131715); border: 1px solid var(--border-color, #303432); }
+.wm-bookmaker-search button, .wm-bookmaker-pagination button { padding: 6px; color: var(--book-a); border: 1px solid var(--border-color, #303432); background: transparent; cursor: pointer; }
+.wm-bookmaker-pagination { justify-content: space-between; font-size: 10px; }
+.wm-bookmaker-pagination span { font-variant-numeric: tabular-nums; color: var(--text-dim, #a0aaa6); }
+.wm-bookmaker-pagination button:disabled { opacity: .4; cursor: default; }

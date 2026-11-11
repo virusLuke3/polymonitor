@@ -77,6 +77,27 @@ def create_runtime_panels_blueprint(dependencies: RuntimePanelRouteDependencies)
         return jsonify({"status": "unavailable", "error": "seed-store-unavailable"}), 503, {
             "Cache-Control": "no-store", "Retry-After": "30"}
 
+    @bp.route('/runtime/bookmakers/board', methods=['GET'])
+    def bookmaker_board():
+        from api.services.bookmaker_panels.snapshot_service import read_board
+        family = request.args.get('family', 'sports')
+        query = {key: request.args.get(key, '').strip() for key in ('sport', 'provider', 'search')}
+        try:
+            query.update(offset=int(request.args.get('offset', '0')), limit=int(request.args.get('limit', '20')))
+        except ValueError:
+            return jsonify({'error': 'Invalid page bounds'}), 400
+        if family not in {'sports', 'game'} or not 0 <= query['offset'] <= 100_000 or not 1 <= query['limit'] <= 20 or any(
+                len(query[key]) > maximum for key, maximum in (('sport', 50), ('provider', 50), ('search', 100))):
+            return jsonify({'error': 'Invalid bookmaker query'}), 400
+        store = dependencies.panel_context.snapshot_store
+        if store is None:
+            return jsonify({'error': 'Bookmaker snapshots unavailable'}), 503
+        board = read_board(store, family == 'game', query=query)
+        if not board['generatedAt']:
+            return jsonify({'error': 'Bookmaker snapshots unavailable'}), 503, {'Retry-After': '30'}
+        return jsonify({'panelId': 'esports-intel' if family == 'game' else 'sports-odds',
+            'generatedAt': board['generatedAt'], 'status': 'ok', 'bookmakerBoard': board}), 200, {'Cache-Control': 'no-store'}
+
     @bp.route('/runtime/weather/books', methods=['GET'])
     def weather_books():
         tokens = list(dict.fromkeys((request.args.get('tokens') or '').split(',')))

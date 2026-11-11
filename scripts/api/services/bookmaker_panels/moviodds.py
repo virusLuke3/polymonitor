@@ -17,15 +17,27 @@ GROUPS = {
     'tennis': ('83', '67'), 'american_football': ('1441', '58'),
     'ice_hockey': ('972', '96'), 'baseball': ('1096',),
     'esports': ('1510001',),
+    'rugby_union': ('80007', '80012'), 'rugby_league': ('190006', '190053'),
+    'cricket': ('1246', '30154', '30155'), 'australian_rules': ('360005',),
+    'table_tennis': ('920000',), 'volleyball': ('910000',),
+    'handball': ('780001', '780000', '780262'), 'badminton': ('940002',),
+    'boxing': ('148',), 'mma': ('1620234', '1620232', '162148'),
+    'darts': ('703',), 'snooker': ('952',), 'bandy': ('890000',),
+    'floorball': ('900134',), 'gaelic_sports': ('750036',),
 }
+FAST_SPORTS = frozenset(('soccer', 'basketball', 'tennis', 'american_football', 'ice_hockey', 'baseball', 'esports'))
 
 
 def specs():
     if not source_value('POLYDATA_MOVIODDS_BASE_URL'):
         return []
+    configured = source_value('POLYDATA_MOVIODDS_SPORTS')
+    enabled = [s.strip() for s in configured.split(',')] if configured else list(FAST_SPORTS)
     return [SourceSpec(f'bookmakers:movi:{sport}:v1', f'bet365 via MoviOdds · {sport}',
         'POLYDATA_MOVIODDS_BASE_URL', partial(parse, sport=sport),
-        cadence=300, stale_after=600, retain_for=1800) for sport in GROUPS]
+        cadence=300 if sport in FAST_SPORTS else 900,
+        stale_after=600 if sport in FAST_SPORTS else 1800,
+        retain_for=1800 if sport in FAST_SPORTS else 7200) for sport in GROUPS if sport in enabled]
 
 
 def acquire(spec, deadline):
@@ -65,16 +77,18 @@ def _selection(q, row, sport):
         return None
     line = str(q.get('line') or '').strip().casefold()
     title = str(q.get('group_name') or '').strip().casefold()
-    if title not in {'game', 'match lines', 'full time result', 'fulltime result', 'to win match'}:
+    if title not in {'game', 'match lines', 'full time result', 'fulltime result', 'to win match',
+                     'game 3-way', 'to win the match', 'to win', 'match winner (incl. draw)',
+                     'winner', 'to win fight', 'fight lines', 'match winner'}:
         return None
     label = q.get('side') or q.get('label')
     if not isinstance(label, str) or not label.strip():
         return None
     team = next((row[k] for k in ('home', 'away') if name(label) == name(row[k])), None)
-    if line in ('to win', ''):
+    if line in ('to win', '', 'winner', 'result'):
         label = team or ('Draw' if name(label) in ('draw', 'tie') else None)
         kind, point = 'h2h', None
-    elif line in ('line', 'handicap', 'puck line', 'run line'):
+    elif line in ('line', 'handicap', 'puck line', 'run line', 'spread'):
         label, kind, point = team, 'spreads', number(q.get('handicap'))
     elif line in ('total', 'total maps'):
         label = {'over': 'Over', 'under': 'Under'}.get(name(label))
@@ -122,6 +136,8 @@ def parse(body, sport):
         normalized = None
         for (group, market_id, kind, _line, phase), selections in groups.items():
             try:
+                if kind == 'h2h' and group in {'80012', '190053', '30155', '780000'} and len(selections) != 3:
+                    raise ValueError('Incomplete three-way winner')
                 if len({str(q['sel_id']) for q, _ in selections}) != len(selections):
                     raise ValueError('Duplicate selection identity')
                 clocks = [instant(q.get('ts')) for q, _ in selections]
