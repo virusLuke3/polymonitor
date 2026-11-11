@@ -561,6 +561,7 @@ def get_cpi_release_calendar_snapshot(
     allow_live_build: bool = True,
 ) -> Dict[str, Any]:
     dependencies = _dependencies(ctx)
+    allow_live_build = allow_live_build and getattr(dependencies.snapshot_store, "backend", "sqlite") != "redis"
     ttl_seconds = max(
         300,
         int(

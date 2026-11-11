@@ -432,6 +432,7 @@ def get_weather_news_snapshot(
     allow_live_build: bool = False,
 ) -> Dict[str, Any]:
     dependencies = _dependencies(ctx)
+    allow_live_build = allow_live_build and getattr(dependencies.snapshot_store, "backend", "sqlite") != "redis"
     ttl_seconds = max(300, int(getattr(dependencies.settings, "weather_news_ttl_seconds", 900) or 900))
     seeded = _read_seeded_snapshot(dependencies, ttl_seconds=ttl_seconds)
     if seeded is not None:

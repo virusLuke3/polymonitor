@@ -291,6 +291,7 @@ def get_food_retail_basket_snapshot(
     allow_live_build: bool = False,
 ) -> Dict[str, Any]:
     dependencies = _dependencies(ctx)
+    allow_live_build = allow_live_build and getattr(dependencies.snapshot_store, "backend", "sqlite") != "redis"
     ttl = max(
         1800,
         int(

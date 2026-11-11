@@ -514,6 +514,7 @@ def get_macro_cpi_panel_snapshot(
     allow_live_build: bool = False,
 ) -> Dict[str, Any]:
     dependencies = _dependencies(ctx)
+    allow_live_build = allow_live_build and getattr(dependencies.snapshot_store, "backend", "sqlite") != "redis"
     ttl = ttl_seconds(dependencies)
     seeded = _read_seeded(dependencies, panel_id)
     if seeded is not None:

@@ -813,6 +813,7 @@ def get_breaking_event_radar_snapshot(
     allow_live_build: bool = True,
 ) -> Dict[str, Any]:
     dependencies = BreakingEventRadarDependencies.from_context(ctx)
+    allow_live_build = allow_live_build and getattr(dependencies.snapshot_store, "backend", "sqlite") != "redis"
     ttl_seconds = max(120, int(os.environ.get("POLYDATA_BREAKING_EVENT_RADAR_TTL_SECONDS", DEFAULT_TTL_SECONDS) or DEFAULT_TTL_SECONDS))
     seeded = _read_seeded_snapshot(dependencies)
     if seeded is not None:

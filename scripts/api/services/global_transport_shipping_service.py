@@ -2167,6 +2167,7 @@ def get_global_transport_shipping_snapshot(
     allow_live_build: bool = True,
 ) -> Dict[str, Any]:
     dependencies = _dependencies(ctx)
+    allow_live_build = allow_live_build and getattr(dependencies.snapshot_store, "backend", "sqlite") != "redis"
     ttl_seconds = max(300, int(os.environ.get("POLYDATA_GLOBAL_TRANSPORT_TTL_SECONDS", DEFAULT_TTL_SECONDS) or DEFAULT_TTL_SECONDS))
     seeded = _read_seeded_snapshot(dependencies)
     if seeded is not None:

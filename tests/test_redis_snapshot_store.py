@@ -162,3 +162,27 @@ def test_finance_api_reads_collector_universe_without_yahoo_or_republication(sto
     assert result["generatedAt"] == value["generatedAt"]
     assert store.client.hgetall(key) == before
     forbidden.assert_not_called()
+
+
+@pytest.mark.parametrize("module_name,reader_name,normalizer", [
+    ("world_cup_match_ops_service", "get_world_cup_match_ops_snapshot", "normalize_world_cup_match_ops_payload"),
+    ("global_transport_shipping_service", "get_global_transport_shipping_snapshot", "normalize_global_transport_shipping_payload"),
+    ("cpi_release_calendar_service", "get_cpi_release_calendar_snapshot", "normalize_cpi_release_calendar_payload"),
+])
+def test_legacy_live_build_switch_cannot_start_public_seed_acquisition(store, monkeypatch, module_name, reader_name, normalizer):
+    import importlib
+    from types import SimpleNamespace
+    module = importlib.import_module("api.services." + module_name)
+    dependencies = SimpleNamespace(snapshot_store=store, settings=SimpleNamespace())
+    if hasattr(module, "_dependencies"):
+        monkeypatch.setattr(module, "_dependencies", lambda ctx: dependencies)
+    monkeypatch.setattr(module, "_read_seeded_snapshot", lambda *a, **kw: None)
+    monkeypatch.setattr(module, normalizer, lambda payload, **kw: payload)
+    if hasattr(module, "_empty_payload"):
+        monkeypatch.setattr(module, "_empty_payload", lambda *a, **kw: {"status": "warming"})
+    forbidden = Mock(side_effect=AssertionError("API acquisition is forbidden"))
+    target = "build_cpi_release_calendar_payload" if module_name == "cpi_release_calendar_service" else "_schedule_live_refresh"
+    monkeypatch.setattr(module, target, forbidden)
+    result = getattr(module, reader_name)({"SNAPSHOT_STORE": store}, allow_live_build=True)
+    assert result["status"] == "warming"
+    forbidden.assert_not_called()

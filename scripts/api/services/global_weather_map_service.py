@@ -1943,6 +1943,7 @@ def get_global_weather_map_snapshot(
     allow_live_build: bool = False,
 ) -> Dict[str, Any]:
     dependencies = _dependencies(ctx)
+    allow_live_build = allow_live_build and getattr(dependencies.snapshot_store, "backend", "sqlite") != "redis"
     ttl_seconds = max(
         60,
         int(

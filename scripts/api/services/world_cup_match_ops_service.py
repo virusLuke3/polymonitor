@@ -307,6 +307,7 @@ def _schedule_live_refresh(ctx: dict, *, limit: int, ttl_seconds: int, reason: s
 
 
 def get_world_cup_match_ops_snapshot(ctx: dict, limit: int = DEFAULT_LIMIT, *, allow_live_build: bool = True) -> Dict[str, Any]:
+    allow_live_build = allow_live_build and getattr(ctx.get("SNAPSHOT_STORE"), "backend", "sqlite") != "redis"
     ttl_seconds = max(120, int(os.environ.get("POLYDATA_WORLD_CUP_MATCH_OPS_TTL_SECONDS", DEFAULT_TTL_SECONDS) or DEFAULT_TTL_SECONDS))
     seeded = _read_seeded_snapshot(ctx)
     if seeded is not None:
