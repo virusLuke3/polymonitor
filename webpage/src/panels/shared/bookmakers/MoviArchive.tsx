@@ -25,11 +25,13 @@ function Detail({ fixture, sport }: { fixture: string; sport: string }) {
   const [tab, setTab] = useState('history');
   const r = usePanelResource(archiveResource({ sport, fixture, selection, offset, limit: 100 }));
   const d = r.data, historyTask = d?.tasks?.find(task => task.kind === 'history');
+  const closingTask = d?.tasks?.find(task => task.kind === 'closing');
   return <>
     <div className="wm-bookmaker-tabs" role="group" aria-label={t('Archived data', '档案类型')}>
       {[['history', t('History', '历史赔率')], ['closing', t('Closing', '收盘价')], ['result', t('Result', '赛果')]].map(([key, title]) => <button type="button" key={key} aria-pressed={tab === key} onClick={() => setTab(key!)}>{title}</button>)}
     </div>
     {r.error && <p className="wm-bookmaker-caption">{t('Archive read failed; saved records retain their original times.', '档案读取失败；保留记录仍使用原始时间。')}</p>}
+    {tab === 'closing' && closingTask?.error && <p className="wm-bookmaker-caption">{t('Closing source temporarily unavailable; automatic retry is pending. Previously acquired records retain their original times.', '收盘档案来源暂不可用，后台等待自动重试。已有记录保留原始时间。')}</p>}
     {!d ? <p className="wm-bookmaker-empty">{t('Loading stored archive…', '正在读取已存档案…')}</p> : tab === 'history' ? <>
       <select className="wm-movi-selection" aria-label={t('Historical selection', '历史报价选项')} value={selection} onChange={e => { setSelection(e.currentTarget.value); setOffset(0); }}>
         <option value="">{t('All recorded selections', '全部已记录选项')}</option>{d.selections?.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
@@ -47,7 +49,7 @@ function Detail({ fixture, sport }: { fixture: string; sport: string }) {
       <p className="wm-bookmaker-caption">{d.closing.data.closed ? t('Closed · pre-match close and final recorded price', '已收盘 · 赛前收盘与最后记录价') : t('Provisional · match has not closed', '暂定价格 · 尚未收盘')} · {d.closing.data.pre_close_basis}</p>
       <table className="wm-bookmaker-table"><thead><tr><th>{t('Selection', '选项')}</th><th>{t('Pre-close', '赛前收盘')}</th><th>{t('Last', '最后记录')}</th></tr></thead><tbody>{d.closing.data.selections.map((s, i) => <tr key={`${s.sel_id}:${i}`}><th><span>{s.side || s.label || s.sel_id} {s.handicap}</span><small>{s.group_name} · {s.line}</small></th><td>{s.pre_close?.suspended ? t('Suspended', '封盘') : s.pre_close?.odds_dec?.toFixed(3) ?? '—'}{s.pre_close && <small>{formatDateTime(s.pre_close.ts)}</small>}</td><td>{s.last?.suspended ? t('Suspended', '封盘') : s.last?.odds_dec?.toFixed(3) ?? '—'}{s.last && <small>{formatDateTime(s.last.ts)}</small>}</td></tr>)}</tbody></table>
       {d.closing.omittedSelections > 0 && <p className="wm-bookmaker-caption">{d.closing.omittedSelections} {t('additional selections stored; first 200 shown.', '个额外选项已存储；本页显示前 200 项。')}</p>}
-    </> : <p className="wm-bookmaker-empty">{t('Closing data has not been acquired for this match.', '此场比赛尚未取得收盘档案。')}</p> : d.result ? <>
+    </> : !closingTask?.error && <p className="wm-bookmaker-empty">{t('Closing data has not been acquired for this match.', '此场比赛尚未取得收盘档案。')}</p> : d.result ? <>
       <div className="wm-movi-result"><strong>{d.result.data.final_score || '—'}</strong><span>{d.result.data.status === 'finished' ? t('Reported finished', '来源报告已结束') : t('Finish unconfirmed', '结束状态未确认')}</span></div>
       <p className="wm-bookmaker-caption">{formatDateTime(d.result.data.finished_at)} · MoviOdds / bet365</p>
       {d.result.data.periods?.map((p, i) => <div className="wm-bookmaker-fact-row" key={i}><span>{p.name}</span><b>{p.score}</b></div>)}
