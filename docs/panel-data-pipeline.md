@@ -72,6 +72,7 @@ WorldMonitor 的参考依据（本地核对版本 `65860c21bb1b9987915609792b985
 - 单条上限 16 MiB；namespace 默认上限 2048 条，已有更小 `max_entries` 优先；Redis 连接/读写各 1 秒，不自动重试。正式部署使用隔离的本机 Redis seed 实例：512 MiB、noeviction、AOF everysec、持久卷；不修改既有 Redis 队列实例。部署文件为 `deploy/redis/compose.yml`。
 - 批量 API 对已声明的 namespace 使用 pipeline 预读，最多 128 键／32 MiB；领域函数仍按完整 key 和原始时钟校验。动态来源按需读取同一 Redis，并在单次批量请求内合并重复读，不建立派生快照。
 - 迁移只读取原 SQLite，保留 payload、更新时间和过期时间；跳过已经超过物理保留的记录。原文件作为回滚备份保留，不作为在线回退源。API 缺失快速返回现有 warming/unavailable；动态参数的有界补齐沿用原领域契约。
+- `finance-market-atlas`、`equity-event-command` 原先可在 GET 中查询 Yahoo；现复用 Finance Watch 采集器发布最大 40／24 行的共享快照，API 按请求 limit 截取。沿用该 owner 的周期，每项总预算 180 秒，Yahoo 并发 3；缺失或过期只报告 warming/stale，不由浏览器请求补采。
 - Redis 集中快照与浏览器 IndexedDB 是两层：前者供所有用户共享、采集器持续更新，后者使刷新页面优先恢复内容。当前盘口、选中合约和撤销敏感数据仍需现有实时校验。
 
 

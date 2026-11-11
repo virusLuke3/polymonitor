@@ -98,6 +98,10 @@ class FinanceWatchPanelsWatcher:
         self._yahoo_resources = RuntimeResources()
         self._source_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="panel-yahoo")
         self._yahoo_context = {**self.service_context(), "requests": requests, "_resources": self._yahoo_resources}
+        self._projection_runtime = None
+        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+            from api.runtime import ServiceRuntime
+            self._projection_runtime = ServiceRuntime(settings=self.settings)
 
     def ttl_seconds(self) -> int:
         configured = int(os.environ.get("POLYDATA_FINANCE_WATCH_PANELS_SEED_TTL_SECONDS", "0") or 0)
@@ -196,6 +200,8 @@ class FinanceWatchPanelsWatcher:
         return list(self._source_executor.map(fetch, values))
 
     def close(self):
+        if getattr(self, "_projection_runtime", None) is not None:
+            self._projection_runtime.close()
         self._source_executor.shutdown(wait=True, cancel_futures=True)
         self._yahoo_resources.close()
         self.requests.close()
@@ -273,10 +279,46 @@ class FinanceWatchPanelsWatcher:
         payload["lastSuccessAt"] = last_success_at
         self.seed_meta_store.store(SEED_META_NAMESPACE, panel_id, payload)
 
+    def collect_projections(self) -> Dict[str, Any]:
+        """Reuse this owner for the two legacy request-built finance panels."""
+        runtime = getattr(self, "_projection_runtime", None)
+        if runtime is None:
+            return {}
+        from api.services import finance_panels_service
+
+        def publish(namespace, cache_key, builder, *, ttl_seconds):
+            payload = builder()
+            if payload.get("status") in {"warming", "unavailable", "error"}:
+                raise RuntimeError("Finance projection has no usable source data")
+            publish_snapshot(snapshot_store=self.snapshot_store, namespace=namespace, cache_key=cache_key,
+                             payload=payload, ttl_seconds=self.ttl_seconds())
+            return payload
+
+        context = {**runtime.finance_panels_context, "finance_seed_writer": True,
+                   "get_snapshot_payload": publish, "get_yahoo_market_snapshot": self.get_yahoo_market_snapshot}
+        result = {}
+        for panel_id, reader, limit in (
+            ("finance-market-atlas", finance_panels_service.get_finance_market_atlas_snapshot, 40),
+            ("equity-event-command", finance_panels_service.get_equity_event_command_snapshot, 24),
+        ):
+            self.source_deadline = time.monotonic() + 180
+            try:
+                payload = reader(context, limit=limit)
+                self.store_seed_meta(panel_id, status=payload.get("status", "partial"),
+                                     record_count=len(payload.get("items") or []),
+                                     source_states=payload.get("sources") or {}, error_summary=None)
+                result[panel_id] = payload.get("status")
+            except Exception as exc:
+                self.store_seed_meta(panel_id, status="error", record_count=0,
+                                     source_states={"projection": "error"}, error_summary=type(exc).__name__,
+                                     preserve_last_success=True)
+                result[panel_id] = "error"
+        return result
+
     @seed_writer
     def run_once(self) -> Dict[str, Any]:
         ctx = self.service_context()
-        result: Dict[str, Any] = {"status": "ok", "panels": {}}
+        result: Dict[str, Any] = {"status": "ok", "panels": self.collect_projections()}
         for panel_id in finance_watch_panels_service.FINANCE_WATCH_PANEL_IDS:
             store = getattr(self, "snapshot_store", None)
             lock = store.fetch_lock(finance_watch_panels_service.finance_watch_namespace(panel_id), finance_watch_panels_service.FINANCE_WATCH_CACHE_KEY, timeout=0) if hasattr(store, "fetch_lock") else nullcontext()

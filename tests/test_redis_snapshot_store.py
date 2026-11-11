@@ -142,3 +142,23 @@ def test_factory_seed_identity_is_independent_of_legacy_queue_prefix(monkeypatch
     reader = create_snapshot_store(str(tmp_path / "api.sqlite"))
     assert worker.key("snapshot:test", "v1") == reader.key("snapshot:test", "v1")
     assert worker.client is reader.client
+
+
+def test_finance_api_reads_collector_universe_without_yahoo_or_republication(store):
+    from api.services import finance_panels_service
+    forbidden = Mock(side_effect=AssertionError("Public GET must not collect or publish"))
+    context = {"SNAPSHOT_STORE": store, "get_snapshot_payload": forbidden,
+               "get_yahoo_market_snapshot": forbidden, "get_market_groups_payload": forbidden}
+    reader = finance_panels_service.get_equity_event_command_snapshot
+    assert reader(context, limit=4)["status"] == "warming"
+    now = time.time()
+    value = {"status": "ok", "generatedAt": "2026-01-01T00:00:00Z",
+             "items": [{"symbol": str(i)} for i in range(12)]}
+    store.import_snapshot("runtime:finance:equity-event-command", "v3:24", value, now - 100, now - 1)
+    key = store.key("runtime:finance:equity-event-command", "v3:24")
+    before = store.client.hgetall(key)
+    result = reader(context, limit=4)
+    assert result["status"] == "stale" and len(result["items"]) == 4
+    assert result["generatedAt"] == value["generatedAt"]
+    assert store.client.hgetall(key) == before
+    forbidden.assert_not_called()

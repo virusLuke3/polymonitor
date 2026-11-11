@@ -64,6 +64,7 @@ class FinancePanelDependencies:
     get_yahoo_market_snapshot: Callable[..., Any] | None
     get_crypto_funding_watch_snapshot: Callable[..., Any] | None
     external_sources: finance_external_sources_service.FinanceExternalSourceDependencies
+    seed_writer: bool = False
 
     @classmethod
     def from_context(
@@ -74,6 +75,7 @@ class FinancePanelDependencies:
             return context
         return cls(
             application=context.get("app"),
+            seed_writer=context.get("finance_seed_writer") is True,
             utc_now_iso=resolve_optional_service_callable(
                 context,
                 "utc_now_iso",
@@ -261,6 +263,19 @@ def _cached(
     builder: Callable[[], Dict[str, Any]],
     ttl_seconds: int = FINANCE_PANEL_TTL_SECONDS,
 ) -> Dict[str, Any]:
+    store = dependencies.external_sources.snapshot_store
+    if getattr(store, "backend", "sqlite") == "redis" and not dependencies.seed_writer:
+        from api.services.macro_data_policy import read_seeded
+        maximum = 40 if namespace == "runtime:finance:market-atlas" else 24
+        version, requested = cache_key.rsplit(":", 1)
+        payload = read_seeded(store, None, namespace, f"{version}:{maximum}")
+        if payload is None:
+            payload = read_seeded(store, None, namespace, cache_key)
+        if payload is None:
+            return {"status": "warming", "generatedAt": "", "items": [], "summary": {},
+                    "categories": [], "sources": {"collector": "warming"}}
+        return {**payload, "items": list(payload.get("items") or [])[:int(requested)],
+                **({"status": "stale"} if payload.get("cacheMode") == "stale-seed" else {})}
     if dependencies.get_snapshot_payload is not None:
         return dependencies.get_snapshot_payload(
             namespace,
@@ -391,7 +406,7 @@ def _quote_snapshots(
                 )
             return symbol, None
 
-    with ThreadPoolExecutor(max_workers=min(6, max(1, len(symbols)))) as executor:
+    with ThreadPoolExecutor(max_workers=min(3, max(1, len(symbols)))) as executor:
         futures = [executor.submit(_load, symbol) for symbol in symbols]
         for future in as_completed(futures):
             symbol, row = future.result()
