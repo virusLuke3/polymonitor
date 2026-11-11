@@ -93,7 +93,7 @@ WorldMonitor 的参考依据（本地核对版本 `65860c21bb1b9987915609792b985
 - 必需值缺失或格式错误时，该来源明确标为未配置/配置错误并停止其请求，其他已配置来源继续工作；可选密钥缺失只关闭对应授权能力。保留历史值遵循原时间与过期规则，不能伪造新成功，也不能回退到写死的来源或代理。
 - `.env` 及含真实值的部署派生文件不提交 Git；`.env.example` 只列变量名、用途、必需性及空值/占位符。密钥、私有节点和完整认证 URL 不进入日志、截图、公共 API、缓存键或 `VITE_*` 前端包；公共展示需要的来源名称、证据链接由后端按字段输出，不能整体透传环境配置。
 
-本节覆盖存量及后续开发。逐项配置检查见 [86 个 Panel 清单](panel-env-audit.md)，变量到使用文件的映射见 [来源变量索引](panel-env-source-bindings.json)。源码迁移和实际服务部署分别记录，不能据此推断上游健康。
+本节覆盖存量及后续开发。逐项配置检查见 [121 个 Panel 清单](panel-env-audit.md)，变量到使用文件的映射见 [来源变量索引](panel-env-source-bindings.json)。源码迁移和实际服务部署分别记录，不能据此推断上游健康。
 
 实现入口：Python 使用 `runtime.environment` 与 `data_sources.source_value()`；JSON 目录以 `${ENV_NAME}` 引用。`POLYMONITOR_ENV_FILE` 指定私有文件，未指定时读取项目 `.env`；显式进程变量优先，空值不回退。`POLYMONITOR_SOURCE_ROUTES_JSON` 在 `.env` 中保存主机到已授权出口的路由表；旧 `SOURCE_ROUTES_FILE` 不再作为独立节点配置。浏览器必须直连的公开底图、雷达和公共证据链接使用 `VITE_PUBLIC_*`；构建器仅注入公开变量及既有公共 API／地图参数，不导出整个环境。协议 namespace、版权署名、解析规则和响应链接不作为固定取数地址迁移。
 
@@ -173,3 +173,20 @@ Broker Research 继续由 Finance watch owner 采集并写入 `runtime:finance:b
 ## 公网读取链路与本机模型
 
 采集成功、后端本机读取成功和公网展示成功分别验收。当前反向链路的连接隔离、Gunicorn 首次读取/保活预算、Nginx 连接复用及故障验收见 [网站数据传输契约](website-data-link.md)。数据拥有者和 SQLite/Redis 存储身份不变；传输故障不能通过清空快照或重写源时间处理。三个 AI Panel 的模型、线程/显存预算及生成周期见 [Agent 功能索引](../agent/README.md)。
+
+## Redis 切换验收记录（2026-11-11）
+
+本节仅记录当次发布，不代表持续健康或全部来源完整。生产后端应用版本为 `9c13497899a997943655a7a76140e922e5e10859`，从已推送提交的干净 archive 安装；63 个部署文件逐一与该版本比较一致。现有 32 个活跃采集服务分批重启，共享明确配置的公共 seed 前缀。正式网页仍为既有前端版本 `d712ea50bf6bad623cb2ee7999f50ebe30e09428`；本次未修改前端代码、布局或清除浏览器缓存。
+
+| 验收项 | 当次证据及边界 |
+| --- | --- |
+| 存储迁移 | 最后一轮只读导入有 1809 条符合保留要求的公共记录：1735 条写入、74 条因 Redis 已有更新版本而跳过；另迁入加密当前聚合。381 条超过物理保留、2743 条私有／历史记录未作为公共 seed 导入。来源时间、原更新时间和过期时间保留。 |
+| 持久化 | 切换前重启隔离 Redis，1808 条已导入记录的内容与时钟一致；AOF 开启且写入状态正常。上线观察内存约 145 MiB／512 MiB，淘汰数 0。原 SQLite 和运行文件保留作回滚材料，线上公共读取不回退它们。 |
+| 自动采集 | 切换后 61 个公共数据 namespace 发布了新的来源版本，65 条元数据有新的成功时间，其中 53 ok、8 degraded、3 partial、1 scan。部分成功不代表全部子来源成功。NBA 在 03:36 和 03:45 UTC、DeFi 在 03:34 和 03:45 UTC 均有成功采集；浏览器 IndexedDB 中也读到 03:45 的新结果，源时间与缓存写入时间不同。 |
+| API | 03:43–03:45 UTC 对全部 111 个 Runtime Panel 接口逐个走真实公网读取：111 个 HTTP 200，内容状态为 96 ok、9 degraded、2 partial、2 stale、1 warming、1 无顶层 status。不能把这张接口表当成全部前端 Panel 或所有来源通过。此前本机批量读取 111 个资源为 2.73 秒，无批量路由错误。 |
+| 浏览器 | 生产网址原有布局的 111 个位置逐个滚入视口检查，结束检查时没有持续 loading；首次逐项记录为 84 ready、9 degraded、8 stale、7 idle、3 error。随后复查 Election 自动恢复 ready，Big Tech 得到新快照但市值来源仍 partial。NBA 页面刷新后 ready，DeFi ready；天气报价曲线／表格 ready，天气共享来源仍有缺项。桌面及手机截图使用真实 API。前端 registry 共 121 项；未出现在本次保存布局的 10 项不能据此算 UI 验收通过。 |
+| 测试 | 干净发布导出的 Python 测试 977 项通过，前端构建通过；其中 13 项使用真实隔离 Redis 验证时钟、保留、锁、旧写入拒绝、私有存储隔离、批量读取、缺失和故障时不临时采集。CI 配置单独 Redis 测试服务；未宣称整个 CI 通过，基线仍有 systemd 配置检查和 tracked-path 检查失败。 |
+
+剩余问题：Breaking Radar 的 GDELT 仍 rate-limited，其他来源可发布新事件但整体 degraded；天气、行情与宏观部分来源不完整，Global Indices 和 Fear & Greed 曾超期；World Cup Match Ops 无当前采集结果。页面检查还观察到市场 chart／flow 的 503、盘口超时和个别网络变化，后续本机读取恢复不构成公网持续稳定证明。这些是来源或实时／历史读取链路问题，不能用 Redis 命中率或旧缓存可见代替修复验收。天气整小时周期及更慢来源尚未逐一观察完整后续周期，不宣称全部持续获取新数据。
+
+验收原始材料保留在本次任务的 `redis-panel-seeds` 附件目录：`deployment.json`、`migration.json`、`durability.json`、`public-panels.json`、`seed-clocks-after.json`、`final-source-check.json`、`browser.json`、`browser-followup.json` 及桌面／手机截图。它们是当时证据，不是默认运行配置。

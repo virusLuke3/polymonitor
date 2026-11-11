@@ -23,7 +23,7 @@ def store(tmp_path):
     if not url:
         pytest.skip("Requires disposable POLYMONITOR_TEST_REDIS_URL")
     parsed = urlsplit(url)
-    assert parsed.hostname == "127.0.0.1" and parsed.port != 6379, "Never use the production Redis"
+    assert parsed.hostname == "127.0.0.1" and parsed.port not in {6379, 6381}, "Never use the production Redis"
     client = redis.Redis.from_url(url, decode_responses=True, socket_timeout=1)
     prefix = "test:" + uuid.uuid4().hex + ":"
     value = RedisSnapshotStore(str(tmp_path / "history.sqlite3"), client=client, prefix=prefix)

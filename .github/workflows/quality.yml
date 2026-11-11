@@ -19,6 +19,18 @@ jobs:
   python-quality:
     runs-on: ubuntu-22.04
     timeout-minutes: 30
+    services:
+      panel-seed-test:
+        image: redis:7-alpine
+        ports:
+          - 16379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      POLYMONITOR_TEST_REDIS_URL: redis://127.0.0.1:16379/0
 
     steps:
       - name: Check out repository
