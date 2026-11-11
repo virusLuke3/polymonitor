@@ -68,3 +68,31 @@ publication versus acquisition times, current permission and owner-age filters,
 real time-window counts, market matching and failed refreshes. Production
 acceptance additionally requires source response evidence and successive normal
 worker rounds. HTTP 200, retained rows and browser cache alone are insufficient.
+
+### Production check: 2026-11-11 (Asia/Shanghai)
+
+Backend commit `aa459370802e397156e9e4a8bdbc3ff0c1758dd6` was installed from a
+clean archive; the two installed modules match that commit. API workers were
+gracefully reloaded and the existing radar collector restarted. No frontend
+code or layout changed (frontend release remains `d712ea50bf6bad623cb2ee7999f50ebe30e09428`).
+The private environment now explicitly sets the GDELT fallback interval to
+3600 seconds. All 137 scoped backend tests passed from the clean archive.
+
+- The startup round at 15:27 reused 20 matching public-feed reports for weather.
+- Two subsequent ordinary five-minute rounds acquired 20 RSS reports each for
+  Iran (15:32) and US politics (15:37). Source acquisition clocks advanced;
+  the Iran headline also changed to a more recently published report.
+- The real production browser automatically received the 15:32 snapshot after
+  displaying the previous one. Reload and desktop/mobile display were verified
+  with real APIs; the final public API returned the 15:37 snapshot.
+- GDELT's pre-existing 17-failure record and 20:30:42 cooldown were unchanged
+  throughout all three rounds. No new GDELT request was needed. Its source
+  status remains rate-limited and the panel remains degraded; these checks
+  establish alternate-source updates, not recovery of GDELT itself or complete
+  news coverage. The remaining two topics were not observed in a full new
+  five-topic rotation during this window.
+
+Task evidence is retained in the `gdelt-source-priority` artifact directory:
+`deployment.json`, `automatic-rounds.json`, `public-final.json`, `browser.json`,
+`tests.log` and desktop/mobile screenshots. This dated check is not a permanent
+health claim or a deployment configuration.
