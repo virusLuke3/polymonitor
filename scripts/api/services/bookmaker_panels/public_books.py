@@ -265,6 +265,22 @@ def parse_oddsportal(body, sport, books):
     return {'fixtures': rows, 'unknownBookmakerIds': sorted(unknown)}
 
 
+def pinnodds_project(sport, competition):
+    # The /nba, /nfl and /nhl pages include other leagues of the same sport.
+    # Keep them accessible under their actual category rather than relabeling
+    # NCAA as NFL or European basketball as NBA.
+    if re.search(r'\b(e-?basketball|e-?soccer|simulated|virtual)\b', competition, re.I):
+        return None
+    league = name(competition)
+    if sport in {'nba', 'nfl', 'nhl', 'mlb'}:
+        if league == sport:
+            return sport
+        if league == 'ncaa' and sport in {'nba', 'nfl'}:
+            return 'ncaab' if sport == 'nba' else 'ncaaf'
+        return {'nba': 'basketball', 'nfl': 'american_football', 'nhl': 'ice_hockey', 'mlb': 'baseball'}[sport]
+    return sport
+
+
 def parse_pinnodds(body, sport):
     soup = BeautifulSoup(body, 'html.parser')
     stamp = None
@@ -286,7 +302,9 @@ def parse_pinnodds(body, sport):
             divider = sides.index('v')
             home, away = ' '.join(sides[:divider]), ' '.join(sides[divider + 1:])
             competition = cell.select_one('small').get_text(strip=True)
-            project = sport
+            project = pinnodds_project(sport, competition)
+            if not project:
+                continue
             if sport == 'esports':
                 prefix = competition.split(' - ', 1)[0].casefold()
                 project = {'cs2': 'cs2', 'league of legends': 'lol', 'dota 2': 'dota2',

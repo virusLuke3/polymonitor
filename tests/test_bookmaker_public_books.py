@@ -92,3 +92,13 @@ def test_public_book_aliases_do_not_inflate_company_count():
     assert book_key('Stake.com') == book_key('stake')
     assert book_key('GG.BET') == book_key('GGBET')
     assert book_category('Betfair Exchange') == 'exchange'
+
+
+@pytest.mark.parametrize('page,league,expected', [
+    ('nba', 'NBA', 'nba'), ('nba', 'NCAA', 'ncaab'), ('nba', 'Europe - Euroleague', 'basketball'),
+    ('nba', 'Philippines - NCAA', 'basketball'), ('nfl', 'NFL', 'nfl'), ('nfl', 'NCAA', 'ncaaf'),
+    ('nhl', 'NHL', 'nhl'), ('nhl', 'Finland - SM Liiga', 'ice_hockey'),
+    ('nba', 'eBasketball H2H', None),
+])
+def test_pinnodds_page_name_does_not_define_every_rows_league(page, league, expected):
+    assert p.pinnodds_project(page, league) == expected

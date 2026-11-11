@@ -198,6 +198,21 @@ def test_retained_exchange_classification_does_not_refresh_source_clock(monkeypa
     assert fixture['quotes'][0]['category'] == 'sportsbook'
 
 
+def test_retained_pinnodds_college_rows_never_enter_nfl_query(monkeypatch):
+    import scripts.api.services.bookmaker_panels.snapshot_service as service
+    fixture = parse_board(body(raw_fixture()), 'soccer')['fixtures'][0]
+    fixture.update(provider='pinnodds', sport='nfl', competition='NCAA')
+    def read(_store, spec):
+        return ({'fixtures': [fixture]} if spec.key == 'bookmakers:board:nfl:v1' else {},
+            {'lastSuccessAt': '2026-11-11T08:00:00Z', 'stale': False, 'error': None, 'usable': True})
+    monkeypatch.setattr(service, 'read_source', read)
+    query = dict(sport='nfl', provider='', search='', offset=0, limit=20)
+    assert not read_board(None, query=query)['fixtures']
+    college = read_board(None, query={**query, 'sport': 'ncaaf'})['fixtures'][0]
+    assert college['fetchedAt'] == '2026-11-11T08:00:00Z'
+    assert fixture['sport'] == 'nfl'  # correction is read-only, no false new fetch
+
+
 def test_guest_quota_is_shared_across_different_snapshot_stores(tmp_path, monkeypatch):
     from scripts.api.services.bookmaker_panels.budget import reserve_guest
     monkeypatch.setenv('POLYDATA_BOOKMAKER_QUOTA_SQLITE_PATH', str(tmp_path/'budget.sqlite3'))

@@ -131,6 +131,11 @@ def read_board(store, game=False, *, query=None):
                 'quoteCount': sum(len(row['quotes']) for row in data.get('fixtures', []))}
         sources.append(meta)
         for row in data.get('fixtures', []):
+            if row['provider'] == 'pinnodds':
+                project = public_books.pinnodds_project(row['sport'], row['competition'])
+                if not project:
+                    continue
+                row = {**row, 'sport': project}
             # Apply taxonomy fixes to retained evidence without fetching again or
             # rewriting its acquisition clock (notably the daily guest sample).
             quotes = [{**q, 'book': book_key(q['book']), 'category': book_category(q['book'], q['category']),

@@ -10,7 +10,7 @@
 | The Odds API | 已有体育博彩公司报价 | 复用 Sports Odds watcher，在同一次请求保存完整报价 | 保持原额度和采集周期，不因新增面板重复请求 |
 | OddsLink guest | LoL、Valorant 窗口外的赛前补充 | 每项目每日一次；持久化全局 5 次/日预算，与原研究工具共用 | 试用补充，不能声称是连续实时 feed |
 | KashRock public demo | GG.bet 等玩家道具样本 | 每项目每日一次，独立保存 | 单条公开演示，无报价时间不能充当当前市场价格 |
-| MoviOdds | bet365 七类运动/电竞的主盘口 | 同一个 bookmaker owner | 第三方镜像；逐市场核实时钟、封盘与期间独立保存 |
+| MoviOdds | bet365 22 类已核实体育/电竞项目的主盘口 | 同一个 bookmaker owner | 第三方镜像；逐市场核实时钟、封盘与期间独立保存 |
 | FanDuel public | NBA/NFL/NHL/MLB 胜负、让分、大小分 | 公开网页同源 JSON → bookmaker owner | 只有开赛时间，没有逐报价变价时间；不能用开赛时间当报价时间 |
 | Bovada public | 上述四项及 NCAAF/NCAAB 主盘口 | 公开 coupon JSON → 同一 owner | event.lastModified 仅为事件修改时间；排除球员、半场和单节盘 |
 | BetRivers / Kambi | 四大联赛公开列表中的主盘口 | 公开 listView → 同一 owner | 列表未必含每个市场；保留暂停状态、双方变价时间与千分位单位 |
@@ -64,7 +64,7 @@ FanDuel 的 marketTime、Bovada 的 lastModified、Pinnodds 的 dateModified 都
 
 MoviOdds 是第三方 bet365 报价来源，补进同一 Sports / Game，不替代 GRID 的官方赛况身份。配置读取 `POLYDATA_MOVIODDS_BASE_URL`、可选 `POLYDATA_MOVIODDS_API_KEY`，代理沿用 `.env` 的来源路由。它的免费访问规则以当前响应为准，401/403 停止并保留错误，不寻找他人的密钥。
 
-当前落地范围为七个项目的有界 REST 主盘口快照：足球、篮球、网球、美式足球、冰球、棒球及电竞，每五分钟到期采集；按来源实际 group 过滤，赛前和滚球 group 分开。沿用 bookmaker owner、正式 evidence SQLite、SnapshotStore 和只读 API，不再创建重复历史库或页面取数。单来源 45 秒完整尝试、最多两次，整轮仍 240 秒；响应上限 8 MiB、规范化 2 MiB，未执行来源下轮优先。新源 10 分钟标旧、30 分钟停止展示；来源级失败保留原成功时间。原有来源周期与付费额度不变。
+原七个快周期项目的有界 REST 主盘口快照：足球、篮球、网球、美式足球、冰球、棒球及电竞，每五分钟到期采集；按来源实际 group 过滤，赛前和滚球 group 分开。沿用 bookmaker owner、正式 evidence SQLite、SnapshotStore 和只读 API，不再创建重复历史库或页面取数。单来源 45 秒完整尝试、最多两次，整轮仍 240 秒；响应上限 8 MiB、规范化 2 MiB，未执行来源下轮优先。新源 10 分钟标旧、30 分钟停止展示；来源级失败保留原成功时间。原有来源周期与付费额度不变。
 
 `ts` 是价格变化时间，`group_status[group].polled_at` 是该市场最近核实时间，两者单独保存；不能拿本次抓取时间给旧报价续期。该来源缺少 group 核实时钟的报价不参与主概率。封盘、上游 stale、采集失败的保留值及滚球采集超过两分钟的值不参与当前共识。匿名 API 不承诺一秒更新，本轮页面消费仍按已有分钟级 Runtime。
 
@@ -145,3 +145,5 @@ Polymarket 匹配要求游戏、球队、比赛时间和胜负市场类型一致
 本节是实现契约；生产版本、持久读回、自动轮次和桌面/手机结果在完成后追加。此前 403 和缺少个人 key 的通道仍为权限限制，不能用公开样本替代正式授权覆盖。
 
 生产验收另发现 FanDuel 联赛页面附件会夹带电竞篮球；解析现核对 `competitionId` 对应的官方联赛名称，只接该联赛的真实比赛。旧数据已由一次真实重新采集替换，浏览器 Sports/Game 缓存及分页 key 升到 v2，避免继续恢复旧的错误分类。测试覆盖混合页面、纯电竞附件及缺失联赛元数据。
+
+进一步核验发现 Pinnodds 的 NBA/NFL/NHL 页面实际包含同运动的其他联赛。解析和只读投影现在按每行 competition 分类：NCAA 分到 NCAAB/NCAAF，欧洲篮球及非 NHL 冰球保留在各自运动类别，不冒充职业联赛，也不丢弃有效报价。旧快照在只读投影中修正分类并保留原始时间；前端缓存最终版本为 v3。
