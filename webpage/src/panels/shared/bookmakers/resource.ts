@@ -7,7 +7,7 @@ export function bookmakerPage(game: boolean, query: BoardQuery): PanelResource<P
   const params = { family, sport: query.sport, provider: query.provider, search: query.search,
     offset: String(query.offset), limit: String(query.limit) };
   const snapshot = bookmakerSnapshot(game);
-  return { ...snapshot, key: `bookmakers:page:v1:${new URLSearchParams(params)}`, title: game ? 'Game' : 'Sports',
+  return { ...snapshot, key: `bookmakers:page:v2:${new URLSearchParams(params)}`, title: game ? 'Game' : 'Sports',
     fetch: context => fetchBookmakerPage(params, context?.signal),
     parse: value => {
       const result = parsePayload(value, game), b = result.bookmakerBoard;

@@ -50,16 +50,23 @@ def parse_fanduel(body, sport):
     raw = json.loads(body)
     attachments = raw['attachments']
     events, markets = attachments['events'], attachments['markets']
-    if not isinstance(events, dict) or not isinstance(markets, dict):
+    competitions = attachments.get('competitions')
+    if not isinstance(events, dict) or not isinstance(markets, dict) or not isinstance(competitions, dict):
         raise ValueError('Invalid FanDuel attachments')
     kinds = {'MONEY_LINE': 'h2h', 'MATCH_HANDICAP_(2-WAY)': 'spreads',
              'TOTAL_POINTS_(OVER/UNDER)': 'totals', 'TOTAL_RUNS_(OVER/UNDER)': 'totals',
              'TOTAL_GOALS_(OVER/UNDER)': 'totals'}
-    rows, rejected = [], 0
+    rows, rejected, eligible_events = [], 0, set()
     for e in events.values():
+        # A league's landing page includes cross-promoted simulated events.
+        # Validate the native competition, not the page title or team substring.
+        competition = competitions.get(str(e.get('competitionId')), {})
+        if name(competition.get('name')) != name(sport):
+            continue
         if ' @ ' not in e.get('name', ''):
             continue  # Outrights, awards and season totals are not matches.
         away, home = e['name'].split(' @ ', 1)
+        eligible_events.add(e['eventId'])
         selected = [m for m in markets.values() if m.get('eventId') == e['eventId'] and m.get('marketType') in kinds]
         parsed = []
         for m in selected:
@@ -84,7 +91,7 @@ def parse_fanduel(body, sport):
                 provider='fanduel', phase='inplay' if any(m.get('inPlay') for m in selected) else 'prematch'))
         except ValueError:
             rejected += 1
-    if markets and not rows and any(m.get('marketType') in kinds for m in markets.values()):
+    if markets and not rows and any(m.get('eventId') in eligible_events and m.get('marketType') in kinds for m in markets.values()):
         raise ValueError('No valid FanDuel match markets')
     return {'fixtures': rows, 'rejectedMarkets': rejected}
 

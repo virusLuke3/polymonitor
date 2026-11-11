@@ -6,19 +6,43 @@ from scripts.api.services.bookmaker_panels.model import book_key, book_category
 
 
 def test_fanduel_direction_and_unknown_price_clock():
-    e = {'eventId': 1, 'name': 'Away @ Home', 'openDate': '2026-11-10T02:00:00Z'}
+    e = {'eventId': 1, 'competitionId': 10, 'name': 'Away @ Home', 'openDate': '2026-11-10T02:00:00Z'}
     def runner(label, side, price):
         return {'runnerName': label, 'result': {'type': side}, 'runnerStatus': 'ACTIVE',
                 'winRunnerOdds': {'trueOdds': {'decimalOdds': {'decimalOdds': price}}}}
     m = {'eventId': 1, 'marketType': 'MONEY_LINE', 'marketStatus': 'OPEN',
          'marketTime': e['openDate'], 'runners': [runner('Away', 'AWAY', 2.2), runner('Home', 'HOME', 1.8)]}
-    raw = {'attachments': {'events': {'1': e}, 'markets': {'1': m}}}
+    raw = {'attachments': {'events': {'1': e}, 'markets': {'1': m}, 'competitions': {'10': {'name': 'NBA'}}}}
     row = p.parse_fanduel(json.dumps(raw), 'nba')['fixtures'][0]
     assert row['home'] == 'Home'
     q = row['quotes'][0]
     assert q['sourceUpdatedAt'] is None  # marketTime is kickoff, not price time.
     assert q['outcomes'][0]['name'] == 'Away'
     m['runners'][0]['result']['type'] = 'HOME'
+    with pytest.raises(ValueError):
+        p.parse_fanduel(json.dumps(raw), 'nba')
+
+
+def test_fanduel_landing_page_does_not_turn_simulated_basketball_into_nba():
+    from copy import deepcopy
+    e = {'eventId': 1, 'competitionId': 10, 'name': 'Boston Celtics @ Toronto Raptors', 'openDate': '2026-11-11T02:00:00Z'}
+    def market(event_id, away, home):
+        return {'eventId': event_id, 'marketType': 'MONEY_LINE', 'marketStatus': 'OPEN',
+            'runners': [{'runnerName': team, 'result': {'type': side}, 'runnerStatus': 'ACTIVE',
+                        'winRunnerOdds': {'trueOdds': {'decimalOdds': {'decimalOdds': 1.9}}}}
+                       for team, side in ((away, 'AWAY'), (home, 'HOME'))]}
+    raw = {'attachments': {'events': {'1': e, '2': {**e, 'eventId': 2, 'competitionId': 11,
+        'name': 'Boston Celtics (EXO) @ Toronto Raptors (PLAYER)'}},
+        'competitions': {'10': {'name': 'NBA'}, '11': {'name': 'eBasketball H2H GG League 4x5 Mins'}},
+        'markets': {'1': market(1, 'Boston Celtics', 'Toronto Raptors'),
+                    '2': market(2, 'Boston Celtics (EXO)', 'Toronto Raptors (PLAYER)')}}}
+    result = p.parse_fanduel(json.dumps(raw), 'nba')
+    assert len(result['fixtures']) == 1
+    assert result['fixtures'][0]['away'] == 'Boston Celtics'
+    no_real = deepcopy(raw)
+    del no_real['attachments']['events']['1']
+    assert p.parse_fanduel(json.dumps(no_real), 'nba')['fixtures'] == []
+    del raw['attachments']['competitions']
     with pytest.raises(ValueError):
         p.parse_fanduel(json.dumps(raw), 'nba')
 
