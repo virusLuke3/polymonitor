@@ -16,7 +16,7 @@ GROUPS = {
     'soccer': ('40', '1777'), 'basketball': ('1453', '112'),
     'tennis': ('83', '67'), 'american_football': ('1441', '58'),
     'ice_hockey': ('972', '96'), 'baseball': ('1096',),
-    'esports': ('1510001',),
+    'esports': ('1510001', '1510501'),
     'rugby_union': ('80007', '80012'), 'rugby_league': ('190006', '190053'),
     'cricket': ('1246', '30154', '30155'), 'australian_rules': ('360005',),
     'table_tennis': ('920000',), 'volleyball': ('910000',),

@@ -103,6 +103,19 @@ def test_failed_feed_catalog_or_redis_lease_never_qualifies_prices(tmp_path):
     assert status['stale'] and fixtures[0]['quotes'][0]['sourceStale']
 
 
+def test_esports_live_group_survives_prematch_removal():
+    from scripts.api.services.bookmaker_panels.moviodds import GROUPS
+    assert set(GROUPS['esports']) == {'1510001', '1510501'}
+    s = Stream(['esports']); s.set_catalog([{**meta(), 'in_play': True}], NOW); s.begin()
+    live = [{**price(), 'group_id': '1510501', 'phase': 'inplay'},
+            {**price(), 'group_id': '1510501', 'phase': 'inplay', 'side': 'Beta', 'sel_id': 'a', 'odds_dec': 2.1}]
+    s.apply(frame(rows=[{**price(), 'suspended': True, 'phase': 'prematch'}, *live]), NOW)
+    s.apply(frame('remove', [{'group_id': '1510001', 'market_id': 'm', 'sel_id': 'h'}]), NOW+1)
+    s.apply({'type': 'feed', 'feed': {'state': 'ok', 'sports': {'esports': {'live': {'state': 'ok'}}}}}, NOW+1)
+    q = s.payload(NOW+1)['fixtures'][0]['quotes'][0]
+    assert q['phase'] == 'inplay' and q['groupId'] == '1510501' and not q['sourceStale']
+
+
 def test_duplicate_frames_keep_first_receipt_and_failed_batch_is_atomic(archive):
     msg = frame(); batch = [(encode(msg), msg, NOW)]
     archive.frames(batch); archive.frames([(encode(msg), msg, NOW+100)])
@@ -122,16 +135,18 @@ def test_restart_history_cursor_overlap_and_no_failed_advance(archive):
     def page(path, params, deadline):
         calls.append(params)
         return encode({'fixture_id': 'f', 'count': 1, 'truncated': len(calls) == 1,
-                       'points': [{**price(), 'ts': stamp(NOW-100)}]})
+                       'points': [{**price(), 'group_id': params['group'], 'ts': stamp(NOW-100)}]})
     run_job(archive, task, 9999, read=page, now=NOW)
     resumed = Archive(archive.path).due(NOW+31, 'history')
     assert json.loads(resumed['cursor'])['complete'] is False
     run_job(archive, resumed, 9999, read=page, now=NOW+31)
     assert calls[1]['to'] == stamp(NOW-100)
+    resumed = Archive(archive.path).due(NOW+62, 'history')
+    run_job(archive, resumed, 9999, read=page, now=NOW+62)
     with archive.connection() as db:
         row = db.execute('SELECT * FROM tasks WHERE key=?', (task['key'],)).fetchone()
         assert json.loads(row['cursor'])['complete'] is True
-        assert db.execute('SELECT count(*) FROM points').fetchone()[0] == 1
+        assert db.execute('SELECT count(*) FROM points').fetchone()[0] == 2
         cursor = row['cursor']
     def bad(*args):
         return encode({'fixture_id': 'wrong', 'count': 0, 'points': [], 'truncated': False})
@@ -142,7 +157,7 @@ def test_restart_history_cursor_overlap_and_no_failed_advance(archive):
 
 def test_full_timestamp_page_cannot_silently_skip(archive):
     task = archive.due(NOW, 'history')
-    task['cursor'] = json.dumps({'scope': 'primary-groups-v1', 'groups': ['1510001'], 'groupIndex': 0, 'to': stamp(), 'from': stamp(NOW-86400)})
+    task['cursor'] = json.dumps({'scope': 'primary-groups-v1', 'groups': ['1510001', '1510501'], 'groupIndex': 0, 'to': stamp(), 'from': stamp(NOW-86400)})
     def page(*args): return encode({'fixture_id': 'f', 'count': 1, 'truncated': True, 'points': [price()]})
     with pytest.raises(ValueError, match='boundary'): run_job(archive, task, 9999, read=page, now=NOW)
 
