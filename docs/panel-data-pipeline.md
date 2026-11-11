@@ -187,6 +187,6 @@ Broker Research 继续由 Finance watch owner 采集并写入 `runtime:finance:b
 | 浏览器 | 生产网址原有布局的 111 个位置逐个滚入视口检查，结束检查时没有持续 loading；首次逐项记录为 84 ready、9 degraded、8 stale、7 idle、3 error。随后复查 Election 自动恢复 ready，Big Tech 得到新快照但市值来源仍 partial。NBA 页面刷新后 ready，DeFi ready；天气报价曲线／表格 ready，天气共享来源仍有缺项。桌面及手机截图使用真实 API。前端 registry 共 121 项；未出现在本次保存布局的 10 项不能据此算 UI 验收通过。 |
 | 测试 | 干净发布导出的 Python 测试 977 项通过，前端构建通过；其中 13 项使用真实隔离 Redis 验证时钟、保留、锁、旧写入拒绝、私有存储隔离、批量读取、缺失和故障时不临时采集。CI 配置单独 Redis 测试服务；未宣称整个 CI 通过，基线仍有 systemd 配置检查和 tracked-path 检查失败。 |
 
-剩余问题：Breaking Radar 的 GDELT 仍 rate-limited，其他来源可发布新事件但整体 degraded；天气、行情与宏观部分来源不完整，Global Indices 和 Fear & Greed 曾超期；World Cup Match Ops 无当前采集结果。页面检查还观察到市场 chart／flow 的 503、盘口超时和个别网络变化，后续本机读取恢复不构成公网持续稳定证明。这些是来源或实时／历史读取链路问题，不能用 Redis 命中率或旧缓存可见代替修复验收。天气整小时周期及更慢来源尚未逐一观察完整后续周期，不宣称全部持续获取新数据。
+剩余问题：Breaking Radar 的 GDELT 仍 rate-limited，其他来源可发布新事件但整体 degraded；天气、行情与宏观部分来源不完整，Global Indices 和 Fear & Greed 曾超期；World Cup Match Ops 无当前采集结果。页面检查还观察到市场 chart／flow 的 503、盘口超时和个别网络变化，03:47 UTC 公网复查 chart／flow 恢复 HTTP 200（分别 600 点／50 条，历史覆盖仍 partial／NOT_PROVEN），盘口复查先出现非 JSON 响应、随后 HTTP 200；单次恢复不构成持续稳定或盘口连续性证明。这些是来源或实时／历史读取链路问题，不能用 Redis 命中率或旧缓存可见代替修复验收。天气整小时周期及更慢来源尚未逐一观察完整后续周期，不宣称全部持续获取新数据。
 
-验收原始材料保留在本次任务的 `redis-panel-seeds` 附件目录：`deployment.json`、`migration.json`、`durability.json`、`public-panels.json`、`seed-clocks-after.json`、`final-source-check.json`、`browser.json`、`browser-followup.json` 及桌面／手机截图。它们是当时证据，不是默认运行配置。
+验收原始材料保留在本次任务的 `redis-panel-seeds` 附件目录：`deployment.json`、`migration.json`、`durability.json`、`public-panels.json`、`seed-clocks-after.json`、`final-source-check.json`、`browser.json`、`browser-followup.json`、`public-market-followup.json` 及桌面／手机截图。它们是当时证据，不是默认运行配置。
