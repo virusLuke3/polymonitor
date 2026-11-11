@@ -7,7 +7,7 @@ export function bookmakerPage(game: boolean, query: BoardQuery): PanelResource<P
   const params = { family, sport: query.sport, provider: query.provider, search: query.search,
     offset: String(query.offset), limit: String(query.limit) };
   const snapshot = bookmakerSnapshot(game);
-  return { ...snapshot, key: `bookmakers:page:v3:${new URLSearchParams(params)}`, title: game ? 'Game' : 'Sports',
+  return { ...snapshot, key: `bookmakers:page:v4:${new URLSearchParams(params)}`, title: game ? 'Game' : 'Sports',
     fetch: context => fetchBookmakerPage(params, context?.signal),
     parse: value => {
       const result = parsePayload(value, game), b = result.bookmakerBoard;
@@ -21,6 +21,6 @@ export function bookmakerPage(game: boolean, query: BoardQuery): PanelResource<P
       return expire(result, Date.now());
     },
     revalidate: expire,
-    refreshPolicy: { tier: 'slow', intervalMs: game ? 120000 : 300000, staleAfterMs: 1800000, requestTimeoutMs: 45000 },
+    refreshPolicy: { tier: 'slow', intervalMs: 15000, staleAfterMs: 1800000, requestTimeoutMs: 45000 },
   };
 }

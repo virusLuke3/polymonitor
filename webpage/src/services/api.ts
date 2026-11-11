@@ -293,6 +293,10 @@ export function fetchBookmakerPage(query: Record<string, string>, signal?: Abort
   return apiGetWithTimeout<unknown>(`/runtime/bookmakers/board?${new URLSearchParams(query)}`, 30000, signal, 'no-store');
 }
 
+export function fetchMoviOddsArchive(query: Record<string, string>, signal?: AbortSignal) {
+  return apiGetWithTimeout<unknown>(`/runtime/bookmakers/moviodds/archive?${new URLSearchParams(query)}`, 30000, signal, 'no-store');
+}
+
 export function fetchRuntimeInflationNowcast(signal?: AbortSignal) {
   return apiGet<RuntimeInflationNowcastPayload>('/runtime/macro/inflation-nowcast', signal);
 }

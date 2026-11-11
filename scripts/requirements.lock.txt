@@ -294,6 +294,8 @@ python-dotenv==1.2.2
     #   pydantic-settings
 python-multipart==0.0.32
     # via mcp
+python-socks==2.8.2
+    # via -r scripts/requirements.txt
 pytz==2026.2
     # via pandas
 pyunormalize==17.0.0

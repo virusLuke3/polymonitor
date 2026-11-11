@@ -12,6 +12,6 @@ export const panel = runtimePanelFromRenderer({
 }, {
   // GRID and bookmaker availability must not depend on another panel's batch.
   batch: false, requestTimeoutMs: 45000,
-  tier: 'slow', intervalMs: 120000, staleAfterMs: 1800000,
+  tier: 'slow', intervalMs: 15000, staleAfterMs: 1800000,
   limit: 10, fetchData: (context, limit) => fetchRuntimeGridEsports(limit, context?.signal),
 });

@@ -1222,5 +1222,36 @@
   ],
   "VITE_PUBLIC_YOUTUBE_WATCH_URL": [
     "webpage/src/panels/modules/market-youtube-channels/index.tsx"
+  ],
+  "POLYDATA_MOVIODDS_BASE_URL": [
+    "scripts/api/services/bookmaker_panels/movi_history.py"
+  ],
+  "POLYDATA_MOVIODDS_WS_URL": [
+    "scripts/runtime/moviodds_watcher.py"
+  ],
+  "POLYDATA_MOVIODDS_API_KEY": [
+    "scripts/api/services/bookmaker_panels/movi_history.py",
+    "scripts/runtime/moviodds_watcher.py"
+  ],
+  "POLYDATA_MOVIODDS_STREAM_ENABLED": [
+    "scripts/api/services/bookmaker_panels/movi_archive.py"
+  ],
+  "POLYDATA_MOVIODDS_ARCHIVE_PATH": [
+    "scripts/api/services/bookmaker_panels/movi_archive.py"
+  ],
+  "POLYDATA_MOVIODDS_ARCHIVE_MAX_MIB": [
+    "scripts/api/services/bookmaker_panels/movi_archive.py"
+  ],
+  "POLYDATA_MOVIODDS_RAW_RETENTION_DAYS": [
+    "scripts/api/services/bookmaker_panels/movi_archive.py"
+  ],
+  "POLYDATA_MOVIODDS_HISTORY_RETENTION_DAYS": [
+    "scripts/api/services/bookmaker_panels/movi_archive.py"
+  ],
+  "POLYDATA_MOVIODDS_LOOKBACK_DAYS": [
+    "scripts/api/services/bookmaker_panels/movi_history.py"
+  ],
+  "POLYDATA_MOVIODDS_REST_REQUESTS_PER_CYCLE": [
+    "scripts/api/services/bookmaker_panels/movi_history.py"
   ]
 }

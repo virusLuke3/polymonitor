@@ -444,6 +444,8 @@ python-multipart==0.0.32
     # via
     #   -r scripts/requirements.lock.txt
     #   mcp
+python-socks==2.8.2
+    # via -r scripts/requirements.lock.txt
 pytz==2026.2
     # via
     #   -r scripts/requirements.lock.txt

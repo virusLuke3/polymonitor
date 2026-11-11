@@ -53,6 +53,7 @@ def response(status=200, **headers):
     result.status_code = status
     result.headers.update(headers)
     result._content = b'{}'
+    result._content_consumed = True
     return result
 
 
@@ -81,6 +82,20 @@ def test_rate_limit_does_not_switch_and_survives_session_replacement(monkeypatch
     monkeypatch.setattr(requests.Session, 'request', request)
     with transport.SourceSession() as session:
         assert session.get('https://source.example').status_code == 429
+    with transport.SourceSession() as session, pytest.raises(requests.exceptions.RetryError):
+        session.get('https://source.example')
+    assert len(calls) == 1
+
+
+def test_archive_service_retry_after_does_not_retry_or_change_exit(monkeypatch):
+    calls = []
+    def request(*args, **kwargs):
+        calls.append(kwargs)
+        return response(503, **{'Retry-After': '600'})
+    monkeypatch.setattr(requests.Session, 'request', request)
+    with transport.SourceSession() as session, pytest.raises(requests.exceptions.HTTPError):
+        transport.read_with_retry(session, 'https://source.example', lambda r: (r.raise_for_status(), r.content)[1],
+                                  respect_retry_after=True, attempts=2, timeout=45)
     with transport.SourceSession() as session, pytest.raises(requests.exceptions.RetryError):
         session.get('https://source.example')
     assert len(calls) == 1

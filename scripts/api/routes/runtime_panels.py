@@ -98,6 +98,25 @@ def create_runtime_panels_blueprint(dependencies: RuntimePanelRouteDependencies)
         return jsonify({'panelId': 'esports-intel' if family == 'game' else 'sports-odds',
             'generatedAt': board['generatedAt'], 'status': 'ok', 'bookmakerBoard': board}), 200, {'Cache-Control': 'no-store'}
 
+    @bp.route('/runtime/bookmakers/moviodds/archive', methods=['GET'])
+    def moviodds_archive():
+        from api.services.bookmaker_panels.movi_reads import read
+        query = {k: request.args.get(k, '').strip() for k in ('sport', 'fixture', 'selection')}
+        try:
+            query.update(offset=int(request.args.get('offset', '0')), limit=int(request.args.get('limit', '100')))
+            if not 0 <= query['offset'] <= 1_000_000 or not 1 <= query['limit'] <= 200 or any(
+                    len(query[k]) > size for k, size in (('sport', 50), ('fixture', 100), ('selection', 3000))):
+                raise ValueError('Invalid archive scope')
+        except ValueError:
+            return jsonify({'error': 'Invalid MoviOdds archive query'}), 400
+        try:
+            result = read(query)
+        except LookupError:
+            return jsonify({'error': 'MoviOdds fixture not found'}), 404
+        except Exception:
+            return jsonify({'error': 'MoviOdds archive unavailable'}), 503, {'Retry-After': '30'}
+        return jsonify(result), 200, {'Cache-Control': 'no-store'}
+
     @bp.route('/runtime/weather/books', methods=['GET'])
     def weather_books():
         tokens = list(dict.fromkeys((request.args.get('tokens') or '').split(',')))

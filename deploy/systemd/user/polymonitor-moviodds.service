@@ -1,0 +1,21 @@
+[Unit]
+Description=Polymonitor MoviOdds stream and historical evidence owner
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/polymonitor/backend
+Environment=PYTHONPATH=%h/.local/share/polymonitor/backend/scripts
+# Generated private pointer to the same project .env; no endpoints or nodes here.
+EnvironmentFile=%h/.config/polymonitor/moviodds.env
+ExecStart=/usr/bin/python3 -m runtime.moviodds_watcher
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=130
+KillMode=control-group
+MemoryMax=768M
+Nice=10
+
+[Install]
+WantedBy=default.target

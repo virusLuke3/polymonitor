@@ -57,6 +57,15 @@ describe('bookmaker snapshots', () => {
   it('expires recovered browser data without another network response', () => {
     expect(expire(base, now + 7200_001).bookmakerBoard.fixtures).toHaveLength(0);
   });
+  it('withdraws a WS quote after publication lease expires without removing historical context', () => {
+    const value: Payload = structuredClone(base);
+    value.bookmakerBoard.fixtures[0]!.quotes = [{ ...quote, provider: 'moviodds', streamValidUntil: new Date(now + 45000).toISOString() }];
+    expect(quoteCurrent(value.bookmakerBoard.fixtures[0]!.quotes[0]!, now)).toBe(true);
+    expect(quoteCurrent(value.bookmakerBoard.fixtures[0]!.quotes[0]!, now + 45001)).toBe(false);
+    const expired = expire(value, now + 45001);
+    expect(expired.bookmakerBoard.fixtures[0]!.quotes[0]!.sourceStale).toBe(true);
+    expect(expire(expired, now + 45002)).toBe(expired);
+  });
   it('uses a slow mirror source own retention and rejects future received clocks', () => {
     const value: Payload = structuredClone(base);
     value.bookmakerBoard.fixtures[0]!.tier = 'mirror-feed';

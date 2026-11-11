@@ -121,10 +121,20 @@ def merge_exact_events(fixtures):
 
 
 def read_board(store, game=False, *, query=None):
+    from .movi_archive import enabled as stream_enabled
     chosen = [s for s in specs() if (s.key.split(':')[2] in GAMES or s.key.split(':')[2] == 'esports') == game]
+    if stream_enabled():
+        # The live stream owns removals/resync. Older REST quotes cannot resurrect
+        # selections it withdrew, including during an outage.
+        chosen = [s for s in chosen if not s.key.startswith('bookmakers:movi:')]
     if not game:
         chosen.append(THE_ODDS)
     sources, fixtures, props = [], [], []
+    if stream_enabled():
+        from .movi_stream import read_stream
+        stream_rows, stream_meta = read_stream(store, game)
+        fixtures.extend(stream_rows)
+        sources.append(stream_meta)
     for spec in chosen:
         data, meta = read_source(store, spec)
         meta = {**meta, 'fixtureCount': len(data.get('fixtures', [])),

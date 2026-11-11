@@ -12,6 +12,6 @@ export const panel = runtimePanelFromRenderer({
 }, {
   // Large, independent snapshots must not queue behind unrelated batch readers.
   batch: false, requestTimeoutMs: 45000,
-  tier: 'slow', intervalMs: 300000, staleAfterMs: 1800000,
+  tier: 'slow', intervalMs: 15000, staleAfterMs: 1800000,
   limit: 8, fetchData: (context, limit) => fetchRuntimeSportsOdds(limit, context?.signal),
 });

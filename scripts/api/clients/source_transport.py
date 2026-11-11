@@ -240,7 +240,7 @@ def read_response_bytes(response, max_bytes, *, deadline=None, sample=False):
 
 
 def read_with_retry(session, url, read_response, *, attempts=4, deadline=None,
-                    require_full_attempt=False, **kwargs):
+                    require_full_attempt=False, respect_retry_after=False, **kwargs):
     """Collector-only retries, including body reads, with an intact attempt timeout.
 
     The normal request path keeps its original budget. Slow collectors opt in;
@@ -282,6 +282,11 @@ def read_with_retry(session, url, read_response, *, attempts=4, deadline=None,
                 session._route_succeeded(f"{host}:{index}")
             return value
         except requests.exceptions.HTTPError as exc:
+            if (respect_retry_after and exc.response is not None and exc.response.status_code == 503
+                    and exc.response.headers.get('Retry-After')):
+                if routed:
+                    session._cool(host + ':rate-limit', _retry_seconds(exc.response.headers['Retry-After']))
+                raise
             if exc.response is None or exc.response.status_code not in {500, 502, 503, 504}:
                 raise
             if routed:

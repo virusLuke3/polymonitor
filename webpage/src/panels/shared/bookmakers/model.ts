@@ -7,6 +7,7 @@ export type Outcome = { name: string; decimal: number; implied: number; probabil
 export type Quote = { book: string; label: string; category: string; market: string; period: string; provider: string;
   sourceUpdatedAt: string | null; sourceCheckedAt?: string | null; suspended?: boolean;
   phase?: string; sampleTier?: string; sourceStale?: boolean; sourceError?: string | null; receivedAt?: string; retentionSeconds?: number;
+  streamValidUntil?: string; fixtureId?: string; sportKey?: string;
   url: string | null; overround: number; outcomes: Outcome[] };
 export type Fixture = { id: string; provider: string; tier: string; sport: string; competition: string;
   home: string; away: string; startTime: string; fetchedAt: string; sourceStale: boolean; sourceError: string | null; quotes: Quote[];
@@ -35,6 +36,7 @@ export const quoteCurrent = (q: Quote, now = Date.now()) => {
   const clock = q.sourceCheckedAt !== undefined ? q.sourceCheckedAt : q.sourceUpdatedAt;
   const maxAge = q.phase === 'inplay' ? 120_000 : 1800_000;
   return !q.suspended && !q.sourceStale && !q.sourceError && !!clock &&
+    (!q.streamValidUntil || Date.parse(q.streamValidUntil) > now) &&
     Date.parse(clock) <= now + 60_000 && now - Date.parse(clock) < maxAge;
 };
 export function currentWinnerQuotes(event: Fixture, now = Date.now()): Quote[] {
@@ -54,6 +56,8 @@ function validQuote(q: unknown): q is Quote {
     (q.sourceUpdatedAt === null || date(q.sourceUpdatedAt)) && finite(q.overround) &&
     (q.sourceCheckedAt === undefined || q.sourceCheckedAt === null || date(q.sourceCheckedAt)) &&
     (q.receivedAt === undefined || date(q.receivedAt)) &&
+    (q.streamValidUntil === undefined || date(q.streamValidUntil)) &&
+    (q.fixtureId === undefined || text(q.fixtureId)) &&
     (q.retentionSeconds === undefined || finite(q.retentionSeconds) && q.retentionSeconds > 0) &&
     (q.suspended === undefined || typeof q.suspended === 'boolean') &&
     (q.sourceStale === undefined || typeof q.sourceStale === 'boolean') &&
@@ -95,8 +99,9 @@ export function parsePayload(value: unknown, game: boolean): Payload {
 export function expire(value: Payload, now: number): Payload {
   const fixtures = value.bookmakerBoard.fixtures.map(f => {
     const quotes = f.quotes.filter(q => !q.receivedAt || q.retentionSeconds === undefined ||
-      now - Date.parse(q.receivedAt) >= -60_000 && now - Date.parse(q.receivedAt) < q.retentionSeconds * 1000);
-    return quotes.length === f.quotes.length ? f : { ...f, quotes };
+      now - Date.parse(q.receivedAt) >= -60_000 && now - Date.parse(q.receivedAt) < q.retentionSeconds * 1000)
+      .map(q => !q.sourceStale && q.streamValidUntil && Date.parse(q.streamValidUntil) <= now ? { ...q, sourceStale: true } : q);
+    return quotes.length === f.quotes.length && quotes.every((q, i) => q === f.quotes[i]) ? f : { ...f, quotes };
   }).filter(f => {
     // New feeds carry their actual domain retention on each quote. A shared
     // provider name/tier must not silently force a different source cadence.
@@ -114,8 +119,8 @@ export function expire(value: Payload, now: number): Payload {
   return { ...value, items, bookmakerBoard: { ...value.bookmakerBoard, fixtures, props } };
 }
 export function bookmakerSnapshot(game: boolean): PanelSnapshotContract<unknown> {
-  return { key: `bookmakers:${game ? 'esports-intel:10' : 'sports-odds:8'}:v3`,
-    cache: { version: 3, maxChars: 600_000, storage: 'indexeddb' }, maxAgeMs: 1800_000, staleAgeMs: PUBLIC_OVERVIEW_RETENTION_MS,
+  return { key: `bookmakers:${game ? 'esports-intel:10' : 'sports-odds:8'}:v4`,
+    cache: { version: 4, maxChars: 600_000, storage: 'indexeddb' }, maxAgeMs: 1800_000, staleAgeMs: PUBLIC_OVERVIEW_RETENTION_MS,
     acceptStale: true, updatedAt: runtimeTimestamp,
     parse: value => expire(parsePayload(value, game), Date.now()),
     revalidate: (value, now) => expire(value as Payload, now),

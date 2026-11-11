@@ -4,6 +4,7 @@ import { useI18n } from '@/services/i18n';
 import { usePanelRuntimeView } from '@/panels/PanelRuntimeView';
 import { usePanelResource } from '@/panels/usePanelResource';
 import { bookmakerPage } from './resource';
+import { MoviArchive } from './MoviArchive';
 import { currentWinnerQuotes, lineKey, quoteCurrent, safeLink, teamKey, type Fixture, type Payload, type Quote } from './model';
 
 const percent = (n: number) => `${(n * 100).toFixed(1)}%`;
@@ -76,7 +77,7 @@ function MatchBoard({ event, game }: { event: Fixture; game: boolean }) {
     </details>}
     <details className="wm-bookmaker-method"><summary>{t('Prices & coverage', '报价与覆盖口径')}</summary>
       <p>{t('Decimal odds; the smaller percentage below each price removes that bookmaker’s margin proportionally. Older or undated quotes are excluded from the headline. Full match/series only; bookmaker rules can differ.', '上方为十进制赔率，下方为该公司比例去水概率。旧报价和时间未知报价不计入主数字。这里只比较完整比赛或系列赛，博彩公司结算规则可能不同。')}</p>
-      <p>{t('For MoviOdds, market confirmation time is separate from the last price change. Suspended or unconfirmed markets do not enter the average. Snapshots are collected every five minutes; in-play quotes older than two minutes are excluded.', 'MoviOdds 的市场核实时间与最后变价时间分开。封盘或未核实的市场不计入均值。每五分钟采集快照，滚球报价超过两分钟即退出当前均值。')}</p>
+      <p>{t('MoviOdds keeps market confirmation separate from price changes. Suspended, unconfirmed and disconnected stream quotes do not enter the average; in-play confirmations older than two minutes are excluded.', 'MoviOdds 的市场核实与变价时间分开。封盘、未核实或流已断开的报价不计入均值；滚球核实时间超过两分钟即退出当前均值。')}</p>
       <p>{[...new Set(event.quotes.map(q => q.provider))].join(' + ')} · {t('Received', '采集于')} {formatDateTime(event.fetchedAt)}</p>
     </details>
   </>;
@@ -138,9 +139,10 @@ export function BookmakerPanel({ payload, game = false }: { payload?: Payload; g
       {sports.map(key => <button type="button" key={key} aria-pressed={sport === key} onClick={() => { setSport(key); setEventId(''); setProvider(''); }}>{short(key)}<small>{board?.projectCounts?.[key] ?? board?.fixtures.filter(f => f.sport === key).length ?? '·'}</small></button>)}
     </div>
     <div className="wm-bookmaker-tabs" role="group" aria-label={t('View', '视图')}>
-      {[['odds', t('Odds', '赔率')], ['coverage', t('All books', '全部公司')], ['facts', t(game ? 'Official scores' : 'Standings', game ? '官方赛况' : '排名与赛程')], ...(game ? [['props', t('Player props', '选手道具')]] : [])].map(([key, label]) =>
+      {[['odds', t('Odds', '赔率')], ['archive', t('History & results', '历史与赛果')], ['coverage', t('All books', '全部公司')], ['facts', t(game ? 'Official scores' : 'Standings', game ? '官方赛况' : '排名与赛程')], ...(game ? [['props', t('Player props', '选手道具')]] : [])].map(([key, label]) =>
         <button type="button" key={key} aria-pressed={tab === key} onClick={() => setTab(key || 'odds')}>{label}</button>)}
     </div>
+    {tab === 'archive' && <MoviArchive key={sport} sport={sport} />}
     {tab === 'odds' && <>
       {providers.length > 1 && <label className="wm-bookmaker-event-select"><select aria-label={t('Odds provider', '赔率数据通道')} value={provider} onChange={e => { setProvider(e.currentTarget.value); setEventId(''); }}>
         <option value="">{t('All providers', '全部数据通道')}</option>{providers.map(p => <option key={p} value={p}>{p}</option>)}

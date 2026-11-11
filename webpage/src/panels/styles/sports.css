@@ -1041,3 +1041,8 @@
 .wm-bookmaker-pagination { justify-content: space-between; font-size: 10px; }
 .wm-bookmaker-pagination span { font-variant-numeric: tabular-nums; color: var(--text-dim, #a0aaa6); }
 .wm-bookmaker-pagination button:disabled { opacity: .4; cursor: default; }
+.wm-movi-selection { width: 100%; min-width: 0; }
+.wm-movi-history-curve { display: block; width: 100%; height: 84px; color: var(--book-a); }
+.wm-movi-result { display: flex; align-items: baseline; gap: 12px; padding: 8px 0; }
+.wm-movi-result strong { font-size: 26px; color: var(--book-a); }
+.wm-movi-result span { font-size: 11px; color: var(--text-dim, #a0aaa6); }
