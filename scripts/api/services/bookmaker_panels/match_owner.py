@@ -159,7 +159,8 @@ def attach_matches(store, fixtures, *, now=None):
                 pairs = compatible_selection(f, q, m, a)
                 if pairs:
                     matching.append({'book': q['book'], 'provider': q['provider'], 'pairs': pairs})
-            url = template.replace('{slug}', m['slug']) if template else None
+            event_slug = m.get('eventSlug') or next((x['slug'] for x in snapshot['decisions'][identity(f)].get('markets', []) if x['type'] == 'h2h'), None)
+            url = template.replace('{event_slug}', event_slug).replace('{slug}', m['slug']) if template and event_slug else None
             parsed = urlsplit(url or '')
             url = url if parsed.scheme == 'https' and parsed.hostname and not parsed.username and not parsed.password else None
             d['markets'].append({**m, 'url': url, 'books': matching[:80], 'comparisonReady': False})

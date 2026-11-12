@@ -192,6 +192,7 @@ def market_links(e, rows):
             p = decimal_line(prices[i]) if i < len(prices) else None
             outcomes.append({'tokenId': token, 'label': label, 'catalogPrice': float(p) if p is not None and 0 <= p <= 1 else None})
         result.append({'marketId': str(row['id']), 'conditionId': row['condition_id'], 'slug': row['slug'],
+                       'eventSlug': row.get('event_slug') or e['row']['slug'],
                        'title': row['title'], 'type': s['type'], 'metric': s['metric'], 'period': 'full',
                        'line': str(s['line']) if s['line'] is not None else None, 'handicapTeam': s['team'],
                        'outcomes': outcomes, 'observedAt': row.get('quote_observed_at'),
