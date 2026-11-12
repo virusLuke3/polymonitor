@@ -2,6 +2,7 @@ import type { PanelSnapshotContract } from '@/panels/resource-cache';
 import { PUBLIC_OVERVIEW_RETENTION_MS } from '@/panels/resource-cache';
 import { RuntimeResponseError, runtimeTimestamp } from '@/panels/runtime-store';
 import type { RuntimeGridEsportsItem } from '@/types';
+import { validMatch, type Match } from './matching';
 
 export type Outcome = { name: string; decimal: number; implied: number; probability: number; point: number | null };
 export type Quote = { book: string; label: string; category: string; market: string; period: string; provider: string;
@@ -10,6 +11,7 @@ export type Quote = { book: string; label: string; category: string; market: str
   streamValidUntil?: string; fixtureId?: string; sportKey?: string;
   url: string | null; overround: number; outcomes: Outcome[] };
 export type Fixture = { id: string; provider: string; tier: string; sport: string; competition: string;
+  polymarketMatch?: Match;
   home: string; away: string; startTime: string; fetchedAt: string; sourceStale: boolean; sourceError: string | null; quotes: Quote[];
   inPlay?: boolean; score?: string | null; scoreUpdatedAt?: string | null; period?: string | number | null };
 export type Source = { id: string; label: string; usable: boolean; stale: boolean; error: string | null; lastSuccessAt: string | null;
@@ -86,6 +88,7 @@ export function parsePayload(value: unknown, game: boolean): Payload {
       !Array.isArray(b.props) || b.props.length > 10) throw new RuntimeResponseError('Invalid bookmaker board');
   if (!b.fixtures.every(f => object(f) && ['id', 'provider', 'tier', 'sport', 'competition', 'home', 'away'].every(k => text(f[k])) &&
     date(f.startTime) && date(f.fetchedAt) && typeof f.sourceStale === 'boolean' && nullableText(f.sourceError) &&
+    (f.polymarketMatch === undefined || validMatch(f.polymarketMatch)) &&
     Array.isArray(f.quotes) && f.quotes.length <= 1600 && f.quotes.every(validQuote))) throw new RuntimeResponseError('Invalid bookmaker fixture');
   if (!b.props.every(p => object(p) && ['id', 'sport', 'player', 'stat', 'direction', 'book'].every(k => text(p[k])) &&
     finite(p.line) && finite(p.decimal) && p.decimal > 1 && nullableText(p.url) && date(p.fetchedAt))) throw new RuntimeResponseError('Invalid player prop');

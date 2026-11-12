@@ -1,0 +1,19 @@
+[Unit]
+Description=Polymonitor bookmaker to Polymarket matching owner
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/polymonitor/backend
+Environment=PYTHONPATH=%h/.local/share/polymonitor/backend/scripts
+EnvironmentFile=%h/.config/polymonitor/bookmaker-matcher.env
+ExecStart=/usr/bin/python3 -m runtime.bookmaker_matcher
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=110
+MemoryMax=512M
+Nice=10
+
+[Install]
+WantedBy=default.target

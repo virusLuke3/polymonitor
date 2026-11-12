@@ -5,6 +5,7 @@ import { usePanelRuntimeView } from '@/panels/PanelRuntimeView';
 import { usePanelResource } from '@/panels/usePanelResource';
 import { bookmakerPage } from './resource';
 import { MoviArchive } from './MoviArchive';
+import { PolymarketMatches } from './PolymarketMatches';
 import { currentWinnerQuotes, lineKey, quoteCurrent, safeLink, teamKey, type Fixture, type Payload, type Quote } from './model';
 
 const percent = (n: number) => `${(n * 100).toFixed(1)}%`;
@@ -67,6 +68,7 @@ function MatchBoard({ event, game }: { event: Fixture; game: boolean }) {
         <tbody>{rows(expanded ? quotes : quotes.slice(0, 8))}</tbody></table>
       {quotes.length > 8 && <button type="button" className="wm-bookmaker-more" onClick={() => setExpanded(v => !v)}>{expanded ? t('Show fewer', '收起') : `${t('All bookmakers', '全部公司')} · ${quotes.length}`}</button>}
     </> : <p className="wm-bookmaker-empty">{t('This source has no complete quotes for this market.', '此来源暂无该盘口的完整报价。')}</p>}
+    <PolymarketMatches event={event} market={market} />
     {alternatives.length > 0 && <details className="wm-bookmaker-alternatives"><summary>{t('Prediction markets & exchanges', '预测市场与交易所')} · {new Set(alternatives.map(q => q.book)).size}</summary>
       <p className="wm-bookmaker-caption">{t('Provider-linked event. Settlement rules remain unverified; excluded from bookmaker average.', '聚合来源关联的比赛，结算规则尚未核实；不计入博彩公司均值。')}</p>
       {alternatives.map((q, i) => <div className="wm-bookmaker-alternative" key={`${q.book}:${i}`}>

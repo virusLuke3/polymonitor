@@ -120,7 +120,7 @@ def merge_exact_events(fixtures):
     return list(groups.values())
 
 
-def read_board(store, game=False, *, query=None):
+def read_board(store, game=False, *, query=None, inventory=False):
     from .movi_archive import enabled as stream_enabled
     chosen = [s for s in specs() if (s.key.split(':')[2] in GAMES or s.key.split(':')[2] == 'esports') == game]
     if stream_enabled():
@@ -164,6 +164,11 @@ def read_board(store, game=False, *, query=None):
             seen.add(row['id'])
             unique.append(row)
     unique = merge_exact_events(unique)
+    if inventory:
+        # Private owner inventory, before any UI pagination/size projection.
+        return {'fixtures': unique}
+    from .match_owner import attach_matches
+    unique = attach_matches(store, unique)
     total = len(unique)
     # Coverage is measured before bounded UI projection. Do not mistake eight
     # visible rows or a small public window for the entire acquired universe.
