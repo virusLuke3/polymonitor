@@ -82,7 +82,7 @@ def test_totals_require_exact_half_line_metric_and_period():
         assert compatible_selection(f, q | change, m, Aliases()) is None
     q['outcomes'][1]['point'] = 3.5
     assert compatible_selection(f, q, m, Aliases()) is None
-    assert market_links(e, [total | dict(slug=e['row']['slug']+'-total-games-2')])[0]['line'] == '2'
+    assert market_links(e, [total | dict(slug=e['row']['slug']+'-total-games-2',title='O/U 2 games')])[0]['line'] == '2'
     assert not market_links(e, [total | dict(slug=e['row']['slug']+'-game1-total-2pt5')])
 
 
@@ -231,3 +231,9 @@ def test_quote_structure_changes_recheck_but_prices_do_not():
     assert selection_shape(f)==initial
     q['player']='Alex Two'
     assert selection_shape(f)!=initial
+
+
+def test_conflicting_title_and_slug_lines_are_not_linked():
+    e = event(market())
+    assert not market_links(e,[market(slug=e['row']['slug']+'-total-games-2',title='O/U 2.5 games',quote_labels=['Over','Under'])])
+    assert not market_links(e,[market(slug=e['row']['slug']+'-map-handicap-home-1pt5',title='Map Handicap: MOUZ (-2.5) vs FUT Esports (+2.5)')])

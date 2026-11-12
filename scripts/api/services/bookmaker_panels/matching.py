@@ -173,17 +173,20 @@ def semantics(row, e):
     if e['sport'] == 'nba' and prop and suffix != '?':
         metric = prop[2].lower().replace(' + ', '_').replace(' ', '_')
         description = row.get('description') or ''
-        if f'more than {prop[3]}' not in description or prop[1] not in description or 'including all overtime' not in description:
+        if not re.search(r'more than ' + re.escape(prop[3]) + r'(?![\d.])', description) or prop[1] not in description or 'including all overtime' not in description:
             return None
         return {'type': 'player_totals', 'metric': metric, 'line': decimal_line(prop[3]), 'team': None, 'player': prop[1]}
     if suffix == '':
         return {'type': 'h2h', 'metric': 'series' if e['sport'] in GAMES else 'match', 'line': None, 'team': None}
     if re.fullmatch(r'-(?:total-games|total)-\d+(?:pt\d+)?', suffix):
         n = decimal_line(suffix.rsplit('-', 1)[1].replace('pt', '.'))
+        title_line = re.search(r'O/U (\d+(?:\.\d+)?)', title)
+        if not title_line or decimal_line(title_line[1]) != n:
+            return None
         return {'type': 'totals', 'metric': 'maps' if e['sport'] in GAMES else {'nhl': 'goals', 'mlb': 'runs', 'soccer': 'goals'}.get(e['sport'], 'points'), 'line': n, 'team': None}
     if re.fullmatch(r'-(?:map-handicap|spread|handicap)-[a-z0-9]+-\d+(?:pt\d+)?', suffix):
         m = re.search(r'(?:Spread: |Handicap: )?(.+?) \(([+-]?\d+(?:\.\d+)?)\)', title)
-        if m:
+        if m and abs(decimal_line(m[2])) == decimal_line(suffix.rsplit('-', 1)[1].replace('pt', '.')):
             team = re.sub(r'^(?:Map Handicap: |Spread: |Handicap: )', '', m[1])
             return {'type': 'spreads', 'metric': 'maps' if e['sport'] in GAMES else {'nhl': 'goals', 'mlb': 'runs', 'soccer': 'goals'}.get(e['sport'], 'points'),
                     'line': decimal_line(m[2]), 'team': team}
