@@ -38,6 +38,7 @@ export function PolymarketMatches({ event, market, selectedQuote }: { event: Fix
     {m.state === 'linked' || m.state === 'unavailable' && m.markets.length > 0 ? <>
       {m.state === 'unavailable' && <p className="wm-bookmaker-caption">{t('Recheck failed. Keeping the previous link while the worker retries.', '重新检查失败，保留此前的关联；后台正在重试。')}</p>}
       <p className="wm-bookmaker-caption">{t('Event, selection and line are checked separately from settlement. Prices below are saved references, not executable offers.', '赛事、选项和盘口线分别核对；结算差异在各盘口中列出。下方为已存参考价，不是可成交报价。')}</p>
+      {(m.marketCoverage === 'truncated' || (m.availableMarkets ?? 0) > m.markets.length) && <p className="wm-bookmaker-caption">{t('Bounded market sample; not all event markets are shown.', '当前为有界盘口样本，未展示该赛事的全部盘口。')}</p>}
       {markets.map(p => <div className="wm-bookmaker-alternative" key={p.conditionId}>
         <strong>{safeLink(p.url) ? <a href={safeLink(p.url)} target="_blank" rel="noopener noreferrer">{p.title} ↗</a> : p.title}</strong>
         <span>{p.outcomes.map(o => `${o.label} ${o.catalogPrice == null ? '—' : `${(o.catalogPrice * 100).toFixed(1)}¢`}`).join(' / ')}</span>
@@ -48,7 +49,7 @@ export function PolymarketMatches({ event, market, selectedQuote }: { event: Fix
         {p.books.length > 0 && <small>{p.settlement === 'conflict' ? t('Rule conflict — no arbitrage signal', '规则存在差异，不输出套利信号') : t('Remaining rule evidence required', '仍需补充规则证据')}</small>}
         <small>{t('PM catalog' , 'PM 目录')} · {p.observedAt ? formatRelativeTime(p.observedAt) : t('Time unknown', '时间未知')}{!catalogCurrent(p) ? ` · ${t('Saved reference', '历史参考值')}` : ''}</small>
       </div>)}
-      {!markets.length && <p className="wm-bookmaker-caption">{t('No supported Polymarket selection for this market type.', '此盘口类型尚无支持的 Polymarket 选项映射。')}</p>}
+      {!markets.length && <p className="wm-bookmaker-caption">{t('No verified mapping for this selection in the current projection.', '当前返回范围内尚无此选项的已核实关联。')}</p>}
     </> : <p className="wm-bookmaker-caption">{reasons[m.reason] || (m.state === 'unavailable'
       ? t('The background worker will retry. This is not proof that no market exists.', '后台会自动重试；读取失败不代表没有对应市场。')
       : t('Only evidence-backed matches are linked automatically.', '只有证据充分的匹配才会自动关联。'))}</p>}

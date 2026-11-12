@@ -8,7 +8,7 @@ export type MatchedMarket = {
 };
 export type Match = { state: 'pending' | 'unsupported' | 'linked' | 'review' | 'unmatched' | 'incomplete' | 'unavailable';
   reason: string; checkedAt?: number; verifiedAt?: number; firstLinkedAt?: number | null; stale?: boolean; eventId?: string;
-  title?: string; pmEventId?: string; markets: MatchedMarket[];
+  title?: string; pmEventId?: string; availableMarkets?: number; marketCoverage?: string; markets: MatchedMarket[];
   candidates?: { eventId: string; title: string; reason: string; timeDeltaSeconds: number }[] };
 
 const obj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
