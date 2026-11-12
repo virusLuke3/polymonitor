@@ -96,12 +96,14 @@ def fixture(raw, *, provider='oddslink', american=True, tier='public-board'):
         if not isinstance(markets, list):
             rejected += 1
             continue
-        for market in markets[:20]:
+        for market in markets[:200]:
             try:
                 kind = market['key']
                 outcomes = market['outcomes']
-                if kind not in {'h2h', 'spreads', 'totals'} or market.get('period') not in (None, 'full'):
+                if kind not in {'h2h', 'spreads', 'totals', 'player_totals'} or market.get('period') not in (None, 'full'):
                     continue
+                if kind == 'player_totals' and not all(isinstance(market.get(k), str) and market[k] for k in ('player', 'playerId', 'metric', 'marketId')):
+                    raise ValueError('Player identity missing')
                 if not isinstance(outcomes, list) or len(outcomes) not in (2, 3):
                     raise ValueError('Incomplete market')
                 labels = {name(o['name']) for o in outcomes}
@@ -109,12 +111,12 @@ def fixture(raw, *, provider='oddslink', american=True, tier='public-board'):
                     raise ValueError('Duplicate outcomes')
                 if kind == 'h2h' and labels not in (teams, teams | {'draw'}):
                     raise ValueError('Wrong winner outcomes')
-                if kind == 'totals' and labels != {'over', 'under'}:
+                if kind in {'totals', 'player_totals'} and labels != {'over', 'under'}:
                     raise ValueError('Incomplete total')
                 if kind == 'spreads' and labels != teams:
                     raise ValueError('Incomplete spread')
                 points = [number(o['point']) for o in outcomes] if kind != 'h2h' else []
-                if points and (len(points) != 2 or (kind == 'totals' and points[0] != points[1]) or
+                if points and (len(points) != 2 or (kind in {'totals', 'player_totals'} and points[0] != points[1]) or
                                (kind == 'spreads' and abs(sum(points)) > 1e-6)):
                     raise ValueError('Different lines')
                 prices = [decimal(o['price'], american) for o in outcomes]
@@ -128,6 +130,7 @@ def fixture(raw, *, provider='oddslink', american=True, tier='public-board'):
                     'outcomes': [{'name': o['name'], 'decimal': p, 'implied': 1/p,
                                   'probability': (1/p)/total, 'point': points[i] if points else None}
                                  for i, (o, p) in enumerate(zip(outcomes, prices))]})
+                result['quotes'][-1].update({k: market[k] for k in ('player', 'playerId', 'metric', 'marketId') if k in market})
             except (KeyError, TypeError, ValueError, OverflowError):
                 rejected += 1
     result['rejectedMarkets'] = rejected

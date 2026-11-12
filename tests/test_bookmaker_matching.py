@@ -82,7 +82,7 @@ def test_totals_require_exact_half_line_metric_and_period():
         assert compatible_selection(f, q | change, m, Aliases()) is None
     q['outcomes'][1]['point'] = 3.5
     assert compatible_selection(f, q, m, Aliases()) is None
-    assert not market_links(e, [total | dict(slug=e['row']['slug']+'-total-games-2')])
+    assert market_links(e, [total | dict(slug=e['row']['slug']+'-total-games-2')])[0]['line'] == '2'
     assert not market_links(e, [total | dict(slug=e['row']['slug']+'-game1-total-2pt5')])
 
 
@@ -177,3 +177,46 @@ def test_catalog_failure_retains_previous_mapping_without_renewing_verification(
     assert current['state'] == 'unavailable' and current['verifiedAt'] == verified
     assert current['eventId'] == first['eventId'] and current['markets'] == first['markets']
     assert attach_matches(s, [f])[0]['polymarketMatch']['stale']
+
+
+def test_soccer_three_way_binary_complement_and_regulation():
+    r = market(slug='epl-one-two-2026-11-12-draw', event_slug='epl-one-two-2026-11-12',
+               event_title='One FC vs. Two FC', title='Will One FC vs. Two FC end in a draw?',
+               description='scheduled for November 12, 2026 at 2:00 AM ET. First 90 minutes plus stoppage time.', quote_labels=['No','Yes'])
+    f = fixture() | dict(sport='soccer', home='Two FC', away='One FC', competition='Premier League')
+    d, e = assess(f,[r],Aliases()); assert d['state'] == 'linked'
+    m = market_links(e,[r])[0]
+    q = dict(category='sportsbook',market='h2h',period='full',outcomes=[dict(name=n) for n in ('Two FC','Draw','One FC')])
+    pairs = compatible_selection(f,q,m,Aliases())
+    assert pairs == [dict(selection='Two FC',tokenId='22'),dict(selection='Draw',tokenId='11'),dict(selection='One FC',tokenId='22')]
+    assert compatible_selection(f,q | dict(outcomes=q['outcomes'][::2]),m,Aliases()) is None
+    assert market_links(e,[r | dict(description='First 45 minutes')]) == []
+
+
+def test_player_identity_stat_threshold_and_binary_tokens():
+    root = market(slug='nba-one-two-2026-11-12',title='One vs. Two')
+    e = event(root)
+    r = market(slug=root['slug']+'-points-alex-one-20',title='Alex One: Points O/U 20',quote_labels=['No','Yes'],
+        description='Alex One scores more than 20 points. 20 points or fewer. The entire game including all overtime periods. If inactive or otherwise does not take the court at any point, resolve "No".')
+    m = market_links(e,[r])[0]
+    f = fixture() | dict(sport='nba')
+    q = dict(category='sportsbook',market='player_totals',metric='points',period='full',player='Alex One',outcomes=[dict(name='Over',point=20),dict(name='Under',point=20)])
+    assert compatible_selection(f,q,m,Aliases())[0]['tokenId'] == '11'
+    assert m['ruleFacts']['equality'] == 'under'
+    for change in (dict(player='Alex Two'),dict(metric='rebounds'),dict(period='half1')):
+        assert compatible_selection(f,q | change,m,Aliases()) is None
+
+
+def test_rule_documents_and_push_refund_are_not_pm_split():
+    from api.services.bookmaker_panels.settlement import parse_rules, evaluate, push_pnl
+    facts = parse_rules(b'<h1>Push Rule. In all cases stakes are returned.</h1>', 'general')
+    assert facts['facts']['equality'] == 'refund'
+    with pytest.raises(ValueError): parse_rules(b'<html>blocked</html>','general')
+    rules = dict(general=dict(current=True,facts=facts['facts']),basketball=dict(current=True,facts=dict(overtime='included',postponed='refund_except_playoffs_48h')))
+    m = dict(type='player_totals',line='20',ruleFacts=dict(overtime='included',cancel='split',dnp='no',equality='under'))
+    check = evaluate(dict(book='bovada'),m,rules,'nba')
+    assert check['status']=='conflict' and not check['arbitrageReady']
+    assert any(x['case']=='equal_to_line' and x['polymarket']=='under' for x in check['scenarios'])
+    assert push_pnl(100,100,.7,.5) == -20
+    rules['general']['current']=False
+    assert evaluate(dict(book='bovada'),m,rules,'nba')['status']=='unknown'

@@ -102,3 +102,21 @@ def test_public_book_aliases_do_not_inflate_company_count():
 ])
 def test_pinnodds_page_name_does_not_define_every_rows_league(page, league, expected):
     assert p.pinnodds_project(page, league) == expected
+
+
+def test_bovada_player_totals_preserve_identity_and_each_line_status():
+    from copy import deepcopy
+    m = dict(id='prop1', key='2W-OU', descriptionKey='Total Points O/U - Alex One', period=dict(abbreviation='G'),status='O',
+        outcomes=[dict(type=t, competitorId='player1', status='O',price=dict(decimal='1.9',handicap='20')) for t in ('O','U')])
+    m2 = deepcopy(m); m2['id']='prop2';m2['descriptionKey']='Total Points O/U - Alex Two';m2['status']='S'
+    for o in m2['outcomes']:o['competitorId']='player2'
+    e = dict(id='event1',type='GAMEEVENT',startTime=1794452400000,competitors=[dict(id='h',home=True,name='H'),dict(id='a',home=False,name='A')],displayGroups=[dict(markets=[m,m2])])
+    raw=[dict(events=[e])]
+    qs=p.parse_bovada(json.dumps(raw),'nba')['fixtures'][0]['quotes']
+    assert len(qs)==2 and qs[0]['market']=='player_totals'
+    assert qs[0]['playerId']=='player1' and not qs[0]['suspended'] and qs[1]['suspended']
+    assert qs[0]['sourceUpdatedAt'] is None
+    m['outcomes'][1]['competitorId']='other'
+    assert len(p.parse_bovada(json.dumps(raw),'nba')['fixtures'][0]['quotes'])==1
+    m2['period']['abbreviation']='1H'
+    assert p.parse_bovada(json.dumps(raw),'nba')['fixtures']==[]

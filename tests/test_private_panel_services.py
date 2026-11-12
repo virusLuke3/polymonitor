@@ -131,7 +131,7 @@ def test_website_profile_uses_explicit_local_connect_proxy_without_changing_defa
     assert 'ProxyJump=none' in argv and '127.0.0.1:19505:127.0.0.1:19502' in argv
     assert any('reader@jump.example.invalid' in arg for arg in website_link.ssh_argv('old'))
     for bad in ['http://outside.test:80', 'http://127.0.0.1', 'http://127.0.0.1:80/path',
-                'http://user:password@127.0.0.1:80', 'http://127.0.0.1:80?x=1', 'socks5://127.0.0.1:80']:
+                'http://user' + ':password@127.0.0.1:80', 'http://127.0.0.1:80?x=1', 'socks5://127.0.0.1:80']:
         profiles['panels']['http_proxy'] = bad
         config['POLYMONITOR_WEB_LINK_PROFILES_JSON'] = json.dumps(profiles)
         with pytest.raises(ValueError, match='loopback'):

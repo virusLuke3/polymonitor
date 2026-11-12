@@ -10,9 +10,9 @@ import re
 import unicodedata
 from zoneinfo import ZoneInfo
 
-VERSION = 1
+VERSION = 2
 SPORT_PREFIX = {'nba': 'nba', 'nfl': 'nfl', 'nhl': 'nhl', 'mlb': 'mlb',
-                'cs2': 'cs2', 'lol': 'lol', 'dota2': 'dota2', 'val': 'valorant', 'r6': 'r6'}
+                'cs2': 'cs2', 'lol': 'lol', 'dota2': 'dota2', 'val': 'valorant', 'r6': 'r6', 'soccer': 'soccer'}
 GAMES = {'cs2', 'lol', 'dota2', 'valorant', 'r6'}
 
 
@@ -71,10 +71,15 @@ class Aliases:
 
 def event(row):
     slug = str(row.get('slug') or '')
+    root = row.get('event_slug') or slug
+    description = row.get('description') or ''
     sport = SPORT_PREFIX.get(slug.split('-')[0])
-    if not sport or not re.search(r'-\d{4}-\d{2}-\d{2}$', slug):
+    soccer = not sport and slug.split('-')[0] in {'epl', 'lal', 'bun', 'sea', 'fl1', 'ucl', 'uel', 'uecl', 'mls', 'ere', 'por', 'scop', 'fif', 'int', 'unl', 'conl'} and '90 minutes' in description and re.search(r'-\d{4}-\d{2}-\d{2}$', root)
+    if soccer:
+        sport = 'soccer'
+    if not sport or not re.search(r'-\d{4}-\d{2}-\d{2}$', root if soccer else slug):
         return None
-    title = str(row.get('title') or '')
+    title = str((row.get('event_title') if soccer else row.get('title')) or '')
     if sport in GAMES:
         m = re.fullmatch(r'[^:]+: (.+?) vs\.? (.+?) \(BO([13579])\) - (.+)', title)
     else:
@@ -86,7 +91,7 @@ def event(row):
         return None
     return {'pmEventId': str(row['event_id']), 'sport': sport, 'teams': [m[1], m[2]],
             'start': start, 'competition': m[4] if sport in GAMES else sport,
-            'bestOf': int(m[3]) if sport in GAMES else None, 'row': row}
+            'bestOf': int(m[3]) if sport in GAMES else None, 'row': {**row, 'slug': root} if soccer else row}
 
 
 def competition_match(a, b):
@@ -117,6 +122,8 @@ def assess(f, rows, aliases, *, truncated=False):
             if score < .55:
                 continue
             reason = 'team_alias_unverified'
+        elif f['sport'] == 'soccer' and re.findall(r'(?i)\b(?:u[12]\d|women)\b', f['competition']) != re.findall(r'(?i)\b(?:u[12]\d|women)\b', str(row.get('event_title', ''))):
+            reason = 'competition_unverified'
         elif delta > 300:
             reason = 'kickoff_conflict'
         elif f['sport'] in GAMES and not competition_match(f['competition'], e['competition']):
@@ -153,25 +160,51 @@ def semantics(row, e):
     slug, root = row.get('slug', ''), e['row']['slug']
     suffix = slug[len(root):] if slug.startswith(root) else '?'
     title = row.get('title', '')
+    if e['sport'] == 'soccer':
+        if '90 minutes' not in (row.get('description') or ''):
+            return None
+        draw = re.fullmatch(r'Will (.+?) vs\.? (.+?) end in a draw\?', title)
+        win = re.fullmatch(r'Will (.+?) win on \d{4}-\d{2}-\d{2}\?', title)
+        if draw and [key(draw[1]), key(draw[2])] == [key(t) for t in e['teams']]:
+            return {'type': 'h2h', 'metric': 'match', 'line': None, 'team': None, 'predicate': 'Draw'}
+        if win and key(win[1]) in {key(t) for t in e['teams']}:
+            return {'type': 'h2h', 'metric': 'match', 'line': None, 'team': None, 'predicate': win[1]}
+    prop = re.fullmatch(r'(.+?): (Points|Rebounds|Assists|Steals|Blocks|Three Pointers|Points \+ Rebounds|Points \+ Assists|Rebounds \+ Assists|Points \+ Rebounds \+ Assists) O/U (\d+(?:\.\d+)?)', title)
+    if e['sport'] == 'nba' and prop and suffix != '?':
+        metric = prop[2].lower().replace(' + ', '_').replace(' ', '_')
+        description = row.get('description') or ''
+        if f'more than {prop[3]}' not in description or prop[1] not in description or 'including all overtime' not in description:
+            return None
+        return {'type': 'player_totals', 'metric': metric, 'line': decimal_line(prop[3]), 'team': None, 'player': prop[1]}
     if suffix == '':
         return {'type': 'h2h', 'metric': 'series' if e['sport'] in GAMES else 'match', 'line': None, 'team': None}
     if re.fullmatch(r'-(?:total-games|total)-\d+(?:pt\d+)?', suffix):
         n = decimal_line(suffix.rsplit('-', 1)[1].replace('pt', '.'))
-        return {'type': 'totals', 'metric': 'maps' if e['sport'] in GAMES else {'nhl': 'goals', 'mlb': 'runs'}.get(e['sport'], 'points'), 'line': n, 'team': None}
+        return {'type': 'totals', 'metric': 'maps' if e['sport'] in GAMES else {'nhl': 'goals', 'mlb': 'runs', 'soccer': 'goals'}.get(e['sport'], 'points'), 'line': n, 'team': None}
     if re.fullmatch(r'-(?:map-handicap|spread|handicap)-[a-z0-9]+-\d+(?:pt\d+)?', suffix):
         m = re.search(r'(?:Spread: |Handicap: )?(.+?) \(([+-]?\d+(?:\.\d+)?)\)', title)
         if m:
             team = re.sub(r'^(?:Map Handicap: |Spread: |Handicap: )', '', m[1])
-            return {'type': 'spreads', 'metric': 'maps' if e['sport'] in GAMES else {'nhl': 'goals', 'mlb': 'runs'}.get(e['sport'], 'points'),
+            return {'type': 'spreads', 'metric': 'maps' if e['sport'] in GAMES else {'nhl': 'goals', 'mlb': 'runs', 'soccer': 'goals'}.get(e['sport'], 'points'),
                     'line': decimal_line(m[2]), 'team': team}
     return None
+
+
+def pm_rules(description, semantics):
+    """Extract explicit clauses only; absent clauses remain unknown."""
+    text = description.lower()
+    return {'overtime': 'regulation' if '90 minutes' in text else 'included' if 'including' in text and 'overtime' in text else 'unknown',
+            'cancel': 'split' if 'resolve 50-50' in text else 'predicate' if 'canceled' in text and 'no-result provisions' in text else 'unknown',
+            'dnp': 'no' if 'does not take the court at any point' in text and 'resolve "no"' in text else 'unknown',
+            'equality': 'under' if semantics['type'] == 'player_totals' and 'or fewer' in text else
+                        'split' if re.search(r'(?:exactly|equal to)[^.]+resolve 50-50', text) else 'unknown'}
 
 
 def market_links(e, rows):
     result = []
     for row in rows:
         s = semantics(row, e)
-        if not s or s['type'] != 'h2h' and (s['line'] is None or abs(s['line']) % 1 != Decimal('.5')):
+        if not s or s['type'] != 'h2h' and (s['line'] is None or abs(s['line']) % Decimal('.5') != 0):
             continue
         ids, labels = row.get('quote_token_ids'), row.get('quote_labels')
         if not isinstance(ids, list) or not isinstance(labels, list) or len(ids) != 2 or len(labels) != 2 or len(set(ids)) != 2:
@@ -180,8 +213,11 @@ def market_links(e, rows):
             continue
         if not re.fullmatch(r'0x[0-9a-fA-F]{64}', str(row.get('condition_id') or '')):
             continue
-        if s['type'] == 'h2h' and {key(x) for x in labels} != {key(x) for x in e['teams']}:
-            continue  # e.g. football Yes/No requires a different predicate grammar
+        binary = bool(s.get('predicate') or s['type'] == 'player_totals')
+        if binary and {key(x) for x in labels} != {'yes', 'no'}:
+            continue
+        if s['type'] == 'h2h' and not binary and {key(x) for x in labels} != {key(x) for x in e['teams']}:
+            continue
         if s['type'] == 'totals' and {key(x) for x in labels} != {'over', 'under'}:
             continue
         if s['type'] == 'spreads' and (key(s['team']) not in {key(x) for x in e['teams']} or {key(x) for x in labels} != {key(x) for x in e['teams']}):
@@ -195,6 +231,8 @@ def market_links(e, rows):
                        'eventSlug': row.get('event_slug') or e['row']['slug'],
                        'title': row['title'], 'type': s['type'], 'metric': s['metric'], 'period': 'full',
                        'line': str(s['line']) if s['line'] is not None else None, 'handicapTeam': s['team'],
+                       'player': s.get('player'), 'predicate': s.get('predicate'),
+                       'ruleFacts': pm_rules(row.get('description') or '', s),
                        'outcomes': outcomes, 'observedAt': row.get('quote_observed_at'),
                        'sourceUpdatedAt': row.get('quote_updated_at'), 'rulesHash': digest(row.get('description')),
                        'settlement': 'unknown', 'reason': 'bookmaker_settlement_rules_unverified'})
@@ -208,9 +246,17 @@ def compatible_selection(f, q, m, aliases):
         return None  # a generic "total" can be maps, rounds or kills
     if q.get('metric') and q['metric'] != m['metric']:
         return None
+    if m['type'] == 'player_totals' and (not q.get('player') or key(q['player']) != key(m.get('player'))):
+        return None
+    if m.get('predicate'):
+        if len(q['outcomes']) != 3 or {aliases.entity(f['sport'], o['name']) for o in q['outcomes']} != {aliases.entity(f['sport'], n) for n in (f['home'], f['away'], 'Draw')}:
+            return None
+        tokens = {key(o['label']): o['tokenId'] for o in m['outcomes']}
+        return [{'selection': o['name'], 'tokenId': tokens['yes' if aliases.same(f['sport'], o['name'], m['predicate']) else 'no']} for o in q['outcomes']]
     pairs = []
     for o in q['outcomes']:
-        found = [p for p in m['outcomes'] if aliases.same(f['sport'], o['name'], p['label'])]
+        label = {'over': 'Yes', 'under': 'No'}.get(key(o['name']), '') if m['type'] == 'player_totals' else o['name']
+        found = [p for p in m['outcomes'] if aliases.same(f['sport'], label, p['label'])]
         if len(found) != 1:
             return None
         if m['type'] != 'h2h':

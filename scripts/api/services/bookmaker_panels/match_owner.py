@@ -9,6 +9,7 @@ from market.market_serving_identity import binary_serving_identity_sql
 from data_sources import source_value
 from .matching import Aliases, VERSION, SPORT_PREFIX, assess, identity, market_links, compatible_selection
 from .movi_archive import configured_int
+from .settlement import evaluate, rule_snapshot
 
 NAMESPACE, SNAPSHOT = 'source:bookmakers:matching', 'snapshot:v1'
 
@@ -44,7 +45,7 @@ class Catalog:
             "m.active IS TRUE AND m.closed IS FALSE AND "
             "to_tsvector('simple', coalesce(m.title,'') || ' ' || coalesce(m.slug,'') || ' ' || coalesce(m.category,'')) "
             "@@ plainto_tsquery('simple', ?) AND m.slug ~ ?",
-            (text, '-[0-9]{4}-[0-9]{2}-[0-9]{2}$'), limit=21)
+            (text, '-[0-9]{4}-[0-9]{2}-[0-9]{2}(-draw)?$'), limit=21)
         return rows[:20], len(rows) > 20
 
     def markets(self, event):
@@ -60,7 +61,7 @@ class Catalog:
             AND q.token_ids @> jsonb_build_array(m.yes_token_id,m.no_token_id)
             WHERE m.event_id=? AND m.active IS TRUE AND m.closed IS FALSE
             AND {binary_serving_identity_sql('m', qualified_ops=True)}
-            ORDER BY m.id LIMIT 201''', (event['pmEventId'],))
+            ORDER BY CASE WHEN m.title = ANY(?::text[]) THEN 0 WHEN m.slug=m.event_slug OR m.slug ~ '-draw$' THEN 1 ELSE 2 END, m.id DESC LIMIT 201''', (event['pmEventId'], event.get('requestedTitles', [])))
         return rows[:200], len(rows) > 200
 
 
@@ -68,14 +69,18 @@ def run_cycle(store, archive, catalog, *, now=None):
     from .snapshot_service import read_board
     now = time.time() if now is None else now
     a = aliases()
+    rules = rule_snapshot(store)
     deadline = time.monotonic() + 90
     max_jobs = configured_int('POLYDATA_ODDS_MATCH_JOBS', 30, 1, 100)
     decisions = archive.decisions()
     inventory = [f for game in (False, True) for f in read_board(store, game, inventory=True)['fixtures']]
     unique = {identity(f): f for f in inventory}
     due = [(k, f) for k, f in unique.items() if f['sport'] in set(SPORT_PREFIX.values()) and
-           (decisions.get(k, {}).get('_due', 0) <= now or decisions.get(k, {}).get('aliasVersion') != a.version)]
-    due.sort(key=lambda x: decisions.get(x[0], {}).get('checkedAt', 0))
+           (decisions.get(k, {}).get('version') != VERSION or decisions.get(k, {}).get('_due', 0) <= now or decisions.get(k, {}).get('aliasVersion') != a.version)]
+    # New identities with player lines or major football leagues get first
+    # inspection; age still dominates so smaller leagues cannot starve.
+    due.sort(key=lambda x: (decisions.get(x[0], {}).get('checkedAt', 0),
+                           not (any(q.get('player') for q in x[1]['quotes']) or 'Nations League' in x[1]['competition'])))
     grouped = {}
     for item in due:
         grouped.setdefault(item[1]['sport'], []).append(item)
@@ -88,7 +93,7 @@ def run_cycle(store, archive, catalog, *, now=None):
     for k, f in due[:max_jobs]:
         if time.monotonic() >= deadline:
             break
-        evidence = {'aliases': a.rows}
+        evidence = {'aliases': a.rows, 'bookmakerRules': rules}
         try:
             rows, truncated = catalog.candidates(f)
             evidence['candidates'] = evidence_rows(rows)
@@ -96,6 +101,7 @@ def run_cycle(store, archive, catalog, *, now=None):
             result['markets'] = []
             if e:
                 time.sleep(.15)  # Share the same host read budget with interactive panels.
+                e['requestedTitles'] = [q['player'] + ': ' + q['metric'].replace('_', ' ').title() + ' O/U ' + format(float(q['outcomes'][0]['point']), 'g') for q in f['quotes'] if q.get('market') == 'player_totals']
                 rows, more = catalog.markets(e)
                 evidence['markets'] = evidence_rows(rows)
                 result['marketCoverage'] = 'truncated' if more else 'complete'
@@ -129,14 +135,14 @@ def run_cycle(store, archive, catalog, *, now=None):
             m['type'], m['line'] or ''))
         # Reserve room for every supported type; alternate spreads must not
         # push the winner and totals out of a bounded public projection.
-        groups = {kind: [m for m in candidates if m['type'] == kind] for kind in ('h2h', 'spreads', 'totals')}
+        groups = {kind: [m for m in candidates if m['type'] == kind] for kind in ('h2h', 'spreads', 'totals', 'player_totals')}
         projected = []
         while any(groups.values()) and len(projected) < 24:
             for queue in groups.values():
                 if queue and len(projected) < 24:
                     projected.append(queue.pop(0))
         d['markets'] = projected
-    value = {'version': VERSION, 'generatedAt': time.time(), 'decisions': public, 'counts': counts, 'aliases': a.rows}
+    value = {'version': VERSION, 'generatedAt': time.time(), 'decisions': public, 'counts': counts, 'aliases': a.rows, 'rules': rules}
     if len(json.dumps(value, default=str).encode()) > 2 * 1024**2:
         raise ValueError('Matching projection capacity reached')
     if not store.set(NAMESPACE, SNAPSHOT, json.loads(json.dumps(value, default=str)), ttl_seconds=86400):
@@ -163,11 +169,13 @@ def attach_matches(store, fixtures, *, now=None):
             for q in f['quotes']:
                 pairs = compatible_selection(f, q, m, a)
                 if pairs:
-                    matching.append({'book': q['book'], 'provider': q['provider'], 'pairs': pairs})
+                    matching.append({'book': q['book'], 'provider': q['provider'], 'pairs': pairs,
+                                     'ruleCheck': evaluate(q, m, snapshot.get('rules', {}), f['sport'])})
             event_slug = m.get('eventSlug') or next((x['slug'] for x in snapshot['decisions'][identity(f)].get('markets', []) if x['type'] == 'h2h'), None)
             url = template.replace('{event_slug}', event_slug).replace('{slug}', m['slug']) if template and event_slug else None
             parsed = urlsplit(url or '')
             url = url if parsed.scheme == 'https' and parsed.hostname and not parsed.username and not parsed.password else None
-            d['markets'].append({**m, 'url': url, 'books': matching[:80], 'comparisonReady': False})
+            d['markets'].append({**m, 'url': url, 'books': matching[:80], 'comparisonReady': False,
+                                 'settlement': 'conflict' if any(b['ruleCheck']['status'] == 'conflict' for b in matching) else 'unknown'})
         result.append({**f, 'polymarketMatch': d})
     return result

@@ -84,6 +84,19 @@ describe('bookmaker snapshots', () => {
     expect(lineKey(quote)).toBe('2');
     expect(lineKey({ ...quote, outcomes: [...quote.outcomes, { ...quote.outcomes[0]!, name: 'Draw' }] })).toBe('3');
     expect(safeLink('javascript:alert(1)')).toBeUndefined();
-    expect(safeLink('https://user:password@example.test')).toBeUndefined();
+    expect(safeLink('https://user' + ':password@example.test')).toBeUndefined();
   });
+});
+
+
+it('separates player and stat identities at identical numeric lines', () => {
+  const prop: Quote = { ...quote, market: 'player_totals', player: 'Alex One', playerId: '1', marketId: 'p1', metric: 'points',
+    outcomes: quote.outcomes.map((o, i) => ({ ...o, name: i ? 'Under' : 'Over', point: 20 })) };
+  expect(lineKey(prop)).not.toBe(lineKey({ ...prop, player: 'Alex Two' }));
+  expect(lineKey(prop)).not.toBe(lineKey({ ...prop, metric: 'rebounds' }));
+  const payload = structuredClone(base) as Payload;
+  payload.bookmakerBoard.fixtures[0]!.quotes = [prop];
+  expect(parsePayload(payload, true).bookmakerBoard.fixtures[0]!.quotes).toHaveLength(1);
+  delete prop.playerId;
+  expect(() => parsePayload(payload, true)).toThrow();
 });

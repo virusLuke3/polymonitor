@@ -45,7 +45,7 @@
 - 后端自本轮 `0ef5c95d` 至 `31803aea` 的任务文件逐个核对前版本后发布；后续传输配置至 `4cf3efdd`；流式 ClickHouse 异常解析修正为 `110f9b72`。私有域名/出口/转发保存在 .env，未提交密钥或私有路由。
 - 初次 Radar 依赖新增字段导致 API 启动失败，约 16:09:52–16:13:50 CST 不可用；已将 collector-only 依赖改为兼容可选字段并恢复服务。这个发布事故保留记录，不以随后成功覆盖。
 - 前端 474 单测通过、1 跳过；构建和类型检查通过。相关后端聚合 208 项通过；随后 Brotli 130 项、天气新闻与路由 41 项、LOB renderer 7 项相关测试通过，计数有重叠，不相加为总覆盖。最后 JSON exception 修正另从提交的干净 archive 验证 ClickHouse 读取与市场 Panel 共 37 项通过；正式 API 中超预算的 flow 继续返回 503，没有伪造完整结果。
-- 证据目录：`/home/jiahuaiyu/.codex/visualizations/2026/11/10/panel-source-recovery/`。主要文件 acceptance-api.json、acceptance-parser.json、public-all-panels.json、verified-context-api.json、production-desktop-remote.json 与后续恢复/手机记录。临时并行 CDP 控制导致视口交叉的截图不纳入验收，后续按设备顺序复验。
+- 证据目录：`$HOME/.codex/visualizations/2026/11/10/panel-source-recovery/`。主要文件 acceptance-api.json、acceptance-parser.json、public-all-panels.json、verified-context-api.json、production-desktop-remote.json 与后续恢复/手机记录。临时并行 CDP 控制导致视口交叉的截图不纳入验收，后续按设备顺序复验。
 
 ## 浏览器后续复验（时间独立）
 

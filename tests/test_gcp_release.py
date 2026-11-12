@@ -223,7 +223,8 @@ def test_packaged_api_starts_without_the_source_checkout(tmp_path):
     assert manifest["entries"] and not manifest["ignored_paths"]
     release.apply_release(remote, output / "manifest.json", output / "payload.tar.gz", tmp_path / "backups")
     env = {key: os.environ[key] for key in ("PATH", "HOME", "SYSTEMROOT") if key in os.environ}
-    env.update(POLYDATA_DISABLE_DOTENV="1", PYTHONDONTWRITEBYTECODE="1", PYTHONPATH=f"{remote}/scripts:{remote}")
+    env.update(POLYDATA_DISABLE_DOTENV="1", POLYMONITOR_SEED_BACKEND="sqlite",
+               PYTHONDONTWRITEBYTECODE="1", PYTHONPATH=f"{remote}/scripts:{remote}")
     subprocess.run(
         [
             sys.executable,

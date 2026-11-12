@@ -5,7 +5,7 @@ from enum import Enum
 from typing import Iterable
 
 
-CATALOG_VERSION = "telegram-delivery-2026-11-08.v2"
+CATALOG_VERSION = "telegram-delivery-2026-11-12.v3"
 
 
 class DeliveryMode(str, Enum):
@@ -138,6 +138,25 @@ _GENERIC_TOPIC_GROUPS = {
     ),
     "monitor": ("natural-hazards",),
 }
+
+
+# Explicit classification of the registered external-data expansion. This adds
+# opt-in all-panels coverage only; the eleven default deliveries stay unchanged.
+_EXTERNAL_TOPIC_GROUPS = {
+    'alpha': ('chain-metrics-monitor', 'crypto-listing-watch', 'crypto-project-milestones'),
+    'macro': ('fiscal-tax-monitor', 'merger-progress', 'private-valuation-watch'),
+    'news': ('ai-leaderboard-watch', 'art-auction-watch', 'culture-awards-race', 'culture-box-office',
+             'culture-music-charts', 'mentions-evidence', 'product-release-watch', 'public-figure-events',
+             'reality-show-progress', 'research-evidence-watch', 'social-window-monitor', 'space-mission-watch'),
+    'intel': ('esports-map-state', 'esports-tournament-path', 'geo-ceasefire-watch', 'geo-conflict-watch',
+              'geo-diplomacy-calendar', 'geo-territory-control', 'geo-treaty-tracker', 'sports-awards-watch',
+              'sports-player-props', 'sports-season-race', 'sports-spread-monitor', 'sports-total-monitor',
+              'sports-tournament-path'),
+    'weather': ('weather-drought', 'weather-extremes', 'weather-precipitation', 'weather-storm-advisory'),
+}
+for _topic, _panels in _EXTERNAL_TOPIC_GROUPS.items():
+    _GENERIC_TOPIC_GROUPS[_topic] = _GENERIC_TOPIC_GROUPS.get(_topic, ()) + _panels
+FRONTEND_PANEL_IDS += tuple(panel for group in _EXTERNAL_TOPIC_GROUPS.values() for panel in group)
 
 
 _AGGREGATES = {

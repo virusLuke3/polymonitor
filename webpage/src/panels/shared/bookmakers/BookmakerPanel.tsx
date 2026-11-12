@@ -57,9 +57,10 @@ function MatchBoard({ event, game }: { event: Fixture; game: boolean }) {
     <p className="wm-bookmaker-caption">{eligible.length ? `${eligible.length} ${t('books · proportional no-vig average', '家公司 · 比例去水均值')}` : t('No recent, timestamped winner quotes', '暂无近期且带源时间的胜负报价')}
       {event.tier !== 'public-board' && ` · ${t('Supplemental feed', '补充来源')}`}</p>
     <div className="wm-bookmaker-tabs" role="group" aria-label={t('Market type', '盘口类型')}>
-      {([['h2h', t(game ? 'Series winner' : 'Winner', game ? '系列赛胜负' : '胜负')], ['spreads', t('Handicap', '让分')], ['totals', t('Totals', '大小分')]]).map(([key, label]) =>
+      {([['h2h', t(game ? 'Series winner' : 'Winner', game ? '系列赛胜负' : '胜负')], ['spreads', t('Handicap', '让分')], ['totals', t('Totals', '大小分')], ...(!game ? [['player_totals', t('Players', '球员盘')]] : [])]).map(([key, label]) =>
         <button type="button" key={key} aria-pressed={market === key} onClick={() => { setMarket(key || 'h2h'); setLine(''); }}>{label}</button>)}
     </div>
+    {market === 'player_totals' && <p className="wm-bookmaker-caption">{quotes[0]?.player} · {quotes[0]?.metric}</p>}
     {lines.length > 1 && <label className="wm-bookmaker-line">{t('Line', '盘口线')} <select aria-label={t('Exact market line', '选择相同盘口线')} value={chosenLine} onChange={e => setLine(e.currentTarget.value)}>
       {lines.map(key => <option key={key} value={key}>{market === 'h2h' ? `${key} ${t('outcomes', '项结果')}` : key.split('|').join(' / ')}</option>)}
     </select></label>}
@@ -68,7 +69,7 @@ function MatchBoard({ event, game }: { event: Fixture; game: boolean }) {
         <tbody>{rows(expanded ? quotes : quotes.slice(0, 8))}</tbody></table>
       {quotes.length > 8 && <button type="button" className="wm-bookmaker-more" onClick={() => setExpanded(v => !v)}>{expanded ? t('Show fewer', '收起') : `${t('All bookmakers', '全部公司')} · ${quotes.length}`}</button>}
     </> : <p className="wm-bookmaker-empty">{t('This source has no complete quotes for this market.', '此来源暂无该盘口的完整报价。')}</p>}
-    <PolymarketMatches event={event} market={market} />
+    <PolymarketMatches event={event} market={market} selectedQuote={quotes[0]} />
     {alternatives.length > 0 && <details className="wm-bookmaker-alternatives"><summary>{t('Prediction markets & exchanges', '预测市场与交易所')} · {new Set(alternatives.map(q => q.book)).size}</summary>
       <p className="wm-bookmaker-caption">{t('Provider-linked event. Settlement rules remain unverified; excluded from bookmaker average.', '聚合来源关联的比赛，结算规则尚未核实；不计入博彩公司均值。')}</p>
       {alternatives.map((q, i) => <div className="wm-bookmaker-alternative" key={`${q.book}:${i}`}>

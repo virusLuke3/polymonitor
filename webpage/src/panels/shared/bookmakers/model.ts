@@ -9,6 +9,7 @@ export type Quote = { book: string; label: string; category: string; market: str
   sourceUpdatedAt: string | null; sourceCheckedAt?: string | null; suspended?: boolean;
   phase?: string; sampleTier?: string; sourceStale?: boolean; sourceError?: string | null; receivedAt?: string; retentionSeconds?: number;
   streamValidUntil?: string; fixtureId?: string; sportKey?: string;
+  player?: string; playerId?: string; metric?: string; marketId?: string;
   url: string | null; overround: number; outcomes: Outcome[] };
 export type Fixture = { id: string; provider: string; tier: string; sport: string; competition: string;
   polymarketMatch?: Match;
@@ -49,12 +50,13 @@ export function currentWinnerQuotes(event: Fixture, now = Date.now()): Quote[] {
     .sort((a, b) => Date.parse(a.sourceCheckedAt || a.sourceUpdatedAt || '') - Date.parse(b.sourceCheckedAt || b.sourceUpdatedAt || ''))
     .map(q => [q.book, q])).values()];
 }
-export const lineKey = (q: Quote) => q.market === 'h2h' ? String(q.outcomes.length) : q.outcomes.map(o => `${o.name}:${o.point}`).sort().join('|');
+export const lineKey = (q: Quote) => q.market === 'h2h' ? String(q.outcomes.length) : [...(q.market === 'player_totals' ? [q.player!, q.metric!] : []), ...q.outcomes.map(o => `${o.name}:${o.point}`).sort()].join('|');
 export const teamKey = (value: string) => value.toLocaleLowerCase().replace(/[^\p{L}\p{N}_]/gu, '');
 
 function validQuote(q: unknown): q is Quote {
   return object(q) && ['book', 'label', 'category', 'market', 'period', 'provider'].every(k => text(q[k])) &&
-    ['h2h', 'spreads', 'totals'].includes(String(q.market)) && nullableText(q.url) &&
+    ['h2h', 'spreads', 'totals', 'player_totals'].includes(String(q.market)) &&
+    (q.market !== 'player_totals' || ['player', 'playerId', 'metric', 'marketId'].every(k => text(q[k]))) && nullableText(q.url) &&
     (q.sourceUpdatedAt === null || date(q.sourceUpdatedAt)) && finite(q.overround) &&
     (q.sourceCheckedAt === undefined || q.sourceCheckedAt === null || date(q.sourceCheckedAt)) &&
     (q.receivedAt === undefined || date(q.receivedAt)) &&

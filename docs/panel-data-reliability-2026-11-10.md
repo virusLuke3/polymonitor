@@ -197,7 +197,7 @@
 
 ## 证据与回滚
 
-原始证据目录：`/home/jiahuaiyu/.codex/visualizations/2026/11/10/panel-reliability/`。
+原始证据目录：`$HOME/.codex/visualizations/2026/11/10/panel-reliability/`。
 
 - `public-{first,second,final}.json`：三轮完整 payload/响应时间；`public-targeted.json` 为随后 Nowcast/天气/体育/研究正式回读。
 - `parsers-final.json`、`desktop-panels.json`、`mobile-panels.json`、`hidden-panels.json`：121 项身份、解析结果、可视 DOM、网络记录。`desktop-first-pass-mixed-viewport.json` 是作废的交叉视口首轮，不用于桌面验收。
@@ -210,7 +210,7 @@
 ## LOB 与慢周期来源跟进（19:46 CST 起）
 
 这一段只验收本次相关消费者，不把前面的 121 项首轮检查升级为全部来源持续通过。
-原始证据位于 `/home/jiahuaiyu/.codex/visualizations/2026/11/10/lob-panel-recovery/`。
+原始证据位于 `$HOME/.codex/visualizations/2026/11/10/lob-panel-recovery/`。
 
 ### 已发布的修复
 

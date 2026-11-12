@@ -5,6 +5,8 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
+StandardOutput=journal
+StandardError=journal
 Environment=POLYMONITOR_ENV_FILE=/__POLYDATA_REPO_ROOT__/.env
 ExecStart=/usr/bin/python3 /__POLYDATA_REPO_ROOT__/scripts/runtime/website_link.py
 Restart=always

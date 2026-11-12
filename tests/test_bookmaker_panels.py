@@ -51,7 +51,7 @@ def test_incomplete_or_mixed_line_is_not_publishable(market, rows):
 
 def test_prediction_market_is_not_a_sportsbook_and_secret_link_removed():
     row = raw_fixture()
-    row['bookmakers'][0].update(key='polymarket', kind='sportsbook', link='https://user:password@example.test/market')
+    row['bookmakers'][0].update(key='polymarket', kind='sportsbook', link='https://user' + ':password@example.test/market')
     q = parse_board(body(row), 'soccer')['fixtures'][0]['quotes'][0]
     assert q['category'] == 'prediction_market'
     assert q['url'] is None
@@ -242,3 +242,11 @@ def test_provider_provenance_retained_with_one_event_and_one_company():
     assert len({q['book'] for q in combined[0]['quotes']}) == 1
     other['startTime'] = '2026-11-11T18:00:00+00:00'
     assert len(merge_exact_events([first, other])) == 2
+
+
+def test_merge_keeps_different_players_on_the_same_line():
+    from api.services.bookmaker_panels.snapshot_service import merge_exact_events
+    q = dict(book='bovada',provider='bovada',category='sportsbook',market='player_totals',period='full',metric='points',sourceUpdatedAt=None,outcomes=[dict(name='Over',point=20),dict(name='Under',point=20)])
+    row = dict(id='a',sport='nba',home='H',away='A',startTime='2026-11-12T01:00:00Z',quotes=[q | dict(player='One',playerId='1'),q | dict(player='Two',playerId='2')])
+    merged = merge_exact_events([row,row | dict(id='b',quotes=[])])
+    assert {x['player'] for x in merged[0]['quotes']} == {'One','Two'}

@@ -40,8 +40,9 @@ def emit(event_id, sport, home, away, start, book, markets, *, provider, competi
         'bookmakers': [{'key': book, 'title': book, 'markets': markets}]},
         provider=provider, american=False, tier='public-feed')
     for q in row['quotes']:
-        market = next(m for m in markets if m['key'] == q['market'] and
-                      {o['name'] for o in m['outcomes']} == {o['name'] for o in q['outcomes']})
+        market = next(m for m in markets if m['key'] == q['market'] and m.get('player') == q.get('player') and
+                      {(o['name'], str(float(o['point'])) if o.get('point') is not None else None) for o in m['outcomes']} ==
+                      {(o['name'], str(float(o['point'])) if o.get('point') is not None else None) for o in q['outcomes']})
         q.update(suspended=bool(market.get('suspended')), phase=phase)
     return row
 
@@ -113,9 +114,13 @@ def parse_bovada(body, sport):
             parsed = []
             for group in e.get('displayGroups', []):
                 for m in group.get('markets', []):
-                    # Main period alone is insufficient: player props use it too.
+                    prop = re.fullmatch(r'Total (Points|Rebounds|Assists|Steals|Blocks|Three Point Field Goals|Points and Rebounds|Points and Assists|Rebounds and Assists|Points, Rebounds and Assists) O/U - (.+)', m.get('descriptionKey', ''))
+                    player_ids = {str(o.get('competitorId') or '') for o in m.get('outcomes', [])}
+                    is_player = bool(sport == 'nba' and prop and len(player_ids) == 1 and '' not in player_ids and
+                                     not player_ids.intersection(str(t['id']) for t in teams.values()) and
+                                     prop[2] not in (home, away))
                     if (m.get('key') not in kinds or m.get('period', {}).get('abbreviation') != 'G' or
-                            m.get('descriptionKey') not in {'Head To Head', 'Main Dynamic Asian Handicap', 'Main Dynamic Over/Under'}):
+                            not is_player and m.get('descriptionKey') not in {'Head To Head', 'Main Dynamic Asian Handicap', 'Main Dynamic Over/Under'}):
                         continue
                     candidates += 1
                     try:
@@ -127,7 +132,9 @@ def parse_bovada(body, sport):
                             if o.get('type') in ('H', 'A') and str(o.get('competitorId')) != str(teams[o['type'] == 'H']['id']):
                                 raise ValueError('Wrong Bovada competitor')
                             outcomes.append({'name': label, 'price': o['price']['decimal'], 'point': o['price'].get('handicap')})
-                        parsed.append({'key': kinds[m['key']], 'outcomes': outcomes,
+                        parsed.append({'key': 'player_totals' if is_player else kinds[m['key']], 'outcomes': outcomes,
+                            **({'player': prop[2], 'playerId': next(iter(player_ids)), 'marketId': str(m['id']),
+                                'metric': prop[1].lower().replace(', ', '_').replace(' and ', '_').replace(' ', '_')} if is_player else {}),
                             'suspended': m.get('status') != 'O' or any(o.get('status') != 'O' for o in m['outcomes'])})
                     except (KeyError, TypeError, ValueError):
                         rejected += 1

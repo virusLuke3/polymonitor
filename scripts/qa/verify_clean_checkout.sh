@@ -40,6 +40,9 @@ fi
   "${ROOT_DIR}/tests"
 "${PYTHON_BIN}" -m pytest -q
 npm --prefix "${ROOT_DIR}/webpage" audit --audit-level=high
-npm --prefix "${ROOT_DIR}/webpage" run build
+# A preflight release uses the same-origin public API. Do not inherit the
+# ignored developer dotenv's localhost URL into a production-mode bundle.
+VITE_POLYDATA_API_BASE_URL="${VITE_POLYDATA_API_BASE_URL:-/wm-api}" \
+  npm --prefix "${ROOT_DIR}/webpage" run build
 
 echo "Clean-checkout verification passed."

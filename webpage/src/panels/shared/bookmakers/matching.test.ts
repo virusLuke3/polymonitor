@@ -29,3 +29,12 @@ describe('matching evidence boundary', () => {
     expect(validMatch({ state: 'unknown', reason: 'anything', markets: [] })).toBe(false);
   });
 });
+
+
+it('accepts a three-way complement and explicit rule conflicts without enabling arbitrage', () => {
+  const football = { ...market, settlement: 'conflict', books: [{ book: 'book', provider: 'feed',
+    pairs: [{ selection: 'A', tokenId: '1' }, { selection: 'Draw', tokenId: '2' }, { selection: 'B', tokenId: '2' }],
+    ruleCheck: { status: 'conflict', reasons: [], scenarios: [{ case: 'equal_to_line', bookmaker: 'stake_refund', polymarket: 'split' }] } }] };
+  expect(validMatch({ ...match, markets: [football] })).toBe(true);
+  expect(validMatch({ ...match, markets: [{ ...football, comparisonReady: true }] })).toBe(false);
+});

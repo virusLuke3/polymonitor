@@ -1,10 +1,10 @@
 export type MatchedMarket = {
   marketId: string; conditionId: string; title: string; slug: string; type: string;
-  metric: string; period: string; line: string | null; handicapTeam: string | null;
+  metric: string; player?: string | null; period: string; line: string | null; handicapTeam: string | null;
   observedAt: string | null; sourceUpdatedAt: string | null; url: string | null;
-  settlement: 'unknown'; reason: string; comparisonReady: false;
+  settlement: 'unknown' | 'conflict'; reason: string; comparisonReady: false;
   outcomes: { tokenId: string; label: string; catalogPrice: number | null }[];
-  books: { book: string; provider: string; pairs: { selection: string; tokenId: string }[] }[];
+  books: { book: string; provider: string; pairs: { selection: string; tokenId: string }[]; ruleCheck?: { status: string; reasons: string[]; scenarios: { case: string; bookmaker: string; polymarket: string }[] } }[];
 };
 export type Match = { state: 'pending' | 'unsupported' | 'linked' | 'review' | 'unmatched' | 'incomplete' | 'unavailable';
   reason: string; checkedAt?: number; verifiedAt?: number; firstLinkedAt?: number | null; stale?: boolean; eventId?: string;
@@ -22,11 +22,11 @@ export function validMatch(v: unknown): v is Match {
   if (v.candidates !== undefined && (!Array.isArray(v.candidates) || v.candidates.length > 8 || !v.candidates.every(c => obj(c) && str(c.eventId) && str(c.title) && str(c.reason) && typeof c.timeDeltaSeconds === 'number' && Number.isFinite(c.timeDeltaSeconds)))) return false;
   return v.markets.every(m => obj(m) && ['marketId', 'conditionId', 'title', 'slug', 'type', 'metric', 'period', 'reason'].every(k => str(m[k])) &&
     /^0x[0-9a-fA-F]{64}$/.test(String(m.conditionId)) && (m.line === null || str(m.line)) && (m.handicapTeam === null || str(m.handicapTeam)) &&
-    stamp(m.observedAt) && stamp(m.sourceUpdatedAt) && (m.url === null || str(m.url)) && m.settlement === 'unknown' && m.comparisonReady === false &&
+    stamp(m.observedAt) && stamp(m.sourceUpdatedAt) && (m.url === null || str(m.url)) && ['unknown', 'conflict'].includes(String(m.settlement)) && m.comparisonReady === false &&
     Array.isArray(m.outcomes) && m.outcomes.length === 2 && m.outcomes.every(o => obj(o) && str(o.tokenId) && /^\d+$/.test(o.tokenId) && str(o.label) &&
       (o.catalogPrice === null || typeof o.catalogPrice === 'number' && Number.isFinite(o.catalogPrice) && o.catalogPrice >= 0 && o.catalogPrice <= 1)) &&
     new Set(m.outcomes.map(o => o.tokenId)).size === 2 && Array.isArray(m.books) && m.books.length <= 80 && m.books.every(b => obj(b) && str(b.book) && str(b.provider) &&
-      Array.isArray(b.pairs) && b.pairs.length === 2 && b.pairs.every(p => obj(p) && str(p.selection) && str(p.tokenId) &&
+      (b.ruleCheck === undefined || obj(b.ruleCheck) && str(b.ruleCheck.status) && Array.isArray(b.ruleCheck.reasons) && b.ruleCheck.reasons.every(str) && Array.isArray(b.ruleCheck.scenarios) && b.ruleCheck.scenarios.every(s => obj(s) && str(s.case) && str(s.bookmaker) && str(s.polymarket))) && Array.isArray(b.pairs) && [2, 3].includes(b.pairs.length) && b.pairs.every(p => obj(p) && str(p.selection) && str(p.tokenId) &&
         (m.outcomes as MatchedMarket['outcomes']).some(o => o.tokenId === p.tokenId))));
 }
 
