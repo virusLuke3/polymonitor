@@ -158,3 +158,22 @@ def test_worker_unavailable_not_unmatched_and_commit_precedes_publish(tmp_path,m
     monkeypatch.setattr(a,'save',lambda *args: (_ for _ in ()).throw(OSError('disk full')))
     with pytest.raises(OSError):run_cycle(s,a,Catalog(),now=time.time()+300)
     assert s.published == 1
+
+
+def test_catalog_failure_retains_previous_mapping_without_renewing_verification(tmp_path, monkeypatch):
+    from api.services.bookmaker_panels import snapshot_service
+    from api.services.bookmaker_panels.match_owner import aliases
+    f = fixture(); k = identity(f)
+    monkeypatch.setattr(snapshot_service, 'read_board', lambda *a, **kw: {'fixtures': [f]})
+    a = MatchStore(tmp_path/'match.db'); a.initialize(); s = Store()
+    d, e = assess(f, [market()], Aliases())
+    verified = time.time() - 400
+    d.update(verifiedAt=verified, aliasVersion=aliases().version, markets=market_links(e, [market()]))
+    first = a.save(k, f, d, {}, verified, 300)
+    class Catalog:
+        def candidates(self, f): raise TimeoutError()
+    run_cycle(s, a, Catalog())
+    current = a.decisions()[k]
+    assert current['state'] == 'unavailable' and current['verifiedAt'] == verified
+    assert current['eventId'] == first['eventId'] and current['markets'] == first['markets']
+    assert attach_matches(s, [f])[0]['polymarketMatch']['stale']

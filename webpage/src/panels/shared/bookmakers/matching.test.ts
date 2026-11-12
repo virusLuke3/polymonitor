@@ -21,6 +21,8 @@ describe('matching evidence boundary', () => {
     expect(matchCurrent(match, now + 600001)).toBe(false);
     expect(matchCurrent({ ...match, stale: true }, now)).toBe(false);
     expect(matchCurrent({ ...match, checkedAt: (now + 120000) / 1000 }, now)).toBe(false);
+    expect(matchCurrent({ ...match, verifiedAt: (now - 600001) / 1000 }, now)).toBe(false);
+    expect(matchCurrent({ ...match, state: 'unavailable' }, now)).toBe(false);
   });
   it('distinguishes no match from an unavailable search', () => {
     expect(validMatch({ state: 'unavailable', reason: 'catalog_timeout', markets: [] })).toBe(true);

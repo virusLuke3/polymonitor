@@ -79,7 +79,7 @@ class MatchStore:
             # Quote ticks and check clocks already have owners. Audit a new
             # identity/rules decision once, not every unchanged five-minute poll.
             def facts(value):
-                clocks = {'checkedAt', 'firstLinkedAt', 'fetchedAt', 'sourceStale', 'sourceError',
+                clocks = {'checkedAt', 'verifiedAt', 'firstLinkedAt', 'fetchedAt', 'sourceStale', 'sourceError',
                           'score', 'scoreUpdatedAt', 'inPlay', 'catalogPrice',
                           'observedAt', 'sourceUpdatedAt', 'quote_prices', 'quote_observed_at', 'quote_updated_at',
                           'gamma_updated_at', 'gamma_metadata_updated_at', 'market_refresh_attempted_at',

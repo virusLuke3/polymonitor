@@ -7,7 +7,7 @@ export type MatchedMarket = {
   books: { book: string; provider: string; pairs: { selection: string; tokenId: string }[] }[];
 };
 export type Match = { state: 'pending' | 'unsupported' | 'linked' | 'review' | 'unmatched' | 'incomplete' | 'unavailable';
-  reason: string; checkedAt?: number; firstLinkedAt?: number | null; stale?: boolean; eventId?: string;
+  reason: string; checkedAt?: number; verifiedAt?: number; firstLinkedAt?: number | null; stale?: boolean; eventId?: string;
   title?: string; pmEventId?: string; markets: MatchedMarket[];
   candidates?: { eventId: string; title: string; reason: string; timeDeltaSeconds: number }[] };
 
@@ -17,6 +17,7 @@ const stamp = (v: unknown) => v === null || str(v) && Number.isFinite(Date.parse
 export function validMatch(v: unknown): v is Match {
   if (!obj(v) || !['pending', 'unsupported', 'linked', 'review', 'unmatched', 'incomplete', 'unavailable'].includes(String(v.state)) || !str(v.reason) ||
     v.checkedAt !== undefined && (typeof v.checkedAt !== 'number' || !Number.isFinite(v.checkedAt)) ||
+    v.verifiedAt !== undefined && (typeof v.verifiedAt !== 'number' || !Number.isFinite(v.verifiedAt)) ||
     v.stale !== undefined && typeof v.stale !== 'boolean' || !Array.isArray(v.markets) || v.markets.length > 24) return false;
   if (v.candidates !== undefined && (!Array.isArray(v.candidates) || v.candidates.length > 8 || !v.candidates.every(c => obj(c) && str(c.eventId) && str(c.title) && str(c.reason) && typeof c.timeDeltaSeconds === 'number' && Number.isFinite(c.timeDeltaSeconds)))) return false;
   return v.markets.every(m => obj(m) && ['marketId', 'conditionId', 'title', 'slug', 'type', 'metric', 'period', 'reason'].every(k => str(m[k])) &&
@@ -29,5 +30,8 @@ export function validMatch(v: unknown): v is Match {
         (m.outcomes as MatchedMarket['outcomes']).some(o => o.tokenId === p.tokenId))));
 }
 
-export const matchCurrent = (m: Match, now = Date.now()) => !m.stale && m.checkedAt !== undefined && m.checkedAt * 1000 <= now + 60_000 && now - m.checkedAt * 1000 < 600_000;
+export const matchCurrent = (m: Match, now = Date.now()) => {
+  const verified = m.verifiedAt ?? m.checkedAt;
+  return m.state === 'linked' && !m.stale && verified !== undefined && verified * 1000 <= now + 60_000 && now - verified * 1000 < 600_000;
+};
 export const catalogCurrent = (m: MatchedMarket, now = Date.now()) => !!m.observedAt && Date.parse(m.observedAt) <= now + 60_000 && now - Date.parse(m.observedAt) < 120_000;

@@ -20,10 +20,12 @@ export function PolymarketMatches({ event, market }: { event: Fixture; market: s
     candidate_search_truncated: t('Candidate query reached its bound.', '候选查询达到上限，不能确认唯一性。'),
   };
   const markets = m.markets.filter(x => x.type === market);
+  const verified = m.verifiedAt ?? m.checkedAt;
   return <details className="wm-bookmaker-alternatives" open={m.state === 'linked'}>
     <summary>Polymarket · {labels[m.state]}{m.state === 'linked' && !matchCurrent(m) ? ` · ${t('Recheck due', '待重新核实')}` : ''}</summary>
-    {m.checkedAt && <p className="wm-bookmaker-caption">{t('Identity checked', '身份核实于')} {formatRelativeTime(new Date(m.checkedAt * 1000).toISOString())}</p>}
-    {m.state === 'linked' ? <>
+    {!!verified && <p className="wm-bookmaker-caption">{t('Last successful check', '最近成功检查')} {formatRelativeTime(new Date(verified * 1000).toISOString())}</p>}
+    {m.state === 'linked' || m.state === 'unavailable' && m.markets.length > 0 ? <>
+      {m.state === 'unavailable' && <p className="wm-bookmaker-caption">{t('Recheck failed. Keeping the previous link while the worker retries.', '重新检查失败，保留此前的关联；后台正在重试。')}</p>}
       <p className="wm-bookmaker-caption">{t('Same event. Settlement rules are not yet verified; catalog prices are reference values, not executable spreads.', '已关联同一赛事。结算规则尚未核实；目录价格仅供参考，不计算可执行价差。')}</p>
       {markets.map(p => <div className="wm-bookmaker-alternative" key={p.conditionId}>
         <strong>{safeLink(p.url) ? <a href={safeLink(p.url)} target="_blank" rel="noopener noreferrer">{p.title} ↗</a> : p.title}</strong>

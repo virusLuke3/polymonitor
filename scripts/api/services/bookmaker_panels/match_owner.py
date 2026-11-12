@@ -101,9 +101,14 @@ def run_cycle(store, archive, catalog, *, now=None):
                 result['marketCoverage'] = 'truncated' if more else 'complete'
                 result['markets'] = market_links(e, rows)
             delay = 300 if result['state'] == 'linked' else 1800
+            result['verifiedAt'] = time.time()
         except Exception as exc:
             # No exception text: database/proxy diagnostics can contain secrets.
-            result = {'state': 'unavailable', 'reason': 'catalog_' + type(exc).__name__, 'markets': [], 'candidates': []}
+            old = decisions.get(k, {})
+            verified = old.get('verifiedAt', old.get('checkedAt', 0))
+            retained = {field: old[field] for field in ('pmEventId', 'eventId', 'title', 'firstLinkedAt', 'markets', 'candidates', 'marketCoverage') if field in old} if now - verified <= 86400 else {}
+            result = {'markets': [], 'candidates': [], **retained, 'state': 'unavailable',
+                      'verifiedAt': verified, 'reason': 'catalog_' + type(exc).__name__}
             delay = min(1800, 120 * 2 ** min(decisions.get(k, {}).get('_failures', 0), 4))
             counts['errors'] += 1
         result.update(version=VERSION, identity=k, aliasVersion=a.version)
@@ -151,7 +156,7 @@ def attach_matches(store, fixtures, *, now=None):
             state = 'pending' if f['sport'] in set(SPORT_PREFIX.values()) else 'unsupported'
             result.append({**f, 'polymarketMatch': {'state': state, 'reason': 'awaiting_catalog_check' if state == 'pending' else 'sport_not_supported', 'markets': []}})
             continue
-        expired = now - d.get('checkedAt', 0) > 600 or now - snapshot.get('generatedAt', 0) > 600
+        expired = d['state'] == 'unavailable' or now - d.get('verifiedAt', d.get('checkedAt', 0)) > 600 or now - snapshot.get('generatedAt', 0) > 600
         d = {**d, 'stale': expired, 'markets': []}
         for m in snapshot['decisions'][identity(f)].get('markets', []):
             matching = []
