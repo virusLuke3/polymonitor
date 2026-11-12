@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 from api.services.market_service import read_query, market_rows
 from market.market_serving_identity import binary_serving_identity_sql
 from data_sources import source_value
-from .matching import Aliases, VERSION, SPORT_PREFIX, assess, identity, market_links, compatible_selection
+from .matching import Aliases, VERSION, SPORT_PREFIX, assess, identity, market_links, compatible_selection, digest
 from .movi_archive import configured_int
 from .settlement import evaluate, rule_snapshot
 
@@ -65,6 +65,15 @@ class Catalog:
         return rows[:200], len(rows) > 200
 
 
+
+def selection_shape(fixture):
+    # Prices and receipt times do not change contract identity. New player,
+    # statistic, period or threshold does and must not wait for the old TTL.
+    rows = {(q.get('market'), q.get('period'), q.get('metric'), q.get('player'),
+             tuple(sorted((o['name'], str(o.get('point'))) for o in q['outcomes']))) for q in fixture['quotes']}
+    return digest(sorted(rows, key=repr))
+
+
 def run_cycle(store, archive, catalog, *, now=None):
     from .snapshot_service import read_board
     now = time.time() if now is None else now
@@ -75,11 +84,13 @@ def run_cycle(store, archive, catalog, *, now=None):
     decisions = archive.decisions()
     inventory = [f for game in (False, True) for f in read_board(store, game, inventory=True)['fixtures']]
     unique = {identity(f): f for f in inventory}
+    shapes = {k: selection_shape(f) for k, f in unique.items()}
     due = [(k, f) for k, f in unique.items() if f['sport'] in set(SPORT_PREFIX.values()) and
-           (decisions.get(k, {}).get('version') != VERSION or decisions.get(k, {}).get('_due', 0) <= now or decisions.get(k, {}).get('aliasVersion') != a.version)]
+           (decisions.get(k, {}).get('version') != VERSION or decisions.get(k, {}).get('selectionVersion') != shapes[k] or decisions.get(k, {}).get('_due', 0) <= now or decisions.get(k, {}).get('aliasVersion') != a.version)]
     # New identities with player lines or major football leagues get first
     # inspection; age still dominates so smaller leagues cannot starve.
-    due.sort(key=lambda x: (decisions.get(x[0], {}).get('checkedAt', 0),
+    due.sort(key=lambda x: (not (decisions.get(x[0], {}).get('state') == 'linked' and (decisions[x[0]].get('version') != VERSION or decisions[x[0]].get('selectionVersion') != shapes[x[0]])),
+                           decisions.get(x[0], {}).get('checkedAt', 0),
                            not (any(q.get('player') for q in x[1]['quotes']) or 'Nations League' in x[1]['competition'])))
     grouped = {}
     for item in due:
@@ -117,7 +128,7 @@ def run_cycle(store, archive, catalog, *, now=None):
                       'verifiedAt': verified, 'reason': 'catalog_' + type(exc).__name__}
             delay = min(1800, 120 * 2 ** min(decisions.get(k, {}).get('_failures', 0), 4))
             counts['errors'] += 1
-        result.update(version=VERSION, identity=k, aliasVersion=a.version)
+        result.update(version=VERSION, identity=k, aliasVersion=a.version, selectionVersion=shapes[k])
         saved = archive.save(k, f, result, evidence, time.time(), delay)
         decisions[k] = saved
         counts['checked'] += 1

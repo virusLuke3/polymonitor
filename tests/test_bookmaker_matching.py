@@ -220,3 +220,14 @@ def test_rule_documents_and_push_refund_are_not_pm_split():
     assert push_pnl(100,100,.7,.5) == -20
     rules['general']['current']=False
     assert evaluate(dict(book='bovada'),m,rules,'nba')['status']=='unknown'
+
+
+def test_quote_structure_changes_recheck_but_prices_do_not():
+    from api.services.bookmaker_panels.match_owner import selection_shape
+    q = dict(market='player_totals',period='full',player='Alex One',metric='points',outcomes=[dict(name='Over',point=20,decimal=1.9),dict(name='Under',point=20,decimal=1.9)])
+    f = fixture() | dict(quotes=[q])
+    initial=selection_shape(f)
+    q['outcomes'][0]['decimal']=2.1
+    assert selection_shape(f)==initial
+    q['player']='Alex Two'
+    assert selection_shape(f)!=initial
