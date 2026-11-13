@@ -1,8 +1,6 @@
 """Data-source validation and feed catalogs; importing this module reads no files."""
 
-import os
 from typing import Dict, List
-from urllib.parse import urlparse
 from runtime.environment import configured_value
 
 
@@ -31,22 +29,6 @@ def resolve_source_references(value):
     if isinstance(value, dict):
         return {key: resolve_source_references(item) for key, item in value.items()}
     return value
-
-
-def require_self_hosted_polygon_rpc_url(value: str) -> str:
-    """Accept only the loopback endpoint backed by the Polygon SSH tunnel."""
-
-    text = str(value or "").strip().strip('"').strip("'")
-    parsed = urlparse(text)
-    if parsed.scheme not in {"http", "https"} or parsed.hostname not in {
-        "127.0.0.1",
-        "localhost",
-        "::1",
-    }:
-        raise RuntimeError(
-            "POLYMARKET_RPC_URL must use the local SSH tunnel to the self-hosted Polygon node"
-        )
-    return text
 
 
 def rss_feeds() -> List[Dict[str, str]]:
@@ -632,7 +614,3 @@ CONTENT_TOPIC_REGISTRY: List[Dict[str, object]] = [
 
 def non_empty_feeds(feeds: List[Dict[str, str]]) -> List[Dict[str, str]]:
     return [feed for feed in feeds if str(feed.get("url") or "").strip()]
-
-
-def content_topic_registry() -> List[Dict[str, object]]:
-    return list(CONTENT_TOPIC_REGISTRY)

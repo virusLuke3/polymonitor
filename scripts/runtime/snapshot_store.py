@@ -16,6 +16,8 @@ from typing import Any, Optional
 
 
 class SnapshotStore:
+    backend = "sqlite"
+
     def __init__(self, db_path: str, *, busy_timeout_ms: int = 750) -> None:
         self.db_path = str(Path(db_path).expanduser())
         self._schema_lock = threading.Lock()

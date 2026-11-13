@@ -94,8 +94,6 @@ FinanceWatchContext = Mapping[str, Any] | FinanceWatchDependencies
 def _dependencies(
     context: FinanceWatchContext,
 ) -> FinanceWatchDependencies:
-    if isinstance(context, FinanceWatchDependencies):
-        return context
     return FinanceWatchDependencies.from_context(context)
 
 

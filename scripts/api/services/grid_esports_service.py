@@ -132,8 +132,6 @@ GridEsportsContext = Mapping[str, Any] | GridEsportsDependencies
 def _dependencies(
     context: GridEsportsContext,
 ) -> GridEsportsDependencies:
-    if isinstance(context, GridEsportsDependencies):
-        return context
     return GridEsportsDependencies.from_context(context)
 
 

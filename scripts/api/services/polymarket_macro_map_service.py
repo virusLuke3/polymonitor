@@ -1,5 +1,5 @@
 from __future__ import annotations
-from api.services.macro_data_policy import bounded_rows, display_age, read_seeded, row_clock
+from api.services.macro_data_policy import bounded_rows, display_age, read_seeded
 
 import json
 import math
@@ -122,8 +122,6 @@ PolymarketMacroMapContext = (
 def _dependencies(
     context: PolymarketMacroMapContext,
 ) -> PolymarketMacroMapDependencies:
-    if isinstance(context, PolymarketMacroMapDependencies):
-        return context
     return PolymarketMacroMapDependencies.from_context(context)
 
 

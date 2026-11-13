@@ -17,8 +17,9 @@ try:
     import redis
 except ImportError:
     redis = None
-import requests
 
+from api.context import worker_application
+from runtime.seed_meta import redis_key as _redis_key
 from runtime.redis_snapshot_store import seed_writer
 from api.clients.source_transport import source_session
 from api.config import load_api_settings
@@ -36,20 +37,7 @@ YOUTUBE_RSS_REFRESH_STATE_KEY = "market-tv-wire:youtube-rss-refresh"
 DEFAULT_YOUTUBE_RSS_REFRESH_SECONDS = 86400
 
 
-class _Logger:
-    def exception(self, message: str, *args: Any, **kwargs: Any) -> None:
-        print(f"[market-tv-wire] ERROR {message % args if args else message}", file=sys.stderr)
-
-    def warning(self, message: str, *args: Any, **kwargs: Any) -> None:
-        print(f"[market-tv-wire] WARN {message % args if args else message}", file=sys.stderr)
-
-
-class _App:
-    logger = _Logger()
-
-
-def _redis_key(prefix: str, namespace: str, cache_key: str) -> str:
-    return f"{prefix or ''}{namespace}:{cache_key}"
+WORKER_APP = worker_application('market-tv-wire')
 
 
 class MarketTvWireWatcher:
@@ -111,7 +99,7 @@ class MarketTvWireWatcher:
     def context(self, *, youtube_rss_refresh_due: bool = False) -> Dict[str, Any]:
         return {
             "SETTINGS": self.settings,
-            "app": _App(),
+            "app": WORKER_APP,
             "http_text_get": self._http_text_get,
             "http_json_get": self._http_json_get,
             "SNAPSHOT_STORE": self.snapshot_store,

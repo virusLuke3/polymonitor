@@ -70,8 +70,6 @@ DefiTokenWatchContext = Mapping[str, Any] | DefiTokenWatchDependencies
 def _dependencies(
     context: DefiTokenWatchContext,
 ) -> DefiTokenWatchDependencies:
-    if isinstance(context, DefiTokenWatchDependencies):
-        return context
     return DefiTokenWatchDependencies.from_context(context)
 
 

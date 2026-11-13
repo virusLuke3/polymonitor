@@ -58,8 +58,6 @@ Jin10RuntimeContext = Mapping[str, Any] | Jin10RuntimeDependencies
 def _dependencies(
     context: Jin10RuntimeContext,
 ) -> Jin10RuntimeDependencies:
-    if isinstance(context, Jin10RuntimeDependencies):
-        return context
     return Jin10RuntimeDependencies.from_context(context)
 
 

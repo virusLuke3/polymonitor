@@ -60,8 +60,6 @@ F1RuntimeContext = Mapping[str, Any] | F1RuntimeDependencies
 def _dependencies(
     context: F1RuntimeContext,
 ) -> F1RuntimeDependencies:
-    if isinstance(context, F1RuntimeDependencies):
-        return context
     return F1RuntimeDependencies.from_context(context)
 
 

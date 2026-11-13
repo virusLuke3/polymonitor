@@ -9,7 +9,6 @@ import json
 import os
 import sys
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
@@ -32,6 +31,9 @@ try:
 except ImportError:
     BeautifulSoup = None
 
+from api.context import worker_application
+from runtime.seed_meta import utc_now_iso
+from runtime.seed_meta import redis_key as _redis_key
 from runtime.redis_snapshot_store import seed_writer
 from api.config import load_api_settings
 from api.clients.source_transport import source_session
@@ -46,21 +48,7 @@ SEED_META_CACHE_KEY = "inflation-nowcast"
 SEED_META_SERVICE_NAME = "polydata-inflation-nowcast-seed.service"
 
 
-class _LoggerAdapter:
-    def exception(self, message: str, *args: Any, **kwargs: Any) -> None:
-        print(f"[inflation-nowcast] ERROR {message % args if args else message}", file=sys.stderr)
-
-
-class _AppAdapter:
-    logger = _LoggerAdapter()
-
-
-def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _redis_key(prefix: str, namespace: str, cache_key: str) -> str:
-    return f"{str(prefix or '')}{namespace}:{cache_key}"
+WORKER_APP = worker_application('inflation-nowcast')
 
 
 def _has_nowcast_data(payload: Dict[str, Any]) -> bool:
@@ -110,7 +98,7 @@ class InflationNowcastWatcher:
         return {
             "SETTINGS": self.settings,
             "FINANCE_RUNTIME_TTL_SECONDS": self.settings.finance_runtime_ttl_seconds,
-            "app": _AppAdapter(),
+            "app": WORKER_APP,
             "requests": self.requests,
             "BeautifulSoup": BeautifulSoup,
             "utc_now_iso": utc_now_iso,
@@ -122,7 +110,7 @@ class InflationNowcastWatcher:
             return stale
         if self.redis_client is None:
             return {}
-        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+        if self.snapshot_store.backend == "redis":
             return {}
         try:
             raw = self.redis_client.get(self.redis_key())

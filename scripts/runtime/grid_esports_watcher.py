@@ -9,7 +9,6 @@ import json
 import os
 import sys
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
@@ -27,6 +26,9 @@ try:
 except ImportError:
     requests = None
 
+from api.context import worker_application
+from runtime.seed_meta import utc_now_iso
+from runtime.seed_meta import redis_key as _redis_key
 from runtime.redis_snapshot_store import seed_writer
 from api.config import load_api_settings
 from api.clients.source_transport import read_response_bytes
@@ -43,21 +45,7 @@ SEED_META_CACHE_KEY = "esports-intel"
 SEED_META_SERVICE_NAME = "polydata-grid-esports-seed.service"
 
 
-class _LoggerAdapter:
-    def exception(self, message: str, *args: Any, **kwargs: Any) -> None:
-        print(f"[grid-esports] ERROR {message % args if args else message}", file=sys.stderr)
-
-
-class _AppAdapter:
-    logger = _LoggerAdapter()
-
-
-def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _redis_key(prefix: str, namespace: str, cache_key: str) -> str:
-    return f"{str(prefix or '')}{namespace}:{cache_key}"
+WORKER_APP = worker_application('grid-esports')
 
 
 class GridEsportsWatcher:
@@ -113,7 +101,7 @@ class GridEsportsWatcher:
     def service_context(self) -> Dict[str, Any]:
         context = {
             "SETTINGS": self.settings,
-            "app": _AppAdapter(),
+            "app": WORKER_APP,
             "http_json_post": self.http_json_post,
             "utc_now_iso": utc_now_iso,
         }
@@ -122,7 +110,7 @@ class GridEsportsWatcher:
         return context
 
     def load_previous_payload(self) -> Dict[str, Any]:
-        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+        if self.snapshot_store.backend == "redis":
             return {}
         try:
             raw = self.redis_client.get(self.redis_key())

@@ -9,9 +9,7 @@ import json
 import os
 import sys
 import time
-from contextlib import nullcontext
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -29,6 +27,10 @@ try:
 except ImportError:
     requests = None
 
+from api.cache import read_runtime_payload, write_runtime_payload
+from api.context import worker_application
+from runtime.seed_meta import utc_now_iso
+from runtime.seed_meta import redis_key as _redis_key
 from runtime.redis_snapshot_store import seed_writer
 from api.clients import market_data_client
 from api.clients.source_transport import source_session, read_with_retry, read_response_bytes
@@ -46,27 +48,7 @@ SEED_META_NAMESPACE = "seed-meta:tech"
 SEED_META_SERVICE_NAME = "polydata-tech-panels-seed.service"
 
 
-class _LoggerAdapter:
-    def exception(self, message: str, *args: Any, **kwargs: Any) -> None:
-        print(f"[tech-panels] ERROR {message % args if args else message}", file=sys.stderr)
-        error = sys.exc_info()[1]
-        if error is not None:
-            print(type(error).__name__ + ": " + str(error)[:400], file=sys.stderr)
-
-    def warning(self, message: str, *args: Any, **kwargs: Any) -> None:
-        print(f"[tech-panels] WARN {message % args if args else message}", file=sys.stderr)
-
-
-class _AppAdapter:
-    logger = _LoggerAdapter()
-
-
-def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _redis_key(prefix: str, namespace: str, cache_key: str) -> str:
-    return f"{str(prefix or '')}{namespace}:{cache_key}"
+WORKER_APP = worker_application('tech-panels', exception_limit=400)
 
 
 class TechPanelsWatcher:
@@ -119,20 +101,10 @@ class TechPanelsWatcher:
             attempts=2, deadline=deadline, timeout=max(30, timeout), headers=headers, stream=True)
 
     def get_cached_runtime_payload(self, namespace: str, cache_key: str) -> Optional[Dict[str, Any]]:
-        key = f"{namespace}:{cache_key}"
-        entry = self._runtime_cache.get(key)
-        if not entry:
-            return None
-        if entry["expires_at"] <= time.monotonic():
-            self._runtime_cache.pop(key, None)
-            return None
-        return entry["payload"]
+        return read_runtime_payload(self._runtime_cache, namespace, cache_key)
 
     def set_cached_runtime_payload(self, namespace: str, cache_key: str, payload: Dict[str, Any], ttl_seconds: int = 300) -> Dict[str, Any]:
-        self._runtime_cache[f"{namespace}:{cache_key}"] = {
-            "payload": payload, "expires_at": time.monotonic() + max(1, ttl_seconds),
-        }
-        return payload
+        return write_runtime_payload(self._runtime_cache, namespace, cache_key, payload, ttl_seconds)
 
     def get_yahoo_market_snapshot(self, symbol: str, interval: str = "30m", range_name: str = "5d", ttl_seconds: Optional[int] = None) -> Optional[Dict[str, Any]]:
         return market_data_client.get_yahoo_market_snapshot(
@@ -166,7 +138,7 @@ class TechPanelsWatcher:
             "FINANCE_RUNTIME_TTL_SECONDS": getattr(self.settings, "finance_runtime_ttl_seconds", 300),
             "SNAPSHOT_STORE": self.snapshot_store,
             "_safe_float": tech_panels_service._safe_float,
-            "app": _AppAdapter(),
+            "app": WORKER_APP,
             "get_cached_json": self.seed_meta_store.get,
             "set_cached_json": self.seed_meta_store.store,
             "get_cached_runtime_payload": self.get_cached_runtime_payload,
@@ -184,7 +156,7 @@ class TechPanelsWatcher:
         stale = self.snapshot_store.get_stale(tech_panels_service.tech_panel_namespace(panel_id), tech_panels_service.TECH_PANEL_CACHE_KEY)
         if isinstance(stale, dict):
             return stale
-        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+        if self.snapshot_store.backend == "redis":
             return {}
         try:
             raw = self.redis_client.get(self.redis_key(panel_id))
@@ -234,8 +206,7 @@ class TechPanelsWatcher:
         ctx = self.service_context()
         result: Dict[str, Any] = {"status": "ok", "panels": {}}
         for panel_id in tech_panels_service.TECH_PANEL_IDS:
-            store = getattr(self, "snapshot_store", None)
-            lock = store.fetch_lock(tech_panels_service.tech_panel_namespace(panel_id), tech_panels_service.TECH_PANEL_CACHE_KEY, timeout=0) if hasattr(store, "fetch_lock") else nullcontext()
+            lock = self.snapshot_store.fetch_lock(tech_panels_service.tech_panel_namespace(panel_id), tech_panels_service.TECH_PANEL_CACHE_KEY, timeout=0)
             try:
                 with lock:
                     self.source_deadline = time.monotonic() + 180

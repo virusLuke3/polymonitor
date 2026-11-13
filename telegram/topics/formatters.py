@@ -824,8 +824,3 @@ def format_all_snapshots_with_stats(
         }:
             stats["empty"] += 1
     return messages, stats
-
-
-def format_all_snapshots(snapshots: Dict[str, Dict[str, Any]]) -> List[MessageCandidate]:
-    messages, _stats = format_all_snapshots_with_stats(snapshots)
-    return messages

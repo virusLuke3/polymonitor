@@ -9,9 +9,7 @@ import json
 import os
 import sys
 import time
-from contextlib import nullcontext
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -29,6 +27,10 @@ try:
 except ImportError:
     requests = None
 
+from api.cache import read_runtime_payload, write_runtime_payload
+from api.context import worker_application
+from runtime.seed_meta import utc_now_iso
+from runtime.seed_meta import redis_key as _redis_key
 from runtime.redis_snapshot_store import seed_writer
 from api.clients import market_data_client
 from api.clients.fred_csv import read_fred_text
@@ -47,27 +49,7 @@ SEED_META_NAMESPACE = "seed-meta:finance"
 SEED_META_SERVICE_NAME = "polydata-finance-watch-panels-seed.service"
 
 
-class _LoggerAdapter:
-    def exception(self, message: str, *args: Any, **kwargs: Any) -> None:
-        print(f"[finance-watch] ERROR {message % args if args else message}", file=sys.stderr)
-        error = sys.exc_info()[1]
-        if error is not None:
-            print(type(error).__name__ + ": " + str(error)[:400], file=sys.stderr)
-
-    def warning(self, message: str, *args: Any, **kwargs: Any) -> None:
-        print(f"[finance-watch] WARN {message % args if args else message}", file=sys.stderr)
-
-
-class _AppAdapter:
-    logger = _LoggerAdapter()
-
-
-def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _redis_key(prefix: str, namespace: str, cache_key: str) -> str:
-    return f"{str(prefix or '')}{namespace}:{cache_key}"
+WORKER_APP = worker_application('finance-watch', exception_limit=400)
 
 
 class FinanceWatchPanelsWatcher:
@@ -98,7 +80,7 @@ class FinanceWatchPanelsWatcher:
         self._source_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="panel-yahoo")
         self._yahoo_context = {**self.service_context(), "requests": requests, "_resources": self._yahoo_resources}
         self._projection_runtime = None
-        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+        if self.snapshot_store.backend == "redis":
             from api.runtime import ServiceRuntime
             self._projection_runtime = ServiceRuntime(settings=self.settings)
 
@@ -133,20 +115,10 @@ class FinanceWatchPanelsWatcher:
         return response.json() if response.content else None
 
     def get_cached_runtime_payload(self, namespace: str, cache_key: str) -> Optional[Dict[str, Any]]:
-        key = f"{namespace}:{cache_key}"
-        entry = self._runtime_cache.get(key)
-        if not entry:
-            return None
-        if entry["expires_at"] <= time.monotonic():
-            self._runtime_cache.pop(key, None)
-            return None
-        return entry["payload"]
+        return read_runtime_payload(self._runtime_cache, namespace, cache_key)
 
     def set_cached_runtime_payload(self, namespace: str, cache_key: str, payload: Dict[str, Any], ttl_seconds: int = 300) -> Dict[str, Any]:
-        self._runtime_cache[f"{namespace}:{cache_key}"] = {
-            "payload": payload, "expires_at": time.monotonic() + max(1, ttl_seconds),
-        }
-        return payload
+        return write_runtime_payload(self._runtime_cache, namespace, cache_key, payload, ttl_seconds)
 
     def get_yahoo_market_snapshot(self, symbol: str, interval: str = "30m", range_name: str = "5d", ttl_seconds: Optional[int] = None) -> Optional[Dict[str, Any]]:
         return market_data_client.get_yahoo_market_snapshot(
@@ -167,7 +139,7 @@ class FinanceWatchPanelsWatcher:
         return list(self._source_executor.map(fetch, values))
 
     def close(self):
-        if getattr(self, "_projection_runtime", None) is not None:
+        if self._projection_runtime is not None:
             self._projection_runtime.close()
         self._source_executor.shutdown(wait=True, cancel_futures=True)
         self._yahoo_resources.close()
@@ -179,7 +151,7 @@ class FinanceWatchPanelsWatcher:
             "FINANCE_RUNTIME_TTL_SECONDS": getattr(self.settings, "finance_runtime_ttl_seconds", 300),
             "SNAPSHOT_STORE": self.snapshot_store,
             "_safe_float": finance_watch_panels_service._safe_float,
-            "app": _AppAdapter(),
+            "app": WORKER_APP,
             "get_cached_json": self.seed_meta_store.get,
             "set_cached_json": self.seed_meta_store.store,
             "get_cached_runtime_payload": self.get_cached_runtime_payload,
@@ -198,7 +170,7 @@ class FinanceWatchPanelsWatcher:
         stale = self.snapshot_store.get_stale(finance_watch_panels_service.finance_watch_namespace(panel_id), finance_watch_panels_service.FINANCE_WATCH_CACHE_KEY)
         if isinstance(stale, dict):
             return stale
-        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+        if self.snapshot_store.backend == "redis":
             return {}
         try:
             raw = self.redis_client.get(self.redis_key(panel_id))
@@ -245,7 +217,7 @@ class FinanceWatchPanelsWatcher:
 
     def collect_projections(self) -> Dict[str, Any]:
         """Reuse this owner for the two legacy request-built finance panels."""
-        runtime = getattr(self, "_projection_runtime", None)
+        runtime = self._projection_runtime
         if runtime is None:
             return {}
         from api.services import finance_panels_service
@@ -284,8 +256,7 @@ class FinanceWatchPanelsWatcher:
         ctx = self.service_context()
         result: Dict[str, Any] = {"status": "ok", "panels": self.collect_projections()}
         for panel_id in finance_watch_panels_service.FINANCE_WATCH_PANEL_IDS:
-            store = getattr(self, "snapshot_store", None)
-            lock = store.fetch_lock(finance_watch_panels_service.finance_watch_namespace(panel_id), finance_watch_panels_service.FINANCE_WATCH_CACHE_KEY, timeout=0) if hasattr(store, "fetch_lock") else nullcontext()
+            lock = self.snapshot_store.fetch_lock(finance_watch_panels_service.finance_watch_namespace(panel_id), finance_watch_panels_service.FINANCE_WATCH_CACHE_KEY, timeout=0)
             try:
                 with lock:
                     self.source_deadline = time.monotonic() + (420 if panel_id == "crypto-fear-greed" else 180)

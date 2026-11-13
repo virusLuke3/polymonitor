@@ -312,14 +312,6 @@ def _source_status(items: Iterable[Any], *, degraded_if_empty: bool = True) -> s
     return "degraded" if degraded_if_empty else "empty"
 
 
-def fetch_hyperliquid_perp_source(
-    ctx: FinanceExternalSourceContext,
-) -> Dict[str, Any]:
-    return _fetch_hyperliquid_perp_source(
-        _dependencies(ctx),
-    )
-
-
 def _fetch_hyperliquid_perp_source(
     dependencies: FinanceExternalSourceDependencies,
 ) -> Dict[str, Any]:
@@ -639,14 +631,6 @@ def _fetch_reference_tradfi_perp_source(
     }
 
 
-def fetch_etf_flow_source(
-    ctx: FinanceExternalSourceContext,
-) -> Dict[str, Any]:
-    return _fetch_etf_flow_source(
-        _dependencies(ctx),
-    )
-
-
 def _fetch_etf_flow_source(
     dependencies: FinanceExternalSourceDependencies,
 ) -> Dict[str, Any]:
@@ -689,16 +673,6 @@ def _fetch_etf_flow_source(
             _setting(dependencies, "finance_yahoo_chart_url_template"),
         ),
     }
-
-
-def build_etf_flow_proxy_from_perps(
-    ctx: FinanceExternalSourceContext,
-    hyperliquid_payload: Dict[str, Any],
-) -> Dict[str, Any]:
-    return _build_etf_flow_proxy_from_perps(
-        _dependencies(ctx),
-        hyperliquid_payload,
-    )
 
 
 def _build_etf_flow_proxy_from_perps(
@@ -803,14 +777,6 @@ def _fetch_cot_source(
         )
     return {"status": ("partial" if rows else "error") if failed else _source_status(rows),
             "failedSymbols": failed, "sourceErrors": source_errors, "items": rows, "sourceUrl": source_url}
-
-
-def fetch_stablecoin_source(
-    ctx: FinanceExternalSourceContext,
-) -> Dict[str, Any]:
-    return _fetch_stablecoin_source(
-        _dependencies(ctx),
-    )
 
 
 def _fetch_stablecoin_source(

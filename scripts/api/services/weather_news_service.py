@@ -102,8 +102,6 @@ WeatherNewsContext = Mapping[str, Any] | WeatherNewsDependencies
 def _dependencies(
     context: WeatherNewsContext,
 ) -> WeatherNewsDependencies:
-    if isinstance(context, WeatherNewsDependencies):
-        return context
     return WeatherNewsDependencies.from_context(context)
 
 

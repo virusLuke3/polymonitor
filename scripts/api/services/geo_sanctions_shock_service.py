@@ -140,8 +140,6 @@ GeoSanctionsShockContext = (
 def _dependencies(
     context: GeoSanctionsShockContext,
 ) -> GeoSanctionsShockDependencies:
-    if isinstance(context, GeoSanctionsShockDependencies):
-        return context
     return GeoSanctionsShockDependencies.from_context(context)
 
 
@@ -306,16 +304,6 @@ def _seeded_fallback_payload(ctx: GeoSanctionsShockContext) -> Dict[str, Any]:
     )
     payload["cacheMode"] = "warming"
     return payload
-
-
-def _previous_seed_payload(ctx: GeoSanctionsShockContext) -> Dict[str, Any]:
-    payload = _seeded_payload_from_cache(ctx)
-    if isinstance(payload, dict):
-        return payload
-    payload = _stale_seeded_payload(ctx)
-    if isinstance(payload, dict):
-        return payload
-    return {}
 
 
 def _with_limit(payload: Dict[str, Any], limit: int) -> Dict[str, Any]:
@@ -882,7 +870,7 @@ def _fetch_ucdp_page(ctx: GeoSanctionsShockContext, *, api_url: str, token: str,
     if status_code in {401, 403}:
         raise RuntimeError(f"ucdp-access-denied:{status_code}")
     response.raise_for_status()
-    payload = response.json() if hasattr(response, "json") else {}
+    payload = response.json()
     if not isinstance(payload, dict):
         raise RuntimeError("ucdp-invalid-payload")
     return payload
@@ -1079,7 +1067,7 @@ def _acled_login_with_password(ctx: GeoSanctionsShockContext) -> Optional[Dict[s
             },
         )
         response.raise_for_status()
-        payload = response.json() if hasattr(response, "json") else {}
+        payload = response.json()
         state = _build_acled_auth_state(payload or {})
         if state is None:
             return None
@@ -1115,7 +1103,7 @@ def _acled_refresh_access_token(ctx: GeoSanctionsShockContext, current_state: Op
         if int(getattr(response, "status_code", 500) or 500) != 200:
             _dependencies(ctx).application.logger.warning("geo shock acled refresh failed status=%s falling back to password login", getattr(response, "status_code", None))
             return _acled_login_with_password(ctx)
-        payload = response.json() if hasattr(response, "json") else {}
+        payload = response.json()
         state = _build_acled_auth_state(payload or {}, fallback_refresh_token=refresh_token)
         if state is None:
             return _acled_login_with_password(ctx)
@@ -1246,7 +1234,7 @@ def _fetch_acled_conflict_snapshot(ctx: GeoSanctionsShockContext) -> Dict[str, A
             _dependencies(ctx).application.logger.warning("geo shock acled access denied")
             return {"state": "access-denied", "items": [], "targetScores": {}, "hotspotCount": 0}
         response.raise_for_status()
-        payload = response.json() if hasattr(response, "json") else {}
+        payload = response.json()
     except Exception:
         _dependencies(ctx).application.logger.exception("geo shock acled read failed")
         return {"state": "error", "items": [], "targetScores": {}, "hotspotCount": 0}

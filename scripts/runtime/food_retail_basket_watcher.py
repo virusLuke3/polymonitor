@@ -6,7 +6,6 @@ import json
 import os
 import sys
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
@@ -17,13 +16,16 @@ if str(_scripts_root) not in sys.path:
 import redis
 import requests
 
+from api.context import worker_application
+from runtime.seed_meta import utc_now_iso
+from runtime.seed_meta import redis_key as _redis_key
 from runtime.redis_snapshot_store import seed_writer
 from api.config import load_api_settings
 from api.clients.source_transport import source_session
 from api.clients.fred_csv import read_fred_text
 from api.services import food_retail_basket_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, retained_snapshot, collection_delay, publish_snapshot
-from runtime.macro_collection import start_round, round_evidence, read_text
+from runtime.macro_collection import MacroSourceCache, start_round, round_evidence, read_text
 from runtime.redis_snapshot_store import create_snapshot_store as SnapshotStore
 
 DEFAULT_INTERVAL_SECONDS = 21600
@@ -32,24 +34,10 @@ SEED_META_CACHE_KEY = "food-retail-basket-pressure"
 SEED_META_SERVICE_NAME = "polydata-food-retail-basket-seed.service"
 
 
-class _Logger:
-    def exception(self, message: str, *args: Any, **kwargs: Any) -> None:
-        print(f"[food-basket] ERROR {message % args if args else message}", file=sys.stderr)
+WORKER_APP = worker_application('food-basket')
 
 
-class _App:
-    logger = _Logger()
-
-
-def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _redis_key(prefix: str, namespace: str, cache_key: str) -> str:
-    return f"{prefix or ''}{namespace}:{cache_key}"
-
-
-class FoodRetailBasketWatcher:
+class FoodRetailBasketWatcher(MacroSourceCache):
     def __init__(self, *, redis_url: str, redis_prefix: str, snapshot_sqlite_path: str, settings: Any, interval_seconds: int) -> None:
         self.settings = settings
         self.redis_prefix = redis_prefix or ""
@@ -75,7 +63,7 @@ class FoodRetailBasketWatcher:
     def context(self) -> Dict[str, Any]:
         return {
             "SETTINGS": self.settings,
-            "app": _App(),
+            "app": WORKER_APP,
             "http_text_get": self._http_text_get,
             "fred_text_get": lambda url, **kwargs: read_fred_text(self.requests, url, deadline=getattr(self, "collection_deadline", None)),
             "SNAPSHOT_STORE": self.snapshot_store,
@@ -83,25 +71,6 @@ class FoodRetailBasketWatcher:
             "set_cached_json": self._set_cached_json,
             "utc_now_iso": utc_now_iso,
         }
-
-    def _get_cached_json(self, namespace: str, cache_key: str) -> Dict[str, Any] | None:
-        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
-            return self.snapshot_store.get(namespace, cache_key)
-        payload = self.snapshot_store.get(namespace, cache_key)
-        if not isinstance(payload, dict):
-            payload = self.snapshot_store.get_stale(namespace, cache_key)
-        return payload if isinstance(payload, dict) else None
-
-    def _set_cached_json(self, namespace: str, cache_key: str, payload: Dict[str, Any], ttl: int) -> None:
-        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
-            if not self.snapshot_store.set(namespace, cache_key, payload, ttl):
-                raise RuntimeError("Seed publication rejected")
-            return payload
-        if self.redis_client is not None:
-            try:
-                self.redis_client.set(_redis_key(self.redis_prefix, namespace, cache_key), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl)
-            except Exception as exc:
-                print(f"[macro-source] Redis cache mirror failed: {type(exc).__name__}", file=sys.stderr)
 
     def previous(self) -> Dict[str, Any]:
         stale = self.snapshot_store.get_stale(self.namespace(), self.cache_key())

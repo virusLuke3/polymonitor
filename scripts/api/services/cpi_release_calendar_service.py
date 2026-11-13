@@ -4,7 +4,7 @@ import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, time, timezone
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
@@ -100,8 +100,6 @@ CpiReleaseCalendarContext = (
 def _dependencies(
     context: CpiReleaseCalendarContext,
 ) -> CpiReleaseCalendarDependencies:
-    if isinstance(context, CpiReleaseCalendarDependencies):
-        return context
     return CpiReleaseCalendarDependencies.from_context(context)
 
 

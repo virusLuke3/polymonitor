@@ -1,5 +1,5 @@
 from __future__ import annotations
-from api.services.macro_data_policy import bounded_rows, display_age, read_seeded, row_clock
+from api.services.macro_data_policy import bounded_rows, display_age, read_seeded
 
 from data_sources import source_value
 
@@ -11,7 +11,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from api.context import resolve_optional_service_callable, resolve_service_callable
 from api.clients.fred_csv import fetch_fred_observations
-from api.services.macro_data_contract import describe_series, month_key
+from api.services.macro_data_contract import describe_series
 from api.services.seed_recovery import age_seconds
 
 
@@ -193,8 +193,6 @@ MacroCpiPanelsContext = Mapping[str, Any] | MacroCpiPanelsDependencies
 def _dependencies(
     context: MacroCpiPanelsContext,
 ) -> MacroCpiPanelsDependencies:
-    if isinstance(context, MacroCpiPanelsDependencies):
-        return context
     return MacroCpiPanelsDependencies.from_context(context)
 
 

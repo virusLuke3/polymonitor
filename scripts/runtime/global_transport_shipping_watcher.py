@@ -23,6 +23,8 @@ try:
 except ImportError:
     requests = None
 
+from api.context import worker_application
+from runtime.seed_meta import redis_key as _redis_key
 from runtime.redis_snapshot_store import seed_writer
 from api.config import load_api_settings
 from api.clients.source_transport import read_response_bytes, read_with_retry, source_session
@@ -40,20 +42,7 @@ SEED_META_CACHE_KEY = "global-transport-shipping"
 SEED_META_SERVICE_NAME = "polydata-global-transport-shipping-seed.service"
 
 
-class _Logger:
-    def exception(self, message: str, *args: Any, **kwargs: Any) -> None:
-        print(f"[global-transport-shipping] ERROR {message % args if args else message}", file=sys.stderr)
-
-    def warning(self, message: str, *args: Any, **kwargs: Any) -> None:
-        print(f"[global-transport-shipping] WARN {message % args if args else message}", file=sys.stderr)
-
-
-class _App:
-    logger = _Logger()
-
-
-def _redis_key(prefix: str, namespace: str, cache_key: str) -> str:
-    return f"{str(prefix or '')}{namespace}:{cache_key}"
+WORKER_APP = worker_application('global-transport-shipping')
 
 
 class GlobalTransportShippingWatcher:
@@ -120,7 +109,7 @@ class GlobalTransportShippingWatcher:
             "_resources": self.resources,
             "SETTINGS": self.settings,
             "SNAPSHOT_STORE": self.snapshot_store,
-            "app": _App(),
+            "app": WORKER_APP,
             "http_text_get": self.http_text_get,
             "http_json_get": self.http_json_get,
             "http_form_post": self.http_form_post,

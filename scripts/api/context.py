@@ -8,8 +8,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 import logging
+import sys
 import threading
 import time
+from types import SimpleNamespace
 from concurrent.futures import ThreadPoolExecutor, wait
 
 
@@ -151,6 +153,33 @@ def runtime_resources(context) -> RuntimeResources:
 
 class ApplicationLog(Protocol):
     logger: logging.Logger
+
+
+class WorkerLogger:
+    """The worker equivalent of Flask's application logger, writing to journal."""
+
+    def __init__(self, name: str, *, exception_limit: int = 0):
+        self.name = name
+        self.exception_limit = exception_limit
+
+    def _write(self, level, message, args):
+        print(f"[{self.name}] {level} {message % args if args else message}", file=sys.stderr)
+
+    def info(self, message, *args, **kwargs):
+        self._write("INFO", message, args)
+
+    def warning(self, message, *args, **kwargs):
+        self._write("WARN", message, args)
+
+    def exception(self, message, *args, **kwargs):
+        self._write("ERROR", message, args)
+        error = sys.exc_info()[1]
+        if self.exception_limit and error is not None:
+            print(type(error).__name__ + ": " + str(error)[:self.exception_limit], file=sys.stderr)
+
+
+def worker_application(name: str, *, exception_limit: int = 0):
+    return SimpleNamespace(logger=WorkerLogger(name, exception_limit=exception_limit))
 
 
 def resolve_route_callable(context: Mapping[str, Any], name: str) -> Callable[..., Any]:

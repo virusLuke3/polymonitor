@@ -83,8 +83,6 @@ SportsOddsContext = Mapping[str, Any] | SportsOddsDependencies
 def _dependencies(
     context: SportsOddsContext,
 ) -> SportsOddsDependencies:
-    if isinstance(context, SportsOddsDependencies):
-        return context
     return SportsOddsDependencies.from_context(context)
 
 

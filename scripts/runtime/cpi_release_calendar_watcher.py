@@ -9,7 +9,7 @@ import json
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 from typing import Any, Dict
@@ -33,6 +33,9 @@ try:
 except ImportError:
     BeautifulSoup = None
 
+from api.context import worker_application
+from runtime.seed_meta import utc_now_iso
+from runtime.seed_meta import redis_key as _redis_key
 from runtime.redis_snapshot_store import seed_writer
 from api.config import load_api_settings
 from api.clients.source_transport import read_response_bytes, read_with_retry, source_session
@@ -48,27 +51,7 @@ SEED_META_CACHE_KEY = "cpi-release-calendar"
 SEED_META_SERVICE_NAME = "polydata-cpi-release-calendar-seed.service"
 
 
-class _LoggerAdapter:
-    def exception(self, message: str, *args: Any, **kwargs: Any) -> None:
-        print(f"[cpi-calendar] ERROR {message % args if args else message}", file=sys.stderr)
-
-    def warning(self, message: str, *args: Any, **kwargs: Any) -> None:
-        print(f"[cpi-calendar] WARN {message % args if args else message}", file=sys.stderr)
-
-    def info(self, message: str, *args: Any, **kwargs: Any) -> None:
-        print(f"[cpi-calendar] INFO {message % args if args else message}", file=sys.stderr)
-
-
-class _AppAdapter:
-    logger = _LoggerAdapter()
-
-
-def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _redis_key(prefix: str, namespace: str, cache_key: str) -> str:
-    return f"{str(prefix or '')}{namespace}:{cache_key}"
+WORKER_APP = worker_application('cpi-calendar')
 
 
 class CpiReleaseCalendarWatcher:
@@ -123,7 +106,7 @@ class CpiReleaseCalendarWatcher:
     def service_context(self) -> Dict[str, Any]:
         return {
             "SETTINGS": self.settings,
-            "app": _AppAdapter(),
+            "app": WORKER_APP,
             "BeautifulSoup": BeautifulSoup,
             "http_text_get": self._http_text_get,
             "SNAPSHOT_STORE": self.snapshot_store,

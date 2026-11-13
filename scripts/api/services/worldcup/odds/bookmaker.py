@@ -150,14 +150,6 @@ def build_bookmaker_market_outcomes(
     return sorted(outcomes, key=lambda row: (float(row.get("point") or 0), str(row.get("name") or ""))), bookmaker_rows
 
 
-def build_bookmaker_h2h_outcomes(
-    match: Dict[str, Any],
-    event: Dict[str, Any],
-    canonical_outcome_label: Callable[[Dict[str, Any], Any], str],
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    return build_bookmaker_market_outcomes(match, event, "h2h", canonical_outcome_label)
-
-
 def _canonical_outcome_label(match: Dict[str, Any], label: Any) -> str:
     text = str(label or "").strip()
     if not text:

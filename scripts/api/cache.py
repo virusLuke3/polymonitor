@@ -62,16 +62,28 @@ def get_redis_client(ctx: CacheState):
             return None
 
 
-def get_cached_runtime_payload(ctx: CacheState, namespace: str, cache_key: str) -> Optional[Any]:
-    now = time.monotonic()
+def read_runtime_payload(entries: dict, namespace: str, cache_key: str) -> Any:
     composite_key = f"{namespace}:{cache_key}"
+    cached = entries.get(composite_key)
+    if not cached:
+        return None
+    if cached["expires_at"] <= time.monotonic():
+        entries.pop(composite_key, None)
+        return None
+    return cached["payload"]
+
+
+def write_runtime_payload(entries: dict, namespace: str, cache_key: str, payload: Any, ttl_seconds: int) -> Any:
+    entries[f"{namespace}:{cache_key}"] = {
+        "payload": payload,
+        "expires_at": time.monotonic() + max(1, ttl_seconds),
+    }
+    return payload
+
+
+def get_cached_runtime_payload(ctx: CacheState, namespace: str, cache_key: str) -> Optional[Any]:
     with ctx.runtime_lock:
-        cached = ctx.runtime_cache.get(composite_key)
-        if not cached or cached.get("expires_at", 0.0) <= now:
-            if cached:
-                ctx.runtime_cache.pop(composite_key, None)
-            return None
-        return cached.get("payload")
+        return read_runtime_payload(ctx.runtime_cache, namespace, cache_key)
 
 
 def set_cached_runtime_payload(ctx: CacheState, namespace: str, cache_key: str, payload: Any, ttl_seconds: int) -> Any:
@@ -79,11 +91,7 @@ def set_cached_runtime_payload(ctx: CacheState, namespace: str, cache_key: str, 
     with ctx.runtime_lock:
         if len(ctx.runtime_cache) >= 512 and composite_key not in ctx.runtime_cache:
             ctx.runtime_cache.pop(next(iter(ctx.runtime_cache)))
-        ctx.runtime_cache[composite_key] = {
-            "payload": payload,
-            "expires_at": time.monotonic() + max(1, ttl_seconds),
-        }
-    return payload
+        return write_runtime_payload(ctx.runtime_cache, namespace, cache_key, payload, ttl_seconds)
 
 
 def _redis_key(ctx: CacheState, namespace: str, cache_key: str) -> str:

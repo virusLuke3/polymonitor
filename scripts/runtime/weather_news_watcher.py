@@ -6,7 +6,6 @@ import json
 import os
 import sys
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
@@ -20,6 +19,9 @@ except ImportError:
     redis = None
 import requests
 
+from api.context import worker_application
+from runtime.seed_meta import utc_now_iso
+from runtime.seed_meta import redis_key as _redis_key
 from runtime.redis_snapshot_store import seed_writer
 from api.clients.source_transport import read_response_bytes, read_with_retry, source_session
 from api.config import load_api_settings
@@ -35,21 +37,7 @@ SEED_META_CACHE_KEY = "weather-news"
 SEED_META_SERVICE_NAME = "polydata-weather-news-seed.service"
 
 
-class _Logger:
-    def exception(self, message: str, *args: Any, **kwargs: Any) -> None:
-        print(f"[weather-news] ERROR {message % args if args else message}", file=sys.stderr)
-
-
-class _App:
-    logger = _Logger()
-
-
-def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _redis_key(prefix: str, namespace: str, cache_key: str) -> str:
-    return f"{prefix or ''}{namespace}:{cache_key}"
+WORKER_APP = worker_application('weather-news')
 
 
 class WeatherNewsWatcher:
@@ -99,7 +87,7 @@ class WeatherNewsWatcher:
         return {
             "_resources": self.resources,
             "SETTINGS": self.settings,
-            "app": _App(),
+            "app": WORKER_APP,
             "http_text_get": self._http_text_get,
             "SNAPSHOT_STORE": self.snapshot_store,
             "get_cached_json": self.seed_meta_store.get,

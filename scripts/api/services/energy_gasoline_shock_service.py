@@ -62,8 +62,6 @@ EnergyGasolineShockContext = Mapping[str, Any] | EnergyGasolineShockDependencies
 def _dependencies(
     context: EnergyGasolineShockContext,
 ) -> EnergyGasolineShockDependencies:
-    if isinstance(context, EnergyGasolineShockDependencies):
-        return context
     return EnergyGasolineShockDependencies.from_context(context)
 
 

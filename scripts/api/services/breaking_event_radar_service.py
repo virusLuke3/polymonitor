@@ -679,19 +679,6 @@ def _empty_payload(
     }
 
 
-def normalize_breaking_event_radar_payload(
-    payload: Any,
-    *,
-    ctx: Mapping[str, Any],
-    limit: int = DEFAULT_LIMIT,
-) -> Dict[str, Any]:
-    return _normalize_breaking_event_radar_payload(
-        payload,
-        dependencies=BreakingEventRadarDependencies.from_context(ctx),
-        limit=limit,
-    )
-
-
 def _normalize_breaking_event_radar_payload(
     payload: Any,
     *,

@@ -34,7 +34,6 @@ except ImportError:
     BeautifulSoup = None
 
 from api.config import load_api_settings
-from api.services import worldcup_dashboard_service
 from db import DEFAULT_DB_PATH, dict_from_row, get_connection
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload
 from runtime.redis_snapshot_store import create_snapshot_store as SnapshotStore
@@ -123,7 +122,7 @@ class WorldCupSeedWatcher:
             conn.close()
 
     def get_cached_json(self, namespace: str, cache_key: str) -> Any:
-        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+        if self.snapshot_store.backend == "redis":
             return self.snapshot_store.get(namespace, cache_key)
         cached = self.snapshot_store.get(namespace, cache_key)
         if isinstance(cached, dict):
@@ -138,7 +137,7 @@ class WorldCupSeedWatcher:
             return None
 
     def set_cached_json(self, namespace: str, cache_key: str, payload: Any, ttl_seconds: int) -> None:
-        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+        if self.snapshot_store.backend == "redis":
             if not self.snapshot_store.set(namespace, cache_key, payload, ttl_seconds):
                 raise RuntimeError("Seed publication rejected")
             return payload

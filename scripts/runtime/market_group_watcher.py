@@ -9,7 +9,6 @@ import json
 import os
 import sys
 import time
-from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -28,6 +27,10 @@ try:
 except ImportError:
     requests = None
 
+from api.cache import read_runtime_payload, write_runtime_payload
+from api.context import worker_application
+from runtime.seed_meta import utc_now_iso
+from runtime.seed_meta import redis_key as _redis_key
 from runtime.redis_snapshot_store import seed_writer
 from api.clients import market_data_client
 from api.commodity_symbols import COMMODITY_SYMBOLS
@@ -78,24 +81,7 @@ CRYPTO_COINGECKO_IDS = {
 }
 
 
-class _LoggerAdapter:
-    def exception(self, message: str, *args: Any, **kwargs: Any) -> None:
-        print(f"[market-group] ERROR {message % args if args else message}", file=sys.stderr)
-        error = sys.exc_info()[1]
-        if error is not None:
-            print(type(error).__name__ + ": " + str(error)[:300], file=sys.stderr)
-
-
-class _AppAdapter:
-    logger = _LoggerAdapter()
-
-
-def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _redis_key(prefix: str, namespace: str, cache_key: str) -> str:
-    return f"{str(prefix or '')}{namespace}:{cache_key}"
+WORKER_APP = worker_application('market-group', exception_limit=300)
 
 
 def _safe_float(value: Any) -> Optional[float]:
@@ -145,7 +131,7 @@ class MarketGroupWatcher:
             "SETTINGS": self.settings,
             "FINANCE_RUNTIME_TTL_SECONDS": self.settings.finance_runtime_ttl_seconds,
             "CRYPTO_COINGECKO_IDS": CRYPTO_COINGECKO_IDS,
-            "app": _AppAdapter(),
+            "app": WORKER_APP,
             "requests": requests,
             "_resources": self._resources,
             "map_market_rows": self._source_executor.map,
@@ -176,27 +162,16 @@ class MarketGroupWatcher:
         }
 
     def get_cached_runtime_payload(self, namespace: str, cache_key: str) -> Any:
-        composite_key = f"{namespace}:{cache_key}"
-        cached = self._runtime_cache.get(composite_key)
-        if not cached:
-            return None
-        if float(cached.get("expires_at") or 0.0) <= time.monotonic():
-            self._runtime_cache.pop(composite_key, None)
-            return None
-        return cached.get("payload")
+        return read_runtime_payload(self._runtime_cache, namespace, cache_key)
 
     def set_cached_runtime_payload(self, namespace: str, cache_key: str, payload: Any, ttl_seconds: int) -> Any:
-        self._runtime_cache[f"{namespace}:{cache_key}"] = {
-            "payload": payload,
-            "expires_at": time.monotonic() + max(1, int(ttl_seconds)),
-        }
-        return payload
+        return write_runtime_payload(self._runtime_cache, namespace, cache_key, payload, int(ttl_seconds))
 
     def load_previous_payload(self, namespace: str, cache_key: str) -> Dict[str, Any]:
         stale = self.snapshot_store.get_stale(namespace, cache_key)
         if isinstance(stale, dict):
             return stale
-        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+        if self.snapshot_store.backend == "redis":
             return {}
         try:
             raw = self.redis_client.get(_redis_key(self.redis_prefix, namespace, cache_key))

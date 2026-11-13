@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-import os
+from telegram import env_str as _get_str, env_int as _get_int, env_bool as _get_bool, unique_urls as _unique_urls
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -12,37 +13,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 from scripts.runtime.environment import load_environment
 
 
-def _get_str(name: str, default: str = "") -> str:
-    value = os.environ.get(name)
-    if value is None:
-        return default
-    text = str(value).strip()
-    return text or default
-
-
 def _get_first(names: Iterable[str], default: str = "") -> str:
     for name in names:
         value = _get_str(name, "")
         if value:
             return value
     return default
-
-
-def _get_int(name: str, default: int) -> int:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    try:
-        return int(str(raw).strip())
-    except (TypeError, ValueError):
-        return default
-
-
-def _get_bool(name: str, default: bool = False) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _csv_set(raw: str) -> set[str]:
@@ -57,18 +33,6 @@ def _csv_int_set(raw: str) -> set[int]:
         except ValueError:
             continue
     return values
-
-
-def _unique_urls(values: Iterable[str]) -> tuple[str, ...]:
-    urls: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        url = str(value or "").strip().rstrip("/")
-        if not url or url in seen:
-            continue
-        seen.add(url)
-        urls.append(url)
-    return tuple(urls)
 
 
 @dataclass(frozen=True)

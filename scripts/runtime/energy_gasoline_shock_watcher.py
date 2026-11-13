@@ -6,7 +6,6 @@ import json
 import os
 import sys
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
@@ -21,6 +20,9 @@ except ImportError:
 import requests
 import xlrd
 
+from api.context import worker_application
+from runtime.seed_meta import utc_now_iso
+from runtime.seed_meta import redis_key as _redis_key
 from runtime.redis_snapshot_store import seed_writer
 from api.config import load_api_settings
 from api.services import energy_gasoline_shock_service
@@ -33,21 +35,7 @@ SEED_META_CACHE_KEY = "energy-gasoline-shock"
 SEED_META_SERVICE_NAME = "polydata-energy-gasoline-shock-seed.service"
 
 
-class _Logger:
-    def exception(self, message: str, *args: Any, **kwargs: Any) -> None:
-        print(f"[energy-shock] ERROR {message % args if args else message}", file=sys.stderr)
-
-
-class _App:
-    logger = _Logger()
-
-
-def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _redis_key(prefix: str, namespace: str, cache_key: str) -> str:
-    return f"{prefix or ''}{namespace}:{cache_key}"
+WORKER_APP = worker_application('energy-shock')
 
 
 class EnergyGasolineShockWatcher:
@@ -82,7 +70,7 @@ class EnergyGasolineShockWatcher:
     def context(self) -> Dict[str, Any]:
         return {
             "SETTINGS": self.settings,
-            "app": _App(),
+            "app": WORKER_APP,
             "http_bytes_get": self._http_bytes_get,
             "SNAPSHOT_STORE": self.snapshot_store,
             "get_cached_json": self.seed_meta_store.get,

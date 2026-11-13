@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import time
-import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Dict, List, Optional, cast
+from typing import Any, Callable, Dict, cast
 
 from api.context import RuntimeResources, runtime_resources, resolve_service_callable
 from api.runtime_panels import get_default_panel_ids
@@ -428,12 +427,6 @@ def _claim_prewarm_slot(resources: RuntimeResources, task_name: str, interval_se
             return False
         resources.prewarm_last_run[task_name] = now
     return True
-
-
-def prewarm_snapshot_payloads(ctx: Mapping[str, Any]) -> None:
-    _prewarm_snapshot_payloads(
-        BootstrapPrewarmDependencies.from_context(ctx),
-    )
 
 
 def _prewarm_snapshot_payloads(

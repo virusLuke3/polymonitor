@@ -9,7 +9,6 @@ import json
 import os
 import sys
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -36,6 +35,9 @@ try:
 except ImportError:
     BeautifulSoup = None
 
+from api.context import worker_application
+from runtime.seed_meta import utc_now_iso
+from runtime.seed_meta import redis_key as _redis_key
 from runtime.redis_snapshot_store import seed_writer
 from api.config import load_api_settings
 from api.services.worldcup.builder import build_worldcup_dashboard_payload
@@ -58,21 +60,7 @@ SEED_META_SERVICE_NAME = "polydata-worldcup-dashboard-seed.service"
 WORLDCUP_WORKSPACE_URL = source_value('POLYMONITOR_URL_WWW_POLYMONITOR_CLUB_7640AA')
 
 
-class _LoggerAdapter:
-    def exception(self, message: str, *args: Any, **kwargs: Any) -> None:
-        print(f"[worldcup-dashboard] ERROR {message % args if args else message}", file=sys.stderr)
-
-
-class _AppAdapter:
-    logger = _LoggerAdapter()
-
-
-def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _redis_key(prefix: str, namespace: str, cache_key: str) -> str:
-    return f"{str(prefix or '')}{namespace}:{cache_key}"
+WORKER_APP = worker_application('worldcup-dashboard')
 
 
 def _record_count(payload: Dict[str, Any]) -> int:
@@ -210,7 +198,7 @@ class WorldCupDashboardWatcher:
             "SETTINGS": self.settings,
             "SPORTS_RUNTIME_TTL_SECONDS": self.settings.sports_runtime_ttl_seconds,
             "SNAPSHOT_STORE": self.snapshot_store,
-            "app": _AppAdapter(),
+            "app": WORKER_APP,
             "BeautifulSoup": BeautifulSoup,
             "http_json_get": self.http_json_get,
             "http_text_get": self.http_text_get,
@@ -228,7 +216,7 @@ class WorldCupDashboardWatcher:
             return stale
         if self.redis_client is None:
             return {}
-        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+        if self.snapshot_store.backend == "redis":
             return {}
         try:
             raw = self.redis_client.get(self.redis_key())

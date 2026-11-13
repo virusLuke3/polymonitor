@@ -5,7 +5,7 @@ import time
 from dataclasses import dataclass
 from urllib.parse import quote, urljoin, urlparse
 
-from api.services.trusted_hls_sources import TRUSTED_HLS_SOURCES, trusted_hls_urls
+from api.services.trusted_hls_sources import TRUSTED_HLS_SOURCES
 from api.clients.source_transport import source_session, read_with_retry, read_response_bytes
 
 
@@ -78,10 +78,6 @@ def select_rule(url: str) -> TrustedHlsRule | None:
         if any(normalized_path.startswith(path) for path in rule.additional_paths):
             return rule
     raise HlsProxyError("HLS URL is not in the trusted playback allowlist", 403)
-
-
-def proxy_target_count() -> int:
-    return len(list(trusted_hls_urls()))
 
 
 def _is_manifest_url(url: str, content_type: str = "") -> bool:

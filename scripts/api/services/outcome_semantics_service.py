@@ -948,10 +948,6 @@ def annotate_aggregate_rows(ctx: Mapping[str, Any], rows: Iterable[Mapping[str, 
     return annotate_trade_rows(ctx, rows, identity_mode="aggregate")
 
 
-def probe_market_outcome_semantics(ctx: Mapping[str, Any], market_id: Any) -> Dict[str, Any]:
-    return annotate_trade_rows(ctx, [{"marketId": market_id}], identity_mode="probe")[0]
-
-
 def _canonical_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"), default=str)
 

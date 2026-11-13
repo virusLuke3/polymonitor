@@ -29,7 +29,7 @@ except ImportError:
 from runtime.redis_snapshot_store import seed_writer
 from api.config import ApiSettings, load_api_settings
 from api.services import signal_service
-from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot, retained_snapshot
+from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot
 from runtime.redis_snapshot_store import create_snapshot_store as SnapshotStore
 from runtime.telegram_panel_publish import publish_cached_panel_snapshot
 
@@ -215,7 +215,7 @@ class SignalsWatcher:
             return stale
         if self.redis_client is None:
             return {}
-        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+        if self.snapshot_store.backend == "redis":
             return {}
         try:
             raw = self.redis_client.get(self.redis_key())

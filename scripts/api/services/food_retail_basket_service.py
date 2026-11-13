@@ -1,5 +1,5 @@
 from __future__ import annotations
-from api.services.macro_data_policy import bounded_rows, display_age, read_seeded, row_clock
+from api.services.macro_data_policy import bounded_rows, display_age, read_seeded
 
 from data_sources import source_value
 
@@ -78,8 +78,6 @@ FoodRetailBasketContext = Mapping[str, Any] | FoodRetailBasketDependencies
 def _dependencies(
     context: FoodRetailBasketContext,
 ) -> FoodRetailBasketDependencies:
-    if isinstance(context, FoodRetailBasketDependencies):
-        return context
     return FoodRetailBasketDependencies.from_context(context)
 
 

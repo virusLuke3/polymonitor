@@ -6,7 +6,6 @@ import json
 import os
 import sys
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
@@ -17,13 +16,15 @@ if str(_scripts_root) not in sys.path:
 import redis
 import requests
 
+from runtime.seed_meta import utc_now_iso
+from runtime.seed_meta import redis_key as _redis_key
 from runtime.redis_snapshot_store import seed_writer
 from api.config import load_api_settings
 from api.clients.source_transport import source_session
 from api.clients.fred_csv import read_fred_text
 from api.services import macro_cpi_registry_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, retained_snapshot, collection_delay, publish_snapshot
-from runtime.macro_collection import start_round, round_evidence, read_text
+from runtime.macro_collection import MacroSourceCache, start_round, round_evidence, read_text
 from runtime.redis_snapshot_store import create_snapshot_store as SnapshotStore
 from runtime.telegram_panel_publish import publish_cached_panel_snapshot
 
@@ -33,15 +34,7 @@ SEED_META_NAMESPACE = "seed-meta:macro"
 SEED_META_SERVICE_NAME = "polydata-macro-cpi-registry-seed.service"
 
 
-def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _redis_key(prefix: str, namespace: str, cache_key: str) -> str:
-    return f"{prefix or ''}{namespace}:{cache_key}"
-
-
-class MacroCpiRegistryWatcher:
+class MacroCpiRegistryWatcher(MacroSourceCache):
     def __init__(self, *, redis_url: str, redis_prefix: str, snapshot_sqlite_path: str, settings: Any, interval_seconds: int) -> None:
         self.settings = settings
         self.redis_prefix = redis_prefix or ""
@@ -63,25 +56,6 @@ class MacroCpiRegistryWatcher:
 
     def redis_key(self, panel_id: str) -> str:
         return _redis_key(self.redis_prefix, self.namespace(panel_id), self.cache_key())
-
-    def _get_cached_json(self, namespace: str, cache_key: str) -> Dict[str, Any] | None:
-        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
-            return self.snapshot_store.get(namespace, cache_key)
-        payload = self.snapshot_store.get(namespace, cache_key)
-        if not isinstance(payload, dict):
-            payload = self.snapshot_store.get_stale(namespace, cache_key)
-        return payload if isinstance(payload, dict) else None
-
-    def _set_cached_json(self, namespace: str, cache_key: str, payload: Dict[str, Any], ttl: int) -> None:
-        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
-            if not self.snapshot_store.set(namespace, cache_key, payload, ttl):
-                raise RuntimeError("Seed publication rejected")
-            return payload
-        if self.redis_client is not None:
-            try:
-                self.redis_client.set(_redis_key(self.redis_prefix, namespace, cache_key), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl)
-            except Exception as exc:
-                print(f"[macro-source] Redis cache mirror failed: {type(exc).__name__}", file=sys.stderr)
 
     def _http_text_get(self, url: str, **kwargs: Any) -> str:
         return read_text(self, url, **kwargs)

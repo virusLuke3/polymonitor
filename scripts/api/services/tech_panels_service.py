@@ -173,8 +173,6 @@ TechPanelsContext = Mapping[str, Any] | TechPanelsDependencies
 def _dependencies(
     context: TechPanelsContext,
 ) -> TechPanelsDependencies:
-    if isinstance(context, TechPanelsDependencies):
-        return context
     return TechPanelsDependencies.from_context(context)
 
 
@@ -1094,16 +1092,6 @@ def build_tech_panel_payload(ctx: dict, panel_id: str, limit: int = 10) -> Dict[
     if panel_id == "consumer-app-pulse":
         return build_consumer_app_pulse_payload(ctx, limit)
     raise KeyError(f"unknown tech panel: {panel_id}")
-
-
-def build_all_tech_panel_payloads(ctx: dict, limit: int = 24) -> Dict[str, Dict[str, Any]]:
-    payloads: Dict[str, Dict[str, Any]] = {}
-    for panel_id in TECH_PANEL_IDS:
-        try:
-            payloads[panel_id] = build_tech_panel_payload(ctx, panel_id, limit=limit)
-        except Exception as exc:
-            payloads[panel_id] = _payload(panel_id, title=panel_id.upper(), items=[], status="error", sources={"builder": "error"}, summary={"error": str(exc)})
-    return payloads
 
 
 def get_tech_panel_snapshot(

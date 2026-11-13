@@ -14,7 +14,6 @@ import json
 import os
 import sys
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -32,6 +31,9 @@ try:
 except ImportError:
     requests = None
 
+from api.context import worker_application
+from runtime.seed_meta import utc_now_iso
+from runtime.seed_meta import redis_key as _redis_key
 from runtime.redis_snapshot_store import seed_writer
 from api.config import load_api_settings
 from api.clients.source_transport import read_response_bytes, read_with_retry, source_session
@@ -46,27 +48,7 @@ SEED_META_CACHE_KEY = "geo-sanctions-shock"
 SEED_META_SERVICE_NAME = "polydata-geo-sanctions-shock.service"
 
 
-class _LoggerAdapter:
-    def info(self, message: str, *args: Any, **kwargs: Any) -> None:
-        print(f"[geo-shock] INFO {message % args if args else message}", file=sys.stderr)
-
-    def warning(self, message: str, *args: Any, **kwargs: Any) -> None:
-        print(f"[geo-shock] WARN {message % args if args else message}", file=sys.stderr)
-
-    def exception(self, message: str, *args: Any, **kwargs: Any) -> None:
-        print(f"[geo-shock] ERROR {message % args if args else message}", file=sys.stderr)
-
-
-class _AppAdapter:
-    logger = _LoggerAdapter()
-
-
-def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _redis_key(prefix: str, namespace: str, cache_key: str) -> str:
-    return f"{str(prefix or '')}{namespace}:{cache_key}"
+WORKER_APP = worker_application('geo-shock')
 
 
 def _cache_ttl_seconds(settings: Any) -> int:
@@ -189,7 +171,7 @@ class GeoSanctionsShockWatcher:
                     )
                     return dict(normalized)
         except Exception:
-            _AppAdapter.logger.exception("geo shock watcher acled auth redis read failed")
+            WORKER_APP.logger.exception("geo shock watcher acled auth redis read failed")
 
         stale = self.snapshot_store.get_stale(self.acled_auth_namespace(), self.acled_auth_cache_key())
         normalized = geo_sanctions_shock_service._normalize_acled_auth_state(stale)
@@ -210,13 +192,13 @@ class GeoSanctionsShockWatcher:
             try:
                 self.redis_client.set(self.acled_auth_redis_key(), json.dumps(normalized, ensure_ascii=True, default=str), ex=ttl_seconds)
             except Exception:
-                _AppAdapter.logger.exception("optional acled auth mirror write failed")
+                WORKER_APP.logger.exception("optional acled auth mirror write failed")
 
     def load_previous_payload(self) -> Dict[str, Any]:
         stale = self.snapshot_store.get_stale(self.namespace(), self.cache_key())
         if isinstance(stale, dict):
             return stale
-        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+        if self.snapshot_store.backend == "redis":
             return {}
         try:
             raw = self.redis_client.get(self.redis_key())
@@ -225,7 +207,7 @@ class GeoSanctionsShockWatcher:
                 if isinstance(payload, dict):
                     return payload
         except Exception:
-            _AppAdapter.logger.exception("geo shock watcher redis read failed")
+            WORKER_APP.logger.exception("geo shock watcher redis read failed")
         return {}
 
     def build_payload(self) -> Dict[str, Any]:
@@ -233,7 +215,7 @@ class GeoSanctionsShockWatcher:
         ctx = {
             "SETTINGS": self.settings,
             "SNAPSHOT_STORE": self.snapshot_store,
-            "app": _AppAdapter(),
+            "app": WORKER_APP,
             "requests": self.requests,
             "http_json_get": self._http_json_get,
             "get_acled_auth_state": self.load_acled_auth_state,
@@ -257,7 +239,7 @@ class GeoSanctionsShockWatcher:
             and not geo_sanctions_shock_service.payload_has_material_signal(payload)
             and not geo_sanctions_shock_service.payload_has_source_success(payload)
         ):
-            _AppAdapter.logger.warning("geo shock watcher preserved previous snapshot because new payload had no material signal")
+            WORKER_APP.logger.warning("geo shock watcher preserved previous snapshot because new payload had no material signal")
             # Keep observed content/clocks, but persist the failed attempt and
             # per-term cooldowns so a restart cannot retry a rate-limited query.
             retained = {**previous, "status": "stale", "sources": payload.get("sources") or {},

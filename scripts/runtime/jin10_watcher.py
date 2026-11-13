@@ -14,7 +14,6 @@ import json
 import os
 import sys
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -32,6 +31,8 @@ try:
 except ImportError:
     requests = None
 
+from runtime.seed_meta import utc_now_iso
+from runtime.seed_meta import redis_key as _redis_key
 from runtime.redis_snapshot_store import seed_writer
 from api.config import load_api_settings
 from api.services import jin10_runtime_service
@@ -44,14 +45,6 @@ DEFAULT_LIMIT = 24
 SEED_META_NAMESPACE = "seed-meta:macro"
 SEED_META_CACHE_KEY = "jin10-flash"
 SEED_META_SERVICE_NAME = "polydata-jin10-seed.service"
-
-
-def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _redis_key(prefix: str, namespace: str, cache_key: str) -> str:
-    return f"{str(prefix or '')}{namespace}:{cache_key}"
 
 
 def _items(payload: Dict[str, Any]) -> list[Any]:
@@ -153,7 +146,7 @@ class Jin10Watcher:
             return stale
         if self.redis_client is None:
             return {}
-        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+        if self.snapshot_store.backend == "redis":
             return {}
         try:
             raw = self.redis_client.get(self.redis_key())

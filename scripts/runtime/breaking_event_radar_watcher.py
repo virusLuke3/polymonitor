@@ -27,6 +27,8 @@ try:
 except ImportError:
     requests = None
 
+from api.context import worker_application
+from runtime.seed_meta import redis_key as _redis_key
 from runtime.redis_snapshot_store import seed_writer
 from api.config import load_api_settings
 from api.services import breaking_event_radar_service
@@ -42,20 +44,7 @@ SEED_META_CACHE_KEY = "breaking-event-radar"
 SEED_META_SERVICE_NAME = "polydata-breaking-event-radar-seed.service"
 
 
-class _Logger:
-    def exception(self, message: str, *args: Any, **kwargs: Any) -> None:
-        print(f"[breaking-event-radar] ERROR {message % args if args else message}", file=sys.stderr)
-
-    def warning(self, message: str, *args: Any, **kwargs: Any) -> None:
-        print(f"[breaking-event-radar] WARN {message % args if args else message}", file=sys.stderr)
-
-
-class _App:
-    logger = _Logger()
-
-
-def _redis_key(prefix: str, namespace: str, cache_key: str) -> str:
-    return f"{str(prefix or '')}{namespace}:{cache_key}"
+WORKER_APP = worker_application('breaking-event-radar')
 
 
 class BreakingEventRadarWatcher:
@@ -229,7 +218,7 @@ class BreakingEventRadarWatcher:
         context: Dict[str, Any] = {
             "SETTINGS": self.settings,
             "SNAPSHOT_STORE": self.snapshot_store,
-            "app": _App(),
+            "app": WORKER_APP,
             "http_json_get": self.http_json_get,
             "public_articles": self.public_articles,
             "news_articles": self.news_articles,
@@ -252,7 +241,7 @@ class BreakingEventRadarWatcher:
             return stale
         if self.redis_client is None:
             return {}
-        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+        if self.snapshot_store.backend == "redis":
             return {}
         try:
             raw = self.redis_client.get(self.redis_key())

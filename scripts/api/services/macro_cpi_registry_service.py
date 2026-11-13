@@ -469,13 +469,6 @@ def _fred_row_date(row: Dict[str, Any]) -> str:
     return str(row.get("observation_date") or row.get("DATE") or row.get("date") or "").strip()
 
 
-def _series_candidates(series_id: str) -> List[str]:
-    for spec in CPI_EVENT_SPECS:
-        if str(spec.get("seriesId")) == series_id and spec.get("seriesCandidates"):
-            return [str(item) for item in spec.get("seriesCandidates") or []]
-    return [series_id]
-
-
 def _fetch_cpi_series_stats(dependencies: MacroCpiRegistryDependencies) -> Dict[str, Dict[str, Any]]:
     """Collector-only: retain dates so consumers cannot rebind the latest value."""
     if dependencies.http_text_get is None:

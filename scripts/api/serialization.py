@@ -7,7 +7,7 @@ import re
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional
-from api.commodity_symbols import COMMODITY_SYMBOLS
+from api.commodity_symbols import COMMODITY_SYMBOLS as COMMODITY_SYMBOLS
 
 try:
     from eth_utils import to_checksum_address
@@ -167,12 +167,6 @@ def parse_interval_minutes(interval: str) -> int:
     return value * 1440
 
 
-def range_to_seconds(range_name: str) -> int:
-    normalized = str(range_name or "1d").strip().lower()
-    mapping = {"1h": 3600, "6h": 21600, "12h": 43200, "1d": 86400, "3d": 259200, "7d": 604800, "30d": 2592000}
-    return mapping.get(normalized, 86400)
-
-
 def _safe_decimal(value: Any) -> Optional[Decimal]:
     if value in (None, ""):
         return None
@@ -189,12 +183,6 @@ def _safe_float(value: Any) -> Optional[float]:
         return float(value)
     except (TypeError, ValueError):
         return None
-
-
-def _to_percent_text(value: Optional[Decimal]) -> Optional[str]:
-    if value is None:
-        return None
-    return format_trade_decimal(value)
 
 
 def build_market_status_case(now_iso: str) -> str:

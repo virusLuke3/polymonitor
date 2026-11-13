@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from telegram import unique_urls as _unique_urls, env_bool as _env_bool
+
 import os
 from typing import Any, Dict, Iterable, Optional
 
@@ -25,18 +27,6 @@ WORLDCUP_QUERY_ALIASES = {
 }
 
 
-def _unique_urls(values: Iterable[str]) -> tuple[str, ...]:
-    urls: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        url = str(value or "").strip().rstrip("/")
-        if not url or url in seen:
-            continue
-        seen.add(url)
-        urls.append(url)
-    return tuple(urls)
-
-
 def _contains_cjk(value: str) -> bool:
     return any("\u4e00" <= ch <= "\u9fff" for ch in str(value or ""))
 
@@ -46,13 +36,6 @@ def _expand_worldcup_query(query: str) -> str:
     for alias, value in WORLDCUP_QUERY_ALIASES.items():
         expanded = expanded.replace(alias, value)
     return " ".join(expanded.split())
-
-
-def _env_bool(name: str, default: bool = False) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _safe_json_list(value: Any) -> list[Any]:

@@ -22,10 +22,7 @@ SOURCE_SEMANTICS_TABLE = "ops.market_source_semantics_reconciliation"
 PLACEHOLDER_CATEGORY = "orderfilled-placeholder"
 PLACEHOLDER_SLUG_PREFIX = "trade-indexer-placeholder-"
 INVALID_IDENTITY_CATEGORY = "invalid-identity-shell"
-PROTOCOL_STRUCTURAL_IDENTITY_KIND = "protocol_structural"
-CANONICAL_GAMMA_IDENTITY_KIND = "canonical_gamma"
 SYNTHETIC_CTF_V2_SLUG_PREFIX = "onchain-condition-v2-"
-PROTOCOL_STRUCTURAL_SLUG_PREFIX = "protocol-structural-"
 ZERO_CONDITION_ID = "0x" + ("0" * 64)
 
 _SQL_ALIAS = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -114,26 +111,6 @@ def explicit_protocol_ctf_v2_sql(market_alias: str = "m") -> str:
     )"""
 
 
-def canonical_reconciliation_exclusion_sql(market_alias: str = "m") -> str:
-    """Rows that must never be sent to Gamma canonical reconciliation."""
-
-    m = _alias(market_alias)
-    return f"""(
-        LOWER(TRIM(COALESCE({m}.category, ''))) = '{PLACEHOLDER_CATEGORY}'
-        OR LOWER(TRIM(COALESCE({m}.slug, ''))) LIKE '{PLACEHOLDER_SLUG_PREFIX}%%'
-        OR {explicit_protocol_combo_sql(m)}
-        OR {explicit_protocol_ghost_sql(m)}
-        OR {explicit_protocol_ctf_v2_sql(m)}
-        OR (
-            COALESCE(TRIM({m}.gamma_market_id), '') = ''
-            AND COALESCE(TRIM({m}.question_id), '') = ''
-            AND LOWER(TRIM(COALESCE({m}.slug, '')))
-                LIKE '{PROTOCOL_STRUCTURAL_SLUG_PREFIX}%%'
-        )
-        OR {explicit_invalid_registry_shell_sql(m)}
-    )"""
-
-
 def binary_serving_identity_sql(
     market_alias: str = "m",
     *,
@@ -190,50 +167,3 @@ def binary_serving_identity_sql(
               )
         )
     )"""
-
-
-def classify_explicit_protocol_shell(
-    *,
-    gamma_market_id: object,
-    question_id: object,
-    slug: object,
-    category: object,
-    tags: object,
-    condition_id: object = None,
-    identity_kind: object = None,
-) -> str | None:
-    """Python mirror used before any Gamma request is attempted."""
-
-    gamma = str(gamma_market_id or "").strip()
-    question = str(question_id or "").strip()
-    kind = str(identity_kind or "").strip().lower()
-    if kind == PROTOCOL_STRUCTURAL_IDENTITY_KIND:
-        return "protocol_structural_anchor"
-    if gamma or question:
-        return None
-    slug_text = str(slug or "").strip().lower()
-    category_text = str(category or "").strip().lower()
-    tags_text = str(tags or "").strip().lower()
-    condition_text = str(condition_id or "").strip().lower()
-    if slug_text.startswith(PROTOCOL_STRUCTURAL_SLUG_PREFIX):
-        return "protocol_structural_anchor"
-    invalid_registry = condition_text == ZERO_CONDITION_ID and (
-        category_text == INVALID_IDENTITY_CATEGORY
-        or (slug_text.startswith("onchain-") and "onchain-registry" in tags_text)
-    )
-    if invalid_registry:
-        return "protocol_invalid_registry_shell"
-    combo = (
-        "data-api-combo" in tags_text
-        or (slug_text.startswith("combo-") and "combo" in tags_text)
-    )
-    if combo:
-        return "protocol_combo_shell"
-    if slug_text.startswith(SYNTHETIC_CTF_V2_SLUG_PREFIX):
-        return "protocol_ctf_v2_shell"
-    ghost = (
-        category_text in {"ghost", "[ghost]"}
-        or slug_text.startswith("ghost-market-")
-        or ("orphaned" in tags_text and "unknown" in tags_text)
-    )
-    return "protocol_ghost_shell" if ghost else None

@@ -5,7 +5,7 @@ import json
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass
-from typing import Any, Callable, Dict
+from typing import Any, Callable
 
 from api.context import resolve_optional_service_callable, resolve_service_callable
 from .crypto_funding import contracts, providers, universe
@@ -67,8 +67,6 @@ CryptoFundingContext = Mapping[str, Any] | CryptoFundingDependencies
 def _dependencies(
     context: CryptoFundingContext,
 ) -> CryptoFundingDependencies:
-    if isinstance(context, CryptoFundingDependencies):
-        return context
     return CryptoFundingDependencies.from_context(context)
 
 

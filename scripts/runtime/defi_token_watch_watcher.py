@@ -9,7 +9,6 @@ import json
 import os
 import sys
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -27,6 +26,9 @@ try:
 except ImportError:
     requests = None
 
+from api.context import worker_application
+from runtime.seed_meta import utc_now_iso
+from runtime.seed_meta import redis_key as _redis_key
 from runtime.redis_snapshot_store import seed_writer
 from api.clients.source_transport import source_session
 from api.config import load_api_settings
@@ -44,21 +46,7 @@ SEED_META_CACHE_KEY = "defi-token-watch"
 SEED_META_SERVICE_NAME = "polydata-defi-token-watch-seed.service"
 
 
-class _LoggerAdapter:
-    def exception(self, message: str, *args: Any, **kwargs: Any) -> None:
-        print(f"[defi-token-watch] ERROR {message % args if args else message}", file=sys.stderr)
-
-
-class _AppAdapter:
-    logger = _LoggerAdapter()
-
-
-def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def _redis_key(prefix: str, namespace: str, cache_key: str) -> str:
-    return f"{str(prefix or '')}{namespace}:{cache_key}"
+WORKER_APP = worker_application('defi-token-watch')
 
 
 class DefiTokenWatchWatcher:
@@ -110,7 +98,7 @@ class DefiTokenWatchWatcher:
     def service_context(self) -> Dict[str, Any]:
         return {
             "SETTINGS": self.settings,
-            "app": _AppAdapter(),
+            "app": WORKER_APP,
             "http_json_get": self.http_json_get,
             "utc_now_iso": utc_now_iso,
         }
@@ -119,7 +107,7 @@ class DefiTokenWatchWatcher:
         stale = self.snapshot_store.get_stale(self.namespace(), self.cache_key())
         if isinstance(stale, dict):
             return stale
-        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+        if self.snapshot_store.backend == "redis":
             return {}
         try:
             raw = self.redis_client.get(self.redis_key())

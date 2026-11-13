@@ -88,8 +88,6 @@ RuntimeServiceContext = Mapping[str, Any] | RuntimeServiceDependencies
 def _dependencies(
     context: RuntimeServiceContext,
 ) -> RuntimeServiceDependencies:
-    if isinstance(context, RuntimeServiceDependencies):
-        return context
     return RuntimeServiceDependencies.from_context(context)
 
 
