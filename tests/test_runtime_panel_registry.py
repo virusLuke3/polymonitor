@@ -46,11 +46,7 @@ def test_runtime_panel_modules_have_unique_ids_and_routes():
     assert all(route.startswith("/runtime/") for route in routes)
 
 
-def test_runtime_panel_blueprint_registers_all_routes(monkeypatch):
-    from telegram.topics import runtime_bridge
-
-    published = []
-    monkeypatch.setattr(runtime_bridge, "publish_panel_snapshot", lambda *args: published.append(args))
+def test_runtime_panel_blueprint_registers_all_routes():
     app = Flask(__name__)
     helpers = {
         "COMMODITY_SYMBOLS": [],
@@ -175,7 +171,6 @@ def test_runtime_panel_blueprint_registers_all_routes(monkeypatch):
     detail_response = client.get("/runtime/world/natural-hazards/events/earthquake%3Ausgs%3Atest")
     assert detail_response.status_code == 200
     assert detail_response.get_json()["event"]["id"] == "earthquake:usgs:test"
-    assert published == []
 
 
 def test_default_workspace_panel_ids_include_runtime_and_static_panels():

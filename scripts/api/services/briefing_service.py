@@ -222,9 +222,6 @@ def create_briefing(principal: Principal, title: Any, metadata: Mapping[str, Any
         )
         conn.commit()
         return _serialize_registry(row)
-    except AuthError:
-        conn.rollback()
-        raise
     except Exception:
         conn.rollback()
         raise
@@ -256,9 +253,6 @@ def revoke_briefing(principal: Principal, briefing_id: str, metadata: Mapping[st
             target_id=normalized_id,
         )
         conn.commit()
-    except AuthError:
-        conn.rollback()
-        raise
     except Exception:
         conn.rollback()
         raise

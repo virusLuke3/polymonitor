@@ -12,7 +12,7 @@ export default defineConfig({
   expect: { timeout: 15_000 },
   fullyParallel: false,
   workers: 1,
-  reporter: [['list'], ['json', { outputFile: 'artifacts/world-event-map-e2e/results.json' }]],
+  reporter: process.env.PLAYWRIGHT_JSON_OUTPUT_FILE ? [['list'], ['json']] : 'list',
   use: {
     baseURL,
     // Preview registers the production service worker; keep intercepted API
@@ -22,8 +22,8 @@ export default defineConfig({
     locale: 'en-US',
     colorScheme: 'light',
     headless: true,
-    trace: 'retain-on-failure',
-    screenshot: 'only-on-failure',
+    trace: 'off',
+    screenshot: 'off',
     video: 'off',
   },
   projects: [{

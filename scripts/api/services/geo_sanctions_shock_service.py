@@ -262,10 +262,6 @@ def _empty_payload(ctx: GeoSanctionsShockContext, *, status: str = "degraded", s
     }
 
 
-def _seed_cache_ttl_seconds(ctx: GeoSanctionsShockContext) -> int:
-    return max(300, int(_dependencies(ctx).settings.geo_shock_ttl_seconds or 900))
-
-
 def _now_epoch() -> int:
     return int(datetime.now(timezone.utc).timestamp())
 

@@ -17,7 +17,7 @@ test:
 	PYTHONDONTWRITEBYTECODE=1 "$(PYTHON)" -m pytest -q $(PYTEST_ARGS)
 
 clean:
-	rm -rf -- artifacts test-results webpage/artifacts webpage/test-results webpage/playwright-report webpage/dist webpage/.next webpage/.vite webpage/node_modules/.vite .pytest_cache .ruff_cache __pycache__
+	rm -rf -- .planning/artifacts webpage/webpage/artifacts artifacts test-results webpage/artifacts webpage/test-results webpage/playwright-report webpage/dist webpage/.next webpage/.vite webpage/node_modules/.vite .pytest_cache .ruff_cache __pycache__
 	find agent scripts telegram tests -type d -name __pycache__ -prune -exec rm -rf -- {} +
 
 dev:

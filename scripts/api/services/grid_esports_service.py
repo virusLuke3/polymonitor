@@ -721,36 +721,6 @@ def fetch_live_grid_esports_payload(
     )
 
 
-def _degraded_error_payload(
-    ctx: GridEsportsContext,
-    *,
-    limit: int,
-    error: Exception,
-) -> Dict[str, Any]:
-    dependencies = _dependencies(ctx)
-    settings = dependencies.settings
-    generated_at = _generated_at(dependencies)
-    message = str(error).strip()
-    return normalize_grid_esports_payload(
-        {
-            "generatedAt": generated_at,
-            "source": "GRID Open Access",
-            "sourceUrl": getattr(settings, "grid_source_url", ""),
-            "status": "degraded",
-            "sources": {
-                "gridCentralData": "error",
-                "gridSeriesState": "not-queried",
-                "polymarket": "optional-local-match",
-            },
-            "error": message[:240],
-            "items": [],
-        },
-        settings=settings,
-        limit=limit,
-        generated_at=generated_at,
-    )
-
-
 def _get_legacy_grid_esports_snapshot(
     ctx: GridEsportsContext,
     limit: int = DEFAULT_GRID_ESPORTS_LIMIT,

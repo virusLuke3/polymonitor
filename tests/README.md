@@ -15,12 +15,6 @@ permanent quarantine list: collection errors and failing cases fail the run.
 Use mocks and temporary storage; do not run collectors, access production
 credentials or send real notifications from unit tests.
 
-The NBA suite is colocated with its module:
-
-```bash
-make test PYTEST_ARGS='scripts/NBA/test_nba_pipeline.py'
-```
-
 Frontend map behavior is tested in the maintained Vitest and Playwright
 suites. The old Python screenshot-size smoke test and the fixed-date SQLite
 coverage script have been removed.

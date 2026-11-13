@@ -50,7 +50,6 @@ EXTERNAL_RELEASE_PREFIXES = (
     "deploy/",
     "document/",
     "docs/",
-    "scripts/NBA/",
     "scripts/clickhouse/",
     "scripts/db/archive/",
     "scripts/dev/",

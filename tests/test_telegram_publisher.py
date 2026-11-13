@@ -70,7 +70,6 @@ def make_settings(state_path: str) -> TelegramSettings:
         watch_interval_seconds=60,
         dry_run=False,
         disable_notification=False,
-        publish_on_api_fetch=False,
         news=TopicConfig(name="news", chat_id="@news"),
         intel=TopicConfig(name="intel", chat_id="@intel"),
         alpha=TopicConfig(name="alpha", chat_id="@alpha"),

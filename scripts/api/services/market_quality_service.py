@@ -453,21 +453,6 @@ def _query_one_with_availability(
         raise MarketQualityQueryError("optional-aggregate-query", exc) from exc
 
 
-def _query_all_with_availability(
-    dependencies: MarketQualityDependencies,
-    sql: str,
-    params: tuple[Any, ...] = (),
-) -> tuple[list[dict[str, Any]], bool]:
-    try:
-        rows = dependencies.query_all(sql, params) if params else dependencies.query_all(sql)
-        return [dict(row) for row in rows or []], True
-    except Exception as exc:
-        dependencies.application.logger.exception(
-            "market-data-quality optional detail query unavailable"
-        )
-        raise MarketQualityQueryError("optional-detail-query", exc) from exc
-
-
 def _optional_table_exists(
     dependencies: MarketQualityDependencies,
     table_name: str,

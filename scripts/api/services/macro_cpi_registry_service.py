@@ -7,7 +7,7 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlsplit
 
 from api.services.macro_data_contract import month_key, monthly_metric, shift_month, value_label, number
@@ -1125,21 +1125,6 @@ def get_fed_reaction_growth_risk_board_snapshot(
     limit: int = DEFAULT_ITEM_LIMIT,
 ) -> Dict[str, Any]:
     return get_macro_cpi_registry_snapshot(ctx, "fed-reaction-growth-risk-board", limit=limit)
-
-
-def normalize_macro_cpi_registry_payload(
-    payload: Any,
-    *,
-    ctx: Mapping[str, Any],
-    panel_id: str,
-    limit: int = DEFAULT_ITEM_LIMIT,
-) -> Dict[str, Any]:
-    return _normalize_macro_cpi_registry_payload(
-        payload,
-        dependencies=MacroCpiRegistryDependencies.from_context(ctx),
-        panel_id=panel_id,
-        limit=limit,
-    )
 
 
 def _normalize_macro_cpi_registry_payload(

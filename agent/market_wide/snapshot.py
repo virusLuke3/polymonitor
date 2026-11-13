@@ -345,10 +345,6 @@ def _json_key(payload: dict[str, Any]) -> str:
     return json.dumps(payload, sort_keys=True, ensure_ascii=True)
 
 
-def _json_safe_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    return json.loads(json.dumps(payload, ensure_ascii=True, default=str))
-
-
 def _cached_signal_items(helpers: dict[str, Any], namespace: str, cache_key: str, limit: int) -> list[Any]:
     return _items(_read_cached_snapshot(helpers, namespace, cache_key))[:limit]
 
@@ -441,7 +437,7 @@ def build_market_wide_seed_payload(helpers: dict[str, Any], lens: Any, *, run_id
         "suspiciousSignals": _cached_signal_items(helpers, SIGNAL_SNAPSHOT_NAMESPACE_SUSPICIOUS, _json_key({"limit": 12}), 10),
         "forecastMemory": _forecast_memory_items(helpers, normalized_lens, limit=24),
     }
-    payload = _json_safe_payload(payload)
+    payload = json.loads(json.dumps(payload, ensure_ascii=True, default=str))
     payload["forecastRunId"] = run_id or forecast_run_id(payload)
     return payload
 

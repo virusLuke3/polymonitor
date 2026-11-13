@@ -7,7 +7,6 @@ from api.services.finance_watch.common import (
     FINANCE_WATCH_CACHE_KEY,
     FinanceWatchContext,
     _dependencies,
-    _payload,
     finance_watch_namespace,
     utc_now_iso,
 )
@@ -124,26 +123,6 @@ def build_finance_watch_panel_payload(
             limit,
         )
     raise KeyError(f"unknown finance watch panel: {panel_id}")
-
-
-def build_all_finance_watch_panel_payloads(
-    ctx: FinanceWatchContext,
-    limit: int = 24,
-) -> Dict[str, Dict[str, Any]]:
-    dependencies = _dependencies(ctx)
-    external = _read_finance_external(dependencies)
-    payloads: Dict[str, Dict[str, Any]] = {}
-    for panel_id in FINANCE_WATCH_PANEL_IDS:
-        try:
-            payloads[panel_id] = build_finance_watch_panel_payload(
-                dependencies,
-                panel_id,
-                limit=limit,
-                external=external,
-            )
-        except Exception as exc:
-            payloads[panel_id] = _payload(panel_id, title=panel_id.upper(), items=[], status="error", sources={"builder": "error"}, summary={"error": str(exc)})
-    return payloads
 
 
 def _trim_payload(payload: Dict[str, Any], limit: int) -> Dict[str, Any]:

@@ -307,9 +307,6 @@ def add_watchlist_market(
         )
         conn.commit()
         return {"marketId": normalized_market_id, "watchlistId": watchlist_id, "created": not bool(existing)}
-    except AuthError:
-        conn.rollback()
-        raise
     except Exception:
         conn.rollback()
         raise
@@ -344,9 +341,6 @@ def remove_watchlist_market(principal: Principal, market_id: int, metadata: Mapp
             target_id=str(market_id),
         )
         conn.commit()
-    except AuthError:
-        conn.rollback()
-        raise
     except Exception:
         conn.rollback()
         raise
@@ -434,9 +428,6 @@ def create_alert_rule(
         )
         conn.commit()
         return _serialize_rule(row)
-    except AuthError:
-        conn.rollback()
-        raise
     except Exception:
         conn.rollback()
         raise
@@ -468,9 +459,6 @@ def delete_alert_rule(principal: Principal, rule_id: str, metadata: Mapping[str,
             target_id=normalized_rule_id,
         )
         conn.commit()
-    except AuthError:
-        conn.rollback()
-        raise
     except Exception:
         conn.rollback()
         raise
@@ -559,9 +547,6 @@ def mark_alert_read(principal: Principal, event_id: str, metadata: Mapping[str, 
             target_id=normalized_event_id,
         )
         conn.commit()
-    except AuthError:
-        conn.rollback()
-        raise
     except Exception:
         conn.rollback()
         raise
@@ -729,9 +714,6 @@ def update_notification_preferences(
             },
         )
         conn.commit()
-    except AuthError:
-        conn.rollback()
-        raise
     except Exception:
         conn.rollback()
         raise

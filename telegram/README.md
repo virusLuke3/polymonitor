@@ -62,16 +62,7 @@ Run continuously:
 python -m telegram.topics.publisher --watch
 ```
 
-To publish the same payload when the live website/API fetches a supported panel,
-enable the API-side bridge on the machine running `polydata-api.service`:
-
-```bash
-POLYDATA_TELEGRAM_PUBLISH_ON_API_FETCH=true
-```
-
-The API returns normally while a background thread sends Telegram messages.
-`data/telegram_state.json` deduplicates messages so repeated page refreshes do
-not repost the same update.
+Publishing belongs to the standalone publisher above; reading a website/API panel never sends Telegram messages.
 
 ## Panel delivery catalog
 

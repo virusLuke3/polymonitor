@@ -717,16 +717,6 @@ def _probe_hls_stream_http(
         return _hls_probe_result(False, "timeout" if "timed out" in message.lower() else "blocked", error=message[:260])
 
 
-def _probe_hls_stream(
-    ctx: Mapping[str, Any],
-    item: Dict[str, Any],
-) -> Dict[str, Any]:
-    return _probe_hls_stream_with_dependencies(
-        LiveVideoSourceDependencies.from_context(ctx),
-        item,
-    )
-
-
 def _probe_hls_stream_with_dependencies(
     dependencies: LiveVideoSourceDependencies,
     item: Dict[str, Any],
@@ -1178,26 +1168,6 @@ def _youtube_categories(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return [{"id": category, "label": CATEGORY_LABELS[category], "count": counts.get(category, 0)} for category in CATEGORY_ORDER if counts.get(category, 0)]
 
 
-def normalize_market_youtube_channels_payload(
-    payload: Any,
-    *,
-    ctx: Mapping[str, Any] | None = None,
-    limit: int = DEFAULT_MARKET_TV_WIRE_LIMIT,
-    category: str | None = None,
-) -> Dict[str, Any]:
-    dependencies = (
-        LiveVideoSourceDependencies.from_context(ctx)
-        if ctx is not None
-        else None
-    )
-    return _normalize_market_youtube_channels_payload(
-        payload,
-        dependencies=dependencies,
-        limit=limit,
-        category=category,
-    )
-
-
 def _normalize_market_youtube_channels_payload(
     payload: Any,
     *,
@@ -1443,26 +1413,6 @@ def _requested_category(value: Any) -> str | None:
     if not raw or raw == "all":
         return None
     return raw if raw in CATEGORY_LABELS else None
-
-
-def normalize_market_tv_wire_payload(
-    payload: Any,
-    *,
-    ctx: Mapping[str, Any] | None = None,
-    limit: int = DEFAULT_MARKET_TV_WIRE_LIMIT,
-    category: str | None = None,
-) -> Dict[str, Any]:
-    dependencies = (
-        LiveVideoSourceDependencies.from_context(ctx)
-        if ctx is not None
-        else None
-    )
-    return _normalize_market_tv_wire_payload(
-        payload,
-        dependencies=dependencies,
-        limit=limit,
-        category=category,
-    )
 
 
 def _normalize_market_tv_wire_payload(

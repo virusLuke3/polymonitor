@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Iterable
 
 
 CATALOG_VERSION = "telegram-delivery-2026-11-12.v3"
@@ -254,27 +253,3 @@ SERVER_RUNTIME_PANEL_IDS = tuple(
 
 def delivery_contract(panel_id: str) -> DeliveryContract | None:
     return DELIVERY_CATALOG.get(str(panel_id or "").strip())
-
-
-def coverage_report(
-    *,
-    frontend_panel_ids: Iterable[str] = FRONTEND_PANEL_IDS,
-    runtime_panel_ids: Iterable[str] = SERVER_RUNTIME_PANEL_IDS,
-) -> dict[str, object]:
-    frontend = {str(value) for value in frontend_panel_ids}
-    runtime = {str(value) for value in runtime_panel_ids}
-    catalog_ids = set(DELIVERY_CATALOG)
-    mode_counts = {
-        mode.value: sum(contract.mode is mode for contract in DELIVERY_CATALOG.values())
-        for mode in DeliveryMode
-    }
-    return {
-        "catalogVersion": CATALOG_VERSION,
-        "catalogCount": len(catalog_ids),
-        "frontendCount": len(frontend),
-        "runtimeCount": len(runtime),
-        "missingFrontend": sorted(frontend - catalog_ids),
-        "missingRuntime": sorted(runtime - catalog_ids),
-        "modeCounts": mode_counts,
-        "valid": not (frontend - catalog_ids or runtime - catalog_ids),
-    }

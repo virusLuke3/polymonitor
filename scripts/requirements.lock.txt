@@ -58,8 +58,6 @@ distro==1.9.0
     # via
     #   langsmith
     #   openai
-duckdb==1.5.5
-    # via -r scripts/requirements.txt
 eth-hash==0.8.0
     # via
     #   -r scripts/requirements.txt
@@ -176,8 +174,6 @@ psycopg-binary==3.3.4
     # via psycopg
 py-vapid==1.9.4
     # via pywebpush
-pyarrow==25.0.0
-    # via -r scripts/requirements.txt
 pycparser==3.0
     # via cffi
 pycryptodome==3.23.0

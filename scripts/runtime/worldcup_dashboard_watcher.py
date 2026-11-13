@@ -38,6 +38,7 @@ except ImportError:
 
 from runtime.redis_snapshot_store import seed_writer
 from api.config import load_api_settings
+from api.services.worldcup.builder import build_worldcup_dashboard_payload
 from api.services import worldcup_dashboard_service
 from db import DEFAULT_DB_PATH, dict_from_row, get_connection
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot, retained_snapshot
@@ -223,7 +224,7 @@ class WorldCupDashboardWatcher:
             worldcup_dashboard_service.WORLDCUP_DASHBOARD_NAMESPACE,
             worldcup_dashboard_service.WORLDCUP_DASHBOARD_CACHE_KEY,
         )
-        if isinstance(stale, dict) and not worldcup_dashboard_service._has_generated_fallback_artifacts(stale):
+        if isinstance(stale, dict) and not worldcup_dashboard_service.has_generated_fallback_artifacts(stale):
             return stale
         if self.redis_client is None:
             return {}
@@ -233,7 +234,7 @@ class WorldCupDashboardWatcher:
             raw = self.redis_client.get(self.redis_key())
             if raw:
                 payload = json.loads(raw)
-                if isinstance(payload, dict) and not worldcup_dashboard_service._has_generated_fallback_artifacts(payload):
+                if isinstance(payload, dict) and not worldcup_dashboard_service.has_generated_fallback_artifacts(payload):
                     return payload
         except Exception:
             print("[worldcup-dashboard] WARN redis read failed", file=sys.stderr)
@@ -315,7 +316,7 @@ class WorldCupDashboardWatcher:
     def run_once(self) -> Dict[str, Any]:
         previous = self.load_previous_payload()
         try:
-            payload = worldcup_dashboard_service.build_worldcup_dashboard_payload(self.service_context())
+            payload = build_worldcup_dashboard_payload(self.service_context())
         except Exception as exc:
             if previous:
                 preserved = retained_snapshot(previous)

@@ -14,7 +14,7 @@ from api.services.auth_service import AuthError, Principal, audit_action
 
 
 PANEL_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,79}$")
-MAX_PANELS = 100
+MAX_PANELS = 1000
 MAX_PAYLOAD_BYTES = 64 * 1024
 REGIONS = frozenset({"global", "america", "mena", "eu", "asia", "latam", "africa", "oceania"})
 VIEW_MODES = frozenset({"2d", "3d", "heatmap", "density"})
@@ -233,9 +233,6 @@ def put_workspace_layout(
         )
         conn.commit()
         return _serialize(row)
-    except AuthError:
-        conn.rollback()
-        raise
     except Exception:
         conn.rollback()
         raise

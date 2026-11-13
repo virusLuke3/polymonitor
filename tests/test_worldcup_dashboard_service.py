@@ -7,6 +7,7 @@ from api.services.worldcup import schedule
 from unittest.mock import patch
 
 
+from api.services.worldcup.builder import build_worldcup_dashboard_payload
 from api.services import worldcup_dashboard_service
 from api.services.worldcup.odds import bookmaker
 from api.services.worldcup import builder as worldcup_builder
@@ -175,7 +176,7 @@ def test_worldcup_dashboard_links_strict_polymarket_market(before_tournament):
         "get_worldcup_intel_snapshot",
         return_value={"status": "ok", "weather": [], "news": [], "signals": []},
     ):
-        payload = worldcup_dashboard_service.build_worldcup_dashboard_payload(ctx)
+        payload = build_worldcup_dashboard_payload(ctx)
 
     assert payload["providerStates"]["odds"] == "ok"
     assert payload["summary"]["odds"] == 1
@@ -240,7 +241,7 @@ def test_worldcup_dashboard_rejects_event_level_false_positive_market(before_tou
         "get_worldcup_intel_snapshot",
         return_value={"status": "ok", "weather": [], "news": [], "signals": []},
     ):
-        payload = worldcup_dashboard_service.build_worldcup_dashboard_payload(ctx)
+        payload = build_worldcup_dashboard_payload(ctx)
 
     assert payload["providerStates"]["odds"] in {"empty", "missing-key"}
     assert payload["odds"] == []
@@ -324,7 +325,7 @@ def test_worldcup_dashboard_links_match_result_market_group(before_tournament):
         "get_worldcup_intel_snapshot",
         return_value={"status": "ok", "weather": [], "news": [], "signals": []},
     ):
-        payload = worldcup_dashboard_service.build_worldcup_dashboard_payload(ctx)
+        payload = build_worldcup_dashboard_payload(ctx)
 
     assert payload["providerStates"]["odds"] == "ok"
     odds = payload["odds"][0]
@@ -429,7 +430,7 @@ def test_worldcup_dashboard_merges_espn_scoreboard_results():
         "get_worldcup_intel_snapshot",
         return_value={"status": "ok", "weather": [], "news": [], "signals": []},
     ):
-        payload = worldcup_dashboard_service.build_worldcup_dashboard_payload(ctx, include_live_market_links=False)
+        payload = build_worldcup_dashboard_payload(ctx, include_live_market_links=False)
 
     usa = next(match for match in payload["matches"] if match["id"] == "wc2026-019")
     australia = next(match for match in payload["matches"] if match["id"] == "wc2026-020")

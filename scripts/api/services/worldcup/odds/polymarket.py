@@ -634,49 +634,6 @@ def _search_market_sources(ctx: Dict[str, Any], query: str, *, limit: int = 8) -
     return _gamma_search(ctx, query, limit=limit)
 
 
-def _gamma_scan_active(ctx: Dict[str, Any], *, limit: int = 120) -> List[Dict[str, Any]]:
-    getter = ctx.get("http_json_get")
-    if not callable(getter):
-        return []
-    settings = ctx.get("SETTINGS")
-    base_url = str(getattr(settings, "gamma_api_base", "") or POLYMARKET_GAMMA_API_BASE).rstrip("/")
-    rows: List[Dict[str, Any]] = []
-    seen: set[str] = set()
-    param_sets = [
-        {"active": "true", "closed": "false", "limit": limit, "offset": 0, "order": "id", "ascending": "false"},
-        {"active": "true", "closed": "false", "limit": limit, "offset": 0, "order": "volume24hr", "ascending": "false"},
-        {"active": "true", "closed": "false", "limit": limit, "offset": 0, "q": "world cup"},
-        {"active": "true", "closed": "false", "limit": limit, "offset": 0, "q": "fifa"},
-        {"active": "true", "closed": "false", "limit": limit, "offset": 0, "q": "soccer"},
-        {"active": "true", "closed": "false", "limit": limit, "offset": 0, "tag_slug": "soccer"},
-        {"active": "true", "closed": "false", "limit": limit, "offset": 0, "tag_slug": "sports"},
-    ]
-    for path in ("/events", "/markets"):
-        for params in param_sets:
-            try:
-                payload = getter(f"{base_url}{path}", params=params, timeout=10, headers=_headers())
-            except Exception:
-                continue
-            items = payload if isinstance(payload, list) else payload.get("data") if isinstance(payload, dict) else []
-            if not isinstance(items, list):
-                continue
-            for item in items:
-                if not isinstance(item, dict):
-                    continue
-                nested_markets = item.get("markets") if isinstance(item.get("markets"), list) else []
-                candidates = nested_markets if nested_markets else [item]
-                for candidate in candidates:
-                    if not isinstance(candidate, dict):
-                        continue
-                    normalized = _normalize_market_candidate(candidate, item if nested_markets else None)
-                    key = str(normalized.get("slug") or normalized.get("gammaMarketId") or normalized.get("marketTitle") or "")
-                    if not key or key in seen:
-                        continue
-                    seen.add(key)
-                    rows.append({**normalized, "source": "gamma-scan"})
-    return rows
-
-
 def _significant_market_search_tokens(query: Any) -> List[str]:
     stop = {"and", "the", "vs", "v", "world", "cup", "fifa", "soccer", "football", "match", "market"}
     tokens: List[str] = []

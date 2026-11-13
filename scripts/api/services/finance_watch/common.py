@@ -278,18 +278,3 @@ def _format_pct(value: Any) -> str:
     if number is None:
         return "--"
     return f"{number:+.2f}%"
-
-
-def _short_time(value: Any) -> str:
-    if not value:
-        return "--"
-    try:
-        timestamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except ValueError:
-        return "--"
-    delta = timestamp - datetime.now(timezone.utc)
-    hours = int(delta.total_seconds() // 3600)
-    if hours > 0:
-        return f"{hours}h reset"
-    minutes = int(delta.total_seconds() // 60)
-    return f"{max(0, minutes)}m reset"

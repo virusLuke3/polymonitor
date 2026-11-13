@@ -4,7 +4,6 @@ from typing import Any, Dict, Optional
 
 from api.services.worldcup.builder import (
     build_worldcup_core_payload,
-    build_worldcup_dashboard_payload,
     build_worldcup_live_payload,
     merge_worldcup_core_live_payload,
 )
@@ -20,7 +19,6 @@ from api.services.worldcup.panels import (
     panel_ttl_seconds,
     store_worldcup_panel_payloads,
 )
-from api.services.worldcup.schedule import OPENFOOTBALL_2026_URL, WORLD_CUP_CITIES
 
 WORLDCUP_DASHBOARD_NAMESPACE = "snapshot:sports:worldcup-dashboard"
 WORLDCUP_DASHBOARD_CACHE_KEY = "dashboard-v1"
@@ -31,12 +29,6 @@ WORLDCUP_LIVE_CACHE_KEY = "live-v1"
 DEFAULT_TTL_SECONDS = 900
 DEFAULT_CORE_TTL_SECONDS = 24 * 60 * 60
 DEFAULT_LIVE_TTL_SECONDS = 5 * 60
-
-# Backward-compatible aliases for watcher/API callers that imported old private helpers.
-_normalize_payload = normalize_payload
-_has_generated_fallback_artifacts = has_generated_fallback_artifacts
-_fallback_worldcup_dashboard_payload = fallback_worldcup_dashboard_payload
-
 
 def _settings_int(ctx: Dict[str, Any], name: str, default: int) -> int:
     settings = ctx.get("SETTINGS")

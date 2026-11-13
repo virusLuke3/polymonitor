@@ -372,8 +372,8 @@ def test_market_tv_wire_hls_probe_uses_http_fallback_when_ffprobe_missing(monkey
     monkeypatch.setattr(service.shutil, "which", lambda _: None)
     monkeypatch.setattr(service, "urlopen", fake_urlopen)
 
-    probe = service._probe_hls_stream(
-        {"market_tv_hls_probe_timeout_seconds": 3},
+    probe = service._probe_hls_stream_with_dependencies(
+        service.LiveVideoSourceDependencies.from_context({"market_tv_hls_probe_timeout_seconds": 3}),
         {"sourceType": "hls", "hlsUrl": "https://example.com/master.m3u8"},
     )
 

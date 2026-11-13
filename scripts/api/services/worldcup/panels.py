@@ -58,10 +58,6 @@ def _selected_match(payload: Dict[str, Any]) -> Dict[str, Any]:
     return (upcoming or [match for match in matches if isinstance(match, dict)] or [{}])[0]
 
 
-def _match_id(payload: Dict[str, Any]) -> str:
-    return str(_selected_match(payload).get("id") or "")
-
-
 def _selected_odds(payload: Dict[str, Any], match_id: str) -> list[Dict[str, Any]]:
     rows = payload.get("odds") if isinstance(payload.get("odds"), list) else []
     return [row for row in rows if isinstance(row, dict) and str(row.get("matchId") or "") == match_id]

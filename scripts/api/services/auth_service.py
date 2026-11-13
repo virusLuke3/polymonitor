@@ -381,9 +381,6 @@ def login(username: Any, password: Any, metadata: Mapping[str, Any]) -> tuple[Pr
             raw_token,
             csrf_token,
         )
-    except AuthError:
-        conn.rollback()
-        raise
     except Exception:
         conn.rollback()
         raise
@@ -510,9 +507,6 @@ def authenticate_request(
                 raise AuthError(403, "CROSS_SITE_REJECTED", "Cross-site state changes are not allowed.")
         conn.commit()
         return principal
-    except AuthError:
-        conn.rollback()
-        raise
     except Exception:
         conn.rollback()
         raise
@@ -640,9 +634,6 @@ def change_password(principal: Principal, current: Any, replacement: Any, metada
             target_id=str(principal.user_id),
         )
         conn.commit()
-    except AuthError:
-        conn.rollback()
-        raise
     except Exception:
         conn.rollback()
         raise
@@ -764,9 +755,6 @@ def revoke_api_key(principal: Principal, key_id: str, metadata: Mapping[str, Any
             target_id=normalized_key_id,
         )
         conn.commit()
-    except AuthError:
-        conn.rollback()
-        raise
     except Exception:
         conn.rollback()
         raise

@@ -449,20 +449,6 @@ def _parse_weather_bin(label: Any, *, family: str, default_unit: str = "F") -> O
     return _parse_generic_weather_bin(label, family)
 
 
-def _matches_date(text: str, dates: List[Dict[str, str]]) -> bool:
-    for item in dates:
-        candidates = (
-            item["iso"],
-            f"{item['month']} {item['day']}",
-            f"{item['monthShort']} {item['day']}",
-            f"{item['month']} {item['day']} {item['year']}",
-            f"{item['monthShort']} {item['day']} {item['year']}",
-        )
-        if any(candidate in text for candidate in candidates):
-            return True
-    return False
-
-
 def _matched_date_iso(text: str, dates: List[Dict[str, str]]) -> Optional[str]:
     for item in dates:
         candidates = (

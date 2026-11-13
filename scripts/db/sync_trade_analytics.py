@@ -41,6 +41,7 @@ from db.trade_v2 import (
     get_trade_read_source,
     get_trade_stats_source,
     sql_identifier,
+    parse_trade_timestamp,
     uint256_storage_to_text,
 )
 from oracle.settlement_parser import (
@@ -122,24 +123,6 @@ def _parse_int(value: Any) -> Optional[int]:
         return int(value)
     except (TypeError, ValueError):
         return None
-
-
-def _parse_trade_time(value: Any) -> Optional[datetime]:
-    if value is None:
-        return None
-    text = str(value).strip()
-    if not text:
-        return None
-    normalized = text.replace(" UTC", "Z").replace(" ", "T")
-    if normalized.endswith("Z"):
-        normalized = normalized[:-1] + "+00:00"
-    try:
-        parsed = datetime.fromisoformat(normalized)
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
 
 
 def _format_mysql_datetime(value: Optional[datetime]) -> Optional[str]:
@@ -250,7 +233,7 @@ def _format_trade_threshold(value: datetime, *, trade_source: str) -> str:
 
 
 def _is_at_or_before_threshold(value: Any, threshold_dt: datetime) -> bool:
-    parsed = _parse_trade_time(value)
+    parsed = parse_trade_timestamp(value)
     return parsed is not None and parsed <= threshold_dt
 
 
@@ -558,7 +541,7 @@ def _fetch_market_end_date_map(
 
 
 def _market_end_date_is_past(end_date: Any, now: datetime) -> bool:
-    parsed = _parse_trade_time(end_date)
+    parsed = parse_trade_timestamp(end_date)
     return bool(parsed and parsed <= now)
 
 
@@ -1077,7 +1060,7 @@ def _build_trade_address_rows(
         log_index = _parse_int(row.get("log_index"))
         outcome = str(row.get("outcome") or "").upper() or None
 
-        trade_dt = _parse_trade_time(row.get("timestamp"))
+        trade_dt = parse_trade_timestamp(row.get("timestamp"))
         trade_time = _format_mysql_datetime(trade_dt)
         trade_date = _trade_date_text(trade_dt)
         tx_hash = str(row.get("tx_hash") or "")

@@ -5,7 +5,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, time, timezone
-from typing import Any, Callable, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 from api.context import resolve_optional_service_callable, resolve_service_callable
@@ -136,10 +136,6 @@ def _html_to_lines(
     else:
         text = re.sub(r"<[^>]+>", "\n", html)
     return [re.sub(r"\s+", " ", line).strip() for line in text.splitlines() if line.strip()]
-
-
-def _lines_to_text(lines: Iterable[str]) -> str:
-    return re.sub(r"\s+", " ", " ".join(lines)).strip()
 
 
 def _month_number(raw: str) -> int:

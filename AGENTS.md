@@ -13,6 +13,9 @@ Use in-memory inspection, and delete task-created scratch/build outputs after
 use. When a file deliverable is requested, keep one final format unless the user
 explicitly asks for several. Reuse the existing feature document instead of
 adding a new audit/report/manifest stack. Preserve live data and unrelated work.
+For code cleanup, use the installed `code-simplification` skill and trace
+frontend, API, worker and CLI consumers before calling code unused. A missing
+route registration does not make a still-used product service disposable.
 
 Before adding or upgrading any Panel, read
 `document/开发/Panel开发统一指南.md`, `docs/panel-data-pipeline.md`, and

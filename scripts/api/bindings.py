@@ -1121,6 +1121,12 @@ def build_blueprints(runtime: ServiceRuntime):
                 get_web_push=web_push_service.get_status,
                 subscribe_web_push=web_push_service.upsert_subscription,
                 unsubscribe_web_push=web_push_service.revoke_subscription,
+                get_layout=workspace_layout_service.get_workspace_layout,
+                put_layout=workspace_layout_service.put_workspace_layout,
+                list_briefings=briefing_service.list_briefings,
+                create_briefing=briefing_service.create_briefing,
+                revoke_briefing=briefing_service.revoke_briefing,
+                get_public_briefing=briefing_service.get_public_briefing,
             )
         ),
         mcp_routes.create_mcp_blueprint(

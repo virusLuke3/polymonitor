@@ -71,7 +71,6 @@ class TelegramSettings:
     watch_interval_seconds: int
     dry_run: bool
     disable_notification: bool
-    publish_on_api_fetch: bool
     news: TopicConfig
     intel: TopicConfig
     alpha: TopicConfig
@@ -150,7 +149,6 @@ def load_settings() -> TelegramSettings:
         watch_interval_seconds=max(15, _get_int("POLYDATA_TELEGRAM_WATCH_INTERVAL_SECONDS", 60)),
         dry_run=_get_bool("POLYDATA_TELEGRAM_DRY_RUN", False),
         disable_notification=_get_bool("POLYDATA_TELEGRAM_DISABLE_NOTIFICATION", False),
-        publish_on_api_fetch=_get_bool("POLYDATA_TELEGRAM_PUBLISH_ON_API_FETCH", False),
         news=_topic("news", "POLYDATA_TELEGRAM_CHANNEL_NEWS", "POLYDATA_TELEGRAM_THREAD_NEWS"),
         intel=_topic_from_candidates(
             "intel",
