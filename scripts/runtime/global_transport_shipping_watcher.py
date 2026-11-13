@@ -109,37 +109,6 @@ class GlobalTransportShippingWatcher:
         response.raise_for_status()
         return response.json()
 
-    def get_cached_json(self, namespace: str, cache_key: str) -> Optional[Dict[str, Any]]:
-        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
-            return self.snapshot_store.get(namespace, cache_key)
-        cached = self.snapshot_store.get(namespace, cache_key)
-        if isinstance(cached, dict):
-            return cached
-        if self.redis_client is None:
-            return None
-        try:
-            raw = self.redis_client.get(_redis_key(self.redis_prefix, namespace, cache_key))
-            payload = json.loads(str(raw)) if raw else None
-            return payload if isinstance(payload, dict) else None
-        except Exception:
-            return None
-
-    def set_cached_json(self, namespace: str, cache_key: str, payload: Dict[str, Any], ttl_seconds: int) -> None:
-        # Source caches are best effort; formal snapshots use store_payload.
-        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
-            if not self.snapshot_store.set(namespace, cache_key, payload, ttl_seconds):
-                raise RuntimeError("Seed publication rejected")
-            return payload
-        try:
-            self.snapshot_store.set(namespace, cache_key, payload, ttl_seconds)
-        except Exception:
-            pass
-        if self.redis_client is not None:
-            try:
-                self.redis_client.set(_redis_key(self.redis_prefix, namespace, cache_key), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl_seconds)
-            except Exception:
-                pass
-
     def close(self) -> None:
         self.resources.close()
         self.requests.close()
@@ -155,8 +124,8 @@ class GlobalTransportShippingWatcher:
             "http_text_get": self.http_text_get,
             "http_json_get": self.http_json_get,
             "http_form_post": self.http_form_post,
-            "get_cached_json": self.get_cached_json,
-            "set_cached_json": self.set_cached_json,
+            "get_cached_json": self.seed_meta_store.get,
+            "set_cached_json": self.seed_meta_store.cache_source,
             "utc_now_iso": utc_now_iso,
         }
 
@@ -167,7 +136,7 @@ class GlobalTransportShippingWatcher:
         )
         if isinstance(stale, dict):
             return stale
-        cached = self.get_cached_json(
+        cached = self.seed_meta_store.get(
             global_transport_shipping_service.GLOBAL_TRANSPORT_SNAPSHOT_NAMESPACE,
             global_transport_shipping_service.GLOBAL_TRANSPORT_CACHE_KEY,
         )

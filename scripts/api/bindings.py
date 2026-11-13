@@ -532,7 +532,6 @@ def bind_services(runtime: ServiceRuntime) -> None:
         snapshot_store=runtime.SNAPSHOT_STORE,
         get_cached_json=get_cached_json,
         set_cached_json=runtime.set_cached_json,
-        get_snapshot_payload=get_snapshot_payload,
     )
     runtime.defi_token_watch = defi_token_watch_service.DefiTokenWatchDependencies(
         settings=runtime.SETTINGS,
@@ -541,7 +540,6 @@ def bind_services(runtime: ServiceRuntime) -> None:
         snapshot_store=runtime.SNAPSHOT_STORE,
         get_cached_json=get_cached_json,
         set_cached_json=runtime.set_cached_json,
-        get_snapshot_payload=get_snapshot_payload,
     )
     runtime.energy_gasoline_shock = energy_gasoline_shock_service.EnergyGasolineShockDependencies(
         settings=runtime.SETTINGS,
@@ -571,18 +569,8 @@ def bind_services(runtime: ServiceRuntime) -> None:
         snapshot_store=runtime.SNAPSHOT_STORE,
         get_cached_json=get_cached_json,
         set_cached_json=runtime.set_cached_json,
-        get_snapshot_payload=get_snapshot_payload,
         get_crypto_funding_watch_snapshot=get_crypto_funding_watch_snapshot,
-        crypto_funding=crypto_funding_service.CryptoFundingDependencies(
-            settings=runtime.SETTINGS,
-            application=runtime.app,
-            http_json_get=http_json_get,
-            utc_now_iso=utc_now_iso,
-            snapshot_store=runtime.SNAPSHOT_STORE,
-            get_cached_json=get_cached_json,
-            set_cached_json=runtime.set_cached_json,
-            get_snapshot_payload=get_snapshot_payload,
-        ),
+        crypto_funding=runtime.crypto_funding,
         external_sources=finance_external_sources_service.FinanceExternalSourceDependencies(
             settings=runtime.SETTINGS,
             http_json_get=http_json_get,
@@ -640,7 +628,6 @@ def bind_services(runtime: ServiceRuntime) -> None:
         search_markets=search_markets,
         get_cached_json=get_cached_json,
         set_cached_json=runtime.set_cached_json,
-        get_snapshot_payload=get_snapshot_payload,
         snapshot_store=runtime.SNAPSHOT_STORE,
         utc_now_iso=utc_now_iso,
     )
@@ -709,7 +696,6 @@ def bind_services(runtime: ServiceRuntime) -> None:
         get_nasdaq_market_cap=lambda symbol: market_data_client.get_nasdaq_market_cap(runtime.market_data_client_context, symbol),
         get_cached_json=get_cached_json,
         set_cached_json=runtime.set_cached_json,
-        get_snapshot_payload=get_snapshot_payload,
         snapshot_store=runtime.SNAPSHOT_STORE,
     )
     runtime.weather_news = weather_news_service.WeatherNewsDependencies(

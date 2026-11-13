@@ -56,13 +56,9 @@ def _read_finance_external(
     ctx: FinanceWatchContext,
 ) -> Dict[str, Any]:
     dependencies = _dependencies(ctx)
-    payload = finance_external_sources_service.read_finance_external_sources(
+    return finance_external_sources_service.read_finance_external_sources(
         dependencies.external_sources,
     )
-    if isinstance(payload, dict) and payload:
-        return payload
-    # This is a derived view. Only the external-source owner acquires/publishes.
-    return {}
 
 
 def build_finance_watch_panel_payload(
@@ -125,11 +121,6 @@ def build_finance_watch_panel_payload(
     raise KeyError(f"unknown finance watch panel: {panel_id}")
 
 
-def _trim_payload(payload: Dict[str, Any], limit: int) -> Dict[str, Any]:
-    items = [item for item in (payload.get("items") or []) if isinstance(item, dict)]
-    return {**payload, "items": items[: max(0, int(limit or 10))], "summary": {**(payload.get("summary") if isinstance(payload.get("summary"), dict) else {}), "count": min(len(items), max(0, int(limit or 10))), "totalCount": len(items)}}
-
-
 def get_finance_watch_panel_snapshot(
     ctx: FinanceWatchContext,
     panel_id: str,
@@ -154,7 +145,7 @@ def get_finance_watch_panel_snapshot(
                        "error": "External source snapshot is overdue; waiting for its scheduled collector"}
         else:
             payload = {**payload, "cacheMode": "external-seed"}
-        return _trim_payload(payload, limit)
+        return seed_recovery.limit_snapshot_items(payload, limit)
     ttl_seconds = FINANCE_WATCH_TTL_SECONDS
     payload = seed_recovery.read_watch_seed(
         owner_meta_namespace="seed-meta:finance",
@@ -162,4 +153,4 @@ def get_finance_watch_panel_snapshot(
         snapshot_store=dependencies.snapshot_store, redis_get=dependencies.get_cached_json, redis_set=dependencies.set_cached_json,
         builder=lambda: build_finance_watch_panel_payload(dependencies, panel_id, limit=24), ttl_seconds=ttl_seconds,
     )
-    return _trim_payload(payload, limit)
+    return seed_recovery.limit_snapshot_items(payload, limit)

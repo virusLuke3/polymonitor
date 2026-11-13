@@ -24,7 +24,6 @@ class CryptoFundingDependencies:
     snapshot_store: Any
     get_cached_json: Callable[..., Any] | None
     set_cached_json: Callable[..., Any] | None
-    get_snapshot_payload: Callable[..., Any] | None
     executor: Any = None
     market_executor: Any = None
     market_jobs: Any = None
@@ -50,10 +49,6 @@ class CryptoFundingDependencies:
             set_cached_json=resolve_optional_service_callable(
                 context,
                 "set_cached_json",
-            ),
-            get_snapshot_payload=resolve_optional_service_callable(
-                context,
-                "get_snapshot_payload",
             ),
             executor=context.get("funding_executor"),
             market_executor=context.get("funding_market_executor"),

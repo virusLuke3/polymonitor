@@ -127,8 +127,8 @@ class CpiReleaseCalendarWatcher:
             "BeautifulSoup": BeautifulSoup,
             "http_text_get": self._http_text_get,
             "SNAPSHOT_STORE": self.snapshot_store,
-            "get_cached_json": self._get_cached_json,
-            "set_cached_json": self._set_cached_json,
+            "get_cached_json": self.seed_meta_store.get,
+            "set_cached_json": self.seed_meta_store.cache_source,
             "get_polymarket_macro_map_snapshot": lambda limit=20: polymarket_macro_map_service.get_polymarket_macro_map_snapshot(
                 self.service_context(),
                 limit=limit,
@@ -136,42 +136,11 @@ class CpiReleaseCalendarWatcher:
             "utc_now_iso": utc_now_iso,
         }
 
-    def _get_cached_json(self, namespace: str, cache_key: str) -> Dict[str, Any] | None:
-        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
-            return self.snapshot_store.get(namespace, cache_key)
-        cached = self.snapshot_store.get(namespace, cache_key)
-        if isinstance(cached, dict):
-            return cached
-        if self.redis_client is None:
-            return None
-        try:
-            raw = self.redis_client.get(_redis_key(self.redis_prefix, namespace, cache_key))
-            payload = json.loads(str(raw)) if raw else None
-            return payload if isinstance(payload, dict) else None
-        except Exception:
-            return None
-
-    def _set_cached_json(self, namespace: str, cache_key: str, payload: Dict[str, Any], ttl: int) -> None:
-        # Source caches are best effort; formal snapshots use store_payload.
-        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
-            if not self.snapshot_store.set(namespace, cache_key, payload, ttl):
-                raise RuntimeError("Seed publication rejected")
-            return payload
-        try:
-            self.snapshot_store.set(namespace, cache_key, payload, ttl)
-        except Exception:
-            pass
-        if self.redis_client is not None:
-            try:
-                self.redis_client.set(_redis_key(self.redis_prefix, namespace, cache_key), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl)
-            except Exception:
-                pass
-
     def load_previous_payload(self) -> Dict[str, Any]:
         stale = self.snapshot_store.get_stale(self.namespace(), self.cache_key())
         if isinstance(stale, dict):
             return stale
-        cached = self._get_cached_json(self.namespace(), self.cache_key())
+        cached = self.seed_meta_store.get(self.namespace(), self.cache_key())
         if isinstance(cached, dict):
             return cached
         return {}

@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any, Mapping
 
 from db import get_connection
 
+from api.serialization import iso_timestamp
 from api.auth_schema import product_schema_is_ready
 from api.services.auth_service import AuthError, Principal, audit_action
 
@@ -19,15 +20,6 @@ MAX_PAYLOAD_BYTES = 64 * 1024
 REGIONS = frozenset({"global", "america", "mena", "eu", "asia", "latam", "africa", "oceania"})
 VIEW_MODES = frozenset({"2d", "3d", "heatmap", "density"})
 MARKET_GROUP_SORTS = frozenset({"active", "new", "volume", "close", "move", "trades"})
-
-
-def _iso(value: Any) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        aware = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-        return aware.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-    return str(value)
 
 
 def _ensure_schema(conn: Any) -> None:
@@ -63,8 +55,8 @@ def _serialize(row: Any) -> dict[str, Any]:
         "activePanelIds": _decode_json(row[1], []),
         "panelLayout": _decode_json(row[2], {}),
         "preferences": _decode_json(row[3], {}),
-        "clientUpdatedAt": _iso(row[4]),
-        "updatedAt": _iso(row[5]),
+        "clientUpdatedAt": iso_timestamp(row[4]),
+        "updatedAt": iso_timestamp(row[5]),
     }
 
 

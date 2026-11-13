@@ -127,7 +127,6 @@ class TechPanelsDependencies:
     get_yahoo_market_snapshot: Callable[..., Any] | None
     get_cached_json: Callable[..., Any] | None
     set_cached_json: Callable[..., Any] | None
-    get_snapshot_payload: Callable[..., Any] | None
     snapshot_store: Any
     map_yahoo: Callable[..., Any] | None = None
     get_nasdaq_market_cap: Callable[..., Any] | None = None
@@ -161,10 +160,6 @@ class TechPanelsDependencies:
             set_cached_json=resolve_optional_service_callable(
                 context,
                 "set_cached_json",
-            ),
-            get_snapshot_payload=resolve_optional_service_callable(
-                context,
-                "get_snapshot_payload",
             ),
             snapshot_store=context.get("SNAPSHOT_STORE"),
             map_yahoo=context.get("map_yahoo"),
@@ -1111,20 +1106,6 @@ def build_all_tech_panel_payloads(ctx: dict, limit: int = 24) -> Dict[str, Dict[
     return payloads
 
 
-def _trim_payload(payload: Dict[str, Any], limit: int) -> Dict[str, Any]:
-    items = [item for item in (payload.get("items") or []) if isinstance(item, dict)]
-    limit = max(0, int(limit or 10))
-    return {
-        **payload,
-        "items": items[:limit],
-        "summary": {
-            **(payload.get("summary") if isinstance(payload.get("summary"), dict) else {}),
-            "count": min(len(items), limit),
-            "totalCount": len(items),
-        },
-    }
-
-
 def get_tech_panel_snapshot(
     ctx: TechPanelsContext,
     panel_id: str,
@@ -1140,4 +1121,4 @@ def get_tech_panel_snapshot(
         snapshot_store=dependencies.snapshot_store, redis_get=dependencies.get_cached_json, redis_set=dependencies.set_cached_json,
         builder=lambda: build_tech_panel_payload(dependencies, panel_id, limit=36), ttl_seconds=ttl_seconds,
     )
-    return _trim_payload(payload, limit)
+    return seed_recovery.limit_snapshot_items(payload, limit)

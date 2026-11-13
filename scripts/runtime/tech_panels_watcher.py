@@ -8,7 +8,6 @@ import argparse
 import json
 import os
 import sys
-import threading
 import time
 from contextlib import nullcontext
 from concurrent.futures import ThreadPoolExecutor
@@ -32,7 +31,7 @@ except ImportError:
 
 from runtime.redis_snapshot_store import seed_writer
 from api.clients import market_data_client
-from api.clients.source_transport import SourceSession, source_session, read_with_retry, read_response_bytes
+from api.clients.source_transport import source_session, read_with_retry, read_response_bytes
 from api.config import load_api_settings
 from api.context import RuntimeResources
 from api.services import tech_panels_service
@@ -107,12 +106,6 @@ class TechPanelsWatcher:
     def redis_key(self, panel_id: str) -> str:
         return _redis_key(self.redis_prefix, tech_panels_service.tech_panel_namespace(panel_id), tech_panels_service.TECH_PANEL_CACHE_KEY)
 
-    def deadline_options(self):
-        deadline = getattr(self, "source_deadline", None)
-        if deadline is not None and time.monotonic() >= deadline:
-            raise TimeoutError("external panel collection deadline exhausted")
-        return {"source_deadline": deadline} if deadline is not None and isinstance(self.requests, SourceSession) else {}
-
     def http_json_get(self, url: str, params: Optional[Dict[str, Any]] = None, timeout: int = 12, headers: Optional[Dict[str, str]] = None) -> Any:
         deadline = min(getattr(self, "source_deadline", time.monotonic() + 90), time.monotonic() + 90)
         return read_with_retry(self.requests, url,
@@ -124,29 +117,6 @@ class TechPanelsWatcher:
         return read_with_retry(self.requests, url,
             lambda response: read_response_bytes(response, 8 * 1024 * 1024, deadline=deadline).decode(response.encoding or "utf-8"),
             attempts=2, deadline=deadline, timeout=max(30, timeout), headers=headers, stream=True)
-
-    def get_cached_json(self, namespace: str, cache_key: str) -> Optional[Dict[str, Any]]:
-        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
-            return self.snapshot_store.get(namespace, cache_key)
-        payload = self.snapshot_store.get(namespace, cache_key)
-        if isinstance(payload, dict):
-            return payload
-        try:
-            raw = self.redis_client.get(_redis_key(self.redis_prefix, namespace, cache_key))
-            payload = json.loads(raw) if raw else None
-            return payload if isinstance(payload, dict) else None
-        except Exception:
-            return None
-
-    def set_cached_json(self, namespace: str, cache_key: str, payload: Dict[str, Any], ttl_seconds: int) -> Dict[str, Any]:
-        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
-            if not self.snapshot_store.set(namespace, cache_key, payload, ttl_seconds):
-                raise RuntimeError("Seed publication rejected")
-            return payload
-        publish_snapshot(snapshot_store=self.snapshot_store, namespace=namespace, cache_key=cache_key,
-                         payload=payload, ttl_seconds=ttl_seconds, redis_client=self.redis_client,
-                         redis_cache_key=_redis_key(self.redis_prefix, namespace, cache_key))
-        return payload
 
     def get_cached_runtime_payload(self, namespace: str, cache_key: str) -> Optional[Dict[str, Any]]:
         key = f"{namespace}:{cache_key}"
@@ -162,15 +132,6 @@ class TechPanelsWatcher:
         self._runtime_cache[f"{namespace}:{cache_key}"] = {
             "payload": payload, "expires_at": time.monotonic() + max(1, ttl_seconds),
         }
-        return payload
-
-    def get_snapshot_payload(self, namespace: str, cache_key: str, builder, *, ttl_seconds: int) -> Any:
-        cached = self.get_cached_json(namespace, cache_key)
-        if cached is not None:
-            return cached
-        payload = builder()
-        if isinstance(payload, dict):
-            self.set_cached_json(namespace, cache_key, payload, ttl_seconds)
         return payload
 
     def get_yahoo_market_snapshot(self, symbol: str, interval: str = "30m", range_name: str = "5d", ttl_seconds: Optional[int] = None) -> Optional[Dict[str, Any]]:
@@ -205,14 +166,11 @@ class TechPanelsWatcher:
             "FINANCE_RUNTIME_TTL_SECONDS": getattr(self.settings, "finance_runtime_ttl_seconds", 300),
             "SNAPSHOT_STORE": self.snapshot_store,
             "_safe_float": tech_panels_service._safe_float,
-            "_clob_price_cache": {},
-            "_clob_price_cache_lock": threading.Lock(),
             "app": _AppAdapter(),
-            "get_cached_json": self.get_cached_json,
-            "set_cached_json": self.set_cached_json,
+            "get_cached_json": self.seed_meta_store.get,
+            "set_cached_json": self.seed_meta_store.store,
             "get_cached_runtime_payload": self.get_cached_runtime_payload,
             "set_cached_runtime_payload": self.set_cached_runtime_payload,
-            "get_snapshot_payload": self.get_snapshot_payload,
             "http_json_get": self.http_json_get,
             "http_text_get": self.http_text_get,
             "get_yahoo_market_snapshot": self.get_yahoo_market_snapshot,
@@ -288,10 +246,10 @@ class TechPanelsWatcher:
                     previous = bounded_rows(self.load_previous_payload(panel_id), utc_now_iso())
                     if panel_id == "big-tech-market-cap":
                         previous = tech_panels_service.bounded_big_tech_caps(previous)
-                    previous_count = len(previous.get("items") or []) if isinstance(previous, dict) else 0
-                    previous_status = str(previous.get("status") or "") if isinstance(previous, dict) else ""
-                    record_count = len(payload.get("items") or []) if isinstance(payload, dict) else 0
-                    status = str(payload.get("status") or ("ok" if record_count else "empty")) if isinstance(payload, dict) else "error"
+                    previous_count = len(previous.get("items") or [])
+                    previous_status = str(previous.get("status") or "")
+                    record_count = len(payload.get("items") or [])
+                    status = str(payload.get("status") or ("ok" if record_count else "empty"))
                     sources = payload.get("sources") or {}
                     healthy_empty = status == "empty" and bool(sources) and all(value in {"ok", "empty", "disabled"} for value in sources.values())
                     if previous and previous_count > 0 and previous_status != "error" and (status == "error" or (record_count <= 0 and not healthy_empty)):

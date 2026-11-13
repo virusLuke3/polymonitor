@@ -11,13 +11,13 @@ import re
 import secrets
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Any, Iterable, Mapping
 
 from db import dict_from_row, get_backend, get_connection as _direct_connection
 from flask import current_app, has_app_context
 from db.db import psycopg
 
+from api.serialization import iso_timestamp
 from api.auth_schema import schema_is_ready
 
 
@@ -662,10 +662,10 @@ def list_api_keys(principal: Principal) -> list[dict[str, Any]]:
                 "scopes": json.loads(str(row[3]) or "[]"),
                 "rateLimitPerMinute": row[4],
                 "dailyQuota": row[5],
-                "createdAt": _iso(row[6]),
-                "expiresAt": _iso(row[7]),
-                "lastUsedAt": _iso(row[8]),
-                "revokedAt": _iso(row[9]),
+                "createdAt": iso_timestamp(row[6]),
+                "expiresAt": iso_timestamp(row[7]),
+                "lastUsedAt": iso_timestamp(row[8]),
+                "revokedAt": iso_timestamp(row[9]),
             }
             for row in rows
         ]
@@ -779,7 +779,7 @@ def list_audit_log(limit: int = 100) -> list[dict[str, Any]]:
         return [
             {
                 "id": row[0],
-                "occurredAt": _iso(row[1]),
+                "occurredAt": iso_timestamp(row[1]),
                 "username": row[2],
                 "actorKind": row[3],
                 "action": row[4],
@@ -793,12 +793,3 @@ def list_audit_log(limit: int = 100) -> list[dict[str, Any]]:
         ]
     finally:
         conn.close()
-
-
-def _iso(value: Any) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        aware = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-        return aware.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-    return str(value)

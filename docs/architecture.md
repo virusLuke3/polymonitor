@@ -60,9 +60,19 @@ small mapping contexts, which must be replaced domain by domain without adding
 another registry. ClickHouse connection settings, scan limits and admission
 slots belong to the owning runtime and are fixed when settings are loaded.
 
-Generic snapshots use SQLite as their expiry authority. A valid empty result
+Public panel snapshots use Redis as their expiry authority; SQLite remains for
+private state, history and explicit offline use. A valid empty result
 replaces old data; a failed refresh preserves the previous timestamp and marks
 dictionary responses stale. GET routes do not publish Telegram messages.
+
+Finance, tech, CPI calendar, energy, transport, weather news and TV workers reuse
+`runtime/seed_meta.py` for cache reads and writes. Confirmed publication and
+best-effort offline source caching remain distinct; neither changes source
+timestamps, acquisition cadence, retry budgets or retention. Finance and tech
+API views share item limiting in `seed_recovery`; their UI keeps domain-specific
+layouts while computing row changes and filters once. Account, workspace,
+watchlist and briefing timestamps use `api/serialization.py`; World Cup odds
+reuse numeric conversion from their existing domain `common.py`.
 
 `outcome_projection` validates existing source-label evidence without schema,
 write or repair operations. The upstream canonical registry alone does not yet

@@ -8,7 +8,6 @@ import argparse
 import json
 import os
 import sys
-import threading
 import time
 from contextlib import nullcontext
 from concurrent.futures import ThreadPoolExecutor
@@ -133,29 +132,6 @@ class FinanceWatchPanelsWatcher:
         response.raise_for_status()
         return response.json() if response.content else None
 
-    def get_cached_json(self, namespace: str, cache_key: str) -> Optional[Dict[str, Any]]:
-        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
-            return self.snapshot_store.get(namespace, cache_key)
-        payload = self.snapshot_store.get(namespace, cache_key)
-        if isinstance(payload, dict):
-            return payload
-        try:
-            raw = self.redis_client.get(_redis_key(self.redis_prefix, namespace, cache_key))
-            payload = json.loads(raw) if raw else None
-            return payload if isinstance(payload, dict) else None
-        except Exception:
-            return None
-
-    def set_cached_json(self, namespace: str, cache_key: str, payload: Dict[str, Any], ttl_seconds: int) -> Dict[str, Any]:
-        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
-            if not self.snapshot_store.set(namespace, cache_key, payload, ttl_seconds):
-                raise RuntimeError("Seed publication rejected")
-            return payload
-        publish_snapshot(snapshot_store=self.snapshot_store, namespace=namespace, cache_key=cache_key,
-                         payload=payload, ttl_seconds=ttl_seconds, redis_client=self.redis_client,
-                         redis_cache_key=_redis_key(self.redis_prefix, namespace, cache_key))
-        return payload
-
     def get_cached_runtime_payload(self, namespace: str, cache_key: str) -> Optional[Dict[str, Any]]:
         key = f"{namespace}:{cache_key}"
         entry = self._runtime_cache.get(key)
@@ -170,15 +146,6 @@ class FinanceWatchPanelsWatcher:
         self._runtime_cache[f"{namespace}:{cache_key}"] = {
             "payload": payload, "expires_at": time.monotonic() + max(1, ttl_seconds),
         }
-        return payload
-
-    def get_snapshot_payload(self, namespace: str, cache_key: str, builder, *, ttl_seconds: int) -> Any:
-        cached = self.get_cached_json(namespace, cache_key)
-        if cached is not None:
-            return cached
-        payload = builder()
-        if isinstance(payload, dict):
-            self.set_cached_json(namespace, cache_key, payload, ttl_seconds)
         return payload
 
     def get_yahoo_market_snapshot(self, symbol: str, interval: str = "30m", range_name: str = "5d", ttl_seconds: Optional[int] = None) -> Optional[Dict[str, Any]]:
@@ -212,14 +179,11 @@ class FinanceWatchPanelsWatcher:
             "FINANCE_RUNTIME_TTL_SECONDS": getattr(self.settings, "finance_runtime_ttl_seconds", 300),
             "SNAPSHOT_STORE": self.snapshot_store,
             "_safe_float": finance_watch_panels_service._safe_float,
-            "_clob_price_cache": {},
-            "_clob_price_cache_lock": threading.Lock(),
             "app": _AppAdapter(),
-            "get_cached_json": self.get_cached_json,
-            "set_cached_json": self.set_cached_json,
+            "get_cached_json": self.seed_meta_store.get,
+            "set_cached_json": self.seed_meta_store.store,
             "get_cached_runtime_payload": self.get_cached_runtime_payload,
             "set_cached_runtime_payload": self.set_cached_runtime_payload,
-            "get_snapshot_payload": self.get_snapshot_payload,
             "http_json_get": self.http_json_get,
             "http_json_post": self.http_json_post,
             "http_text_get": self.http_text_get,
@@ -330,8 +294,8 @@ class FinanceWatchPanelsWatcher:
                     except Exception as exc:
                         payload = {"status": "error", "items": [], "sources": {"builder": "error"}, "summary": {"error": str(exc)}}
                     previous = bounded_rows(self.load_previous_payload(panel_id), utc_now_iso())
-                    record_count = len(payload.get("items") or []) if isinstance(payload, dict) else 0
-                    status = str(payload.get("status") or ("ok" if record_count else "empty")) if isinstance(payload, dict) else "error"
+                    record_count = len(payload.get("items") or [])
+                    status = str(payload.get("status") or ("ok" if record_count else "empty"))
                     replace_with_empty = panel_id == "broker-research-watch" and status == "empty"
                     if (panel_id in {"defi-security-watch", "ipo-news-watch", "blockchain-policy-news"}
                             and status == "empty" and (payload.get("sources") or {}).get("googleNewsRss") == "empty"):

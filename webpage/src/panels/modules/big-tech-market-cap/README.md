@@ -6,6 +6,11 @@ timestamps; Nasdaq owns published market caps with independent receipt times.
 Never derive missing caps from hardcoded share counts or update either source's
 clock because the other succeeded.
 
+The watcher injects cache reads and confirmed writes from its existing
+`SeedMetaStore`; it does not maintain a second cache adapter or an unused
+snapshot-builder callback. Finance and tech API projections share item limiting
+in `seed_recovery.limit_snapshot_items`, preserving row order and total counts.
+
 The existing three-worker pool completes the 24-symbol quote batch before
 reading market caps. Both batches share the same 180-second collection deadline;
 there is no new executor, acquisition frequency or request-time collection.

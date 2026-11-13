@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from data_sources import source_value
 
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from api.services.worldcup.common import headers, parse_iso, team_tokens, utc_now_iso
+from api.services.worldcup.common import headers, mean, parse_iso, safe_float, team_tokens, utc_now_iso
 from api.services.worldcup.odds.probability import ordered_outcomes
 
 WORLDCUP_ODDS_SPORT_KEY = "soccer_fifa_world_cup"
@@ -26,21 +26,6 @@ BOOKMAKER_MARKET_TYPES = {
     "draw_no_bet": "draw_no_bet",
     "double_chance": "double_chance",
 }
-
-
-def safe_float(value: Any) -> Optional[float]:
-    if value in (None, ""):
-        return None
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return None
-    return number if number == number else None
-
-
-def mean(values: Iterable[float]) -> Optional[float]:
-    rows = [value for value in values if value == value]
-    return sum(rows) / len(rows) if rows else None
 
 
 def _configured_worldcup_odds_markets(settings: Any) -> str:

@@ -11,6 +11,7 @@ from typing import Any, Mapping
 
 from db import get_connection
 
+from api.serialization import iso_timestamp
 from api.auth_schema import product_schema_is_ready
 from api.services.auth_service import AuthError, Principal, audit_action
 
@@ -18,15 +19,6 @@ from api.services.auth_service import AuthError, Principal, audit_action
 PUBLIC_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{32}$")
 MAX_ACTIVE_BRIEFINGS = 20
 BRIEFING_TTL_DAYS = 30
-
-
-def _iso(value: Any) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        aware = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-        return aware.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-    return str(value)
 
 
 def _json_value(value: Any, fallback: Any) -> Any:
@@ -62,7 +54,7 @@ def _market_item(row: Any) -> dict[str, Any]:
             else "awaiting-oracle" if str(row[7] or "").upper() == "ENDED_AWAITING_ORACLE"
             else "open"
         ),
-        "observedAt": _iso(max((value for value in (row[8], row[13]) if value is not None), default=None)),
+        "observedAt": iso_timestamp(max((value for value in (row[8], row[13]) if value is not None), default=None)),
     }
 
 
@@ -124,7 +116,7 @@ def _build_snapshot(conn: Any, user_id: int) -> dict[str, Any]:
     ).fetchone()
     return {
         "schema": "prediction-market-briefing.v1",
-        "generatedAt": _iso(datetime.now(timezone.utc)),
+        "generatedAt": iso_timestamp(datetime.now(timezone.utc)),
         "source": {
             "kind": "canonical-snapshot",
             "markets": "core.markets + core.market_list_serving",
@@ -142,7 +134,7 @@ def _build_snapshot(conn: Any, user_id: int) -> dict[str, Any]:
         "workspaceLens": {
             "revision": int(layout[0]) if layout else 0,
             "activePanelIds": _json_value(layout[1], []) if layout else [],
-            "updatedAt": _iso(layout[2]) if layout else None,
+            "updatedAt": iso_timestamp(layout[2]) if layout else None,
         },
     }
 
@@ -152,9 +144,9 @@ def _serialize_registry(row: Any) -> dict[str, Any]:
         "id": str(row[0]),
         "publicId": row[1],
         "title": row[2],
-        "createdAt": _iso(row[3]),
-        "expiresAt": _iso(row[4]),
-        "revokedAt": _iso(row[5]),
+        "createdAt": iso_timestamp(row[3]),
+        "expiresAt": iso_timestamp(row[4]),
+        "revokedAt": iso_timestamp(row[5]),
         "active": row[5] is None and bool(row[6]),
     }
 
@@ -279,8 +271,8 @@ def get_public_briefing(public_id: str) -> dict[str, Any]:
         return {
             "title": row[0],
             "snapshot": _json_value(row[1], {}),
-            "createdAt": _iso(row[2]),
-            "expiresAt": _iso(row[3]),
+            "createdAt": iso_timestamp(row[2]),
+            "expiresAt": iso_timestamp(row[3]),
         }
     finally:
         conn.close()

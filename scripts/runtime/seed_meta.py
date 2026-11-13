@@ -67,6 +67,35 @@ class SeedMetaStore:
     def _redis_key(self, namespace: str, cache_key: str) -> str:
         return redis_key(self.redis_prefix, namespace, cache_key)
 
+    def get(self, namespace: str, cache_key: str) -> Optional[Dict[str, Any]]:
+        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+            return self.snapshot_store.get(namespace, cache_key)
+        payload = self.snapshot_store.get(namespace, cache_key)
+        if isinstance(payload, dict):
+            return payload
+        try:
+            raw = self.redis_client.get(self._redis_key(namespace, cache_key))
+            payload = json.loads(raw) if raw else None
+            return payload if isinstance(payload, dict) else None
+        except Exception:
+            return None
+
+    def cache_source(self, namespace: str, cache_key: str, payload: Dict[str, Any], ttl: int) -> Dict[str, Any] | None:
+        # Source caches are best effort; formal snapshots use store_payload.
+        if getattr(self.snapshot_store, "backend", "sqlite") == "redis":
+            if not self.snapshot_store.set(namespace, cache_key, payload, ttl):
+                raise RuntimeError("Seed publication rejected")
+            return payload
+        try:
+            self.snapshot_store.set(namespace, cache_key, payload, ttl)
+        except Exception:
+            pass
+        if self.redis_client is not None:
+            try:
+                self.redis_client.set(self._redis_key(namespace, cache_key), json.dumps(payload, ensure_ascii=True, default=str), ex=ttl)
+            except Exception:
+                pass
+
     def load(self, namespace: str, cache_key: str) -> Optional[Dict[str, Any]]:
         if self.snapshot_store is not None:
             stale = self.snapshot_store.get_stale(namespace, cache_key)

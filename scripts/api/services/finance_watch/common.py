@@ -31,7 +31,6 @@ class FinanceWatchDependencies:
     snapshot_store: Any
     get_cached_json: Callable[..., Any] | None
     set_cached_json: Callable[..., Any] | None
-    get_snapshot_payload: Callable[..., Any] | None
     get_crypto_funding_watch_snapshot: Callable[..., Any] | None
     crypto_funding: crypto_funding_service.CryptoFundingDependencies
     external_sources: finance_external_sources_service.FinanceExternalSourceDependencies
@@ -69,10 +68,6 @@ class FinanceWatchDependencies:
             set_cached_json=resolve_optional_service_callable(
                 context,
                 "set_cached_json",
-            ),
-            get_snapshot_payload=resolve_optional_service_callable(
-                context,
-                "get_snapshot_payload",
             ),
             get_crypto_funding_watch_snapshot=(
                 resolve_optional_service_callable(

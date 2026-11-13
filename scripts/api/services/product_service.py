@@ -6,12 +6,12 @@ import json
 import re
 import uuid
 from collections import defaultdict
-from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping
 
 from db import get_connection
 
+from api.serialization import iso_timestamp
 from api.auth_schema import product_schema_is_ready
 from api.services.auth_service import AuthError, Principal, audit_action
 from api.services.web_push_service import configured as web_push_configured
@@ -34,15 +34,6 @@ DEFAULT_ALERT_KINDS = ("oracle_gap", "oracle_disputed")
 WATCHLIST_LIMIT = 200
 RULE_LIMIT = 500
 TIMEZONE_PATTERN = re.compile(r"^[A-Za-z0-9_+./-]{1,64}$")
-
-
-def _iso(value: Any) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        aware = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-        return aware.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-    return str(value)
 
 
 def _json(value: Any) -> str:
@@ -130,8 +121,8 @@ def _serialize_rule(row: Any) -> dict[str, Any]:
         "enabled": bool(row[4]),
         "cooldownSeconds": int(row[5]),
         "conditionActive": bool(row[6]),
-        "lastTriggeredAt": _iso(row[7]),
-        "createdAt": _iso(row[8]),
+        "lastTriggeredAt": iso_timestamp(row[7]),
+        "createdAt": iso_timestamp(row[8]),
     }
 
 
@@ -208,18 +199,18 @@ def get_watchlist(principal: Principal) -> dict[str, Any]:
                     "title": row[1],
                     "slug": row[2],
                     "category": row[3],
-                    "endDate": _iso(row[4]),
+                    "endDate": iso_timestamp(row[4]),
                     "note": row[5],
-                    "addedAt": _iso(row[6]),
+                    "addedAt": iso_timestamp(row[6]),
                     "latestPrice": float(current) if current is not None else None,
                     "price24hAgo": float(previous) if previous is not None else None,
                     "change24h": change,
                     "volume24h": float(row[9] or 0),
                     "tradeCount24h": int(row[10] or 0),
-                    "priceUpdatedAt": _iso(row[11]),
+                    "priceUpdatedAt": iso_timestamp(row[11]),
                     "completionStatus": row[12],
                     "oracleStage": _oracle_stage(row),
-                    "statusUpdatedAt": _iso(row[18]),
+                    "statusUpdatedAt": iso_timestamp(row[18]),
                     "rules": rules_by_market[int(row[0])],
                 }
             )
@@ -506,9 +497,9 @@ def get_alert_events(principal: Principal, *, limit: int = 100, unread_only: boo
                     "detail": row[5],
                     "observedPrice": float(row[6]) if row[6] is not None else None,
                     "oracleStatus": row[7],
-                    "sourceObservedAt": _iso(row[8]),
-                    "occurredAt": _iso(row[9]),
-                    "readAt": _iso(row[10]),
+                    "sourceObservedAt": iso_timestamp(row[8]),
+                    "occurredAt": iso_timestamp(row[9]),
+                    "readAt": iso_timestamp(row[10]),
                     "marketTitle": row[11],
                 }
                 for row in rows
@@ -614,7 +605,7 @@ def get_notification_preferences(principal: Principal) -> dict[str, Any]:
             "quietStartMinute": int(row[3]) if row and row[3] is not None else None,
             "quietEndMinute": int(row[4]) if row and row[4] is not None else None,
             "timezone": str(row[5]) if row else "UTC",
-            "updatedAt": _iso(row[6]) if row else None,
+            "updatedAt": iso_timestamp(row[6]) if row else None,
             "channels": {
                 "inApp": {"available": True, "connected": True},
                 "webPush": {
@@ -862,7 +853,7 @@ def evaluate_alert_rules() -> dict[str, int]:
                         (rule[0],),
                     )
                     continue
-            observed_key = _iso(source_at) or "no-source-time"
+            observed_key = iso_timestamp(source_at) or "no-source-time"
             event_key = f"{rule[0]}:{rule[4]}:{observed_key}"
             event_id = str(uuid.uuid4())
             cursor = conn.execute(

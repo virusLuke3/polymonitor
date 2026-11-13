@@ -17,6 +17,20 @@ _slots = threading.BoundedSemaphore(4)
 _logger = logging.getLogger(__name__)
 
 
+def limit_snapshot_items(payload: dict, limit: int) -> dict:
+    items = [item for item in (payload.get("items") or []) if isinstance(item, dict)]
+    limit = max(0, int(limit or 10))
+    return {
+        **payload,
+        "items": items[:limit],
+        "summary": {
+            **(payload.get("summary") if isinstance(payload.get("summary"), dict) else {}),
+            "count": min(len(items), limit),
+            "totalCount": len(items),
+        },
+    }
+
+
 def age_seconds(timestamp: Any, now: str) -> float:
     try:
         value = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))

@@ -34,7 +34,6 @@ class DefiTokenWatchDependencies:
     snapshot_store: Any
     get_cached_json: Callable[..., Any] | None
     set_cached_json: Callable[..., Any] | None
-    get_snapshot_payload: Callable[..., Any] | None
 
     @classmethod
     def from_context(
@@ -61,10 +60,6 @@ class DefiTokenWatchDependencies:
             set_cached_json=resolve_optional_service_callable(
                 context,
                 "set_cached_json",
-            ),
-            get_snapshot_payload=resolve_optional_service_callable(
-                context,
-                "get_snapshot_payload",
             ),
         )
 

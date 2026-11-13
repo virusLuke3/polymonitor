@@ -1,9 +1,8 @@
-import { toneClass, watchStatusBadge as statusBadge, watchItemKey as itemKey } from '@/panels/shared/formatters';
-import { useMemo, useState } from 'preact/hooks';
+import { formatRelative, toneClass, watchStatusBadge as statusBadge, watchItemKey as itemKey } from '@/panels/shared/formatters';
+import { useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeTechPanel } from '@/services/api';
 import type { RuntimeTechPanelItem, RuntimeTechPanelPayload } from '@/types';
-import { formatRelative } from '@/panels/shared/formatters';
 import type { PanelRenderMap } from '@/panels/types';
 import { runtimePanelFromRenderer } from '@/panels/definePanel';
 import { watchSnapshot } from './watch-snapshot';
@@ -29,17 +28,18 @@ function tags(item: RuntimeTechPanelItem) {
 function WatchlistStrip({
   activeCategory,
   onSelectCategory,
-  payload,
+  watchlist,
+  title,
 }: {
   activeCategory?: string | null;
   onSelectCategory?: (category: string) => void;
-  payload?: RuntimeTechPanelPayload | null;
+  watchlist: Array<Record<string, unknown>>;
+  title?: string | null;
 }) {
-  const watchlist = Array.isArray(payload?.summary?.watchlist) ? payload?.summary?.watchlist as Array<Record<string, unknown>> : [];
   if (!watchlist.length) return null;
   return (
-    <div className="wm-tech-watch-strip" role="tablist" aria-label={`${payload?.title || 'Tech'} filters`}>
-      {watchlist.slice(0, 4).map((item) => {
+    <div className="wm-tech-watch-strip" role="tablist" aria-label={`${title || 'Tech'} filters`}>
+      {watchlist.map((item) => {
         const category = String(item.symbol || item.label || '').trim();
         const active = category === activeCategory;
         return (
@@ -133,8 +133,8 @@ function AppPulseRow({ item }: { item: RuntimeTechPanelItem }) {
 
 function TechPanelBody({ payload, mode }: { payload?: RuntimeTechPanelPayload | null; mode: TechPanelMode }) {
   const items = payload?.items || [];
-  const watchlist = Array.isArray(payload?.summary?.watchlist) ? payload?.summary?.watchlist as Array<Record<string, unknown>> : [];
-  const categoryTabs = watchlist.slice(0, 4).map((item) => String(item.symbol || item.label || '').trim()).filter(Boolean);
+  const watchlist = Array.isArray(payload?.summary?.watchlist) ? (payload.summary.watchlist as Array<Record<string, unknown>>).slice(0, 4) : [];
+  const categoryTabs = watchlist.map((item) => String(item.symbol || item.label || '').trim()).filter(Boolean);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const safeActiveCategory = categoryTabs.includes(String(activeCategory || '')) ? activeCategory : categoryTabs[0] || null;
   const visibleItems = safeActiveCategory && mode !== 'market-cap'
@@ -151,32 +151,24 @@ function TechPanelBody({ payload, mode }: { payload?: RuntimeTechPanelPayload | 
   if (mode === 'market-cap') {
     return <div className="wm-tech-cap-list">{items.map((item, index) => <MarketCapRow item={item} key={itemKey(item, index)} />)}</div>;
   }
-  if (mode === 'app-pulse') {
-    return (
-      <div className="wm-tech-app-list">
-        <WatchlistStrip activeCategory={safeActiveCategory} onSelectCategory={setActiveCategory} payload={payload} />
-        {visibleItems.map((item, index) => <AppPulseRow item={item} key={itemKey(item, index)} />)}
-      </div>
-    );
-  }
+  const Row = mode === 'app-pulse' ? AppPulseRow : TechFeedRow;
   return (
-    <div className="wm-tech-feed-list">
-      <WatchlistStrip activeCategory={safeActiveCategory} onSelectCategory={setActiveCategory} payload={payload} />
-      {visibleItems.map((item, index) => <TechFeedRow item={item} key={itemKey(item, index)} />)}
+    <div className={mode === 'app-pulse' ? 'wm-tech-app-list' : 'wm-tech-feed-list'}>
+      <WatchlistStrip activeCategory={safeActiveCategory} onSelectCategory={setActiveCategory} watchlist={watchlist} title={payload?.title} />
+      {visibleItems.map((item, index) => <Row item={item} key={itemKey(item, index)} />)}
     </div>
   );
 }
 
 function TechWatchPanel({ config, payload }: { config: TechPanelConfig; payload?: RuntimeTechPanelPayload | null }) {
   const [showHelp, setShowHelp] = useState(false);
-  const count = useMemo(() => payload?.items?.length || 0, [payload?.items]);
   return (
     <Panel
       title={config.title}
       titleControls={<button type="button" className="wm-panel-help-button" aria-label={`Explain ${config.title}`} aria-expanded={showHelp} onClick={() => setShowHelp((current) => !current)}>?</button>}
       badge={statusBadge(payload)}
       status={payload?.status === 'ok' ? 'live' : 'muted'}
-      count={count}
+      count={payload?.items?.length || 0}
       headerOverlay={showHelp ? (
         <div className="wm-panel-help-popover">
           <strong>{config.title}</strong>

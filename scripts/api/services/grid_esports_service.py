@@ -88,7 +88,6 @@ class GridEsportsDependencies:
     search_markets: Callable[..., Any] | None
     get_cached_json: Callable[..., Any] | None
     set_cached_json: Callable[..., Any] | None
-    get_snapshot_payload: Callable[..., Any] | None
     snapshot_store: Any
     utc_now_iso: Callable[..., Any] | None
 
@@ -118,10 +117,6 @@ class GridEsportsDependencies:
             set_cached_json=resolve_optional_service_callable(
                 context,
                 "set_cached_json",
-            ),
-            get_snapshot_payload=resolve_optional_service_callable(
-                context,
-                "get_snapshot_payload",
             ),
             snapshot_store=context.get("SNAPSHOT_STORE"),
             utc_now_iso=resolve_optional_service_callable(

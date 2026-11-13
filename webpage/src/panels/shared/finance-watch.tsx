@@ -325,31 +325,28 @@ function FinanceWatchPanel({ config, payload }: { config: FinancePanelConfig; pa
   const previousSignaturesRef = useRef<Record<string, string>>({});
   const previousGeneratedAtRef = useRef<string | undefined>(undefined);
   const mode = config.mode || 'rows';
-  const count = useMemo(() => payload?.items?.length || 0, [payload?.items]);
   const items = payload?.items || [];
-  const itemStamp = useMemo(() => items.map((item, index) => `${itemKey(item, index)}=${itemSignature(item)}`).join('|'), [items]);
+  const { signatures, itemStamp } = useMemo(() => {
+    const entries = items.map((item, index) => [itemKey(item, index), itemSignature(item)]);
+    return {
+      signatures: Object.fromEntries(entries) as Record<string, string>,
+      itemStamp: entries.map(([key, signature]) => `${key}=${signature}`).join('|'),
+    };
+  }, [items]);
   const title = copy('title', config.title);
 
   useEffect(() => {
     if (!payload) return;
-    const nextSignatures: Record<string, string> = {};
-    items.forEach((item, index) => {
-      nextSignatures[itemKey(item, index)] = itemSignature(item);
-    });
     const previous = previousSignaturesRef.current;
     const previousGeneratedAt = previousGeneratedAtRef.current;
     const hasPrevious = Object.keys(previous).length > 0;
-    const changed = hasPrevious ? Object.keys(nextSignatures).filter((key) => previous[key] !== nextSignatures[key]) : [];
-    previousSignaturesRef.current = nextSignatures;
+    const changed = hasPrevious ? Object.keys(signatures).filter((key) => previous[key] !== signatures[key]) : [];
+    previousSignaturesRef.current = signatures;
     previousGeneratedAtRef.current = payload.generatedAt;
     const generatedAtChanged = Boolean(previousGeneratedAt && payload.generatedAt && previousGeneratedAt !== payload.generatedAt);
-    if (!changed.length) {
-      setFreshKeys((current) => current.size ? new Set() : current);
-      if (generatedAtChanged) setUpdatePulse((value) => value + 1);
-      return;
-    }
-    setFreshKeys(new Set(changed));
-    setUpdatePulse((value) => value + 1);
+    if (changed.length) setFreshKeys(new Set(changed));
+    else setFreshKeys((current) => current.size ? new Set() : current);
+    if (changed.length || generatedAtChanged) setUpdatePulse((value) => value + 1);
   }, [itemStamp, payload?.generatedAt]);
 
   useEffect(() => {
@@ -364,7 +361,7 @@ function FinanceWatchPanel({ config, payload }: { config: FinancePanelConfig; pa
       titleControls={<button type="button" className="wm-panel-help-button" aria-label={shared('explainPanel', 'Explain {title}', { title })} aria-expanded={showHelp} onClick={() => setShowHelp((current) => !current)}>?</button>}
       badge={statusBadge(payload)}
       status={payload?.status === 'ok' ? 'live' : 'muted'}
-      count={count}
+      count={items.length}
       headerOverlay={showHelp ? (
         <div className="wm-panel-help-popover">
           <strong>{title}</strong>

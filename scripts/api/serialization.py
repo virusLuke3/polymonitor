@@ -48,6 +48,15 @@ CRYPTO_COINGECKO_IDS = {
 }
 
 
+def iso_timestamp(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        aware = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return aware.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return str(value)
+
+
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 

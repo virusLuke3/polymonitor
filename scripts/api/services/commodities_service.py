@@ -8,20 +8,12 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
+from api.services.seed_recovery import age_seconds
+
 MAX_SEED_AGE_SECONDS = 900
 RETAIN_SECONDS = 900
 _recovery_lock = threading.Lock()
 _last_recovery_attempt = float("-inf")
-
-
-def age_seconds(timestamp: Any, now: str) -> float:
-    try:
-        value = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))
-        current = datetime.fromisoformat(now.replace("Z", "+00:00"))
-        age = (current - value).total_seconds()
-        return age if age >= -60 else float("inf")
-    except (TypeError, ValueError):
-        return float("inf")
 
 
 def valid_price(row: dict) -> bool:

@@ -2,15 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-
-def safe_float(value: Any) -> Optional[float]:
-    if value in (None, ""):
-        return None
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return None
-    return number if number == number else None
+from api.services.worldcup.common import safe_float
 
 
 def percent_from_price(value: Any) -> Optional[float]:
