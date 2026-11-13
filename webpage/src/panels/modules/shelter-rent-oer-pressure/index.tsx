@@ -1,44 +1,16 @@
-import { macroSnapshot, macroSourceRefreshPolicy } from '@/panels/shared/macro-runtime';
 import { fetchRuntimeShelterRentOerPressure } from '@/services/api';
-import type { RuntimeMacroDriverPayload, RuntimePolymarketMacroMapPayload } from '@/types';
-import type { PanelRenderMap } from '../../types';
-import { runtimePanelFromRenderer } from '@/panels/definePanel';
-import { MacroDriverPanel } from '@/panels/shared/macro-driver';
+import { createMacroDriverPanel } from '@/panels/shared/macro-driver';
 
-const renderers: PanelRenderMap = {
-  'shelter-rent-oer-pressure': {
-    render: (ctx) => (
-      <MacroDriverPanel
-        config={{
-          panelId: 'shelter-rent-oer-pressure',
-          title: 'SHELTER / OER',
-          badge: 'FRED',
-          glyph: 'home',
-          driverLabel: 'Core CPI Driver',
-          helpTitle: 'Shelter Rent OER Pressure',
-          helpText: 'Uses official FRED/BLS rent, OER, shelter CPI, and housing-price series to expose the sticky core-CPI channel Polymarket traders watch before CPI prints.',
-          emptyTitle: 'SHELTER WATCH WARMING',
-          implicationItems: ['Core CPI', 'OER', 'Rent CPI', 'Fed path'],
-          linkedCategories: ['cpi', 'fed'],
-          linkedTitle: 'PMKT shelter / CPI',
-        }}
-        payload={ctx.runtimeData['shelter-rent-oer-pressure'] as RuntimeMacroDriverPayload | undefined}
-        macroPayload={ctx.runtimeData['polymarket-macro-map'] as RuntimePolymarketMacroMapPayload | undefined}
-      />
-    ),
-  },
-};
-
-export const panel = runtimePanelFromRenderer(renderers, {
-  id: 'shelter-rent-oer-pressure',
-  snapshot: macroSnapshot('shelter-rent-oer-pressure', false, 'source'),
-  dataDependencies: ['polymarket-macro-map'],
-  title: 'Shelter Rent OER Pressure',
-  eyebrow: 'macro',
+export const panel = createMacroDriverPanel({
+  panelId: 'shelter-rent-oer-pressure',
+  title: 'SHELTER / OER',
+  badge: 'FRED',
+  glyph: 'home',
+  driverLabel: 'Core CPI Driver',
+  helpTitle: 'Shelter Rent OER Pressure',
+  helpText: 'Uses official FRED/BLS rent, OER, shelter CPI, and housing-price series to expose the sticky core-CPI channel Polymarket traders watch before CPI prints.',
+  emptyTitle: 'SHELTER WATCH WARMING',
+  name: 'Shelter Rent OER Pressure',
   description: 'Rent and OER pressure for core CPI markets.',
-  defaultEnabled: false,
-}, {
-  ...macroSourceRefreshPolicy,
   limit: 8,
-  fetchData: (context, limit) => fetchRuntimeShelterRentOerPressure(limit, context?.signal),
-});
+}, fetchRuntimeShelterRentOerPressure);

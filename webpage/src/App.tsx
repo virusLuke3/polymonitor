@@ -149,7 +149,7 @@ function WorldMonitorApp() {
   const { bootstrap, health, globalTrades, globalOracle, latestContent, loading, error } = useDashboardData(workspace, runtime);
   const { markets, marketGroups, marketCatalogRefreshing, marketCatalogError, catalogLoaded } = useMarketCatalog(bootstrap, true, marketGroupSort);
   const { selectedMarketId, setSelectedMarketId, resetMarketSelection, selectedMarketGroupId, selectedMarketGroupOutcomeKey, setSelectedMarketGroupOutcomeKey,
-    selectedMarketGroupDetail, selectedMarketGroupChart, selectedMarketGroupChartRange, setSelectedMarketGroupChartRange,
+    selectedMarketGroupDetail, selectedMarketGroupChartRange, setSelectedMarketGroupChartRange,
     bundle, bundleLoading, focusMarketGroup, error: focusError } = useMarketFocus({ bootstrap, markets, marketGroups, catalogLoaded });
   const { worldEventMap, setRendererViewport, aviationStatus, setMapRendererKind, layers, region, mapZoom, setRegion, setMapZoom,
     countryIndex, mapVisibleEventCount, onMapVisibilityChange, onMapPresentationChange, worldEventMapEvents, mapSourceStatuses } = useWorldEventMapController(runtime);
@@ -277,7 +277,6 @@ function WorldMonitorApp() {
     selectedMarketGroupOutcomeKey,
     setSelectedMarketGroupOutcomeKey,
     selectedMarketGroupDetail,
-    selectedMarketGroupChart,
     selectedMarketGroupChartRange,
     setSelectedMarketGroupChartRange,
     selectedMarket,

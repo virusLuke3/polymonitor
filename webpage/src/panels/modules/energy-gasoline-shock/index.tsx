@@ -2,7 +2,7 @@ import { macroSourceRefreshPolicy } from '@/panels/shared/macro-runtime';
 import { energySnapshot } from '@/panels/shared/context-snapshots';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeEnergyGasolineShock } from '@/services/api';
-import type { RuntimeEnergyGasolineShockPayload, RuntimeEnergyShockItem, RuntimePolymarketMacroMapPayload } from '@/types';
+import type { RuntimeEnergyGasolineShockPayload, RuntimeEnergyShockItem } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '@/panels/definePanel';
 import { PanelGlyph, RowGlyph, StatusBadge, signalToneClass, type PanelGlyphName } from '@/panels/shared/macro-intel';
@@ -53,7 +53,7 @@ function EnergyRow({ item }: { item: RuntimeEnergyShockItem }) {
   );
 }
 
-function EnergyGasolineShockPanel({ payload, macroPayload: _macroPayload }: { payload?: RuntimeEnergyGasolineShockPayload | null; macroPayload?: RuntimePolymarketMacroMapPayload | null }) {
+function EnergyGasolineShockPanel({ payload }: { payload?: RuntimeEnergyGasolineShockPayload | null }) {
   const { copy } = useSpecialistCopy('energy-gasoline-shock');
   const summary = payload?.summary;
   const items = payload?.items || [];
@@ -86,14 +86,13 @@ function EnergyGasolineShockPanel({ payload, macroPayload: _macroPayload }: { pa
 
 const renderers: PanelRenderMap = {
   'energy-gasoline-shock': {
-    render: (ctx) => <EnergyGasolineShockPanel payload={ctx.runtimeData['energy-gasoline-shock'] as RuntimeEnergyGasolineShockPayload | undefined} macroPayload={ctx.runtimeData['polymarket-macro-map'] as RuntimePolymarketMacroMapPayload | undefined} />,
+    render: (ctx) => <EnergyGasolineShockPanel payload={ctx.runtimeData['energy-gasoline-shock'] as RuntimeEnergyGasolineShockPayload | undefined} />,
   },
 };
 
 export const panel = runtimePanelFromRenderer(renderers, {
   snapshot: energySnapshot(6),
   id: 'energy-gasoline-shock',
-  dataDependencies: ['polymarket-macro-map'],
   title: 'Energy & Gasoline Shock',
   eyebrow: 'macro',
   description: 'EIA WTI, gasoline, and diesel pressure for headline CPI markets.',

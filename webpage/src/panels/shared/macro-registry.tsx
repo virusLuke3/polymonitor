@@ -1,4 +1,5 @@
-import { MacroRefresh } from './macro-runtime';
+import { runtimePanelFromRenderer } from '@/panels/definePanel';
+import { MacroRefresh, macroSnapshot, macroRefreshPolicy } from './macro-runtime';
 import {
   displayValue,
   numberLabel as compactNumber,
@@ -15,12 +16,9 @@ import { useSpecialistCopy } from '@/services/specialist-i18n';
 export type MacroRegistryConfig = {
   panelId: string;
   title: string;
-  badge: string;
-  glyph: PanelGlyphName;
   helpTitle: string;
   helpText: string;
   emptyTitle: string;
-  implicationItems: string[];
 };
 
 function rowGlyph(item: RuntimeMacroRegistryItem): PanelGlyphName {
@@ -144,4 +142,20 @@ export function MacroRegistryPanel({ config, payload }: { config: MacroRegistryC
       </div>
     </Panel>
   );
+}
+
+export function createMacroRegistryPanel(
+  config: MacroRegistryConfig & { name: string; description: string; limit: number; defaultEnabled?: boolean },
+  fetchData: (limit?: number, signal?: AbortSignal) => Promise<unknown>,
+) {
+  const id = config.panelId;
+  return runtimePanelFromRenderer({ [id]: {
+    render: ctx => <MacroRegistryPanel config={config} payload={ctx.runtimeData[id] as RuntimeMacroRegistryPayload | undefined} />,
+  } }, {
+    id, title: config.name, eyebrow: 'macro', description: config.description,
+    defaultEnabled: config.defaultEnabled ?? false, snapshot: macroSnapshot(id),
+  }, {
+    ...macroRefreshPolicy, limit: config.limit,
+    fetchData: (context, limit) => fetchData(limit, context?.signal),
+  });
 }

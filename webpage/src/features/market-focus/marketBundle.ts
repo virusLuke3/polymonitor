@@ -1,3 +1,4 @@
+import { hasBookLevels } from './orderBook';
 import type { MarketListItem, MarketGroupItem, MarketGroupDetail, MarketGroupOutcome, MarketSummary, WorkspaceBundle } from '@/types';
 
 
@@ -64,34 +65,22 @@ export function pickDefaultGroupOutcome(group: MarketGroupItem, outcomeKey?: str
     if (matched) return matched;
   }
   return eligible
-    .slice()
-    .sort((left, right) => {
-      const leftPrice = groupOutcomePrice(left);
-      const rightPrice = groupOutcomePrice(right);
-      const leftVolume = Number(left.volume24h || 0);
-      const rightVolume = Number(right.volume24h || 0);
-      const leftTrades = Number(left.tradeCount24h || 0);
-      const rightTrades = Number(right.tradeCount24h || 0);
-      const leftDistance = leftPrice == null ? 0 : Math.min(1, Math.abs(leftPrice - 0.5) * 2);
-      const rightDistance = rightPrice == null ? 0 : Math.min(1, Math.abs(rightPrice - 0.5) * 2);
-      const leftBlockClose = left.blockCloseYesPrice == null || left.blockCloseYesPrice === '' ? 0 : 1;
-      const rightBlockClose = right.blockCloseYesPrice == null || right.blockCloseYesPrice === '' ? 0 : 1;
-      const leftScore = Math.min(70, Math.pow(Math.max(leftVolume, 0), 0.35))
-        + Math.min(70, Math.max(leftTrades, 0) * 3)
-        + leftDistance * 24
-        + leftBlockClose * 28
-        + (left.marketId ? 12 : 0)
-        + (left.yesTokenId ? 8 : 0)
-        - (leftPrice != null && Math.abs(leftPrice - 0.5) < 0.0001 && leftTrades <= 0 && leftVolume < 25 ? 45 : 0);
-      const rightScore = Math.min(70, Math.pow(Math.max(rightVolume, 0), 0.35))
-        + Math.min(70, Math.max(rightTrades, 0) * 3)
-        + rightDistance * 24
-        + rightBlockClose * 28
-        + (right.marketId ? 12 : 0)
-        + (right.yesTokenId ? 8 : 0)
-        - (rightPrice != null && Math.abs(rightPrice - 0.5) < 0.0001 && rightTrades <= 0 && rightVolume < 25 ? 45 : 0);
-      return rightScore - leftScore || rightVolume - leftVolume || rightTrades - leftTrades;
-    })[0] || null;
+    .map((outcome) => {
+      const price = groupOutcomePrice(outcome);
+      const volume = Number(outcome.volume24h || 0);
+      const trades = Number(outcome.tradeCount24h || 0);
+      const distance = price == null ? 0 : Math.min(1, Math.abs(price - 0.5) * 2);
+      const hasBlockClose = outcome.blockCloseYesPrice != null && outcome.blockCloseYesPrice !== '';
+      const score = Math.min(70, Math.pow(Math.max(volume, 0), 0.35))
+        + Math.min(70, Math.max(trades, 0) * 3)
+        + distance * 24
+        + (hasBlockClose ? 28 : 0)
+        + (outcome.marketId ? 12 : 0)
+        + (outcome.yesTokenId ? 8 : 0)
+        - (price != null && Math.abs(price - 0.5) < 0.0001 && trades <= 0 && volume < 25 ? 45 : 0);
+      return { outcome, score, volume, trades };
+    })
+    .sort((left, right) => right.score - left.score || right.volume - left.volume || right.trades - left.trades)[0]?.outcome || null;
 }
 
 export function findGroupForMarketId(groups: MarketGroupItem[], marketId: number | null) {
@@ -263,16 +252,10 @@ function chooseWorkspaceChart(current: WorkspaceBundle['chart'], patch: Workspac
   return patchPoints.length >= currentPoints.length ? patch : current;
 }
 
-function lobHasLevels(lob: WorkspaceBundle['lob']) {
-  const yesLevels = (lob?.yes?.bids?.length || 0) + (lob?.yes?.asks?.length || 0);
-  const noLevels = (lob?.no?.bids?.length || 0) + (lob?.no?.asks?.length || 0);
-  return yesLevels + noLevels > 0;
-}
-
 function chooseWorkspaceLob(current: WorkspaceBundle['lob'], patch: WorkspaceBundle['lob']) {
   if (!patch) return current;
-  if (lobHasLevels(patch)) return patch;
-  if (lobHasLevels(current)) return current;
+  if (hasBookLevels(patch)) return patch;
+  if (hasBookLevels(current)) return current;
   return patch;
 }
 

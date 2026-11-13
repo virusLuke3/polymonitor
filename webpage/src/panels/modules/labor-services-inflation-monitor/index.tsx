@@ -1,39 +1,14 @@
-import { macroSnapshot, macroRefreshPolicy } from '@/panels/shared/macro-runtime';
 import { fetchRuntimeLaborServicesInflationMonitor } from '@/services/api';
-import type { RuntimeMacroRegistryPayload } from '@/types';
-import type { PanelRenderMap } from '../../types';
-import { runtimePanelFromRenderer } from '@/panels/definePanel';
-import { MacroRegistryPanel } from '@/panels/shared/macro-registry';
+import { createMacroRegistryPanel } from '@/panels/shared/macro-registry';
 
-const renderers: PanelRenderMap = {
-  'labor-services-inflation-monitor': {
-    render: (ctx) => (
-      <MacroRegistryPanel
-        config={{
-          panelId: 'labor-services-inflation-monitor',
-          title: 'LABOR / SERVICES',
-          badge: 'BLS/DOL',
-          glyph: 'labor',
-          helpTitle: 'Labor Services Inflation Monitor',
-          helpText: 'Combines payrolls, unemployment, wages, claims, JOLTS, and services-inflation bridges into one registry for Fed/CPI reaction judgment.',
-          emptyTitle: 'LABOR SERVICES WARMING',
-          implicationItems: ['Services CPI', 'Wage pressure', 'Labor cooling', 'Fed reaction'],
-        }}
-        payload={ctx.runtimeData['labor-services-inflation-monitor'] as RuntimeMacroRegistryPayload | undefined}
-      />
-    ),
-  },
-};
-
-export const panel = runtimePanelFromRenderer(renderers, {
-  id: 'labor-services-inflation-monitor',
-  title: 'Labor / Services Inflation Monitor',
-  eyebrow: 'macro',
+export const panel = createMacroRegistryPanel({
+  panelId: 'labor-services-inflation-monitor',
+  title: 'LABOR / SERVICES',
+  helpTitle: 'Labor Services Inflation Monitor',
+  helpText: 'Combines payrolls, unemployment, wages, claims, JOLTS, and services-inflation bridges into one registry for Fed/CPI reaction judgment.',
+  emptyTitle: 'LABOR SERVICES WARMING',
+  name: 'Labor / Services Inflation Monitor',
   description: 'Labor, wage, claims, and services CPI pressure registry.',
-  defaultEnabled: true,
-  snapshot: macroSnapshot('labor-services-inflation-monitor'),
-}, {
-  ...macroRefreshPolicy,
   limit: 36,
-  fetchData: (context, limit) => fetchRuntimeLaborServicesInflationMonitor(limit, context?.signal),
-});
+  defaultEnabled: true,
+}, fetchRuntimeLaborServicesInflationMonitor);

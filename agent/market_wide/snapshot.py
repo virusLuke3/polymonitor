@@ -330,11 +330,11 @@ def _read_cached_snapshot(helpers: dict[str, Any], namespace: str, cache_key: st
         if isinstance(cached, dict):
             return cached
     store = helpers.get("SNAPSHOT_STORE")
-    if store is not None and hasattr(store, "get"):
+    if store is not None:
         fresh = store.get(namespace, cache_key)
         if isinstance(fresh, dict):
             return fresh
-    if store is not None and hasattr(store, "get_stale"):
+    if store is not None:
         stale = store.get_stale(namespace, cache_key)
         if isinstance(stale, dict):
             return stale
@@ -380,7 +380,7 @@ def _read_trade_evidence(helpers: dict[str, Any], name: str, limit: int) -> tupl
 
 def _forecast_memory_items(helpers: dict[str, Any], lens: str, limit: int = 24) -> list[Any]:
     store = helpers.get("SNAPSHOT_STORE")
-    if store is not None and hasattr(store, "get_agent_forecast_memory"):
+    if store is not None:
         try:
             items = store.get_agent_forecast_memory(lens, limit=limit)
             if isinstance(items, list):
@@ -536,11 +536,13 @@ def store_market_wide_snapshot(helpers: dict[str, Any], snapshot: dict[str, Any]
     key = snapshot_cache_key(lens)
     ttl = snapshot_ttl_seconds()
     setter = helpers.get("set_cached_json")
-    if callable(setter):
-        setter(SNAPSHOT_NAMESPACE, key, snapshot, ttl)
     store = helpers.get("SNAPSHOT_STORE")
-    if store is not None and hasattr(store, "set"):
-        store.set(SNAPSHOT_NAMESPACE, key, snapshot, ttl)
+    if callable(setter) and (store is None or store.backend != "redis"):
+        setter(SNAPSHOT_NAMESPACE, key, snapshot, ttl)
+    if store is not None:
+        accepted = store.set(SNAPSHOT_NAMESPACE, key, snapshot, ttl)
+        if store.backend == "redis" and not accepted:
+            raise RuntimeError("Seed publication rejected")
     store_market_wide_quant_snapshot(helpers, snapshot)
     store_market_wide_agent_events(helpers, snapshot)
     store_market_wide_forecast_memory(helpers, snapshot)
@@ -585,12 +587,15 @@ def store_market_wide_quant_snapshot(helpers: dict[str, Any], snapshot: dict[str
     history_key = quant_history_cache_key(lens, payload.get("runId"))
     ttl = quant_snapshot_ttl_seconds()
     setter = helpers.get("set_cached_json")
-    if callable(setter):
-        setter(QUANT_SNAPSHOT_NAMESPACE, latest_key, payload, ttl)
-        setter(QUANT_HISTORY_NAMESPACE, history_key, payload, ttl)
     store = helpers.get("SNAPSHOT_STORE")
-    if store is not None and hasattr(store, "set"):
-        store.set(QUANT_SNAPSHOT_NAMESPACE, latest_key, payload, ttl)
+    if callable(setter):
+        if store is None or store.backend != "redis":
+            setter(QUANT_SNAPSHOT_NAMESPACE, latest_key, payload, ttl)
+        setter(QUANT_HISTORY_NAMESPACE, history_key, payload, ttl)
+    if store is not None:
+        accepted = store.set(QUANT_SNAPSHOT_NAMESPACE, latest_key, payload, ttl)
+        if store.backend == "redis" and not accepted:
+            raise RuntimeError("Seed publication rejected")
         store.set(QUANT_HISTORY_NAMESPACE, history_key, payload, ttl)
 
 
@@ -627,7 +632,7 @@ def _agent_events_from_snapshot(snapshot: dict[str, Any]) -> list[dict[str, Any]
 
 def store_market_wide_agent_events(helpers: dict[str, Any], snapshot: dict[str, Any]) -> None:
     store = helpers.get("SNAPSHOT_STORE")
-    if store is None or not hasattr(store, "record_agent_node_events"):
+    if store is None:
         return
     events = _agent_events_from_snapshot(snapshot)
     if not events:
@@ -648,7 +653,7 @@ def store_market_wide_forecast_memory(helpers: dict[str, Any], snapshot: dict[st
     if not episodes:
         return
     store = helpers.get("SNAPSHOT_STORE")
-    if store is None or not hasattr(store, "upsert_agent_forecast_memory"):
+    if store is None:
         return
     try:
         store.upsert_agent_forecast_memory(episodes)
@@ -658,51 +663,34 @@ def store_market_wide_forecast_memory(helpers: dict[str, Any], snapshot: dict[st
             logger.exception("agent forecast memory write failed")
 
 
-def read_market_wide_quant_snapshot(helpers: dict[str, Any], lens: Any, *, allow_stale: bool = True) -> dict[str, Any] | None:
-    key = quant_snapshot_cache_key(lens)
+def _read_published_snapshot(helpers, namespace, key, allow_stale):
     store = helpers.get("SNAPSHOT_STORE")
-    if store is not None and hasattr(store, "get"):
-        cached = store.get(QUANT_SNAPSHOT_NAMESPACE, key)
+    if store is not None:
+        cached = store.get(namespace, key)
         if isinstance(cached, dict):
-            return cached
+            return cached, False
     getter = helpers.get("get_cached_json")
-    if callable(getter):
-        cached = getter(QUANT_SNAPSHOT_NAMESPACE, key)
+    if callable(getter) and (store is None or store.backend != "redis"):
+        cached = getter(namespace, key)
         if isinstance(cached, dict):
-            return cached
-    if allow_stale and store is not None and hasattr(store, "get_stale"):
-        stale = store.get_stale(QUANT_SNAPSHOT_NAMESPACE, key)
+            return cached, False
+    if allow_stale and store is not None:
+        stale = store.get_stale(namespace, key)
         if isinstance(stale, dict):
-            payload = dict(stale)
-            payload["cacheStatus"] = "stale-snapshot"
-            return payload
-    return None
+            return stale, True
+    return None, False
+
+
+def read_market_wide_quant_snapshot(helpers: dict[str, Any], lens: Any, *, allow_stale: bool = True) -> dict[str, Any] | None:
+    payload, stale = _read_published_snapshot(helpers, QUANT_SNAPSHOT_NAMESPACE, quant_snapshot_cache_key(lens), allow_stale)
+    return {**payload, "cacheStatus": "stale-snapshot"} if stale else payload
 
 
 def read_market_wide_snapshot(helpers: dict[str, Any], lens: Any, *, allow_stale: bool = True) -> dict[str, Any] | None:
-    key = snapshot_cache_key(lens)
-    # The producer's durable local publication is authoritative. A best-effort
-    # Redis write can fail while its older twelve-hour entry remains valid.
-    store = helpers.get("SNAPSHOT_STORE")
-    if store is not None and hasattr(store, "get"):
-        cached = store.get(SNAPSHOT_NAMESPACE, key)
-        if isinstance(cached, dict):
-            return cached
-    getter = helpers.get("get_cached_json")
-    if callable(getter):
-        cached = getter(SNAPSHOT_NAMESPACE, key)
-        if isinstance(cached, dict):
-            return cached
-    if allow_stale and store is not None and hasattr(store, "get_stale"):
-        stale = store.get_stale(SNAPSHOT_NAMESPACE, key)
-        if isinstance(stale, dict):
-            stale = dict(stale)
-            data = dict(stale.get("data") or {})
-            data["cacheStatus"] = "stale-snapshot"
-            data["source"] = "agent-snapshot"
-            stale["data"] = data
-            return stale
-    return None
+    payload, stale = _read_published_snapshot(helpers, SNAPSHOT_NAMESPACE, snapshot_cache_key(lens), allow_stale)
+    if stale:
+        return {**payload, "data": {**(payload.get("data") or {}), "cacheStatus": "stale-snapshot", "source": "agent-snapshot"}}
+    return payload
 
 
 def snapshot_response(snapshot: dict[str, Any]) -> dict[str, Any]:

@@ -2,7 +2,7 @@ import { usePanelResource } from '@/panels/usePanelResource';
 import { marketChartResource, marketDetailResource } from './resources';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { fetchMarketFlow, fetchMarketOracle } from '@/services/api';
-import type { BootstrapPayload, MarketListItem, MarketGroupItem, MarketGroupDetail, MarketGroupChartPayload, MarketGroupChartRange, WorkspaceBundle } from '@/types';
+import type { BootstrapPayload, MarketListItem, MarketGroupItem, MarketGroupDetail, MarketGroupChartRange, WorkspaceBundle } from '@/types';
 import { pickDefaultMarketId, pickDefaultGroupOutcome, optimisticBundleFromMarket, optimisticBundleFromGroup, emptyWorkspaceBundle, bundleMatchesMarket, mergeWorkspaceBundle } from './marketBundle';
 import { pollPanel } from './pollPanel';
 
@@ -132,12 +132,11 @@ export function useMarketFocus({ bootstrap, markets, marketGroups, catalogLoaded
     return () => { alive = false; stopOracle(); stopFlow(); };
   }, [selectedMarketId]);
 
-  const selectedMarketGroupChart: MarketGroupChartPayload | null = null;
   void marketGroups;
   return {
     selectedMarketId, setSelectedMarketId: selectMarket, resetMarketSelection,
     selectedMarketGroupId, selectedMarketGroupOutcomeKey, setSelectedMarketGroupOutcomeKey,
-    selectedMarketGroupDetail, selectedMarketGroupChart, selectedMarketGroupChartRange,
+    selectedMarketGroupDetail, selectedMarketGroupChartRange,
     setSelectedMarketGroupChartRange, bundle, bundleLoading, error, focusMarketGroup,
   };
 }

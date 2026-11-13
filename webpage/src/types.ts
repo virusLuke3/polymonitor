@@ -126,32 +126,6 @@ export type MarketGroupDetail = MarketGroupItem & {
   status?: string;
 };
 
-export type MarketGroupChartSeriesPoint = {
-  timestamp: string;
-  price: number | string;
-};
-
-export type MarketGroupChartSeries = {
-  outcomeKey?: string | null;
-  label?: string | null;
-  marketId?: number | null;
-  color?: string | null;
-  points: MarketGroupChartSeriesPoint[];
-};
-
-export type MarketGroupChartPayload = {
-  eventId?: string | number | null;
-  groupId?: string | null;
-  title?: string | null;
-  defaultOutcomeKey?: string | null;
-  range: string;
-  interval?: string | null;
-  historyStatus?: string | null;
-  priceSource?: string | null;
-  generatedAt?: string;
-  series: MarketGroupChartSeries[];
-};
-
 export type MarketListItem = {
   outcomeSemanticsStatus?: string;
   primaryOutcomePrice?: string | number | null;
@@ -2206,7 +2180,6 @@ export type PanelRenderContext = {
   selectedMarketGroupOutcomeKey: string | null;
   setSelectedMarketGroupOutcomeKey: (outcomeKey: string | null) => void;
   selectedMarketGroupDetail: MarketGroupDetail | null;
-  selectedMarketGroupChart: MarketGroupChartPayload | null;
   selectedMarketGroupChartRange: MarketGroupChartRange;
   setSelectedMarketGroupChartRange: (range: MarketGroupChartRange) => void;
   selectedMarket: MarketSummary | null;

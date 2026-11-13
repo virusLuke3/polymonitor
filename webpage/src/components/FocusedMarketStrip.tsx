@@ -17,9 +17,7 @@ import { formatCompact, formatCurrencyCompact, formatPercent, formatRelative, fo
 import type {
   ChartPayload,
   L2Level,
-  MarketGroupChartPayload,
   MarketGroupChartRange,
-  MarketGroupDetail,
   MarketGroupOutcome,
   MarketListItem,
   PanelRenderContext,
@@ -47,7 +45,6 @@ const FOCUS_CHART = {
 };
 const BOOK_LEVEL_LIMIT = 4;
 
-const POLYMARKET_SERIES_COLORS = ['#7cb6ff', '#4377ff', '#f5b800', '#ff7a1a', '#7f56d9', '#12b76a', '#f04438', '#06aed4'];
 
 function marketTimeSubtitle(endDate?: string | null, createdAt?: string | null) {
   if (endDate) return `Closes ${formatRelative(endDate)}`;
@@ -461,18 +458,6 @@ function buildHorizontalTicks(min: number, max: number, count = 4) {
   });
 }
 
-function polymarketProbabilityScale(values: number[]) {
-  const finite = values.filter((value) => Number.isFinite(value));
-  const rawMax = finite.length ? Math.max(...finite) : 1;
-  let max = 1;
-  if (rawMax <= 0.15) max = 0.15;
-  else if (rawMax <= 0.3) max = 0.3;
-  else if (rawMax <= 0.45) max = 0.45;
-  else if (rawMax <= 0.6) max = 0.6;
-  else if (rawMax <= 0.75) max = 0.75;
-  return { min: 0, max };
-}
-
 function focusedProbabilityScale(values: number[]) {
   const finite = values.filter((value) => Number.isFinite(value));
   if (!finite.length) return { min: 0, max: 1 };
@@ -491,173 +476,8 @@ function focusedProbabilityScale(values: number[]) {
   return { min, max };
 }
 
-function eventOutcomeCards(detail: MarketGroupDetail | null) {
-  return (detail?.outcomes || []).map((outcome) => ({
-    ...outcome,
-    price: Number(outcome.yesPrice),
-    change: Number(outcome.change24h),
-  }));
-}
-
-type EventOutcomeCard = MarketGroupOutcome & {
-  price: number;
-  change: number;
-};
-
-function renderEventDetailChart(
-  chart: MarketGroupChartPayload | null,
-  selectedOutcomeKey: string | null,
-  activeRange?: string | null,
-  latestTickIsNow = true,
-) {
-  const series = (chart?.series || []).filter((entry) => (entry.points || []).length > 1);
-  if (!series.length) return emptyState('Fresh market: waiting for event price history to print.');
-  const { width, height, left, right, top, bottom } = FOCUS_CHART;
-  const allValues = series.flatMap((entry) => (entry.points || []).map((point) => Number(point.price)).filter((value) => Number.isFinite(value)));
-  if (!allValues.length) return emptyState('No event probability history loaded yet.');
-  const { min, max } = polymarketProbabilityScale(allValues);
-  const span = max - min || 1;
-  const plotHeight = height - top - bottom;
-  const projectY = (value: number) => top + (1 - (value - min) / span) * plotHeight;
-  const ticks = buildHorizontalTicks(min, max, 5);
-  const selectedSeries = series.find((entry) => entry.outcomeKey === selectedOutcomeKey) || series[0];
-  const cleanSeries = series
-    .map((entry, index) => ({
-      entry,
-      color: entry.color || POLYMARKET_SERIES_COLORS[index % POLYMARKET_SERIES_COLORS.length],
-      points: normalizeTimedPointsForRange(
-        (entry.points || [])
-          .map((point) => ({ timestamp: point.timestamp, price: Number(point.price) }))
-          .filter((point) => Number.isFinite(point.price) && Boolean(point.timestamp)),
-        activeRange,
-      ),
-    }))
-    .filter((entry) => entry.points.length > 1);
-  const allStamped = cleanSeries
-    .flatMap((entry) => entry.points.map((point) => new Date(point.timestamp).getTime()))
-    .filter((value) => Number.isFinite(value));
-  const domainMinTs = allStamped.length ? Math.min(...allStamped) : undefined;
-  const domainMaxTs = allStamped.length ? Math.max(...allStamped) : undefined;
-  const selectedClean = cleanSeries.find((entry) => entry.entry.outcomeKey === selectedSeries?.outcomeKey) || cleanSeries[0] || null;
-  const selectedPath = selectedClean
-    ? buildTimedLinePath(selectedClean.points, { width, height, left, right, top, bottom, min, max, minTs: domainMinTs, maxTs: domainMaxTs })
-    : '';
-  const selectedColor = selectedClean?.color || selectedSeries?.color || '#4377ff';
-  const lastPoint = selectedClean?.points?.[selectedClean.points.length - 1] || null;
-  const lastPointX = lastPoint && selectedClean
-    ? (() => {
-        const stamped = selectedClean.points.map((point) => new Date(point.timestamp).getTime()).filter(Number.isFinite);
-        const minTs = domainMinTs ?? stamped[0] ?? 0;
-        const maxTs = domainMaxTs ?? stamped[stamped.length - 1] ?? minTs;
-        return left + ((new Date(lastPoint.timestamp).getTime() - minTs) / Math.max(maxTs - minTs, 1)) * (width - left - right);
-      })()
-    : null;
-  const timeTicks = chartTimeTicks(cleanSeries.flatMap((entry) => entry.points), 5);
-  const plotWidth = width - left - right;
-
-  return (
-    <div className="wm-focus-chart-shell wm-focus-event-chart-shell wm-polymarket-prob-chart">
-      <div className="wm-focus-chart-watermark" aria-hidden="true">Polymarket</div>
-      <svg viewBox={`0 0 ${width} ${height}`} className="wm-focus-chart-svg" preserveAspectRatio="none">
-        {ticks.map((tick) => {
-          const y = projectY(tick);
-          return (
-            <g key={tick}>
-              <line x1={left} y1={y} x2={width - right} y2={y} className="wm-focus-chart-grid h" />
-              <text x={width - right + 8} y={y + 4} className="wm-focus-chart-axis-text">{`${Math.round(tick * 100)}%`}</text>
-            </g>
-          );
-        })}
-        {timeTicks.map((tick) => {
-          const x = left + tick.ratio * plotWidth;
-          return (
-            <g key={`${tick.ts}-${tick.label}`}>
-              <rect x={x - 5} y={height - 30} width="10" height="7" rx="2.5" className="wm-focus-chart-timeline-handle" />
-              <text x={x} y={height - 8} className="wm-focus-chart-time-text">{compactTimeLabel(tick.ts, timeTicks.indexOf(tick), timeTicks.length, latestTickIsNow)}</text>
-            </g>
-          );
-        })}
-        <line x1={left} y1={height - 25} x2={width - right} y2={height - 25} className="wm-focus-chart-timeline-line" />
-        {cleanSeries.filter(({ entry }) => entry.outcomeKey !== selectedSeries?.outcomeKey).map(({ entry, points, color }) => {
-          const path = buildTimedLinePath(points, { width, height, left, right, top, bottom, min, max, minTs: domainMinTs, maxTs: domainMaxTs });
-          if (!path) return null;
-          const endpoint = points[points.length - 1];
-          const endpointX = endpoint
-            ? (() => {
-                const stamped = points.map((point) => new Date(point.timestamp).getTime()).filter(Number.isFinite);
-                const minTs = domainMinTs ?? stamped[0] ?? 0;
-                const maxTs = domainMaxTs ?? stamped[stamped.length - 1] ?? minTs;
-                return left + ((new Date(endpoint.timestamp).getTime() - minTs) / Math.max(maxTs - minTs, 1)) * plotWidth;
-              })()
-            : null;
-          return (
-            <g key={entry.outcomeKey || entry.label || path}>
-              <path d={path} className="wm-focus-chart-line event-series muted" style={{ stroke: color }} />
-              {endpoint && endpointX != null ? (
-                <circle cx={endpointX} cy={projectY(endpoint.price)} r="3.7" className="wm-focus-chart-endpoint" style={{ fill: color }} />
-              ) : null}
-            </g>
-          );
-        })}
-        {selectedPath ? (
-          <path
-            d={selectedPath}
-            className="wm-focus-chart-line event-series selected"
-          />
-        ) : null}
-        {lastPoint && lastPointX != null ? (
-          <circle cx={lastPointX} cy={projectY(lastPoint.price)} r="4.6" className="wm-focus-chart-endpoint selected" style={{ fill: selectedColor }} />
-        ) : null}
-      </svg>
-    </div>
-  );
-}
-
-function eventChartLegend(
-  detail: MarketGroupDetail | null,
-  chart: MarketGroupChartPayload | null,
-  selectedOutcomeKey: string | null,
-  onSelect: (outcome: MarketGroupOutcome) => void,
-) {
-  const outcomes = detail?.outcomes || [];
-  const seriesColorMap = new Map((chart?.series || []).map((entry) => [entry.outcomeKey || '', entry.color || '#7cb6ff']));
-  const visible = outcomes
-    .slice()
-    .sort((left, right) => Number(right.yesPrice || 0) - Number(left.yesPrice || 0))
-    .slice(0, 6);
-  if (!visible.length) return null;
-  return (
-    <div className="wm-focus-event-legend" aria-label="event outcomes legend">
-      {visible.map((outcome, index) => {
-        const key = outcome.outcomeKey || '';
-        const active = key === selectedOutcomeKey;
-        return (
-          <button
-            key={key || outcome.label || outcome.marketId || outcome.gammaMarketId}
-            type="button"
-            className={`wm-focus-event-legend-item${active ? ' active' : ''}`}
-            onClick={() => onSelect(outcome)}
-          >
-            <span
-              className="wm-focus-event-legend-dot"
-              style={{ background: seriesColorMap.get(key) || POLYMARKET_SERIES_COLORS[index % POLYMARKET_SERIES_COLORS.length] }}
-              aria-hidden="true"
-            />
-            <span className="wm-focus-event-legend-label">{outcome.label || 'Outcome'}</span>
-            <strong>{formatPercent(outcome.yesPrice)}</strong>
-            <em className={signedClass(outcome.change24h)}>{formatSignedPercent(outcome.change24h)}</em>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 type DetailChartOptions = {
   title?: string | null;
-  category?: string | null;
-  outcomeCount?: number | string | null;
-  selectedLabel?: string | null;
   latestTickIsNow?: boolean;
 };
 
@@ -898,7 +718,6 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   );
   const selectedGroup = ctx.bundle?.group || ctx.selectedMarketGroup;
   const detail = ctx.selectedMarketGroupDetail || ctx.bundle?.group || null;
-  const eventChart = ctx.selectedMarketGroupChart;
   const selectedOutcome = (
     (ctx.bundle?.selectedOutcome && ctx.selectedMarketId != null && Number(ctx.bundle.selectedOutcome.marketId) === ctx.selectedMarketId ? ctx.bundle.selectedOutcome : null)
     || (detail?.outcomes || []).find((outcome) => ctx.selectedMarketId != null && Number(outcome.marketId) === ctx.selectedMarketId)
@@ -966,10 +785,6 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const bidImbalance = bookImbalancePercent(bidDepthTotal, askDepthTotal);
   const hasAnyBookLevels = hasBookLevels(lob);
   const hasActiveBookLevels = hasSideBookLevels(activeBook);
-  const eventOutcomes = detail ? eventOutcomeCards(detail) : [];
-  const shouldShowOutcomeRail = detail
-    ? (detail.outcomes || []).length > 1
-    : ((selectedGroup?.outcomes || []).length > 1 || Number(marketStats?.outcomeCount || 2) > 2);
   const lobObservedAt = timestampMillis(activeBook?.receivedAt || activeBook?.eventAt);
   const lobStatus = !lob && tokenLobLoading && !tokenLobError ? 'warming' : liveBookStatus(lob, bookSide);
   const lobIsFresh = lobStatus === 'live';
@@ -1002,8 +817,6 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const chartSource = String(chart?.priceSource || '').toLowerCase();
   const isBlockCloseChart = Boolean(chartSource.includes('block_close') || String(chart?.interval || '').toLowerCase() === 'block');
   const isBlockCloseView = isBlockCloseChart;
-  const eventChartStatus = String(eventChart?.historyStatus || '').toLowerCase();
-  const eventChartSource = String(eventChart?.priceSource || '').toLowerCase();
   const chartPointCount = chart?.points?.length || 0;
   const chartRenderable = Boolean(
     chart
@@ -1024,11 +837,6 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
       .map((point) => String(point.timestamp || ''))
       .filter(Boolean),
   );
-  const hasEventHistory = Boolean((eventChart?.series || []).some((entry) => (entry.points || []).length > 1));
-  const hasSelectedEventHistory = Boolean((eventChart?.series || []).some((entry) => (
-    (!activeOutcomeKey || entry.outcomeKey === activeOutcomeKey)
-      && (entry.points || []).length > 1
-  )));
   const hasFocusedMarketHistory = Boolean(
     chartPoints.length > 1
       && chartStatus !== 'missing'
@@ -1048,20 +856,7 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
       || chartSource.includes('clob'),
   );
   const canRenderFocusedHistory = hasFocusedMarketCurve || (hasFocusedMarketHistory && focusedMarketSourceIsHistorical);
-  const preferEventChart = Boolean(
-    detail
-      && shouldShowOutcomeRail
-      && hasSelectedEventHistory
-      && !canRenderFocusedHistory
-      && !isBlockCloseView,
-  );
-  const showFocusedEventLegend = preferEventChart;
-  const showFocusedOutcomeRail = preferEventChart && shouldShowOutcomeRail;
-  const chartSourceText = preferEventChart || (!canRenderFocusedHistory && hasEventHistory)
-    ? chartSourceLabel(eventChartSource || 'clob-history', eventChartStatus)
-    : canRenderFocusedHistory || hasFocusedMarketHistory
-      ? chartSourceLabel(chartSource, chartStatus)
-      : chartSourceLabel(chartSource, chartStatus);
+  const chartSourceText = chartSourceLabel(chartSource, chartStatus);
   const hasServingTradeActivity = Number(displayedTrades || 0) > 0 || Number(displayedVolume || 0) > 0;
   const focusedHistoryEmptyText = isBlockCloseView
     ? 'No local OrderFilled block-close history is available for this market yet.'
@@ -1115,9 +910,6 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
   const selectedOutcomeLabel = selectedOutcome?.label || focusedMarket?.title || 'Selected outcome';
   const detailChartOptions: DetailChartOptions = {
     title: marketTitle,
-    category: eventCategory,
-    outcomeCount,
-    selectedLabel: selectedOutcome?.label || 'YES',
     latestTickIsNow: !marketIsClosed,
   };
   const lobSyncLabel = lobStatus === 'available' ? 'SNAPSHOT' : lobStatus.toUpperCase();
@@ -1221,55 +1013,12 @@ export function FocusedMarketStrip(props: FocusedMarketStripProps) {
               </div>
               {chartStatus === 'partial' ? <p className="wm-focus-history-note">Recent stored fills · up to 600 points from the latest 86,400 blocks. Full interval history is not available in this view.</p> : null}
               {chartStatus === 'stale' ? <p className="wm-focus-history-note">History refresh failed; showing the previous read.</p> : null}
-              <div className={`wm-focus-detail-grid${showFocusedOutcomeRail ? '' : ' compact'}`}>
+              <div className="wm-focus-detail-grid compact">
                 <div className="wm-focus-chart-wrap">
-                  {detail
-                    ? (
-                        preferEventChart
-                            ? renderEventDetailChart(eventChart, activeOutcomeKey, ctx.selectedMarketGroupChartRange, !marketIsClosed)
-                            : canRenderFocusedHistory
-                              ? renderDetailChart(displayChart, ctx.selectedMarketGroupChartRange, detailChartOptions)
-                            : hasEventHistory && !isBlockCloseView
-                              ? renderEventDetailChart(eventChart, activeOutcomeKey, ctx.selectedMarketGroupChartRange, !marketIsClosed)
-                              : focusedHistoryFallback
-                      )
-                    : (canRenderFocusedHistory ? renderDetailChart(displayChart, ctx.selectedMarketGroupChartRange, detailChartOptions) : focusedHistoryFallback)}
+                  {canRenderFocusedHistory
+                    ? renderDetailChart(displayChart, ctx.selectedMarketGroupChartRange, detailChartOptions)
+                    : focusedHistoryFallback}
                 </div>
-                {showFocusedEventLegend ? eventChartLegend(detail, eventChart, activeOutcomeKey, (outcome) => {
-                  ctx.setSelectedMarketGroupOutcomeKey(outcome.outcomeKey || null);
-                  if (outcome.marketId != null) {
-                    ctx.setSelectedMarketId(Number(outcome.marketId));
-                  } else {
-                    ctx.setSelectedMarketId(null);
-                  }
-                }) : null}
-                {showFocusedOutcomeRail ? (
-                  <aside className="wm-focus-outcome-rail" aria-label="outcomes">
-                    {eventOutcomes.map((outcome: EventOutcomeCard) => (
-                      <button
-                        type="button"
-                        className={`wm-focus-outcome-card event ${outcome.outcomeKey === activeOutcomeKey ? 'active' : ''} ${outcome.marketId == null ? 'pending' : ''}`}
-                        key={outcome.outcomeKey || outcome.label || outcome.gammaMarketId || outcome.marketId}
-                        onClick={() => {
-                          ctx.setSelectedMarketGroupOutcomeKey(outcome.outcomeKey || null);
-                          if (outcome.marketId != null) {
-                            ctx.setSelectedMarketId(Number(outcome.marketId));
-                          } else {
-                            ctx.setSelectedMarketId(null);
-                          }
-                        }}
-                      >
-                        <div className="wm-focus-outcome-top">
-                          <span>{outcome.label}</span>
-                          <strong>{Number.isFinite(outcome.price) ? formatPercent(outcome.price) : '--'}</strong>
-                        </div>
-                        <div className={`wm-focus-outcome-change ${signedClass(outcome.change)}`}>
-                          {Number.isFinite(outcome.change) ? formatSignedPercent(outcome.change) : '--'}
-                        </div>
-                      </button>
-                    ))}
-                  </aside>
-                ) : null}
               </div>
             </div>
 

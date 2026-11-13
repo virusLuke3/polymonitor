@@ -153,9 +153,9 @@ def _limit_context_chars(context: dict[str, Any], max_chars: int) -> dict[str, A
     if len(json.dumps(context, ensure_ascii=False, default=str)) <= max_chars:
         return context
     reduced = dict(context)
-    reduced["trades"] = reduced.get("trades", [])[:4] if isinstance(reduced.get("trades"), list) else []
-    reduced["content"] = reduced.get("content", [])[:3] if isinstance(reduced.get("content"), list) else []
-    reduced["searchResults"] = reduced.get("searchResults", [])[:2] if isinstance(reduced.get("searchResults"), list) else []
+    reduced["trades"] = reduced["trades"][:4]
+    reduced["content"] = reduced["content"][:3]
+    reduced["searchResults"] = reduced["searchResults"][:2]
     if len(json.dumps(reduced, ensure_ascii=False, default=str)) <= max_chars:
         return reduced
     reduced["trades"] = []

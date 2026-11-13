@@ -1,39 +1,14 @@
-import { macroSnapshot, macroRefreshPolicy } from '@/panels/shared/macro-runtime';
 import { fetchRuntimeCpiComponentsPressureRegistry } from '@/services/api';
-import type { RuntimeMacroRegistryPayload } from '@/types';
-import type { PanelRenderMap } from '../../types';
-import { runtimePanelFromRenderer } from '@/panels/definePanel';
-import { MacroRegistryPanel } from '@/panels/shared/macro-registry';
+import { createMacroRegistryPanel } from '@/panels/shared/macro-registry';
 
-const renderers: PanelRenderMap = {
-  'cpi-components-pressure-registry': {
-    render: (ctx) => (
-      <MacroRegistryPanel
-        config={{
-          panelId: 'cpi-components-pressure-registry',
-          title: 'CPI COMPONENTS',
-          badge: 'BLS/EIA',
-          glyph: 'basket',
-          helpTitle: 'CPI Components Pressure Registry',
-          helpText: 'Merges energy, food, and shelter/OER seeds into one dense component-pressure registry for headline and core CPI judgment.',
-          emptyTitle: 'COMPONENTS WARMING',
-          implicationItems: ['Headline CPI', 'Core sticky', 'Energy impulse', 'Food/shelter pressure'],
-        }}
-        payload={ctx.runtimeData['cpi-components-pressure-registry'] as RuntimeMacroRegistryPayload | undefined}
-      />
-    ),
-  },
-};
-
-export const panel = runtimePanelFromRenderer(renderers, {
-  id: 'cpi-components-pressure-registry',
-  title: 'CPI Components Pressure Registry',
-  eyebrow: 'macro',
+export const panel = createMacroRegistryPanel({
+  panelId: 'cpi-components-pressure-registry',
+  title: 'CPI COMPONENTS',
+  helpTitle: 'CPI Components Pressure Registry',
+  helpText: 'Merges energy, food, and shelter/OER seeds into one dense component-pressure registry for headline and core CPI judgment.',
+  emptyTitle: 'COMPONENTS WARMING',
+  name: 'CPI Components Pressure Registry',
   description: 'Energy, food, shelter, and CPI component pressure registry.',
-  defaultEnabled: true,
-  snapshot: macroSnapshot('cpi-components-pressure-registry'),
-}, {
-  ...macroRefreshPolicy,
   limit: 48,
-  fetchData: (context, limit) => fetchRuntimeCpiComponentsPressureRegistry(limit, context?.signal),
-});
+  defaultEnabled: true,
+}, fetchRuntimeCpiComponentsPressureRegistry);

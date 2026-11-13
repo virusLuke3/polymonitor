@@ -245,11 +245,11 @@ def _limit_context_chars(context: dict[str, Any], max_chars: int) -> dict[str, A
         reduced[key] = []
     if len(json.dumps(reduced, ensure_ascii=False, default=str)) <= max_chars:
         return reduced
-    reduced["forecastMemory"] = reduced.get("forecastMemory", [])[:4] if isinstance(reduced.get("forecastMemory"), list) else []
-    reduced["markets"] = reduced.get("markets", [])[:4] if isinstance(reduced.get("markets"), list) else []
-    reduced["marketGroups"] = reduced.get("marketGroups", [])[:3] if isinstance(reduced.get("marketGroups"), list) else []
-    reduced["topMarketFillTape"] = reduced.get("topMarketFillTape", [])[:3] if isinstance(reduced.get("topMarketFillTape"), list) else []
-    reduced["marketCandidates"] = reduced.get("marketCandidates", [])[:8] if isinstance(reduced.get("marketCandidates"), list) else []
+    reduced["forecastMemory"] = reduced["forecastMemory"][:4]
+    reduced["markets"] = reduced["markets"][:4]
+    reduced["marketGroups"] = reduced["marketGroups"][:3]
+    reduced["topMarketFillTape"] = reduced["topMarketFillTape"][:3]
+    reduced["marketCandidates"] = reduced["marketCandidates"][:8]
     return reduced
 
 
@@ -310,8 +310,7 @@ def _normalize(raw: dict[str, Any], payload: dict[str, Any], lens: str, search_r
         not isinstance(raw.get(key), list) for key in ("focus", "specialMarkets", "themes", "watchlist", "evidence")
     ):
         return _fallback_response(payload, lens, reason="invalid-agent-output")
-    fallback = _fallback_response(payload, lens, reason="fallback")
-    focus_items = raw.get("focus") if isinstance(raw.get("focus"), list) else []
+    focus_items = raw["focus"]
     focus: list[dict[str, str]] = []
     for item in focus_items[:5]:
         if not isinstance(item, dict):
@@ -323,8 +322,8 @@ def _normalize(raw: dict[str, Any], payload: dict[str, Any], lens: str, search_r
             "severity": compact_text(item.get("severity") or "neutral", 20).lower(),
             "evidence": compact_text(item.get("evidence") or "", 80),
         })
-    evidence = raw.get("evidence") if isinstance(raw.get("evidence"), list) else fallback["evidence"]
-    raw_special = raw.get("specialMarkets") if isinstance(raw.get("specialMarkets"), list) else []
+    evidence = raw["evidence"]
+    raw_special = raw["specialMarkets"]
     special_markets: list[dict[str, str]] = []
     for item in raw_special[:4]:
         if not isinstance(item, dict):
@@ -336,7 +335,7 @@ def _normalize(raw: dict[str, Any], payload: dict[str, Any], lens: str, search_r
             "severity": compact_text(item.get("severity") or "neutral", 20).lower(),
             "evidence": compact_text(item.get("evidence") or "", 80),
         })
-    raw_themes = raw.get("themes") if isinstance(raw.get("themes"), list) else []
+    raw_themes = raw["themes"]
     themes: list[dict[str, str]] = []
     for item in raw_themes[:4]:
         if not isinstance(item, dict):
@@ -348,7 +347,7 @@ def _normalize(raw: dict[str, Any], payload: dict[str, Any], lens: str, search_r
             "severity": compact_text(item.get("severity") or "neutral", 20).lower(),
             "evidence": compact_text(item.get("evidence") or "", 80),
         })
-    raw_watchlist = raw.get("watchlist") if isinstance(raw.get("watchlist"), list) else []
+    raw_watchlist = raw["watchlist"]
     watchlist: list[dict[str, str]] = []
     for item in raw_watchlist[:4]:
         if not isinstance(item, dict):
@@ -366,7 +365,7 @@ def _normalize(raw: dict[str, Any], payload: dict[str, Any], lens: str, search_r
         "forecastRunId": compact_text(payload.get("forecastRunId") or payload.get("forecast_run_id"), 48),
         "generatedAt": _utc_now_iso(),
         "model": model,
-        "brief": compact_text(raw.get("brief") or fallback["brief"], 260),
+        "brief": compact_text(raw["brief"], 260),
         "focus": focus,
         "specialMarkets": special_markets,
         "themes": themes,

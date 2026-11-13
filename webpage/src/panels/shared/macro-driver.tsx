@@ -1,7 +1,9 @@
+import { macroSnapshot, macroSourceRefreshPolicy } from './macro-runtime';
+import { runtimePanelFromRenderer } from '@/panels/definePanel';
 import { panelStatus as badgeStatus } from '@/panels/shared/formatters';
 import { useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
-import type { RuntimeMacroDriverItem, RuntimeMacroDriverPayload, RuntimePolymarketMacroMapPayload } from '@/types';
+import type { RuntimeMacroDriverItem, RuntimeMacroDriverPayload } from '@/types';
 import { MacroAlertStrip, PanelGlyph, RowGlyph, StatusBadge, signalToneClass, type PanelGlyphName } from '@/panels/shared/macro-intel';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
 
@@ -14,9 +16,6 @@ export type MacroDriverConfig = {
   helpTitle: string;
   helpText: string;
   emptyTitle: string;
-  implicationItems: string[];
-  linkedCategories: string[];
-  linkedTitle: string;
 };
 
 function compactNumber(value?: string | number | null) {
@@ -71,7 +70,7 @@ function MacroDriverRow({ item }: { item: RuntimeMacroDriverItem }) {
   );
 }
 
-export function MacroDriverPanel({ config, payload, macroPayload: _macroPayload }: { config: MacroDriverConfig; payload?: RuntimeMacroDriverPayload | null; macroPayload?: RuntimePolymarketMacroMapPayload | null }) {
+export function MacroDriverPanel({ config, payload }: { config: MacroDriverConfig; payload?: RuntimeMacroDriverPayload | null }) {
   const { copy, shared } = useSpecialistCopy(config.panelId);
   const [showHelp, setShowHelp] = useState(false);
   const summary = payload?.summary;
@@ -128,4 +127,20 @@ export function MacroDriverPanel({ config, payload, macroPayload: _macroPayload 
       </div>
     </Panel>
   );
+}
+
+export function createMacroDriverPanel(
+  config: MacroDriverConfig & { name: string; description: string; limit: number },
+  fetchData: (limit?: number, signal?: AbortSignal) => Promise<unknown>,
+) {
+  const id = config.panelId;
+  return runtimePanelFromRenderer({ [id]: {
+    render: ctx => <MacroDriverPanel config={config} payload={ctx.runtimeData[id] as RuntimeMacroDriverPayload | undefined} />,
+  } }, {
+    id, title: config.name, eyebrow: 'macro', description: config.description,
+    defaultEnabled: false, snapshot: macroSnapshot(id, false, 'source'),
+  }, {
+    ...macroSourceRefreshPolicy, limit: config.limit,
+    fetchData: (context, limit) => fetchData(limit, context?.signal),
+  });
 }

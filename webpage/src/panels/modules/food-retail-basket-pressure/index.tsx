@@ -3,7 +3,7 @@ import { panelStatus as panelTone } from '@/panels/shared/formatters';
 import { useState } from 'preact/hooks';
 import { Panel } from '@/components/Panel';
 import { fetchRuntimeFoodRetailBasket } from '@/services/api';
-import type { RuntimeFoodBasketItem, RuntimeFoodRetailBasketPayload, RuntimePolymarketMacroMapPayload } from '@/types';
+import type { RuntimeFoodBasketItem, RuntimeFoodRetailBasketPayload } from '@/types';
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '@/panels/definePanel';
 import { PanelGlyph, RowGlyph, StatusBadge, signalToneClass, type PanelGlyphName } from '@/panels/shared/macro-intel';
@@ -68,7 +68,7 @@ function FoodBasketRow({ item }: { item: RuntimeFoodBasketItem }) {
   );
 }
 
-function FoodRetailBasketPanel({ payload, macroPayload: _macroPayload }: { payload?: RuntimeFoodRetailBasketPayload | null; macroPayload?: RuntimePolymarketMacroMapPayload | null }) {
+function FoodRetailBasketPanel({ payload }: { payload?: RuntimeFoodRetailBasketPayload | null }) {
   const { copy } = useSpecialistCopy('food-retail-basket-pressure');
   const [showHelp, setShowHelp] = useState(false);
   const summary = payload?.summary;
@@ -136,14 +136,13 @@ function FoodRetailBasketPanel({ payload, macroPayload: _macroPayload }: { paylo
 
 const renderers: PanelRenderMap = {
   'food-retail-basket-pressure': {
-    render: (ctx) => <FoodRetailBasketPanel payload={ctx.runtimeData['food-retail-basket-pressure'] as RuntimeFoodRetailBasketPayload | undefined} macroPayload={ctx.runtimeData['polymarket-macro-map'] as RuntimePolymarketMacroMapPayload | undefined} />,
+    render: (ctx) => <FoodRetailBasketPanel payload={ctx.runtimeData['food-retail-basket-pressure'] as RuntimeFoodRetailBasketPayload | undefined} />,
   },
 };
 
 export const panel = runtimePanelFromRenderer(renderers, {
   id: 'food-retail-basket-pressure',
   snapshot: macroSnapshot('food-retail-basket-pressure', false, 'source'),
-  dataDependencies: ['polymarket-macro-map'],
   title: 'Food & Retail Basket Pressure',
   eyebrow: 'macro',
   description: 'Official CPI food-component pressure for inflation market positioning.',
