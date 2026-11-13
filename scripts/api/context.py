@@ -46,9 +46,7 @@ class RuntimeResources:
     weather_state: dict[str, Any] = field(default_factory=dict)
     weather_state_lock: Any = field(default_factory=threading.Lock)
     content_lock: Any = field(default_factory=threading.Lock)
-    content_table_exists: dict[tuple[str, str], bool] = field(default_factory=dict)
     content_tables_ensured: set[str] = field(default_factory=set)
-    related_content: dict = field(default_factory=dict)
     quality_lock: Any = field(default_factory=threading.Lock)
     quality_last_good: dict | None = None
     quality_last_error: dict | None = None

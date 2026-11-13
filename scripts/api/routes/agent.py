@@ -6,13 +6,12 @@ import ipaddress
 import json
 import os
 import time
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Callable
 
 from flask import Blueprint, jsonify, request
 
-from api.context import RuntimeResources, runtime_resources
+from api.context import RuntimeResources
 from agent.common.budget import claim_agent_live_call
 from agent.common.gateway_client import (
     call_market_insight_gateway,
@@ -35,18 +34,6 @@ class AgentRouteDependencies:
     get_cached_json: Callable[..., Any] | None
     set_cached_json: Callable[..., Any] | None
     get_redis_client: Callable[..., Any] | None
-
-
-def _optional_route_callable(
-    context: Mapping[str, Any],
-    name: str,
-) -> Callable[..., Any] | None:
-    dependency = context.get(name)
-    if dependency is None:
-        return None
-    if not callable(dependency):
-        raise TypeError(f"Route dependency is not callable: {name}")
-    return dependency
 
 
 def _agent_enabled() -> bool:

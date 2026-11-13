@@ -50,7 +50,6 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Polymonitor consumer API")
     parser.add_argument("--host", default=settings.host)
     parser.add_argument("--port", type=int, default=settings.port)
-    parser.add_argument("--skip-init-schema", action="store_true", help=argparse.SUPPRESS)
     add_db_cli_args(parser)
     args = parser.parse_args()
     configure_db_from_args(args)

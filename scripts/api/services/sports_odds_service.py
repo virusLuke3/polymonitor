@@ -517,28 +517,6 @@ def fetch_live_sports_odds_payload(
     )
 
 
-def _safe_live_sports_odds_payload(
-    ctx: SportsOddsContext,
-    *,
-    limit: int,
-) -> Dict[str, Any]:
-    dependencies = _dependencies(ctx)
-    try:
-        return fetch_live_sports_odds_payload(dependencies, limit=limit)
-    except Exception as exc:
-        logger = getattr(dependencies.application, "logger", None)
-        if logger is not None:
-            logger.exception("sports odds live fallback failed")
-        settings = dependencies.settings
-        generated_at = _generated_at(dependencies)
-        return normalize_sports_odds_payload(
-            {"generatedAt": generated_at, "status": "degraded", "sources": {"theOddsApi": "error", "polymarket": "optional-local-match"}, "error": str(exc)[:240], "items": []},
-            settings=settings,
-            limit=limit,
-            generated_at=generated_at,
-        )
-
-
 def _get_legacy_sports_odds_snapshot(
     ctx: SportsOddsContext,
     limit: int = DEFAULT_SPORTS_ODDS_LIMIT,

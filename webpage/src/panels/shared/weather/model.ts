@@ -87,18 +87,6 @@ export function hasCurrentBook(bin?: RuntimeWeatherQuoteBin | null) {
     && (num(bin.bestBidYes) !== null || num(bin.bestAskYes) !== null));
 }
 
-export function bookMidCoverage(city?: RuntimeGlobalWeatherCity | null) {
-  const bins = city?.bins || [];
-  if (!bins.length) return '0/0';
-  return `${bins.filter((bin) => bookMidPrice(bin) !== null).length}/${bins.length}`;
-}
-
-export function midCoverage(city?: RuntimeGlobalWeatherCity | null) {
-  const bins = city?.bins || [];
-  if (!bins.length) return '0/0';
-  return `${bins.filter((bin) => num(bin.midPriceYes) !== null).length}/${bins.length}`;
-}
-
 export function displayQuoteBins(city?: RuntimeGlobalWeatherCity | null): RuntimeWeatherQuoteBin[] {
   return city?.bins || [];
 }

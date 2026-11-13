@@ -1,5 +1,19 @@
 # Polymonitor Agent Guidance
 
+## Keep implementation and deliverables small
+
+The user's standing preference is: do not add tests or persist intermediate
+artifacts by default. Prefer direct changes to existing owners; remove unused
+code instead of adding compatibility wrappers, speculative abstractions or
+repeated validation of already validated internal data. Keep validation at real
+input boundaries and necessary network recovery and data-identity checks.
+Verify changes with builds, reference checks and actual runtime reads. Existing
+CI remains available; do not create tests merely to mirror an implementation.
+Use in-memory inspection, and delete task-created scratch/build outputs after
+use. When a file deliverable is requested, keep one final format unless the user
+explicitly asks for several. Reuse the existing feature document instead of
+adding a new audit/report/manifest stack. Preserve live data and unrelated work.
+
 Before adding or upgrading any Panel, read
 `document/开发/Panel开发统一指南.md`, `docs/panel-data-pipeline.md`, and
 `docs/panel-data-cadence.md`. For data requests, shared resources or caching,

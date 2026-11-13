@@ -21,15 +21,6 @@ export function topMover(items: RuntimeMarketTicker[]) {
   }, null);
 }
 
-export function sortTickers(items: RuntimeMarketTicker[], sortIndex: Map<string, number>) {
-  return [...items].sort((left, right) => {
-    const leftIndex = sortIndex.get(left.symbol) ?? Number.MAX_SAFE_INTEGER;
-    const rightIndex = sortIndex.get(right.symbol) ?? Number.MAX_SAFE_INTEGER;
-    if (leftIndex !== rightIndex) return leftIndex - rightIndex;
-    return left.label.localeCompare(right.label);
-  });
-}
-
 export function commoditySparkline(points: RuntimeMarketTicker['points'], color: string) {
   const clean = (points || [])
     .map((point, index) => ({ index, value: Number(point.value) }))

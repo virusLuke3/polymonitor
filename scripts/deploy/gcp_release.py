@@ -41,7 +41,6 @@ GCP_SOURCE_PREFIXES = (
 GCP_SOURCE_FILES = {
     ".python-version",
     "pyproject.toml",
-    "scripts/config.py",
     "scripts/data_sources.py",
     "scripts/api_server.py",
     "scripts/requirements.lock.txt",

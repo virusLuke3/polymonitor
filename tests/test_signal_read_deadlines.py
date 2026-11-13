@@ -9,7 +9,6 @@ from flask import Flask
 import pytest
 
 from api.context import RuntimeResources
-from api.routes.runtime_signals import create_runtime_signals_blueprint
 from api.routes.runtime_panels import create_runtime_panels_blueprint, RuntimePanelRouteDependencies
 from api.runtime_panels.types import RuntimePanelContext
 from api.http import register_http_hooks
@@ -145,8 +144,7 @@ def test_verifier_exception_is_not_reclassified_as_pending_or_retried_in_a_loop(
     assert len(calls) == 1
 
 
-@pytest.mark.parametrize("registry", [False, True])
-def test_pending_routes_return_retry_after_and_no_unverified_payload(registry):
+def test_pending_routes_return_retry_after_and_no_unverified_payload():
     def pending(**_kwargs):
         raise SignalReadPending("internal connection details")
     app = Flask(__name__)
@@ -160,8 +158,7 @@ def test_pending_routes_return_retry_after_and_no_unverified_payload(registry):
         natural_hazard_map_snapshot=None, natural_hazard_event_detail=None,
         natural_hazard_related_markets=None, aviation_viewport_snapshot=None,
     )
-    app.register_blueprint(create_runtime_panels_blueprint(dependencies) if registry
-                           else create_runtime_signals_blueprint(helpers))
+    app.register_blueprint(create_runtime_panels_blueprint(dependencies))
     for path in ("/runtime/signals/alpha", "/runtime/trades/whales", "/runtime/trades/suspicious"):
         response = app.test_client().get(path)
         assert response.status_code == 503

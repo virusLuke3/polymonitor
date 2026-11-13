@@ -8,9 +8,8 @@ Type=simple
 WorkingDirectory=/__POLYDATA_REPO_ROOT__
 EnvironmentFile=%h/.config/polydata/polydata.env
 Environment=POLYDATA_API_READONLY=0
-Environment=POLYDATA_CONTENT_API_REFRESH_ENABLED=0
 Environment=POLYDATA_CONTENT_MARKET_DYNAMIC=0
-ExecStart=/bin/bash -lc 'POLYDATA_API_READONLY=0 POLYDATA_CONTENT_API_REFRESH_ENABLED=0 POLYDATA_CONTENT_MARKET_DYNAMIC=0 exec "${POLYDATA_PYTHON_BIN:-python3}" scripts/runtime/content_topic_refresh.py --watch --interval 60'
+ExecStart=/bin/bash -lc 'POLYDATA_API_READONLY=0 POLYDATA_CONTENT_MARKET_DYNAMIC=0 exec "${POLYDATA_PYTHON_BIN:-python3}" scripts/runtime/content_topic_refresh.py --watch --interval 60'
 Restart=always
 RestartSec=30
 StandardOutput=journal

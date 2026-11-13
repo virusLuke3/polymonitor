@@ -1,6 +1,6 @@
 import { Evidence, Empty, Note, Row, Scope, Shell, useCopy } from '../../shared/politics/ui';
 import { num, partyTone } from '../../shared/politics/model';
-import type { Payload } from './model';
+import type { House as Payload } from '../../shared/politics/model';
 export function View({data}:{data?:Payload}) {
  const t=useCopy(), counts=data?.counts||{}, total=Object.values(counts).reduce((a,b)=>a+b,0), majority=data?.majority, label=majority==='R'?t('共和党','Republican'):majority==='D'?t('民主党','Democratic'):majority||'—';
  return <Shell id="politics-government" title={t('政府控制权','GOVERNMENT CONTROL')} data={data} explanation={t('美国众议院现任多数党：采用 Clerk 官方多数/少数记录。当前仅覆盖美国众院，不能套用议会制联盟组阁规则。','Current US House majority follows the Clerk’s majority/minority record. Coverage is the US House, not worldwide coalition formation.')}>

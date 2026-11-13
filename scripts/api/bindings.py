@@ -704,7 +704,6 @@ def bind_services(runtime: ServiceRuntime) -> None:
         settings=runtime.SETTINGS,
         application=runtime.app,
         http_text_get=runtime.http_text_get,
-        http_text_post=None,
         http_json_get=http_json_get,
         get_yahoo_market_snapshot=get_yahoo_market_snapshot,
         get_nasdaq_market_cap=lambda symbol: market_data_client.get_nasdaq_market_cap(runtime.market_data_client_context, symbol),

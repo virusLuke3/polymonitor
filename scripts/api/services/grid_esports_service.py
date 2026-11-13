@@ -751,21 +751,6 @@ def _degraded_error_payload(
     )
 
 
-def _safe_live_grid_esports_payload(
-    ctx: GridEsportsContext,
-    *,
-    limit: int,
-) -> Dict[str, Any]:
-    dependencies = _dependencies(ctx)
-    try:
-        return fetch_live_grid_esports_payload(dependencies, limit=limit)
-    except Exception as exc:
-        logger = getattr(dependencies.application, "logger", None)
-        if logger is not None:
-            logger.exception("GRID esports live fallback failed")
-        return _degraded_error_payload(dependencies, limit=limit, error=exc)
-
-
 def _get_legacy_grid_esports_snapshot(
     ctx: GridEsportsContext,
     limit: int = DEFAULT_GRID_ESPORTS_LIMIT,

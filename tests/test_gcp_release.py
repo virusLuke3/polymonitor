@@ -180,7 +180,6 @@ def test_release_scope_keeps_consumer_packages_and_excludes_tools():
         "scripts/db/db.py",
         "scripts/db/trade_v2.py",
         "scripts/market/market_serving_identity.py",
-        "scripts/trade/orderfilled_raw.py",
         "scripts/oracle/settlement_parser.py",
         "scripts/weather/temperature_bins.py",
         "scripts/f1/runtime_feed.py",

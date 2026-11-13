@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from api.context import runtime_resources
 from typing import Any, Callable, Dict, Optional
 from runtime.seed_meta import publish_snapshot
 
@@ -61,52 +60,3 @@ def log_exception(ctx: Dict[str, Any], message: str, *args: Any) -> None:
     logger = getattr(app, "logger", None)
     if logger is not None:
         logger.exception(message, *args)
-
-
-def preserve_stale_sections(payload: Dict[str, Any], stale_payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    if not stale_payload:
-        return payload
-    next_payload = dict(payload)
-    if not next_payload.get("odds") and isinstance(stale_payload.get("odds"), list):
-        next_payload["odds"] = stale_payload.get("odds")
-        if isinstance(stale_payload.get("marketLinker"), dict):
-            next_payload["marketLinker"] = stale_payload.get("marketLinker")
-    if not next_payload.get("news") and isinstance(stale_payload.get("news"), list):
-        next_payload["news"] = stale_payload.get("news")
-    if not next_payload.get("weather") and isinstance(stale_payload.get("weather"), list):
-        next_payload["weather"] = stale_payload.get("weather")
-    return next_payload
-
-
-def refresh_async(
-    ctx: Dict[str, Any],
-    *,
-    namespace: str,
-    cache_key: str,
-    ttl_seconds: int,
-    builder: Callable[[], Dict[str, Any]],
-    has_generated_fallback_artifacts: Callable[[Dict[str, Any]], bool],
-    stale_payload: Optional[Dict[str, Any]] = None,
-) -> None:
-    resources = runtime_resources(ctx)
-    refresh_key = f"worldcup:{namespace}:{cache_key}"
-    with resources.live_refresh_lock:
-        if refresh_key in resources.live_refreshing:
-            return
-        resources.live_refreshing.add(refresh_key)
-
-    def refresh() -> None:
-        try:
-            payload = builder()
-            if isinstance(payload, dict) and not has_generated_fallback_artifacts(payload):
-                payload = preserve_stale_sections(payload, stale_payload)
-                store_payload(ctx, namespace=namespace, cache_key=cache_key, payload=payload, ttl_seconds=ttl_seconds)
-        except Exception:
-            log_exception(ctx, "worldcup-dashboard async refresh failed key=%s", refresh_key)
-        finally:
-            with resources.live_refresh_lock:
-                resources.live_refreshing.discard(refresh_key)
-
-    if not resources.start_thread(refresh, name="worldcup-dashboard-refresh"):
-        with resources.live_refresh_lock:
-            resources.live_refreshing.discard(refresh_key)

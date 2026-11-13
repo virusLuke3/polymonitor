@@ -1,7 +1,7 @@
 import { useState } from 'preact/hooks';
 import { Empty, Evidence, Link, Note, Scope, Shell, Stat, useCopy } from '../../shared/politics/ui';
 import { num, partyTone } from '../../shared/politics/model';
-import type { Payload } from './model';
+import type { House as Payload } from '../../shared/politics/model';
 export function View({data}:{data?:Payload}) {
  const t=useCopy(),[selected,set]=useState(''), seats=data?.items||[], seat=seats.find(r=>r.id===selected), counts=data?.counts || {};
  return <Shell id="politics-seats" title={t('议席格局','SEAT BALANCE')} data={data} explanation={t('美国众议院 Clerk 现任名单，排除无表决权代表。每格一个原生席位 ID；不是当届开票预测。','US House Clerk current membership, excluding nonvoting delegates. Each cell is a seat, not a current election call.')}>

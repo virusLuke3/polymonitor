@@ -25,19 +25,6 @@ export function pickDefaultMarketId(markets: MarketListItem[], featured?: Market
   return markets[0]?.id ?? featured?.id ?? null;
 }
 
-function groupHasTerminalProbability(group: MarketGroupItem) {
-  const values = [
-    group.latestBlockClosePrice,
-    ...(group.outcomes || []).flatMap((outcome) => [outcome.blockCloseYesPrice, outcome.yesPrice, outcome.noPrice]),
-    ...(group.topOutcomes || []).flatMap((outcome) => [outcome.blockCloseYesPrice, outcome.yesPrice, outcome.noPrice]),
-  ];
-  return values.some((value) => {
-    if (value == null || value === '') return false;
-    const numeric = Number(value);
-    return Number.isFinite(numeric) && (numeric <= 0.03 || numeric >= 0.97);
-  });
-}
-
 function groupOutcomePrice(outcome: { blockCloseYesPrice?: string | number | null; yesPrice?: string | number | null }) {
   for (const value of [outcome.blockCloseYesPrice, outcome.yesPrice]) {
     if (value == null || value === '') continue;
@@ -105,18 +92,6 @@ export function pickDefaultGroupOutcome(group: MarketGroupItem, outcomeKey?: str
         - (rightPrice != null && Math.abs(rightPrice - 0.5) < 0.0001 && rightTrades <= 0 && rightVolume < 25 ? 45 : 0);
       return rightScore - leftScore || rightVolume - leftVolume || rightTrades - leftTrades;
     })[0] || null;
-}
-
-export function pickDefaultMarketGroup(groups: MarketGroupItem[]) {
-  const eligibleGroups = groups.filter((group) => !groupHasTerminalProbability(group) || pickDefaultGroupOutcome(group));
-  const liveGroups = eligibleGroups.filter((group) => Number(group.tradeCount24h || 0) > 0);
-  return (
-    liveGroups.find((group) => Number(group.volume24h || 0) > 0 && Number(group.outcomeCount || 0) > 1)
-    || liveGroups.find((group) => Number(group.outcomeCount || 0) > 1)
-    || liveGroups[0]
-    || eligibleGroups[0]
-    || null
-  );
 }
 
 export function findGroupForMarketId(groups: MarketGroupItem[], marketId: number | null) {

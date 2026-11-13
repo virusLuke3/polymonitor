@@ -128,17 +128,6 @@ export function scoreLabel(value?: string | number | null) {
   return Number.isFinite(numeric) ? String(Math.round(numeric)) : '--';
 }
 
-export function relativeDuration(value?: string | null) {
-  if (!value) return '--';
-  return formatRelative(value).replace(' ago', '').replace('in ', '');
-}
-
-export function compactText(value: string | null | undefined, maxLength: number) {
-  const text = String(value || '').trim();
-  if (text.length <= maxLength) return text;
-  return `${text.slice(0, Math.max(1, maxLength - 1)).trim()}...`;
-}
-
 export function panelStatus(status?: string | null): 'live' | 'muted' {
   return String(status || '').toLowerCase() === 'ok' ? 'live' : 'muted';
 }

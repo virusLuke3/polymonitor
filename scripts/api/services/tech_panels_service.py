@@ -123,7 +123,6 @@ class TechPanelsDependencies:
     settings: Any
     application: Any
     http_text_get: Callable[..., Any] | None
-    http_text_post: Callable[..., Any] | None
     http_json_get: Callable[..., Any] | None
     get_yahoo_market_snapshot: Callable[..., Any] | None
     get_cached_json: Callable[..., Any] | None
@@ -146,10 +145,6 @@ class TechPanelsDependencies:
             http_text_get=resolve_optional_service_callable(
                 context,
                 "http_text_get",
-            ),
-            http_text_post=resolve_optional_service_callable(
-                context,
-                "http_text_post",
             ),
             http_json_get=resolve_optional_service_callable(
                 context,
@@ -303,24 +298,6 @@ def _http_text_get(
     if requests is None:
         raise RuntimeError("requests package is required")
     response = requests.get(url, timeout=timeout, headers=headers)
-    response.raise_for_status()
-    return response.text
-
-
-def _http_text_post(
-    ctx: TechPanelsContext,
-    url: str,
-    *,
-    data: str,
-    timeout: int = 12,
-    headers: Optional[Dict[str, str]] = None,
-) -> str:
-    poster = _dependencies(ctx).http_text_post
-    if poster is not None:
-        return poster(url, data=data, timeout=timeout, headers=headers)
-    if requests is None:
-        raise RuntimeError("requests package is required")
-    response = requests.post(url, data=data, timeout=timeout, headers=headers)
     response.raise_for_status()
     return response.text
 
@@ -500,20 +477,6 @@ def _provider_from_model_id(value: Any) -> str:
 
 def _openrouter_model_url(model_id: Any) -> str:
     return f"{source_value('POLYMONITOR_URL_OPENROUTER_AI_6DBA8B')}{str(model_id or '').strip()}"
-
-
-def _format_model_price(pricing: Any) -> str:
-    if not isinstance(pricing, dict):
-        return "PRICE --"
-    prompt = _safe_float(pricing.get("prompt"))
-    completion = _safe_float(pricing.get("completion"))
-    if prompt == 0 and completion == 0:
-        return "FREE"
-    if prompt is None and completion is None:
-        return "PRICE --"
-    prompt_label = f"${(prompt or 0) * 1_000_000:.2f}"
-    completion_label = f"${(completion or 0) * 1_000_000:.2f}"
-    return f"{prompt_label}/{completion_label} 1M"
 
 
 def _format_token_price(value: Any) -> str:
