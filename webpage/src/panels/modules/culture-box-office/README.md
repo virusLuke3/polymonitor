@@ -1,6 +1,6 @@
 # UK box office
 
-Production module: `culture-box-office`. Visual reference and original input scope: [reviewed design](../../../../design-previews/market-domains/panels/box-office/README.md). This implementation replaces prototype records with acquired public evidence. Automatically discovers the latest official BFI ODS. Weekend gross, cumulative gross, cinemas, weeks, revisions and comparator gaps. UK coverage never substitutes for US or worldwide settlement.
+Production module: `culture-box-office`. This implementation replaces prototype records with acquired public evidence. Automatically discovers the latest official BFI ODS. Weekend gross, cumulative gross, cinemas, weeks, revisions and comparator gaps. UK coverage never substitutes for US or worldwide settlement.
 
 ## Ownership and data path
 

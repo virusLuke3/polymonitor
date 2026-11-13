@@ -1,6 +1,6 @@
 # Music charts
 
-Production module: `culture-music-charts`. Visual reference and original input scope: [reviewed design](../../../../design-previews/market-domains/panels/music-charts/README.md). This implementation replaces prototype records with acquired public evidence. Source chart order and publication timestamp. It is not a Billboard rank, stream count, unit sales or complete historical series.
+Production module: `culture-music-charts`. This implementation replaces prototype records with acquired public evidence. Source chart order and publication timestamp. It is not a Billboard rank, stream count, unit sales or complete historical series.
 
 ## Ownership and data path
 

@@ -1,6 +1,6 @@
 # Product and game releases
 
-Production module: `product-release-watch`. Visual reference and original input scope: [reviewed design](../../../../design-previews/market-domains/panels/product-releases/README.md). This implementation replaces prototype records with acquired public evidence. New-release / coming-soon listing, app identity, platform support and price minor units. A listing does not prove release date, public general availability, exit from early access or 1.0.
+Production module: `product-release-watch`. This implementation replaces prototype records with acquired public evidence. New-release / coming-soon listing, app identity, platform support and price minor units. A listing does not prove release date, public general availability, exit from early access or 1.0.
 
 ## Ownership and data path
 

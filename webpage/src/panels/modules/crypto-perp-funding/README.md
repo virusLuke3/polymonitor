@@ -6,5 +6,3 @@
 - 后端：`scripts/api/services/crypto_strategy/`；唯一写入者 `scripts/runtime/crypto_strategy_watcher.py`；API 只读共享 SQLite。注册在前后端显式 registry。
 - 测试：`tests/test_crypto_strategy_inputs.py`、`shared/crypto-strategy/model.test.ts`、`webpage/e2e/crypto-strategy.spec.ts`；保留现有 Crypto/Funding 测试。
 - 当前边界：REST 跨响应基差超过 5 秒时间差不计算；未实现完整期限结构、清算和跨所 OI。
-
-完整依赖、运行和验收说明见 `docs/crypto-strategy-panels.md`。

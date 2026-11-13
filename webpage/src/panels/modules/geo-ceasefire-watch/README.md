@@ -1,6 +1,6 @@
 # geo-ceasefire-watch
 
-Formal default-enabled view. Owns its body and module-local styles; common shell, size and Runtime are unchanged. [Feature/data contract](../../../../../docs/external-panel-integration.md).
+Formal default-enabled view. Owns its body and module-local styles; common shell, size and Runtime are unchanged.
 
 API `/runtime/external/geo-ceasefire-watch` is a read-only projection owned by `scripts/api/services/geopolitics_expansion/`. Source identities, original clocks and limitations are returned in the payload; no component timer, fetch, fixture or source URL. Registry and App only compose. Shared domain model validates the response.
 

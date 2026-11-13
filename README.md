@@ -126,19 +126,11 @@ order-book views, macro/sports/weather panels, AI insights, and Telegram
 publishing. Upcoming work is focused on sharper customer-facing workflows,
 cleaner sharing, stronger runtime reliability, and deeper signal quality.
 
-## For Teams Running the Project
+## Maintenance
 
-This README is intentionally customer facing. Technical setup and maintenance
-details live in the supporting docs:
-
-- [`docs/development.md`](docs/development.md) for local development commands
-- [`docs/architecture.md`](docs/architecture.md) for system shape and runtime
-  boundaries
-- [`docs/panel-modules.md`](docs/panel-modules.md) for dashboard panel modules
-- [`deploy/README.md`](deploy/README.md) for deployment templates
-- [`deploy/systemd/README.md`](deploy/systemd/README.md) for service templates
-- [`telegram/README.md`](telegram/README.md) for Telegram publishing setup
-- [`docs/updates.md`](docs/updates.md) for the public update log
-
-Private host-specific notes and sensitive operational details should stay out
-of this README.
+Panel and domain guidance stays in the local `document/` directory. Do not
+recreate a separate root `docs/` tree or save per-task reports and previews.
+Runtime entrypoints are in [`Makefile`](Makefile); deployment and service setup
+are in [`deploy/`](deploy/README.md), and Telegram consumers in
+[`telegram/`](telegram/README.md). Keep source data and runtime checkpoints;
+remove generated build outputs after use.

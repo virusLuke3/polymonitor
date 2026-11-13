@@ -1,6 +1,6 @@
 # Art auction calendar
 
-Production module: `art-auction-watch`. Visual reference and original input scope: [reviewed design](../../../../design-previews/market-domains/panels/art-auction/README.md). This implementation replaces prototype records with acquired public evidence. Official sale identity, event dates, city and catalog links. Lot estimates, hammer results and premium schedules require separate licensed feeds and remain unavailable.
+Production module: `art-auction-watch`. This implementation replaces prototype records with acquired public evidence. Official sale identity, event dates, city and catalog links. Lot estimates, hammer results and premium schedules require separate licensed feeds and remain unavailable.
 
 ## Ownership and data path
 

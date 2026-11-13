@@ -1,6 +1,6 @@
 # Research evidence
 
-Production module: `research-evidence-watch`. Visual reference and original input scope: [reviewed design](../../../../design-previews/market-domains/panels/research-evidence/README.md). This implementation replaces prototype records with acquired public evidence. AI title search, DOI, publisher, publication date and indexed citations. Publication is not breakthrough validation, verified review quality, clinical trial success or regulator approval.
+Production module: `research-evidence-watch`. This implementation replaces prototype records with acquired public evidence. AI title search, DOI, publisher, publication date and indexed citations. Publication is not breakthrough validation, verified review quality, clinical trial success or regulator approval.
 
 ## Ownership and data path
 

@@ -1,6 +1,6 @@
 # weather-precipitation
 
-Formal default-enabled view. Owns its body and module-local styles; common shell, size and Runtime are unchanged. [Feature/data contract](../../../../../docs/external-panel-integration.md).
+Formal default-enabled view. Owns its body and module-local styles; common shell, size and Runtime are unchanged.
 
 API `/runtime/external/weather-precipitation` is a read-only projection owned by `scripts/api/services/weather_expansion/`. Source identities, original clocks and limitations are returned in the payload; no component timer, fetch, fixture or source URL. Registry and App only compose. Shared domain model validates the response.
 

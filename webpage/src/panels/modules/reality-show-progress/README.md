@@ -1,6 +1,6 @@
 # Reality show progress
 
-Production module: `reality-show-progress`. Visual reference and original input scope: [reviewed design](../../../../design-previews/market-domains/panels/reality-progress/README.md). This implementation replaces prototype records with acquired public evidence. Survivor latest listed season and episode dates/durations. Third-party schedule metadata; contestant status, elimination, voting windows and results remain unknown.
+Production module: `reality-show-progress`. This implementation replaces prototype records with acquired public evidence. Survivor latest listed season and episode dates/durations. Third-party schedule metadata; contestant status, elimination, voting windows and results remain unknown.
 
 ## Ownership and data path
 

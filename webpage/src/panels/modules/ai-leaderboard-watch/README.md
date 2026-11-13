@@ -1,6 +1,6 @@
 # AI leaderboard
 
-Production module: `ai-leaderboard-watch`. Visual reference and original input scope: [reviewed design](../../../../design-previews/market-domains/panels/ai-leaderboard/README.md). This implementation replaces prototype records with acquired public evidence. Arena Text overall rows, raw scores, score intervals, votes, original ranks and publication dates. No style-control scores, rank-spread inference, anonymous-model identity or model eligibility invention.
+Production module: `ai-leaderboard-watch`. This implementation replaces prototype records with acquired public evidence. Arena Text overall rows, raw scores, score intervals, votes, original ranks and publication dates. No style-control scores, rank-spread inference, anonymous-model identity or model eligibility invention.
 
 ## Ownership and data path
 

@@ -197,8 +197,6 @@ feed, bounded input and unchanged publication timestamps.
   JavaScript errors. Public release identity matched the commit above.
 - Local checks: 25 backend tests, seven frontend contract tests, five browser
   discovery tests, scoped Ruff, and both workspace/clean-release builds passed.
-  Whole-worktree `make quality` stopped at an unrelated personal-path finding in
-  `docs/crypto-strategy-panels.md`; it is not recorded as passing.
 - Coverage remains sampled: 80 markets/60 groups; this run had no content-feed
   items or cached whale signals, some trade reads failed, and some bid/ask and
   historical-change inputs were missing. Other page regions still showed a book
@@ -221,8 +219,7 @@ feed, bounded input and unchanged publication timestamps.
   tool trace contains real content titles, excerpts and original publication
   times. SQLite, the serving API and the public API agreed on the snapshots.
 - All 19 targeted tests passed in both the working checkout and a clean archive
-  of the pushed commit; scoped Ruff passed. The whole-repository gate remains
-  blocked by the unrelated personal-path finding in `docs/crypto-strategy-panels.md`.
+  of the pushed commit; scoped Ruff passed.
 - The public desktop homepage displayed all three new generation timestamps;
   its unchanged frontend release was `696061ed3ea1727c309518a872e78f68137a6912`.
 - The 390px cold-page check did not complete: it waited for the AI response and

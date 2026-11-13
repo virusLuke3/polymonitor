@@ -1,6 +1,6 @@
 # Public figure events
 
-Production module: `public-figure-events`. Visual reference and original input scope: [reviewed design](../../../../design-previews/market-domains/panels/public-events/README.md). This implementation replaces prototype records with acquired public evidence. Initial production scope is Fed officials and published remarks. This is not a broad celebrity feed, a private-event tracker or confirmation of spoken delivery.
+Production module: `public-figure-events`. This implementation replaces prototype records with acquired public evidence. Initial production scope is Fed officials and published remarks. This is not a broad celebrity feed, a private-event tracker or confirmation of spoken delivery.
 
 ## Ownership and data path
 

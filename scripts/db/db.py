@@ -3,9 +3,8 @@
 """
 Polymarket 索引器数据库模块。
 
-当前默认后端为 PostgreSQL。SQLite 仅作为旧迁移/本地调试回退路径；
-MySQL 连接代码只保留给显式的历史迁移工具，不再作为运行时默认目标。
-该模块尽量兼容原有 sqlite3 风格调用，避免大规模重写业务脚本。
+PostgreSQL 用于生产数据；SQLite 用于显式本地存储和离线运行。
+保留两者共享的参数化查询和行读取接口。
 """
 
 from __future__ import annotations
@@ -26,22 +25,12 @@ try:
 except ImportError:
     psycopg = None
 
-try:
-    import pymysql
-except ImportError:
-    pymysql = None
-
-
 DEFAULT_SQLITE_PATH = "/data/hy/myPolyDB/polymarket_indexer.db"
 DEFAULT_DB_PATH = DEFAULT_SQLITE_PATH
 # Explicit CLI overrides only. Environment values are read at configuration time.
 _runtime_overrides: Dict[str, Any] = {}
 
 _NAMED_PARAM_RE = re.compile(r":([a-zA-Z_][a-zA-Z0-9_]*)")
-_ON_CONFLICT_RE = re.compile(
-    r"ON\s+CONFLICT\s*\([^)]*\)\s+DO\s+UPDATE\s+SET",
-    flags=re.IGNORECASE | re.DOTALL,
-)
 
 
 def get_backend() -> str:
@@ -55,20 +44,6 @@ def get_sqlite_path() -> str:
         or os.environ.get("POLYMARKET_DB")
         or DEFAULT_SQLITE_PATH
     )
-
-
-def get_mysql_settings() -> Dict[str, Any]:
-    return {
-        name: _runtime_overrides.get("mysql_" + name, default)
-        for name, default in {
-            "host": "",
-            "port": 0,
-            "user": "",
-            "password": "",
-            "database": "",
-            "charset": "utf8mb4",
-        }.items()
-    }
 
 
 def get_postgres_settings() -> Dict[str, Any]:
@@ -112,14 +87,12 @@ class DatabaseSettings:
     @classmethod
     def from_environment(cls):
         backend = get_backend()
-        settings = get_postgres_settings() if backend in {"postgres", "postgresql"} else get_mysql_settings()
+        settings = get_postgres_settings() if backend in {"postgres", "postgresql"} else {}
         return cls(backend, get_sqlite_path(), MappingProxyType(settings))
 
     def connect(self, db_path=None, *, readonly=False, connect_timeout=None):
         if self.backend in {"postgres", "postgresql"}:
             return get_postgres_connection(self.connection, connect_timeout=connect_timeout)
-        if self.backend == "mysql":
-            return get_mysql_connection(self.connection)
         if self.backend == "sqlite":
             return get_sqlite_connection(db_path or self.sqlite_path, readonly=readonly)
         raise ValueError(f"Unsupported database backend: {self.backend}")
@@ -135,12 +108,6 @@ def configure_runtime_db(
     *,
     backend=None,
     sqlite_path=None,
-    mysql_host=None,
-    mysql_port=None,
-    mysql_user=None,
-    mysql_password=None,
-    mysql_database=None,
-    mysql_charset=None,
     postgres_host=None,
     postgres_port=None,
     postgres_user=None,
@@ -152,27 +119,20 @@ def configure_runtime_db(
 
 
 def add_db_cli_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--backend", choices=["sqlite", "mysql", "postgres", "postgresql"], default=get_backend())
+    parser.add_argument("--backend", choices=["sqlite", "postgres", "postgresql"], default=get_backend())
     parser.add_argument("--sqlite-path", default=get_sqlite_path())
-    for prefix, settings in (("mysql", get_mysql_settings()), ("postgres", get_postgres_settings())):
-        for name, value in settings.items():
-            if prefix == "postgres" and name == "password":
-                continue
-            parser.add_argument(
-                f"--{prefix}-{name.replace('_', '-')}", default=value, type=int if name == "port" else str
-            )
+    for name, value in get_postgres_settings().items():
+        if name == "password":
+            continue
+        parser.add_argument(
+            f"--postgres-{name.replace('_', '-')}", default=value, type=int if name == "port" else str
+        )
 
 
 def configure_db_from_args(args: argparse.Namespace) -> None:
     configure_runtime_db(
         backend=getattr(args, "backend", None),
         sqlite_path=getattr(args, "sqlite_path", None),
-        mysql_host=getattr(args, "mysql_host", None),
-        mysql_port=getattr(args, "mysql_port", None),
-        mysql_user=getattr(args, "mysql_user", None),
-        mysql_password=getattr(args, "mysql_password", None),
-        mysql_database=getattr(args, "mysql_database", None),
-        mysql_charset=getattr(args, "mysql_charset", None),
         postgres_host=getattr(args, "postgres_host", None),
         postgres_port=getattr(args, "postgres_port", None),
         postgres_user=getattr(args, "postgres_user", None),
@@ -189,14 +149,7 @@ def describe_db_target() -> str:
     if backend in {"postgres", "postgresql"}:
         settings = get_postgres_settings()
         return f"postgres:{settings['user']}@{settings['host']}:{settings['port']}/{settings['database']}"
-    if backend == "mysql":
-        settings = get_mysql_settings()
-        return f"mysql:{settings['user']}@{settings['host']}:{settings['port']}/{settings['database']}"
     return f"unsupported:{backend}"
-
-
-def is_mysql_backend() -> bool:
-    return get_backend() == "mysql"
 
 
 def is_postgres_backend() -> bool:
@@ -228,85 +181,6 @@ class DBRow:
 
     def as_dict(self) -> Dict[str, Any]:
         return {name: self._values[idx] for idx, name in enumerate(self._columns)}
-
-
-class MySQLCursorWrapper:
-    def __init__(self, connection: "MySQLConnectionWrapper", cursor) -> None:
-        self._connection = connection
-        self._cursor = cursor
-
-    @property
-    def rowcount(self) -> int:
-        return self._cursor.rowcount
-
-    @property
-    def description(self):
-        return self._cursor.description
-
-    def execute(self, query: str, params: Optional[Any] = None):
-        sql, bound = adapt_sql_for_mysql(query, params)
-        result = self._cursor.execute(sql, bound)
-        self._connection._bump_changes(self._cursor.rowcount)
-        return result
-
-    def executemany(self, query: str, seq_of_params: Iterable[Any]):
-        bound_many = list(seq_of_params)
-        if not bound_many:
-            return 0
-        sql, sample = adapt_sql_for_mysql(query, bound_many[0])
-        if sample is None:
-            raise RuntimeError("unexpected missing bound parameters while adapting executemany")
-        bound_many = [adapt_params_for_mysql(query, item) for item in bound_many]
-        result = self._cursor.executemany(sql, bound_many)
-        self._connection._bump_changes(self._cursor.rowcount)
-        return result
-
-    def fetchone(self):
-        row = self._cursor.fetchone()
-        return wrap_mysql_row(self._cursor.description, row)
-
-    def fetchall(self):
-        rows = self._cursor.fetchall()
-        return [wrap_mysql_row(self._cursor.description, row) for row in rows]
-
-    def close(self) -> None:
-        self._cursor.close()
-
-
-class MySQLConnectionWrapper:
-    def __init__(self, raw_conn) -> None:
-        self._raw_conn = raw_conn
-        self.total_changes = 0
-        self.row_factory = DBRow
-
-    def _bump_changes(self, rowcount: int) -> None:
-        if rowcount and rowcount > 0:
-            self.total_changes += rowcount
-
-    def cursor(self) -> MySQLCursorWrapper:
-        return MySQLCursorWrapper(self, self._raw_conn.cursor())
-
-    def execute(self, query: str, params: Optional[Any] = None):
-        cur = self.cursor()
-        cur.execute(query, params)
-        return cur
-
-    def executemany(self, query: str, seq_of_params: Iterable[Any]):
-        cur = self.cursor()
-        cur.executemany(query, seq_of_params)
-        return cur
-
-    def commit(self) -> None:
-        self._raw_conn.commit()
-
-    def rollback(self) -> None:
-        self._raw_conn.rollback()
-
-    def ping(self, reconnect: bool = True) -> None:
-        self._raw_conn.ping(reconnect=reconnect)
-
-    def close(self) -> None:
-        self._raw_conn.close()
 
 
 class PostgresCursorWrapper:
@@ -385,48 +259,11 @@ class PostgresConnectionWrapper:
         self._pg_conn.close()
 
 
-def wrap_mysql_row(description, row):
-    if row is None:
-        return None
-    columns = [col[0] for col in description] if description else []
-    return DBRow(columns, row)
-
-
 def wrap_db_row(description, row):
     if row is None:
         return None
     columns = [col[0] for col in description] if description else []
     return DBRow(columns, row)
-
-
-def adapt_params_for_mysql(query: str, params: Optional[Any]) -> Any:
-    if params is None:
-        return None
-    if isinstance(params, dict):
-        return params
-    if isinstance(params, tuple):
-        return params
-    if isinstance(params, list):
-        return tuple(params)
-    return (params,)
-
-
-def adapt_sql_for_mysql(query: str, params: Optional[Any]) -> Tuple[str, Optional[Any]]:
-    sql = query.strip()
-    sql = sql.replace(" COLLATE NOCASE", "")
-    sql = re.sub(r"(FROM\s+sync_state\s+WHERE\s+)key\b", r"\1`key`", sql, flags=re.IGNORECASE)
-    sql = re.sub(r"(INTO\s+sync_state\s*\()\s*key\b", r"\1`key`", sql, flags=re.IGNORECASE)
-    sql = re.sub(r"INSERT\s+OR\s+IGNORE\s+INTO", "INSERT IGNORE INTO", sql, flags=re.IGNORECASE)
-    sql = re.sub(r"INSERT\s+OR\s+REPLACE\s+INTO", "REPLACE INTO", sql, flags=re.IGNORECASE)
-    sql = _ON_CONFLICT_RE.sub("ON DUPLICATE KEY UPDATE", sql)
-    sql = re.sub(r"excluded\.([a-zA-Z_][a-zA-Z0-9_]*)", r"VALUES(\1)", sql, flags=re.IGNORECASE)
-    if isinstance(params, dict):
-        sql = _NAMED_PARAM_RE.sub(r"%(\1)s", sql)
-        return sql, params
-    if params is not None:
-        sql = sql.replace("?", "%s")
-        return sql, adapt_params_for_mysql(query, params)
-    return sql.replace("?", "%s"), None
 
 
 def adapt_params_for_postgres(query: str, params: Optional[Any]) -> Any:
@@ -488,25 +325,6 @@ def get_sqlite_connection(db_path: str = DEFAULT_DB_PATH, readonly: bool = False
     return conn
 
 
-def get_mysql_connection(settings: Optional[Mapping[str, Any]] = None) -> MySQLConnectionWrapper:
-    if pymysql is None:
-        raise RuntimeError("pymysql is not installed. Please install pymysql first.")
-    settings = settings if settings is not None else get_mysql_settings()
-    raw = pymysql.connect(
-        host=settings["host"],
-        port=settings["port"],
-        user=settings["user"],
-        password=settings["password"],
-        database=settings["database"],
-        charset=settings["charset"],
-        autocommit=False,
-        connect_timeout=int(os.environ.get("POLYMARKET_MYSQL_CONNECT_TIMEOUT", "10")),
-        read_timeout=int(os.environ.get("POLYMARKET_MYSQL_READ_TIMEOUT", "60")),
-        write_timeout=int(os.environ.get("POLYMARKET_MYSQL_WRITE_TIMEOUT", "60")),
-    )
-    return MySQLConnectionWrapper(raw)
-
-
 def get_postgres_connection(
     settings: Optional[Mapping[str, Any]] = None, *, connect_timeout: int | None = None
 ) -> PostgresConnectionWrapper:
@@ -555,8 +373,6 @@ def get_connection(
         return get_sqlite_connection(db_path or get_sqlite_path(), readonly=readonly)
     if chosen in {"postgres", "postgresql"}:
         return get_postgres_connection()
-    if chosen == "mysql":
-        return get_mysql_connection()
     raise ValueError(f"Unsupported database backend: {chosen}")
 
 
@@ -599,52 +415,7 @@ def get_table_columns(conn, table: str) -> List[str]:
         )
         return [row[0] for row in cur.fetchall()]
 
-    cur = conn.execute(
-        """
-        SELECT COLUMN_NAME
-        FROM information_schema.columns
-        WHERE table_schema = %s AND table_name = %s
-        ORDER BY ordinal_position
-        """,
-        (get_mysql_settings()["database"], table),
-    )
-    return [row[0] for row in cur.fetchall()]
-
-
-def get_table_column_types(conn, table: str) -> Dict[str, str]:
-    if isinstance(conn, sqlite3.Connection):
-        cur = conn.execute(f"PRAGMA table_info({table})")
-        return {row[1]: row[2] for row in cur.fetchall()}
-    if isinstance(conn, PostgresConnectionWrapper):
-        if "." in table:
-            schema, table_name = table.split(".", 1)
-            params = (schema, table_name)
-            schema_filter = "table_schema = %s"
-        else:
-            table_name = table
-            params = (table_name,)
-            schema_filter = "table_schema IN ('core', 'oracle', 'ops', 'public')"
-        cur = conn.execute(
-            f"""
-            SELECT column_name, data_type
-            FROM information_schema.columns
-            WHERE {schema_filter} AND table_name = %s
-            ORDER BY ordinal_position
-            """,
-            params,
-        )
-        return {row[0]: row[1] for row in cur.fetchall()}
-
-    cur = conn.execute(
-        """
-        SELECT COLUMN_NAME, COLUMN_TYPE
-        FROM information_schema.columns
-        WHERE table_schema = %s AND table_name = %s
-        ORDER BY ordinal_position
-        """,
-        (get_mysql_settings()["database"], table),
-    )
-    return {row[0]: row[1] for row in cur.fetchall()}
+    raise TypeError("Unsupported database connection")
 
 
 def table_exists(conn, table: str) -> bool:
@@ -652,101 +423,14 @@ def table_exists(conn, table: str) -> bool:
 
 
 def create_index_if_not_exists(conn, table: str, index_name: str, columns: Sequence[str], unique: bool = False) -> None:
-    if isinstance(conn, sqlite3.Connection):
-        unique_sql = "UNIQUE " if unique else ""
-        conn.execute(f"CREATE {unique_sql}INDEX IF NOT EXISTS {index_name} ON {table}({', '.join(columns)})")
-        return
-    if isinstance(conn, PostgresConnectionWrapper):
-        unique_sql = "UNIQUE " if unique else ""
-        conn.execute(f"CREATE {unique_sql}INDEX IF NOT EXISTS {index_name} ON {table}({', '.join(columns)})")
-        return
-
-    cur = conn.execute(
-        """
-        SELECT 1
-        FROM information_schema.statistics
-        WHERE table_schema = %s AND table_name = %s AND index_name = %s
-        LIMIT 1
-        """,
-        (get_mysql_settings()["database"], table, index_name),
-    )
-    if cur.fetchone():
-        return
     unique_sql = "UNIQUE " if unique else ""
-    conn.execute(f"ALTER TABLE {table} ADD {unique_sql}INDEX {index_name} ({', '.join(columns)})")
+    conn.execute(f"CREATE {unique_sql}INDEX IF NOT EXISTS {index_name} ON {table}({', '.join(columns)})")
 
 
 def ensure_column_exists(conn, table: str, column: str, column_type: str) -> None:
     if column in get_table_columns(conn, table):
         return
     conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
-
-
-def _create_mysql_uma_adapter_mapping_table(conn) -> None:
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS uma_adapter_mapping (
-            id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-            ancillary_data LONGTEXT NOT NULL,
-            ancillary_data_hash CHAR(64) GENERATED ALWAYS AS (SHA2(ancillary_data, 256)) STORED,
-            question_id VARCHAR(255) NOT NULL,
-            source_adapter VARCHAR(255),
-            UNIQUE KEY uq_uma_adapter_mapping_hash (ancillary_data_hash)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-    )
-
-
-def _create_mysql_neg_risk_request_mapping_table(conn) -> None:
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS neg_risk_request_mapping (
-            request_id VARCHAR(255) NOT NULL PRIMARY KEY,
-            question_id VARCHAR(255) NOT NULL,
-            market_id VARCHAR(255),
-            source_operator VARCHAR(255)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-    )
-
-
-def _ensure_mysql_uma_adapter_mapping_schema(conn) -> None:
-    if not table_exists(conn, "uma_adapter_mapping"):
-        _create_mysql_uma_adapter_mapping_table(conn)
-        return
-
-    column_types = {
-        name: col_type.lower() for name, col_type in get_table_column_types(conn, "uma_adapter_mapping").items()
-    }
-    needs_rebuild = (
-        column_types.get("ancillary_data", "").startswith("varchar(")
-        or "ancillary_data_hash" not in column_types
-        or "id" not in column_types
-    )
-    if not needs_rebuild:
-        ensure_column_exists(conn, "uma_adapter_mapping", "source_adapter", "VARCHAR(255)")
-        return
-
-    conn.execute("DROP TABLE IF EXISTS uma_adapter_mapping_legacy_tmp")
-    conn.execute("RENAME TABLE uma_adapter_mapping TO uma_adapter_mapping_legacy_tmp")
-    _create_mysql_uma_adapter_mapping_table(conn)
-    conn.execute(
-        """
-        INSERT INTO uma_adapter_mapping (ancillary_data, question_id, source_adapter)
-        SELECT ancillary_data, question_id, NULL
-        FROM uma_adapter_mapping_legacy_tmp
-        """
-    )
-    conn.execute("DROP TABLE uma_adapter_mapping_legacy_tmp")
-
-
-def _ensure_mysql_neg_risk_request_mapping_schema(conn) -> None:
-    if not table_exists(conn, "neg_risk_request_mapping"):
-        _create_mysql_neg_risk_request_mapping_table(conn)
-        return
-
-    ensure_column_exists(conn, "neg_risk_request_mapping", "market_id", "VARCHAR(255)")
-    ensure_column_exists(conn, "neg_risk_request_mapping", "source_operator", "VARCHAR(255)")
 
 
 def _init_postgres_schema(conn: PostgresConnectionWrapper) -> None:
@@ -1159,7 +843,7 @@ def init_schema(conn=None, db_path: str = DEFAULT_DB_PATH) -> None:
         elif isinstance(conn, PostgresConnectionWrapper):
             _init_postgres_schema(conn)
         else:
-            _init_mysql_schema(conn)
+            raise TypeError("Unsupported database connection")
         conn.commit()
     finally:
         if close_after:
@@ -1562,365 +1246,6 @@ def _init_sqlite_schema(conn: sqlite3.Connection) -> None:
         ("neg_risk_request_mapping", "idx_neg_risk_request_mapping_question_id", ["question_id"]),
         ("neg_risk_request_mapping", "idx_neg_risk_request_mapping_source_operator", ["source_operator"]),
         ("block_timestamps", "idx_block_timestamps_timestamp", ["timestamp"]),
-    ):
-        create_index_if_not_exists(conn, table, index_name, cols)
-
-
-def _init_mysql_schema(conn) -> None:
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS markets (
-            id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-            identity_kind VARCHAR(32) NOT NULL DEFAULT 'canonical_gamma',
-            gamma_market_id VARCHAR(255),
-            slug VARCHAR(512) NOT NULL,
-            condition_id VARCHAR(255) NOT NULL,
-            question_id VARCHAR(255),
-            oracle VARCHAR(255),
-            yes_token_id VARCHAR(255) NOT NULL,
-            no_token_id VARCHAR(255) NOT NULL,
-            title TEXT,
-            description LONGTEXT,
-            enable_neg_risk TINYINT DEFAULT 0,
-            end_date VARCHAR(255),
-            created_at VARCHAR(255),
-            category VARCHAR(255),
-            tags LONGTEXT,
-            clob_token_ids LONGTEXT,
-            UNIQUE KEY uq_markets_slug (slug),
-            UNIQUE KEY uq_markets_condition_id (condition_id)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS trades (
-            id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-            tx_hash VARCHAR(255) NOT NULL,
-            log_index BIGINT NOT NULL,
-            market_id BIGINT NOT NULL,
-            maker VARCHAR(255) NOT NULL,
-            taker VARCHAR(255) NOT NULL,
-            price VARCHAR(255) NOT NULL,
-            size VARCHAR(255) NOT NULL,
-            side VARCHAR(255) NOT NULL,
-            outcome VARCHAR(255),
-            token_id VARCHAR(255) NOT NULL,
-            block_number BIGINT,
-            timestamp VARCHAR(255),
-            order_hash VARCHAR(255),
-            maker_asset_id VARCHAR(255),
-            taker_asset_id VARCHAR(255),
-            maker_amount BIGINT,
-            taker_amount BIGINT,
-            fee BIGINT,
-            contract VARCHAR(255),
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE KEY uq_trades_tx_log (tx_hash, log_index),
-            CONSTRAINT fk_trades_market_id FOREIGN KEY (market_id) REFERENCES markets(id)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS block_timestamps (
-            block_number BIGINT PRIMARY KEY,
-            timestamp VARCHAR(255) NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS sync_state (
-            `key` VARCHAR(255) PRIMARY KEY,
-            value LONGTEXT,
-            last_block BIGINT,
-            updated_at VARCHAR(255)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS market_trade_daily_stats (
-            trade_date DATE NOT NULL,
-            market_id BIGINT NOT NULL,
-            trade_count BIGINT NOT NULL DEFAULT 0,
-            volume_notional DECIMAL(38, 18) NOT NULL DEFAULT 0,
-            last_trade_at DATETIME(6),
-            last_block_number BIGINT,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-            PRIMARY KEY (trade_date, market_id)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS market_latest_prices (
-            market_id BIGINT NOT NULL PRIMARY KEY,
-            latest_trade_at DATETIME(6),
-            latest_trade_block BIGINT,
-            latest_trade_log_index BIGINT,
-            latest_price DECIMAL(20, 10),
-            latest_yes_trade_at DATETIME(6),
-            latest_yes_trade_block BIGINT,
-            latest_yes_trade_log_index BIGINT,
-            latest_yes_price DECIMAL(20, 10),
-            latest_no_trade_at DATETIME(6),
-            latest_no_trade_block BIGINT,
-            latest_no_trade_log_index BIGINT,
-            latest_no_price DECIMAL(20, 10),
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS market_status_snapshot (
-            market_id BIGINT NOT NULL PRIMARY KEY,
-            has_settle TINYINT NOT NULL DEFAULT 0,
-            has_propose TINYINT NOT NULL DEFAULT 0,
-            has_dispute TINYINT NOT NULL DEFAULT 0,
-            settlement_code TINYINT NOT NULL DEFAULT 0,
-            settlement_outcome VARCHAR(32) NOT NULL DEFAULT 'UNKNOWN',
-            settlement_source VARCHAR(64),
-            settlement_raw LONGTEXT,
-            settlement_event_id BIGINT,
-            settlement_event_time DATETIME(6),
-            settlement_transaction VARCHAR(255),
-            is_trading_closed TINYINT NOT NULL DEFAULT 0,
-            is_resolved TINYINT NOT NULL DEFAULT 0,
-            is_final TINYINT NOT NULL DEFAULT 0,
-            completion_status VARCHAR(32) NOT NULL DEFAULT 'OPEN',
-            completion_source VARCHAR(64),
-            completion_time DATETIME(6),
-            gamma_closed TINYINT NOT NULL DEFAULT 0,
-            gamma_closed_time DATETIME(6),
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-            CONSTRAINT fk_market_status_snapshot_market_id FOREIGN KEY (market_id) REFERENCES markets(id)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS market_list_serving (
-            market_id BIGINT NOT NULL PRIMARY KEY,
-            latest_price DECIMAL(20, 10),
-            latest_trade_at DATETIME(6),
-            price_24h_ago DECIMAL(20, 10),
-            trade_count_24h BIGINT NOT NULL DEFAULT 0,
-            volume_24h DECIMAL(38, 18) NOT NULL DEFAULT 0,
-            last_trade_at DATETIME(6),
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-            CONSTRAINT fk_market_list_serving_market_id FOREIGN KEY (market_id) REFERENCES markets(id)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS trade_addresses (
-            id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-            trade_id BIGINT,
-            tx_hash CHAR(66) NOT NULL,
-            log_index BIGINT NOT NULL,
-            market_id BIGINT NOT NULL,
-            token_id VARCHAR(128) NOT NULL,
-            outcome VARCHAR(16),
-            address CHAR(42) NOT NULL,
-            role VARCHAR(16) NOT NULL,
-            side_for_address VARCHAR(16) NOT NULL,
-            price DECIMAL(20, 10) NOT NULL,
-            size DECIMAL(30, 10) NOT NULL,
-            notional DECIMAL(38, 18) NOT NULL,
-            fee_amount DECIMAL(38, 18) NOT NULL DEFAULT 0,
-            block_number BIGINT,
-            trade_time DATETIME(6),
-            trade_date DATE,
-            contract VARCHAR(255),
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE KEY uq_trade_addresses_trade_address (tx_hash, log_index, address)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS address_trade_daily_stats (
-            trade_date DATE NOT NULL,
-            address CHAR(42) NOT NULL,
-            trade_count BIGINT NOT NULL DEFAULT 0,
-            buy_count BIGINT NOT NULL DEFAULT 0,
-            sell_count BIGINT NOT NULL DEFAULT 0,
-            volume_notional DECIMAL(38, 18) NOT NULL DEFAULT 0,
-            last_trade_at DATETIME(6),
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-            PRIMARY KEY (trade_date, address)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS address_trade_totals (
-            address CHAR(42) NOT NULL PRIMARY KEY,
-            total_trade_count BIGINT NOT NULL DEFAULT 0,
-            total_buy_count BIGINT NOT NULL DEFAULT 0,
-            total_sell_count BIGINT NOT NULL DEFAULT 0,
-            total_volume_notional DECIMAL(38, 18) NOT NULL DEFAULT 0,
-            first_trade_at DATETIME(6),
-            last_trade_at DATETIME(6),
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS address_market_stats (
-            address CHAR(42) NOT NULL,
-            market_id BIGINT NOT NULL,
-            trade_count BIGINT NOT NULL DEFAULT 0,
-            buy_count BIGINT NOT NULL DEFAULT 0,
-            sell_count BIGINT NOT NULL DEFAULT 0,
-            volume_notional DECIMAL(38, 18) NOT NULL DEFAULT 0,
-            first_trade_at DATETIME(6),
-            last_trade_at DATETIME(6),
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-            PRIMARY KEY (address, market_id)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-    )
-    _create_mysql_uma_adapter_mapping_table(conn)
-    _create_mysql_neg_risk_request_mapping_table(conn)
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS oracle_events (
-            id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-            tx_hash VARCHAR(255) NOT NULL,
-            log_index BIGINT NOT NULL,
-            block_number BIGINT NOT NULL,
-            event_time VARCHAR(255),
-            event_status VARCHAR(255) NOT NULL,
-            external_market_id VARCHAR(255),
-            market_id BIGINT,
-            market_title TEXT,
-            source_adapter VARCHAR(255),
-            source_oracle VARCHAR(255),
-            adapter_question_id VARCHAR(255),
-            matched_by VARCHAR(255),
-            question_id VARCHAR(255),
-            condition_id VARCHAR(255),
-            string_raw LONGTEXT,
-            p1 VARCHAR(255),
-            p2 VARCHAR(255),
-            proposed_price VARCHAR(255),
-            settled_price VARCHAR(255),
-            settlement_recipient VARCHAR(255),
-            payout LONGTEXT,
-            requester VARCHAR(255),
-            proposer VARCHAR(255),
-            disputer VARCHAR(255),
-            request_transaction VARCHAR(255),
-            proposal_transaction VARCHAR(255),
-            settlement_transaction VARCHAR(255),
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE KEY uq_oracle_events_tx_log (tx_hash, log_index),
-            CONSTRAINT fk_oracle_events_market_id FOREIGN KEY (market_id) REFERENCES markets(id)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """
-    )
-    for col, col_type in (
-        ("identity_kind", "VARCHAR(32) NOT NULL DEFAULT 'canonical_gamma'"),
-        ("gamma_market_id", "VARCHAR(255)"),
-        ("category", "VARCHAR(255)"),
-        ("tags", "LONGTEXT"),
-        ("clob_token_ids", "LONGTEXT"),
-    ):
-        ensure_column_exists(conn, "markets", col, col_type)
-    for col, col_type in (
-        ("order_hash", "VARCHAR(255)"),
-        ("maker_asset_id", "VARCHAR(255)"),
-        ("taker_asset_id", "VARCHAR(255)"),
-        ("maker_amount", "BIGINT"),
-        ("taker_amount", "BIGINT"),
-        ("fee", "BIGINT"),
-        ("contract", "VARCHAR(255)"),
-    ):
-        ensure_column_exists(conn, "trades", col, col_type)
-    ensure_column_exists(conn, "market_list_serving", "price_24h_ago", "DECIMAL(20, 10)")
-    for col, col_type in (
-        ("has_dispute", "TINYINT NOT NULL DEFAULT 0"),
-        ("settlement_code", "TINYINT NOT NULL DEFAULT 0"),
-        ("settlement_outcome", "VARCHAR(32) NOT NULL DEFAULT 'UNKNOWN'"),
-        ("settlement_source", "VARCHAR(64)"),
-        ("settlement_raw", "LONGTEXT"),
-        ("settlement_event_id", "BIGINT"),
-        ("settlement_event_time", "DATETIME(6)"),
-        ("settlement_transaction", "VARCHAR(255)"),
-        ("is_trading_closed", "TINYINT NOT NULL DEFAULT 0"),
-        ("is_resolved", "TINYINT NOT NULL DEFAULT 0"),
-        ("is_final", "TINYINT NOT NULL DEFAULT 0"),
-        ("completion_status", "VARCHAR(32) NOT NULL DEFAULT 'OPEN'"),
-        ("completion_source", "VARCHAR(64)"),
-        ("completion_time", "DATETIME(6)"),
-        ("gamma_closed", "TINYINT NOT NULL DEFAULT 0"),
-        ("gamma_closed_time", "DATETIME(6)"),
-    ):
-        ensure_column_exists(conn, "market_status_snapshot", col, col_type)
-    _ensure_mysql_uma_adapter_mapping_schema(conn)
-    _ensure_mysql_neg_risk_request_mapping_schema(conn)
-    for table, index_name, cols in (
-        ("markets", "idx_markets_condition_id", ["condition_id"]),
-        ("markets", "idx_markets_gamma_market_id", ["gamma_market_id"]),
-        ("markets", "idx_markets_yes_token", ["yes_token_id"]),
-        ("markets", "idx_markets_no_token", ["no_token_id"]),
-        ("trades", "idx_trades_market_id", ["market_id"]),
-        ("trades", "idx_trades_timestamp", ["timestamp"]),
-        ("trades", "idx_trades_block", ["block_number"]),
-        ("market_trade_daily_stats", "idx_market_trade_daily_stats_market_date", ["market_id", "trade_date"]),
-        ("market_trade_daily_stats", "idx_market_trade_daily_stats_last_trade_at", ["last_trade_at"]),
-        ("market_latest_prices", "idx_market_latest_prices_latest_trade_at", ["latest_trade_at"]),
-        ("market_status_snapshot", "idx_market_status_snapshot_flags", ["has_settle", "has_propose", "market_id"]),
-        (
-            "market_status_snapshot",
-            "idx_market_status_snapshot_lifecycle_flags",
-            ["has_settle", "has_propose", "has_dispute", "market_id"],
-        ),
-        ("market_status_snapshot", "idx_market_status_snapshot_settlement_code", ["settlement_code"]),
-        ("market_status_snapshot", "idx_market_status_snapshot_completion_status", ["completion_status", "market_id"]),
-        (
-            "market_status_snapshot",
-            "idx_market_status_snapshot_completion_flags",
-            ["is_final", "is_resolved", "is_trading_closed", "market_id"],
-        ),
-        ("market_status_snapshot", "idx_market_status_snapshot_completion_time", ["completion_time"]),
-        ("market_status_snapshot", "idx_market_status_snapshot_gamma_closed", ["gamma_closed", "gamma_closed_time"]),
-        ("market_list_serving", "idx_market_list_serving_activity", ["volume_24h", "trade_count_24h", "last_trade_at"]),
-        ("market_list_serving", "idx_market_list_serving_latest_trade_at", ["latest_trade_at"]),
-        ("trade_addresses", "idx_trade_addresses_address_time", ["address", "trade_time", "block_number", "log_index"]),
-        ("trade_addresses", "idx_trade_addresses_address_market", ["address", "market_id"]),
-        (
-            "trade_addresses",
-            "idx_trade_addresses_market_time",
-            ["market_id", "trade_time", "block_number", "log_index"],
-        ),
-        ("trade_addresses", "idx_trade_addresses_trade_date_address", ["trade_date", "address"]),
-        ("address_trade_daily_stats", "idx_address_trade_daily_stats_address_date", ["address", "trade_date"]),
-        ("address_trade_daily_stats", "idx_address_trade_daily_stats_last_trade_at", ["last_trade_at"]),
-        ("address_trade_totals", "idx_address_trade_totals_last_trade_at", ["last_trade_at"]),
-        ("address_market_stats", "idx_address_market_stats_market", ["market_id"]),
-        ("address_market_stats", "idx_address_market_stats_last_trade_at", ["last_trade_at"]),
-        ("oracle_events", "idx_oracle_events_market_id", ["market_id"]),
-        ("oracle_events", "idx_oracle_events_external_market_id", ["external_market_id"]),
-        ("oracle_events", "idx_oracle_events_question_id", ["question_id"]),
-        ("oracle_events", "idx_oracle_events_condition_id", ["condition_id"]),
-        ("oracle_events", "idx_oracle_events_market_block_id", ["market_id", "block_number", "id"]),
-        ("oracle_events", "idx_oracle_events_external_market_block_id", ["external_market_id", "block_number", "id"]),
-        ("oracle_events", "idx_oracle_events_question_block_id", ["question_id", "block_number", "id"]),
-        ("oracle_events", "idx_oracle_events_condition_block_id", ["condition_id", "block_number", "id"]),
-        ("oracle_events", "idx_oracle_events_block", ["block_number"]),
-        ("oracle_events", "idx_oracle_events_status", ["event_status"]),
-        ("oracle_events", "idx_oracle_events_status_market_id", ["event_status", "market_id"]),
-        ("oracle_events", "idx_oracle_events_matched_by", ["matched_by"]),
-        ("neg_risk_request_mapping", "idx_neg_risk_request_mapping_question_id", ["question_id"]),
-        ("neg_risk_request_mapping", "idx_neg_risk_request_mapping_source_operator", ["source_operator"]),
     ):
         create_index_if_not_exists(conn, table, index_name, cols)
 

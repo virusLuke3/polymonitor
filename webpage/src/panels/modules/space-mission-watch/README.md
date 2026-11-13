@@ -1,6 +1,6 @@
 # Space missions
 
-Production module: `space-mission-watch`. Visual reference and original input scope: [reviewed design](../../../../design-previews/market-domains/panels/space-mission/README.md). This implementation replaces prototype records with acquired public evidence. Upcoming feed may include recently completed missions. Source status is retained; a planned window does not infer liftoff, landing, orbital success or live countdown.
+Production module: `space-mission-watch`. This implementation replaces prototype records with acquired public evidence. Upcoming feed may include recently completed missions. Source status is retained; a planned window does not infer liftoff, landing, orbital success or live countdown.
 
 ## Ownership and data path
 

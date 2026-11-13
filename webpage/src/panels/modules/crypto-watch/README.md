@@ -6,5 +6,3 @@
 - 后端：`scripts/api/services/crypto_strategy/`；唯一写入者 `scripts/runtime/crypto_strategy_watcher.py`；API 只读共享 SQLite。注册在前后端显式 registry。
 - 测试：`tests/test_crypto_strategy_inputs.py`、`shared/crypto-strategy/model.test.ts`、`webpage/e2e/crypto-strategy.spec.ts`；保留现有 Crypto/Funding 测试。
 - 当前边界：未计算领先时长、择时信号或模型概率。PM 图仅绘制通过现有盘口拥有者校验的实际观测。
-
-完整依赖、运行和验收说明见 `docs/crypto-strategy-panels.md`。

@@ -18,19 +18,19 @@ frontend, API, worker and CLI consumers before calling code unused. A missing
 route registration does not make a still-used product service disposable.
 
 Before adding or upgrading any Panel, read
-`document/开发/Panel开发统一指南.md`, `docs/panel-data-pipeline.md`, and
-`docs/panel-data-cadence.md`. For data requests, shared resources or caching,
-also read `docs/panel-resource-contract.md` and `docs/panel-runtime-lifecycle.md`.
-Apply these contracts to the existing data owner, acquisition, storage, API and
-shared Runtime before implementing the view. Record the chosen chain, storage
-identity, independent clocks, resource budgets and acceptance evidence in the
-Panel's existing feature index or domain document; pure views link the reused
-owner instead of creating another collector or cache. Dated audits and incident
-records are supporting evidence, not current-health claims or default deployment
-configuration. WorldMonitor storage products are references, not assumed local
-infrastructure. If the ignored local guide is absent in a clean checkout, use
-the public `docs/panel-modules.md` together with these data contracts and report
-that the local guide was unavailable.
+`document/开发/Panel开发统一指南.md` and its existing domain guide when available.
+The user removed the root `docs/` directory; do not recreate it or another
+audit/report directory. Keep `document/` unchanged unless explicitly requested.
+If a local guide is unavailable, report that limitation and trace the existing
+implementation instead of inventing a replacement guide.
+
+Reuse the existing data owner, acquisition, storage, API and shared Runtime.
+Keep keys, source endpoints and proxy routes in private `.env` configuration;
+maintain placeholder declarations in `.env.example`. Preserve source identity,
+original timestamps, bounded retries and retention; never renew failed data or
+turn missing values into zero. Check resource budgets before requests that use
+Chainstack quota. A view does not create a second collector or cache. Record
+verification in the task response or an existing feature index, not new files.
 
 For any task that changes the 2D map, its controls, its data adapters, its
 runtime APIs, its fallback renderer, or its deployment behavior, read

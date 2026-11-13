@@ -6,5 +6,3 @@
 - 后端：`scripts/api/services/crypto_strategy/`；唯一写入者 `scripts/runtime/crypto_strategy_watcher.py`；API 只读共享 SQLite。注册在前后端显式 registry。
 - 测试：`tests/test_crypto_strategy_inputs.py`、`shared/crypto-strategy/model.test.ts`、`webpage/e2e/crypto-strategy.spec.ts`；保留现有 Crypto/Funding 测试。
 - 当前边界：折现因子假设为 1；是阈值带平均风险中性尾概率参考，不是精确数字期权概率。未与 PM 到期匹配，不给 PM 概率差或交易结论。
-
-完整依赖、运行和验收说明见 `docs/crypto-strategy-panels.md`。

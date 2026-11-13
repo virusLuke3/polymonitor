@@ -1,6 +1,6 @@
 # Culture awards
 
-Production module: `culture-awards-race`. Visual reference and original input scope: [reviewed design](../../../../design-previews/market-domains/panels/culture-awards/README.md). This implementation replaces prototype records with acquired public evidence. Official announcement titles, source dates and primary-document links. No headline-based winner inference, manufactured nominees, votes or winning probabilities.
+Production module: `culture-awards-race`. This implementation replaces prototype records with acquired public evidence. Official announcement titles, source dates and primary-document links. No headline-based winner inference, manufactured nominees, votes or winning probabilities.
 
 ## Ownership and data path
 

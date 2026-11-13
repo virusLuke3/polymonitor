@@ -1,6 +1,6 @@
 # Mentions evidence
 
-Production module: `mentions-evidence`. Visual reference and original input scope: [reviewed design](../../../../design-previews/market-domains/panels/mentions-evidence/README.md). This implementation replaces prototype records with acquired public evidence. Exact English whole-word/phrase, case-insensitive matching in acquired written paragraphs. No audio, timecodes, speaker diarization, Q&A coverage, ASR or settlement count is fabricated.
+Production module: `mentions-evidence`. This implementation replaces prototype records with acquired public evidence. Exact English whole-word/phrase, case-insensitive matching in acquired written paragraphs. No audio, timecodes, speaker diarization, Q&A coverage, ASR or settlement count is fabricated.
 
 ## Ownership and data path
 

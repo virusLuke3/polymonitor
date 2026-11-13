@@ -149,6 +149,6 @@ not change an already running production host. The cleanup change has not
 been deployed to production.
 
 Development uses terminal output. Optional local captures and their cleanup
-are documented in [development](../../docs/development.md#logs-and-generated-files).
+use systemd journal; remove generated development files with `make clean`.
 
 API startup does not run database migrations. Run `python -m api.manage_auth migrate` explicitly during database maintenance when schema changes require it. `/health/live` checks process liveness; `/health` performs bounded cached database and Redis probes and returns 503 on dependency failure.

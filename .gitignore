@@ -64,7 +64,7 @@ data/*.fetch-locks/
 # PnL research scripts and outputs are still experimental.
 pnl/
 
-# 私有文档，禁止提交到 GitHub。公开文档请放 docs/。
+# 私有文档保留在 document/，禁止提交到 GitHub。
 # 不要对 document/ 使用 git add -f。
 document/
 

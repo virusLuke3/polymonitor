@@ -11,7 +11,7 @@ storage, historical aggregation or persistent browser cache.
   `core.markets` / `core.market_quote_current`. Detail checks every 60 seconds;
   catalog every five minutes. The source quote/observation clocks remain intact.
   API acceptance, bounded stale reuse and database budgets follow
-  [Market panel reads](../../../../../docs/market-panel-reads.md).
+  `scripts/api/services/market_service.py` and the existing shared runtime.
 - Order book: Summary and FocusedMarketStrip both consume
   `features/market-focus/useFocusedOrderBook.ts`. Its `orderBookResource.ts`
   declaration uses the existing `PanelResourceProvider` / Runtime with the

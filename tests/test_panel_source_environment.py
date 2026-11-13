@@ -66,13 +66,3 @@ def test_production_sources_have_no_literal_endpoint_defaults():
                 if re.match(r"^(?:https?|socks5h?|wss?)://[^\s]+", node.value) and not node.value.startswith(namespaces):
                     findings.append(f"{path.relative_to(root)}:{node.lineno}")
     assert not findings, "Move source/proxy defaults into private .env: " + ", ".join(findings)
-
-
-def test_registered_panels_and_source_variables_are_documented():
-    root = Path(__file__).resolve().parents[1]
-    registered = set(re.findall(r"from './([^']+)'", (root / "webpage/src/panels/modules/index.ts").read_text()))
-    audited = set(re.findall(r"\[([^\]]+)\]\(../webpage/src/panels/modules/", (root / "docs/panel-env-audit.md").read_text()))
-    assert audited == registered
-    declarations = set(re.findall(r"(?m)^\s*#?\s*(\w+)=", (root / ".env.example").read_text()))
-    bindings = json.loads((root / "docs/panel-env-source-bindings.json").read_text())
-    assert not set(bindings) - declarations

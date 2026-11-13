@@ -6,5 +6,3 @@
 - 后端：`scripts/api/services/crypto_strategy/`；原始唯一写入者为 market-data 的 `polydata-chainlink-twap.service`；API 经既有 reader 只读 canonical PostgreSQL 和 TWAP SQLite。注册在前后端显式 registry。
 - 测试：`tests/test_crypto_strategy_inputs.py`、`shared/crypto-strategy/model.test.ts`、`webpage/e2e/crypto-strategy.spec.ts`；保留现有 Crypto/Funding 测试。
 - 当前边界：指定源过期就禁用当前距离；开盘展示值保留精度标签。原始窗口贡献和剩余窗口概率未实现；BTC/ETH/SOL/XRP 均校验当轮绑定，缺少整点真实 TWAP 时 anchor 保持缺失。
-
-完整依赖、运行和验收说明见 `docs/crypto-strategy-panels.md`。

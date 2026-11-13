@@ -293,8 +293,6 @@ pyjwt==2.13.0
     # via
     #   -r scripts/requirements.lock.txt
     #   mcp
-pymysql==1.2.0
-    # via -r scripts/requirements.lock.txt
 pyproject-hooks==1.2.0
     # via
     #   build

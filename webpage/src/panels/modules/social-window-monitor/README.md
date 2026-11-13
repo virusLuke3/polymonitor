@@ -1,6 +1,6 @@
 # Social activity
 
-Production module: `social-window-monitor`. Visual reference and original input scope: [reviewed design](../../../../design-previews/market-domains/panels/social-window/README.md). This implementation replaces prototype records with acquired public evidence. Latest configured profile page, excluding reposts and restricted anonymous labels. Partial window only; no total-X-post count, deleted-post inference or complete denominator.
+Production module: `social-window-monitor`. This implementation replaces prototype records with acquired public evidence. Latest configured profile page, excluding reposts and restricted anonymous labels. Partial window only; no total-X-post count, deleted-post inference or complete denominator.
 
 ## Ownership and data path
 

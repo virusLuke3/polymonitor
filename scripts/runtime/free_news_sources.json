@@ -94,7 +94,6 @@
       "probe": {
         "source_id": "bls-cpi",
         "checked_at": "2026-11-04T03:10:35.875756Z",
-        "evidence": "docs/bls-source-research-2026-11-04.md",
         "transport": "fraser-pdf",
         "validated": "directory, item metadata, original BLS PDF and extracted release identity",
         "bytes": 574292,
@@ -144,7 +143,6 @@
       "probe": {
         "source_id": "bls-empsit",
         "checked_at": "2026-11-04T03:10:39.073607Z",
-        "evidence": "docs/bls-source-research-2026-11-04.md",
         "transport": "fraser-pdf",
         "validated": "directory, item metadata, original BLS PDF and extracted release identity",
         "bytes": 580018,
@@ -194,7 +192,6 @@
       "probe": {
         "source_id": "bls-ppi",
         "checked_at": "2026-11-04T03:10:43.033304Z",
-        "evidence": "docs/bls-source-research-2026-11-04.md",
         "transport": "fraser-pdf",
         "validated": "directory, item metadata, original BLS PDF and extracted release identity",
         "bytes": 1641399,
