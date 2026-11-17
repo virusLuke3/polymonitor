@@ -3,9 +3,10 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from dataclasses import replace
 from typing import Any, Dict, Iterable, Mapping, Sequence
 
-from .models import MessageCandidate
+from .models import MessageCandidate, source_clock
 
 
 _VOLATILE_KEY_RE = re.compile(
@@ -35,13 +36,14 @@ _STATUS_KEYS = (
 _IDENTITY_KEYS = (
     "id", "title", "headline", "name", "label", "metric", "type", "kind",
     "status", "severity", "source", "category", "symbol", "eventTitle",
-    "marketTitle", "question",
+    "marketTitle", "question", "asset", "entity", "locationLabel", "hazardKind",
+    "metricLabel", "value", "valueLabel", "changeLabel", "rating", "state",
 )
 _DISPLAY_TITLE_KEYS = (
     "title", "headline", "name", "label", "metric", "eventTitle", "marketTitle",
-    "question", "type", "kind",
+    "question", "entity", "locationLabel", "hazardKind", "asset", "type", "kind",
 )
-_DISPLAY_DETAIL_KEYS = ("status", "severity", "source", "category", "symbol")
+_DISPLAY_DETAIL_KEYS = ("metricLabel", "valueLabel", "changeLabel", "status", "severity", "source", "category", "symbol")
 _COLLECTION_KEYS = (
     "items", "rows", "events", "signals", "alerts", "markets", "games", "news",
     "entries", "results", "records", "incidents", "risks", "watchlist",
@@ -222,3 +224,67 @@ def format_generic_snapshot(panel_id: str, payload: Mapping[str, Any], *, topic:
             link_preview=False,
         )
     ]
+
+
+def format_latest_generic_snapshot(panel_id: str, payload: Mapping[str, Any], *, topic: str) -> list[MessageCandidate]:
+    actual = _actual_payload(payload)
+    # These panels share a seed. Each topic message must use the panel's own evidence.
+    if panel_id == "crypto-exchange-inflow":
+        inflows = actual.get("inflows") or {}
+        actual = {"items": inflows.get("rows") or []} if inflows.get("liveAvailable") is True else {}
+    elif panel_id == "crypto-order-flow":
+        rows = []
+        for asset, item in (actual.get("assets") or {}).items():
+            flow = item.get("flow") or {}
+            if isinstance(flow.get("net"), (int, float)) and flow.get("to"):
+                rows.append({"title": f"{asset} sampled trade flow", "timestamp": flow["to"],
+                             "metricLabel": f'{flow["net"]:+,.0f} USD net', "source": item.get("venue")})
+        actual = {"items": rows}
+    elif panel_id == "crypto-oracle-reference":
+        actual = {"items": [
+            {"title": f"{asset} oracle reference", "timestamp": latest.get("event_at_ms"),
+             "metricLabel": latest.get("value"), "source": ref.get("source")}
+            for asset, ref in (actual.get("references") or {}).items()
+            if ref.get("status") == "ok" and (latest := ref.get("latest")) and latest.get("value") is not None
+        ]}
+    elif panel_id == "options-implied-probability":
+        actual = {"items": [
+            {"title": f"{asset} options distribution", "observedAt": row.get("observedAt"),
+             "metricLabel": f'{len(row["expiries"])} expiries', "source": row.get("source"),
+             "value": row["expiries"][0].get("underlying")}
+            for asset, row in (actual.get("options") or {}).items()
+            if row.get("status") == "ok" and row.get("expiries")
+        ]}
+    elif panel_id == "company-events":
+        actual = {"filings": [row for company in actual.get("companies") or [] for row in company.get("filings") or []]}
+    collections = {
+        key: [
+            row for row in rows
+            if isinstance(row, dict) and not row.get("stale")
+            and str(row.get("status")) not in {"stale", "unavailable", "error"}
+        ]
+        for key, rows in _iter_collections(actual)
+        if key not in {"sources", "errors", "categories", "providerStates", "countryRiskBreakdown",
+                       "sanctionsTargetBreakdown", "targetBreakdown", "sportsContext"}
+    }
+    collections = {key: rows for key, rows in collections.items() if rows}
+    if not collections:
+        return []
+    # Ignore schedule dates and fetch clocks when a row has a real event or publication time.
+    timed = (
+        (stamp, key, row)
+        for key, rows in collections.items()
+        for row in rows
+        if (stamp := source_clock(
+            row, "publishedAt", "published_at", "evidencePublishedAt", "reported_time",
+            "observedAt", "timestamp", "occurredAt", "eventTime", "event_time",
+            "updatedAt", "lastUpdate", "receivedAt",
+        )) is not None
+    )
+    latest = max(timed, key=lambda entry: entry[0], default=None)
+    projection = {key: actual[key] for key in _STATUS_KEYS if key in actual}
+    if latest:
+        stamp, key, row = latest
+        projection[key] = [row]
+        return [replace(message, observed_at=stamp) for message in format_generic_snapshot(panel_id, projection, topic=topic)]
+    return format_generic_snapshot(panel_id, {**projection, **collections}, topic=topic)

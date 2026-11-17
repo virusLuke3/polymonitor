@@ -74,12 +74,18 @@ Panel. Each entry has exactly one delivery mode:
 - `browser-only`: no independent server snapshot exists;
 - `non-pushable`: high-frequency visual data that should not become messages.
 
-The watch loop checks 12 primary sources plus six original generic sources per
-cycle, rotating through the 42 that lack another delivery path. Retained stale
-and warming snapshots wait for usable data. The send state records the
-Telegram message ID, server date and source when returned by the Bot API.
-The normal schedule and the explicit all-panels audit fetch up to four
-snapshots concurrently, with up to 10 seconds of read timeout per request:
+The watch loop checks 14 primary sources and 12 rotating Panel snapshots per
+cycle. The rotation includes every registered pushable runtime Panel.
+The first usable snapshot establishes that source's position. After that,
+each cycle posts at most one new update per configured topic. It uses the actual
+event or publication timestamp where available and otherwise requires a changed
+snapshot. A candidate must be observed within the last 20 minutes. Stale,
+warming and empty snapshots wait for usable data. Seed workers leave
+`POLYDATA_TELEGRAM_PUBLISH_ON_PANEL_CACHE=false` so channel delivery has one owner.
+
+The send state records the Telegram message ID, server date and source. The
+explicit all-panels dry run shows only candidates eligible under the same
+selection rules:
 
 ```bash
 python -m telegram.topics.publisher --once --target all-panels --dry-run
@@ -88,17 +94,13 @@ python -m telegram.topics.publisher --once --target all-panels --dry-run
 This command prints candidates and does not call Telegram or mutate dedupe
 state. Result JSON reports these as `previewed`; the legacy `sent` field also
 counts printed dry-run previews for backward compatibility, and must be read
-together with `dry_run=true`. Before enabling recurring `all-panels` delivery, prime the current
-snapshot so existing records are not posted as a backlog:
+together with `dry_run=true`. The optional prime command resets source positions
+to the current point without sending messages:
 
 ```bash
 python -m telegram.topics.publisher --once --target all-panels --prime
 ```
 
-The first non-dry `all-panels` run also primes automatically. The catalog
-version is recorded only after all expected runtime and non-runtime snapshots
-were fetched; a partial run primes the returned candidates but remains
-unprimed, so recovered sources are safely absorbed on the next run. Publisher
-heartbeat/result JSON exposes formatter counts for specialized, generic,
-empty, aggregate, market-scoped, browser-only, non-pushable, unsupported and
-format-error outcomes.
+Each source establishes its own baseline after the first usable read, including
+after a partial rollout or source recovery. Publisher heartbeat/result JSON
+reports baselined sources, selected sources, fetch errors and Telegram receipts.

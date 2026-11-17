@@ -19,22 +19,19 @@ class PublishState:
             except ValueError:
                 configured = 20000
         self.max_entries = max(100, int(configured or 20000))
-        self.payload: Dict[str, Any] = {"sent": {}, "catalogPrimes": {}}
+        self.payload: Dict[str, Any] = {"sent": {}, "catalogPrimes": {}, "sourceHeads": {}, "topicClocks": {}}
         self.load()
 
     def load(self) -> None:
         if not self.path.exists():
-            self.payload = {"sent": {}, "catalogPrimes": {}}
             return
         try:
             parsed = json.loads(self.path.read_text(encoding="utf-8") or "{}")
         except (OSError, json.JSONDecodeError):
             parsed = {}
-        sent = parsed.get("sent") if isinstance(parsed, dict) else {}
-        catalog_primes = parsed.get("catalogPrimes") if isinstance(parsed, dict) else {}
         self.payload = {
-            "sent": sent if isinstance(sent, dict) else {},
-            "catalogPrimes": catalog_primes if isinstance(catalog_primes, dict) else {},
+            key: parsed[key] if isinstance(parsed, dict) and isinstance(parsed.get(key), dict) else {}
+            for key in ("sent", "catalogPrimes", "sourceHeads", "topicClocks")
         }
 
     def seen(self, target: str, dedupe_key: str) -> bool:

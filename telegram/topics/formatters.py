@@ -6,9 +6,9 @@ from typing import Any, Dict, Iterable, List, Optional
 from urllib.parse import quote_plus
 
 from .catalog import DeliveryMode, delivery_contract
-from .generic_formatter import format_generic_snapshot
+from .generic_formatter import format_generic_snapshot, format_latest_generic_snapshot
 from .market_linker import MarketLink, resolve_market_link
-from .models import FormatOutcome, MessageCandidate
+from .models import FormatOutcome, MessageCandidate, source_clock
 
 RELATED_NEWS_GROUP_LIMIT = 2
 NEW_MARKET_PLACEHOLDER_TITLE_PREFIXES = (
@@ -207,6 +207,7 @@ def format_nba_intel(payload: Dict[str, Any]) -> List[MessageCandidate]:
                 text=text,
                 priority="normal",
                 metadata={"panel": "nba-intel", "marketLink": market_link.url if market_link else ""},
+                observed_at=source_clock(item, "publishedAt") or 0,
                 link_preview=bool(market_link or url),
                 reply_markup=_trade_markup(market_link, extra_buttons=[{"text": "Source", "url": url}] if url else None),
             )
@@ -283,6 +284,7 @@ def format_nba_predictor(payload: Dict[str, Any]) -> List[MessageCandidate]:
                 text=text,
                 priority="normal",
                 metadata={"panel": "espn-matchup-predictor", "marketLink": market_link.url if market_link else ""},
+                observed_at=source_clock(item, "lastModified"),
                 link_preview=bool(market_link),
                 reply_markup=_trade_markup(market_link),
             )
@@ -376,6 +378,7 @@ def format_weather_news(payload: Dict[str, Any]) -> List[MessageCandidate]:
                 text=text,
                 priority=priority,
                 metadata={"panel": "weather-news", "marketLink": market_link.url if market_link else ""},
+                observed_at=source_clock(article, "publishedAt") or 0,
                 link_preview=bool(market_link or url),
                 reply_markup=_trade_markup(market_link, extra_buttons=[{"text": "Source", "url": url}] if url else None),
             )
@@ -408,6 +411,7 @@ def format_latest_content(payload: Dict[str, Any]) -> List[MessageCandidate]:
                 dedupe_key=dedupe,
                 text=text,
                 metadata={"panel": "latest-content", "marketLink": market_link.url if market_link else ""},
+                observed_at=source_clock(item, "publishedAt", "published_at") or 0,
                 link_preview=bool(market_link or url),
                 reply_markup=_trade_markup(market_link, extra_buttons=[{"text": "Source", "url": url}] if url else None),
             )
@@ -483,6 +487,7 @@ def format_related_news(payload: Dict[str, Any]) -> List[MessageCandidate]:
             dedupe_key=dedupe,
             text=text,
             metadata={"panel": "related-news", "marketId": market_id},
+            observed_at=max((source_clock(item, "publishedAt", "published_at") or 0 for item in items), default=0),
             link_preview=bool(market_link or first_url),
             reply_markup=_trade_markup(market_link, extra_buttons=[{"text": "Top source", "url": first_url}] if first_url else None),
         )
@@ -519,6 +524,7 @@ def format_alpha_signal(payload: Dict[str, Any]) -> List[MessageCandidate]:
                 text=text,
                 priority="high",
                 metadata={"panel": "alpha-signal", "marketLink": url},
+                observed_at=source_clock(item, "observedAt", "timestamp") or 0,
                 link_preview=bool(url),
                 reply_markup=_trade_markup(market_link or (MarketLink(url=url, title=title, matched_by="fallback") if url else None)),
             )
@@ -554,6 +560,7 @@ def format_new_market_signals(payload: Dict[str, Any]) -> List[MessageCandidate]
                 text=text,
                 priority="normal",
                 metadata={"panel": "new-market-signals", "marketLink": url},
+                observed_at=source_clock(item, "marketCreatedAt") or 0,
                 link_preview=bool(url),
                 reply_markup=_trade_markup(market_link or (MarketLink(url=url, title=title, matched_by="fallback") if url else None)),
             )
@@ -592,7 +599,7 @@ def format_macro_payload(payload: Dict[str, Any], *, panel_label: str, panel_id:
             meme="📊 Vibe: macro board is moving",
             url="\n".join(part for part in (_source_link(url, "Market") if url else "", _source_link(source_url, "Source") if source_url and source_url != url else "") if part),
         )
-        dedupe = _short_hash(panel_id, item.get("id") or item.get("eventId") or item.get("slug"), title.lower(), status, value)
+        dedupe = _short_hash(panel_id, item.get("id") or item.get("eventId") or item.get("slug"), title.lower(), status, value, outcome_line)
         messages.append(
             MessageCandidate(
                 topic="macro",
@@ -600,6 +607,7 @@ def format_macro_payload(payload: Dict[str, Any], *, panel_label: str, panel_id:
                 text=text,
                 priority="normal",
                 metadata={"panel": panel_id, "marketLink": url},
+                observed_at=source_clock(item, "newestSourceObservedAt", "sourceObservedAt"),
                 link_preview=bool(url or source_url),
                 reply_markup=_trade_markup(market_link or (MarketLink(url=url, title=title, matched_by="fallback") if url else None), extra_buttons=[{"text": "Source", "url": source_url}] if source_url and source_url != url else None),
             )
@@ -639,7 +647,9 @@ def _format_specialized(panel_id: str, payload: Dict[str, Any]) -> List[MessageC
     return []
 
 
-def format_panel_snapshot_outcome(panel_id: str, payload: Dict[str, Any]) -> FormatOutcome:
+def format_panel_snapshot_outcome(
+    panel_id: str, payload: Dict[str, Any], *, latest_only: bool = False,
+) -> FormatOutcome:
     requested_id = str(panel_id or "").strip()
     canonical_id = {
         "related-intel": "related-news",
@@ -661,7 +671,8 @@ def format_panel_snapshot_outcome(panel_id: str, payload: Dict[str, Any]) -> For
         if contract.mode is DeliveryMode.SPECIALIZED:
             candidates = _format_specialized(canonical_id, payload)
         elif contract.mode is DeliveryMode.GENERIC:
-            candidates = format_generic_snapshot(canonical_id, payload, topic=contract.topic)
+            formatter = format_latest_generic_snapshot if latest_only else format_generic_snapshot
+            candidates = formatter(canonical_id, payload, topic=contract.topic)
         else:
             return FormatOutcome(
                 panel_id=canonical_id,
@@ -689,7 +700,7 @@ def format_panel_snapshot(panel_id: str, payload: Dict[str, Any]) -> List[Messag
 
 
 def format_all_snapshots_with_stats(
-    snapshots: Dict[str, Dict[str, Any]],
+    snapshots: Dict[str, Dict[str, Any]], *, latest_only: bool = False,
 ) -> tuple[List[MessageCandidate], Dict[str, int]]:
     messages: List[MessageCandidate] = []
     stats = {
@@ -704,7 +715,7 @@ def format_all_snapshots_with_stats(
         "format_errors": 0,
     }
     for panel_id, payload in snapshots.items():
-        outcome = format_panel_snapshot_outcome(panel_id, payload)
+        outcome = format_panel_snapshot_outcome(panel_id, payload, latest_only=latest_only)
         messages.extend(outcome.candidates)
         if outcome.mode == DeliveryMode.SPECIALIZED.value:
             stats["specialized"] += 1

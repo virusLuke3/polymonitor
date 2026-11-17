@@ -11,11 +11,11 @@ from pathlib import Path
 from typing import Dict, Iterable, List
 
 from .api_client import PolyDataApiClient, resolve_polydata_api_base
-from .catalog import CATALOG_VERSION, HISTORICAL_GENERIC_PANEL_IDS, SERVER_RUNTIME_PANEL_IDS
+from .catalog import DELIVERY_CATALOG, SERVER_RUNTIME_PANEL_IDS
 from .client import TelegramClient
 from .config import TelegramSettings, load_settings
 from .formatters import format_all_snapshots_with_stats, format_related_news
-from .models import MessageCandidate
+from .models import MessageCandidate, source_clock
 from .state import PublishState, state_lock
 
 
@@ -23,6 +23,8 @@ PANEL_ENDPOINTS = {
     "latest-content": ("/content/latest", {"limit": 8}),
     "alpha-signal": ("/runtime/signals/alpha", {"limit": 8}),
     "new-market-signals": ("/runtime/markets/new-signals", {"limit": 12}),
+    "whale-tracker": ("/runtime/panels/whale-tracker", {"limit": 12}),
+    "suspicious-flow": ("/runtime/panels/suspicious-flow", {"limit": 12}),
     "polymarket-macro-map": ("/runtime/macro/polymarket-map", {"limit": 12}),
     "cpi-release-command-center": ("/runtime/macro/cpi-release-command-center", {"limit": 12}),
     "nba-scoreboard": ("/runtime/sports/nba", {"limit": 10}),
@@ -33,24 +35,20 @@ PANEL_ENDPOINTS = {
     "geo-sanctions-shock": ("/runtime/panels/geo-sanctions-shock", {"limit": 12}),
     "policy-progress": ("/runtime/panels/policy-progress", {"limit": 12}),
 }
-INTEL_PANELS = ("geo-sanctions-shock", "policy-progress")
 FETCH_MAX_WORKERS = 4
 FETCH_TIMEOUT_SECONDS = 10
-HISTORICAL_PANELS_PER_CYCLE = 6
-HISTORICAL_PANELS = tuple(
-    panel_id for panel_id in HISTORICAL_GENERIC_PANEL_IDS
-    if panel_id not in PANEL_ENDPOINTS and panel_id not in {
-        # Existing seed workers already publish these snapshots.
-        "global-transport-shipping", "cpi-components-pressure-registry", "goods-tariff-supply-watch",
-        "labor-services-inflation-monitor", "fed-reaction-growth-risk-board",
-    }
+MAX_MESSAGE_AGE_SECONDS = 20 * 60
+ROTATING_PANELS_PER_CYCLE = 12
+ROTATING_PANELS = tuple(
+    panel_id for panel_id in SERVER_RUNTIME_PANEL_IDS
+    if panel_id not in PANEL_ENDPOINTS and DELIVERY_CATALOG[panel_id].pushable
 )
 
 TARGET_PANELS = {
     "all": tuple(PANEL_ENDPOINTS),
     "news": ("latest-content",),
-    "intel": INTEL_PANELS,
-    "alpha": ("alpha-signal", "new-market-signals"),
+    "intel": ("geo-sanctions-shock", "policy-progress"),
+    "alpha": ("alpha-signal", "new-market-signals", "whale-tracker", "suspicious-flow"),
     "macro": ("polymarket-macro-map", "cpi-release-command-center"),
     "nba": ("nba-scoreboard", "nba-intel", "espn-matchup-predictor"),
     "weather": ("global-weather-map", "weather-news"),
@@ -86,6 +84,9 @@ class PublishResult:
     historical_fetched: list[str] = field(default_factory=list)
     historical_unready: list[str] = field(default_factory=list)
     related_markets_checked: int = 0
+    baselined_sources: list[str] = field(default_factory=list)
+    empty_sources: list[str] = field(default_factory=list)
+    selected_by_topic: dict[str, str] = field(default_factory=dict)
 
 
 def _write_heartbeat(*, phase: str, result: PublishResult | None = None, error: str = "") -> None:
@@ -151,13 +152,11 @@ def fetch_snapshots(
         }
 
 
-def _historical_snapshot_ready(panel_id: str, payload: Dict) -> bool:
-    if panel_id == "natural-hazards":
-        return bool(payload.get("events"))
-    if payload.get("stale") or payload.get("cacheMode") in {"stale", "stale-seed", "warming"}:
-        return False
-    return payload.get("status") in {"ok", "ready", "partial", "degraded"} and bool(
-        payload.get("items") or payload.get("commodities") or payload.get("quarterly")
+def _snapshot_ready(payload: Dict) -> bool:
+    blocked = {"stale", "retained", "warming", "empty", "unavailable", "error", "failed", "disabled", "invalid"}
+    return not (
+        payload.get("stale") or str(payload.get("status")).lower() in blocked
+        or str(payload.get("cacheMode")).lower().startswith(("stale", "retained", "warming"))
     )
 
 
@@ -178,8 +177,11 @@ def _fetch_related_candidates(api: PolyDataApiClient, macro_snapshot: Dict) -> t
             print(f"[telegram-publisher] WARN related-news fetch failed error_class={type(exc).__name__}", file=sys.stderr)
             continue
         checked += 1
-        if not payload.get("stale") and payload.get("marketId") == market_id:
-            candidates.extend(format_related_news(payload))
+        if _snapshot_ready(payload) and payload.get("marketId") == market_id:
+            articles = payload.get("items") or []
+            newest = max(articles, key=lambda row: source_clock(row, "publishedAt", "published_at") or 0, default=None)
+            if newest:
+                candidates.extend(format_related_news({**payload, "items": [newest]}))
     return candidates, checked
 
 
@@ -190,9 +192,48 @@ def _candidate_targets(candidate: MessageCandidate, settings: TelegramSettings) 
             yield target
 
 
-def _all_panels_fetch_complete(snapshots: Dict[str, Dict]) -> bool:
-    expected = set(TARGET_PANELS["all-panels"])
-    return expected.issubset(snapshots) and len(snapshots) == len(expected)
+def _latest_candidates(
+    candidates: list[MessageCandidate], snapshots: Dict[str, Dict], state: PublishState, *,
+    now: float, prime: bool, dry_run: bool,
+) -> tuple[dict[str, tuple[float, MessageCandidate]], dict, list[str]]:
+    feeds: dict[str, list[tuple[float, MessageCandidate]]] = {}
+    for candidate in candidates:
+        panel = candidate.metadata["panel"]
+        stamp = candidate.observed_at
+        key = panel if stamp is None else f"{panel}:event"
+        if stamp is None:
+            stamp = source_clock(snapshots.get(panel, {}), "collectedAt", "generatedAt", "updatedAt")
+        if stamp is not None and stamp <= now:
+            feeds.setdefault(key, []).append((stamp, candidate))
+
+    heads = state.payload["sourceHeads"]
+    topic_clocks = state.payload["topicClocks"]
+    chosen = {}
+    updated = {}
+    baselined = []
+    for key, entries in feeds.items():
+        latest_at = max(stamp for stamp, _ in entries)
+        prior = heads.get(key)
+        keys = sorted({c.dedupe_key for _, c in entries})
+        if prime or (prior is None and not dry_run):
+            updated[key] = {"at": max(now, (prior or {}).get("at", 0)), "keys": keys}
+            baselined.append(entries[0][1].metadata["panel"])
+            continue
+        prior_at = (prior or {}).get("at", 0)
+        prior_keys = set((prior or {}).get("keys", []))
+        updated[key] = {"at": max(prior_at, latest_at), "keys": keys}
+        for stamp, candidate in entries:
+            topic = candidate.topic
+            if (
+                stamp != latest_at or stamp <= max(prior_at, topic_clocks.get(topic, 0))
+                or now - stamp > MAX_MESSAGE_AGE_SECONDS or candidate.dedupe_key in prior_keys
+                or state.seen(topic, candidate.dedupe_key)
+            ):
+                continue
+            incumbent = chosen.get(topic)
+            if not incumbent or (stamp, candidate.priority == "high") > (incumbent[0], incumbent[1].priority == "high"):
+                chosen[topic] = (stamp, candidate)
+    return chosen, updated, sorted(set(baselined))
 
 
 def publish_candidates(
@@ -203,10 +244,14 @@ def publish_candidates(
     telegram: TelegramClient,
     dry_run: bool = False,
     prime: bool = False,
+    primary_only: bool = False,
 ) -> PublishResult:
     result = PublishResult(candidates=len(candidates), dry_run=dry_run)
     for candidate in candidates:
-        targets = list(candidate.targets()) if prime or dry_run else list(_candidate_targets(candidate, settings))
+        if primary_only:
+            targets = [candidate.topic] if settings.topic_config(candidate.topic).enabled or dry_run else []
+        else:
+            targets = list(candidate.targets()) if prime or dry_run else list(_candidate_targets(candidate, settings))
         if not targets:
             result.skipped_unconfigured += 1
             continue
@@ -276,41 +321,46 @@ def run_once(
         timeout_seconds=settings.request_timeout_seconds,
     )
     snapshots = fetch_snapshots(api, target=target, historical_panels=historical_panels)
-    historical_unready = [
-        panel_id for panel_id in historical_panels
-        if panel_id in snapshots and not _historical_snapshot_ready(panel_id, snapshots[panel_id])
-    ]
+    historical_unready = [panel_id for panel_id, payload in snapshots.items() if not _snapshot_ready(payload)]
     publishable_snapshots = {
         panel_id: payload
         for panel_id, payload in snapshots.items()
-        if panel_id not in historical_unready and (
-            target == "all-panels"
-            or panel_id not in INTEL_PANELS
-            or (payload.get("status") == "ok" and payload.get("items"))
-        )
+        if panel_id not in historical_unready
     }
-    candidates, format_stats = format_all_snapshots_with_stats(publishable_snapshots)
+    candidates, format_stats = format_all_snapshots_with_stats(publishable_snapshots, latest_only=True)
     related_checked = 0
-    if include_related and (macro := snapshots.get("polymarket-macro-map")):
+    if include_related and (macro := publishable_snapshots.get("polymarket-macro-map")):
         related, related_checked = _fetch_related_candidates(api, macro)
         candidates.extend(related)
     with state_lock(settings.state_path):
         state = PublishState(settings.state_path)
-        auto_prime = target == "all-panels" and not dry_run and not state.catalog_primed(CATALOG_VERSION)
-        effective_prime = bool(prime or auto_prime)
+        chosen, observations, baselined = _latest_candidates(
+            candidates, publishable_snapshots, state, now=time.time(), prime=prime, dry_run=dry_run,
+        )
         result = publish_candidates(
-            candidates,
+            [candidate for _, candidate in chosen.values()],
             settings=settings,
             state=state,
             telegram=telegram,
             dry_run=dry_run,
-            prime=effective_prime,
+            primary_only=True,
         )
-        all_panels_complete = _all_panels_fetch_complete(snapshots)
-        if target == "all-panels" and effective_prime and all_panels_complete:
-            state.mark_catalog_primed(CATALOG_VERSION)
+        if not dry_run:
+            for topic, (stamp, candidate) in chosen.items():
+                if topic in result.last_message_id_by_topic:
+                    state.payload["topicClocks"][topic] = stamp
+                elif result.failed_sends:
+                    panel = candidate.metadata["panel"]
+                    observations.pop(panel if candidate.observed_at is None else f"{panel}:event", None)
+            state.payload["sourceHeads"].update(observations)
             state.save()
-            result.catalog_primed = True
+    result.baselined_sources = baselined
+    candidate_panels = {candidate.metadata["panel"] for candidate in candidates}
+    result.empty_sources = sorted(
+        panel for panel in publishable_snapshots if DELIVERY_CATALOG[panel].pushable and panel not in candidate_panels
+    )
+    result.selected_by_topic = {topic: candidate.metadata["panel"] for topic, (_, candidate) in chosen.items()}
+    result.candidates = len(candidates)
     result.fetched = len(snapshots)
     result.fetch_failed = len(TARGET_PANELS.get(target, TARGET_PANELS["all"])) + len(historical_panels) - len(snapshots)
     result.api_base = api.base_url
@@ -341,7 +391,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--prime",
         action="store_true",
-        help="Mark current candidates as seen without sending them; all-panels also primes automatically on its first live run",
+        help="Record the current source positions without posting them",
     )
     return parser
 
@@ -359,10 +409,11 @@ def main() -> int:
     historical_offset = 0
     _write_heartbeat(phase="starting")
     while True:
+        started = time.monotonic()
         _write_heartbeat(phase="cycle-start")
         try:
             scheduled = args.watch and args.target == "all"
-            historical = HISTORICAL_PANELS[historical_offset:historical_offset + HISTORICAL_PANELS_PER_CYCLE] if scheduled else ()
+            historical = ROTATING_PANELS[historical_offset:historical_offset + ROTATING_PANELS_PER_CYCLE] if scheduled else ()
             result = run_once(
                 settings=settings, target=args.target, dry_run=dry_run, prime=bool(args.prime),
                 api_base_override=str(args.api_base or ""), historical_panels=historical,
@@ -370,7 +421,7 @@ def main() -> int:
             )
             if historical:
                 historical_offset = historical_offset + len(historical)
-                if historical_offset >= len(HISTORICAL_PANELS):
+                if historical_offset >= len(ROTATING_PANELS):
                     historical_offset = 0
             print(json.dumps(result.__dict__, ensure_ascii=True), file=sys.stderr)
             _write_heartbeat(phase="cycle-complete", result=result)
@@ -383,7 +434,7 @@ def main() -> int:
                 return 1
         if not args.watch:
             return 0
-        time.sleep(interval)
+        time.sleep(max(1, interval - (time.monotonic() - started)))
 
 
 if __name__ == "__main__":

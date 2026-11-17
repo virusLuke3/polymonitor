@@ -14,7 +14,7 @@ if str(_repo_root) not in sys.path:
 
 
 def _enabled() -> bool:
-    raw = os.environ.get("POLYDATA_TELEGRAM_PUBLISH_ON_PANEL_CACHE", "true")
+    raw = os.environ.get("POLYDATA_TELEGRAM_PUBLISH_ON_PANEL_CACHE", "false")
     return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
 
