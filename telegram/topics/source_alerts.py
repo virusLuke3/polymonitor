@@ -16,7 +16,7 @@ WEATHER = "global-weather-map"
 
 # Seconds: maximum source age and minimum interval between alerts for the same instrument.
 SOURCE_LIMITS = {
-    ESPORTS: (180, 0),
+    ESPORTS: (5 * 60, 0),
     ORDER_FLOW: (90, 30 * 60),
     ORACLE: (45, 30 * 60),
     COMMODITIES: (20 * 60, 60 * 60),
