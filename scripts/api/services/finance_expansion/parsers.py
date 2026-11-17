@@ -43,6 +43,7 @@ def products(body):
         raise ValueError('No valid products')
     usd = sorted((p for p in rows if p['quote'] == 'USD'), key=lambda p: (p['mode'] == 'online', p['id']))
     return {'products': usd[:300], 'availableProducts': len(rows), 'usdProducts': len(usd), 'truncated': len(usd) > 300,
+            'productModes': {p['id']: p['mode'] for p in usd},
             'coverage': 'Coinbase Exchange USD product modes; listing announcement, deposit, withdrawal and first-trade dates are not provided.'}
 
 

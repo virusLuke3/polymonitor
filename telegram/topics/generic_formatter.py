@@ -233,6 +233,9 @@ def format_generic_snapshot(panel_id: str, payload: Mapping[str, Any], *, topic:
 
 
 def format_latest_generic_snapshot(panel_id: str, payload: Mapping[str, Any], *, topic: str) -> list[MessageCandidate]:
+    if panel_id == "crypto-listing-watch":
+        # The publisher compares product modes against its last observation.
+        return []
     actual = _actual_payload(payload)
     # These panels share a seed. Each topic message must use the panel's own evidence.
     if panel_id == "crypto-exchange-inflow":

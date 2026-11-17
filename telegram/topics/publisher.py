@@ -39,6 +39,7 @@ FETCH_MAX_WORKERS = 4
 FETCH_TIMEOUT_SECONDS = 10
 MAX_MESSAGE_AGE_SECONDS = 20 * 60
 ROTATING_PANELS_PER_CYCLE = 12
+LISTING_PANEL = "crypto-listing-watch"
 ROTATING_PANELS = tuple(
     panel_id for panel_id in SERVER_RUNTIME_PANEL_IDS
     if panel_id not in PANEL_ENDPOINTS and DELIVERY_CATALOG[panel_id].pushable
@@ -192,6 +193,37 @@ def _candidate_targets(candidate: MessageCandidate, settings: TelegramSettings) 
             yield target
 
 
+def _listing_change(snapshot: Dict, prior: Dict, now: float) -> tuple[dict | None, MessageCandidate | None]:
+    stamp = source_clock(snapshot, "generatedAt")
+    modes = snapshot.get("productModes")
+    previous_stamp = prior.get("at", 0)
+    if (
+        snapshot.get("status") != "ok" or not isinstance(modes, dict) or not modes
+        or stamp is None or stamp <= previous_stamp or not 0 <= now - stamp <= MAX_MESSAGE_AGE_SECONDS
+    ):
+        return None, None
+    observation = {"at": stamp, "productModes": modes}
+    previous_modes = prior.get("productModes")
+    if not previous_modes or stamp - previous_stamp > MAX_MESSAGE_AGE_SECONDS:
+        return observation, None
+    pair = min(
+        (pair for pair, mode in modes.items() if mode != "unknown" and mode != previous_modes.get(pair)),
+        key=lambda pair: (pair in previous_modes, pair),
+        default=None,
+    )
+    if pair is None:
+        return observation, None
+    mode = modes[pair]
+    before = previous_modes.get(pair)
+    change = f"{before} → {mode}" if before else f"Newly observed product | {mode}"
+    return observation, MessageCandidate(
+        topic=DELIVERY_CATALOG[LISTING_PANEL].topic,
+        dedupe_key=f"listing:{pair}:{stamp}:{mode}",
+        text=f"📡 Coinbase Exchange product update\n{pair} | {change}\n#CryptoListing",
+        metadata={"panel": LISTING_PANEL, "formatter": "coinbase-product-change"},
+    )
+
+
 def _latest_candidates(
     candidates: list[MessageCandidate], snapshots: Dict[str, Dict], state: PublishState, *,
     now: float, prime: bool, dry_run: bool,
@@ -334,9 +366,20 @@ def run_once(
         candidates.extend(related)
     with state_lock(settings.state_path):
         state = PublishState(settings.state_path)
-        chosen, observations, baselined = _latest_candidates(
-            candidates, publishable_snapshots, state, now=time.time(), prime=prime, dry_run=dry_run,
+        now = time.time()
+        listing_prior = state.payload["sourceHeads"].get(LISTING_PANEL, {})
+        listing_observation, listing_candidate = _listing_change(
+            publishable_snapshots.get(LISTING_PANEL, {}), {} if prime else listing_prior, now,
         )
+        if listing_candidate is not None:
+            candidates.append(listing_candidate)
+        chosen, observations, baselined = _latest_candidates(
+            candidates, publishable_snapshots, state, now=now, prime=prime, dry_run=dry_run,
+        )
+        if listing_observation is not None:
+            observations.setdefault(LISTING_PANEL, {}).update(listing_observation)
+            if prime or not listing_prior.get("productModes"):
+                baselined.append(LISTING_PANEL)
         result = publish_candidates(
             [candidate for _, candidate in chosen.values()],
             settings=settings,
