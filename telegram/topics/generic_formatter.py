@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
 from dataclasses import replace
 from typing import Any, Dict, Iterable, Mapping, Sequence
 
@@ -47,6 +48,11 @@ _DISPLAY_DETAIL_KEYS = ("metricLabel", "valueLabel", "changeLabel", "status", "s
 _COLLECTION_KEYS = (
     "items", "rows", "events", "signals", "alerts", "markets", "games", "news",
     "entries", "results", "records", "incidents", "risks", "watchlist",
+)
+_EVENT_CLOCK_FIELDS = (
+    "publishedAt", "published_at", "evidencePublishedAt", "reported_time",
+    "observedAt", "timestamp", "occurredAt", "eventTime", "event_time",
+    "updatedAt", "lastUpdate", "receivedAt",
 )
 
 
@@ -271,15 +277,12 @@ def format_latest_generic_snapshot(panel_id: str, payload: Mapping[str, Any], *,
     if not collections:
         return []
     # Ignore schedule dates and fetch clocks when a row has a real event or publication time.
+    now = time.time()
     timed = (
         (stamp, key, row)
         for key, rows in collections.items()
         for row in rows
-        if (stamp := source_clock(
-            row, "publishedAt", "published_at", "evidencePublishedAt", "reported_time",
-            "observedAt", "timestamp", "occurredAt", "eventTime", "event_time",
-            "updatedAt", "lastUpdate", "receivedAt",
-        )) is not None
+        if (stamp := source_clock(row, *_EVENT_CLOCK_FIELDS)) is not None and stamp <= now
     )
     latest = max(timed, key=lambda entry: entry[0], default=None)
     projection = {key: actual[key] for key in _STATUS_KEYS if key in actual}
@@ -287,4 +290,6 @@ def format_latest_generic_snapshot(panel_id: str, payload: Mapping[str, Any], *,
         stamp, key, row = latest
         projection[key] = [row]
         return [replace(message, observed_at=stamp) for message in format_generic_snapshot(panel_id, projection, topic=topic)]
+    if any(field in row for rows in collections.values() for row in rows for field in _EVENT_CLOCK_FIELDS):
+        return []
     return format_generic_snapshot(panel_id, {**projection, **collections}, topic=topic)
