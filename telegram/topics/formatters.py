@@ -544,7 +544,10 @@ def format_related_news(payload: Dict[str, Any]) -> List[MessageCandidate]:
         if source and source not in source_labels:
             source_labels.append(source)
         if len(grouped[group_key]) < RELATED_NEWS_GROUP_LIMIT:
-            grouped[group_key].append(f"- {source} | {title[:140]}")
+            published = _text(item.get("publishedAt"))
+            relation = _text(item.get("relation"))
+            detail = " | ".join(part for part in (source, published, relation) if part)
+            grouped[group_key].append(f"- {detail} | {title[:140]}")
     section_lines: List[str] = []
     for key, label in (("news", "News"), ("video", "Video"), ("report", "Reports"), ("research", "Research")):
         lines = grouped[key]

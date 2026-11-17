@@ -41,9 +41,14 @@ class PublishState:
         key = self._key(target, dedupe_key)
         return key in self.payload.setdefault("sent", {})
 
-    def mark(self, target: str, dedupe_key: str) -> None:
+    def mark(
+        self, target: str, dedupe_key: str, *, panel_id: str = "", receipt: dict | None = None,
+    ) -> None:
         key = self._key(target, dedupe_key)
-        self.payload.setdefault("sent", {})[key] = {"sentAt": int(time.time())}
+        entry = {"sentAt": int(time.time())}
+        if receipt is not None:
+            entry.update(panelId=panel_id, messageId=receipt["message_id"], telegramDate=receipt.get("date"))
+        self.payload.setdefault("sent", {})[key] = entry
         self._trim()
 
     def catalog_primed(self, version: str) -> bool:

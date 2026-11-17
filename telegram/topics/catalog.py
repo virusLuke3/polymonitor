@@ -117,27 +117,18 @@ _GENERIC_TOPIC_GROUPS = {
     "intel": (
         "equity-event-command", "global-transport-shipping", "esports-intel",
         "sports-odds", "f1-trackside", "geo-sanctions-shock",
-        'company-events',
-        'crypto-exchange-inflow',
-        'crypto-oracle-reference',
-        'crypto-order-flow',
-        'options-implied-probability',
-        'policy-progress',
-        'politics-appointments',
-        'politics-campaign-finance',
-        'politics-early-vote',
-        'politics-election',
-        'politics-executive',
-        'politics-funding',
-        'politics-government',
-        'politics-legislation',
-        'politics-nomination',
-        'politics-seats',
-
     ),
     "monitor": ("natural-hazards",),
 }
 
+# Sources served by the original all-panels schedule that still have a runtime.
+HISTORICAL_GENERIC_PANEL_IDS = tuple(panel for group in _GENERIC_TOPIC_GROUPS.values() for panel in group)
+_GENERIC_TOPIC_GROUPS["intel"] += (
+    "company-events", "crypto-exchange-inflow", "crypto-oracle-reference", "crypto-order-flow",
+    "options-implied-probability", "policy-progress", "politics-appointments", "politics-campaign-finance",
+    "politics-early-vote", "politics-election", "politics-executive", "politics-funding",
+    "politics-government", "politics-legislation", "politics-nomination", "politics-seats",
+)
 
 # External-data expansion is opt-in through all-panels.
 _EXTERNAL_TOPIC_GROUPS = {

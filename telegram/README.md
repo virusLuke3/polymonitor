@@ -35,7 +35,10 @@ POLYDATA_TELEGRAM_THREAD_WORLDCUP=16
 ```
 
 `latest-content` publishes global headlines to News. Scheduled Intel posts come
-from healthy, nonempty Geo Sanctions Shock and Policy Progress snapshots.
+from Geo Sanctions Shock, Policy Progress, and the original Intel feeds.
+The publisher checks market-specific Related News against one leading contract
+per event from the macro monitor, up to six contracts per rotation. It sends
+the matched public articles with their original publication time and relation.
 `worldcup-intel` publishes a compact Signals / News /
 Weather summary to the World Cup topic and links to
 `https://www.polymonitor.club/?workspace=worldcup`.
@@ -76,10 +79,12 @@ Panel. Each entry has exactly one delivery mode:
 - `browser-only`: no independent server snapshot exists;
 - `non-pushable`: high-frequency visual data that should not become messages.
 
-The normal publisher polls 13 sources. Both the normal schedule and the
-explicit all-panels audit fetch up to four snapshots concurrently, with at most
-10 seconds of read timeout per request. Other snapshots are still delivered
-when one Panel times out:
+The watch loop checks 13 primary sources plus six original generic sources per
+cycle, rotating through the 42 that lack another delivery path. Retained stale
+and warming snapshots wait for usable data. The send state records the
+Telegram message ID, server date and source when returned by the Bot API.
+The normal schedule and the explicit all-panels audit fetch up to four
+snapshots concurrently, with up to 10 seconds of read timeout per request:
 
 ```bash
 python -m telegram.topics.publisher --once --target all-panels --dry-run
