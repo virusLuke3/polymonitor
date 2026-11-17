@@ -101,7 +101,7 @@ class GridEsportsWatcher:
     def http_json_get(self, url: str, *, timeout: float) -> Any:
         from urllib3.util import Timeout
         deadline = time.monotonic() + timeout
-        proxy_url = os.environ.get("POLYDATA_API_HTTP_PROXY_URL", "").strip()
+        proxy_url = os.environ.get("POLYDATA_GRID_GAMMA_PROXY_URL", "").strip()
         proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
         with self.requests.get(url, timeout=Timeout(total=timeout), proxies=proxies, stream=True) as response:
             return json.loads(read_response_bytes(response, 1024 * 1024, deadline=deadline))
