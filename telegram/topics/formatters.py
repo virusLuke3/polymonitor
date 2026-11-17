@@ -316,9 +316,15 @@ def format_esports_intel(payload: Dict[str, Any]) -> List[MessageCandidate]:
         context = " · ".join(_text(event.get(key)) for key in ("tournament", "format") if event.get(key))
         lines = [result, context]
         if maps := event.get("maps"):
-            unit = "单图" if event.get("gameTitle") == "CS2" else "单局"
-            games = " | ".join(f"{game.get('map') or game['number']} {game['score']}" for game in maps)
-            lines.append(f"{unit}比分（按队名顺序） · {games}")
+            cs2 = event.get("gameTitle") == "CS2"
+            unit = "图" if cs2 else "局"
+            games = []
+            for game in maps:
+                label = f"第{game['number']}{unit}"
+                if cs2 and game.get("map"):
+                    label += f" {game['map']}"
+                games.append(f"{label} {game['score']}")
+            lines.append(f"单{unit}比分（按队名顺序） · {' | '.join(games)}")
         market = event.get("polymarket") or {}
         link = market_url_from_row(market)
         if link:
