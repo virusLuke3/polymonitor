@@ -108,7 +108,7 @@ _GENERIC_TOPIC_GROUPS = {
         "growth-demand-recession-tracker", "fed-rates-polymarket-gap",
     ),
     "news": (
-        "ai-model-race", "big-tech-market-cap", "consumer-app-pulse",
+        "ai-model-race",
         "ipo-news-watch", "broker-research-watch", "blockchain-policy-news",
         "breaking-event-radar", "market-tv-wire", "market-youtube-channels",
         "jin10-flash",
@@ -176,7 +176,9 @@ _BROWSER_ONLY = {
 
 
 _NON_PUSHABLE = {
-    "price-chart": "high-frequency selected-market visualization",
+    "price-chart": ("high-frequency selected-market visualization", False),
+    "big-tech-market-cap": ("market-cap rankings are dashboard-only", True),
+    "consumer-app-pulse": ("app rankings are dashboard-only", True),
 }
 
 
@@ -222,11 +224,12 @@ def _build_catalog() -> dict[str, DeliveryContract]:
             mode=DeliveryMode.BROWSER_ONLY,
             reason=reason,
         )
-    for panel_id, reason in _NON_PUSHABLE.items():
+    for panel_id, (reason, server_runtime) in _NON_PUSHABLE.items():
         catalog[panel_id] = DeliveryContract(
             panel_id=panel_id,
             mode=DeliveryMode.NON_PUSHABLE,
             reason=reason,
+            server_runtime=server_runtime,
         )
     return catalog
 
