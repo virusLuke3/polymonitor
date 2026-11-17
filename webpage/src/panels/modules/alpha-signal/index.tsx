@@ -72,8 +72,8 @@ export const panel = runtimePanelFromRenderer(renderers, {
   description: 'Matched trade signals from the Smart Money worktree.',
   defaultEnabled: true,
 }, {
-  tier: 'slow',
-  intervalMs: 300_000,
+  tier: 'fast',
+  intervalMs: 60_000,
   limit: LIMIT,
   fetchData: (context, limit) => fetchRuntimeSmartMoneySignals(limit, context?.signal),
 });
