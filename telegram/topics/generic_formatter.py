@@ -57,6 +57,8 @@ _EVENT_CLOCK_FIELDS = (
 _SAMPLED_PANELS = {
     "crypto-funding-watch", "crypto-order-flow", "crypto-oracle-reference", "options-implied-probability",
 }
+SUMMARY_KEY_PREFIX = "summary:"
+_UNUSABLE_ROW_STATES = {"stale", "retained", "unavailable", "error", "failed", "warming"}
 
 
 def _safe_text(value: Any, *, limit: int = 180) -> str:
@@ -207,7 +209,9 @@ def _priority(payload: Mapping[str, Any]) -> str:
     return "high" if any(word in words for word in ("critical", "emergency", "unhealthy", "alert")) else "normal"
 
 
-def format_generic_snapshot(panel_id: str, payload: Mapping[str, Any], *, topic: str) -> list[MessageCandidate]:
+def format_generic_snapshot(
+    panel_id: str, payload: Mapping[str, Any], *, topic: str, snapshot_summary: bool = False,
+) -> list[MessageCandidate]:
     if not isinstance(payload, Mapping):
         return []
     rows = _display_rows(payload)
@@ -220,10 +224,15 @@ def format_generic_snapshot(panel_id: str, payload: Mapping[str, Any], *, topic:
         lines.append(f"Records: {count_line}")
     lines.extend(rows)
     text = "\n".join([f"📡 {_title_case_panel_id(panel_id)}", *lines])
+    if snapshot_summary:
+        body_hash = hashlib.sha256("\n".join(rows).encode()).hexdigest()[:24]
+        dedupe_key = f"{SUMMARY_KEY_PREFIX}{panel_id}:{body_hash}"
+    else:
+        dedupe_key = f"generic:{panel_id}:{_semantic_hash(panel_id, payload)}"
     return [
         MessageCandidate(
             topic=topic,
-            dedupe_key=f"generic:{panel_id}:{_semantic_hash(panel_id, payload)}",
+            dedupe_key=dedupe_key,
             text=text,
             priority=_priority(payload),
             metadata={"panel": panel_id, "formatter": "generic-semantic-v1"},
@@ -269,8 +278,9 @@ def format_live_generic_snapshot(panel_id: str, payload: Mapping[str, Any], *, t
     collections = {
         key: [
             row for row in rows
-            if isinstance(row, dict) and not row.get("stale")
-            and str(row.get("status")) not in {"stale", "unavailable", "error"}
+            if isinstance(row, dict) and not row.get("stale") and not row.get("retained")
+            and str(row.get("status")).lower() not in _UNUSABLE_ROW_STATES
+            and str(row.get("sourceStatus")).lower() not in _UNUSABLE_ROW_STATES
         ]
         for key, rows in _iter_collections(actual)
         if key not in {"sources", "errors", "categories", "providerStates", "countryRiskBreakdown",
@@ -283,13 +293,13 @@ def format_live_generic_snapshot(panel_id: str, payload: Mapping[str, Any], *, t
     now = time.time()
     projection = {key: actual[key] for key in _STATUS_KEYS if key in actual}
     if panel_id in _SAMPLED_PANELS:
-        return format_generic_snapshot(panel_id, {**projection, **collections}, topic=topic)
+        return format_generic_snapshot(panel_id, {**projection, **collections}, topic=topic, snapshot_summary=True)
     if any(field in row for rows in collections.values() for row in rows for field in _EVENT_CLOCK_FIELDS):
         messages = []
         for key, rows in collections.items():
             sampled = [row for row in rows if panel_id == "ai-model-race" and row.get("category") == "USAGE"]
             if sampled:
-                messages.extend(format_generic_snapshot(panel_id, {**projection, key: sampled}, topic=topic))
+                messages.extend(format_generic_snapshot(panel_id, {**projection, key: sampled}, topic=topic, snapshot_summary=True))
             for row in rows:
                 if panel_id == "ai-model-race" and row.get("category") == "USAGE":
                     continue
@@ -306,4 +316,4 @@ def format_live_generic_snapshot(panel_id: str, payload: Mapping[str, Any], *, t
                         message = replace(message, dedupe_key=f"chain-trade:{row['id']}")
                     messages.append(replace(message, observed_at=stamp))
         return messages
-    return format_generic_snapshot(panel_id, {**projection, **collections}, topic=topic)
+    return format_generic_snapshot(panel_id, {**projection, **collections}, topic=topic, snapshot_summary=True)

@@ -17,6 +17,7 @@ from .catalog import DELIVERY_CATALOG, SERVER_RUNTIME_PANEL_IDS
 from .client import SAFE_TEXT_LENGTH, TelegramClient, TelegramSendRejected
 from .config import TelegramSettings, load_settings
 from .formatters import format_all_snapshots_with_stats, format_related_news
+from .generic_formatter import SUMMARY_KEY_PREFIX
 from .models import MessageCandidate, source_clock
 from .state import PublishState, state_lock
 
@@ -267,6 +268,11 @@ def _new_candidates(
         if stamp <= prior_at:
             continue
         prior_keys = set((prior or {}).get("keys", []))
+        # Adopt the visible-body signature without re-announcing existing snapshots.
+        summary_keys = {key for key in keys if key.startswith(SUMMARY_KEY_PREFIX)}
+        if summary_keys and not any(key.startswith(SUMMARY_KEY_PREFIX) for key in prior_keys):
+            prior_keys.update(summary_keys)
+            baselined.add(panel)
         updated[panel] = {"at": stamp, "keys": keys}
         for candidate in entries:
             if candidate.dedupe_key not in prior_keys:
