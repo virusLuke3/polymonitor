@@ -12,6 +12,10 @@ SAFE_TEXT_LENGTH = 3900
 MAX_SEND_ATTEMPTS = 3
 
 
+class TelegramSendRejected(RuntimeError):
+    """Telegram explicitly refused a send without accepting any part of it."""
+
+
 def split_message(text: str, *, limit: int = SAFE_TEXT_LENGTH) -> List[str]:
     clean = str(text or "").strip()
     if len(clean) <= limit:
@@ -105,7 +109,10 @@ class TelegramClient:
             if response is None:
                 raise RuntimeError("Telegram sendMessage failed before request was sent")
             if response.status_code >= 400:
-                raise RuntimeError(_telegram_error_message(response, body))
+                error_type = TelegramSendRejected if (
+                    not results and response.status_code < 500 and body.get("ok") is False
+                ) else RuntimeError
+                raise error_type(_telegram_error_message(response, body))
             if not body.get("ok"):
                 raise RuntimeError(f"Telegram sendMessage failed: {body}")
             results.append(body)

@@ -19,7 +19,7 @@ class PublishState:
             except ValueError:
                 configured = 20000
         self.max_entries = max(100, int(configured or 20000))
-        self.payload: Dict[str, Any] = {"sent": {}, "catalogPrimes": {}, "sourceHeads": {}, "topicClocks": {}}
+        self.payload: Dict[str, Any] = {"sent": {}, "catalogPrimes": {}, "sourceHeads": {}, "deliveryWindow": {}}
         self.load()
 
     def load(self) -> None:
@@ -31,7 +31,7 @@ class PublishState:
             parsed = {}
         self.payload = {
             key: parsed[key] if isinstance(parsed, dict) and isinstance(parsed.get(key), dict) else {}
-            for key in ("sent", "catalogPrimes", "sourceHeads", "topicClocks")
+            for key in ("sent", "catalogPrimes", "sourceHeads", "deliveryWindow")
         }
 
     def seen(self, target: str, dedupe_key: str) -> bool:
@@ -39,14 +39,19 @@ class PublishState:
         return key in self.payload.setdefault("sent", {})
 
     def mark(
-        self, target: str, dedupe_key: str, *, panel_id: str = "", receipt: dict | None = None,
+        self, target: str, dedupe_key: str, *, panel_id: str = "", receipt: dict | None = None, pending: bool = False,
     ) -> None:
         key = self._key(target, dedupe_key)
         entry = {"sentAt": int(time.time())}
+        if pending:
+            entry.update(panelId=panel_id, delivery="uncertain")
         if receipt is not None:
             entry.update(panelId=panel_id, messageId=receipt["message_id"], telegramDate=receipt.get("date"))
         self.payload.setdefault("sent", {})[key] = entry
         self._trim()
+
+    def forget(self, target: str, dedupe_key: str) -> None:
+        self.payload["sent"].pop(self._key(target, dedupe_key), None)
 
     def catalog_primed(self, version: str) -> bool:
         return str(version or "") in self.payload.setdefault("catalogPrimes", {})

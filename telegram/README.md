@@ -76,16 +76,18 @@ Panel. Each entry has exactly one delivery mode:
 
 The watch loop checks 14 primary sources and 12 rotating Panel snapshots per
 cycle. The rotation includes every registered pushable runtime Panel.
-The first usable snapshot establishes that source's position. After that,
-each cycle posts at most one new update per configured topic. It uses the actual
-event or publication timestamp where available and otherwise requires a changed
-snapshot. A candidate must be observed within the last 20 minutes. Stale,
+Each cycle sends all eligible new events to their configured topics. It uses
+the original event or publication time where available. For sources without
+event timestamps, the first usable snapshot establishes a baseline and only
+changes in later snapshots qualify. Candidates must be newer than the live
+delivery cutoff and within the last 20 minutes. Stale,
 warming and empty snapshots wait for usable data. Seed workers leave
 `POLYDATA_TELEGRAM_PUBLISH_ON_PANEL_CACHE=false` so channel delivery has one owner.
 
-The send state records the Telegram message ID, server date and source. The
-explicit all-panels dry run shows only candidates eligible under the same
-selection rules:
+The send state persists a dedupe key before sending and the Telegram message
+ID, server date and source on receipt. Explicit rejection can be retried.
+An attempt with an uncertain result remains recorded to prevent duplicate
+delivery. The all-panels dry run uses the same selection rules:
 
 ```bash
 python -m telegram.topics.publisher --once --target all-panels --dry-run
@@ -101,6 +103,5 @@ to the current point without sending messages:
 python -m telegram.topics.publisher --once --target all-panels --prime
 ```
 
-Each source establishes its own baseline after the first usable read, including
-after a partial rollout or source recovery. Publisher heartbeat/result JSON
-reports baselined sources, selected sources, fetch errors and Telegram receipts.
+Publisher heartbeat/result JSON reports baselined sources, all selected sources,
+fetch errors and every Telegram receipt ID by topic.

@@ -6,7 +6,7 @@ from typing import Any, Dict, Iterable, List, Optional
 from urllib.parse import quote_plus
 
 from .catalog import DeliveryMode, delivery_contract
-from .generic_formatter import format_generic_snapshot, format_latest_generic_snapshot
+from .generic_formatter import format_generic_snapshot, format_live_generic_snapshot
 from .market_linker import MarketLink, resolve_market_link
 from .models import FormatOutcome, MessageCandidate, source_clock
 
@@ -199,7 +199,7 @@ def format_nba_intel(payload: Dict[str, Any]) -> List[MessageCandidate]:
             meme="🏀 Vibe: locker-room signal",
             url="\n".join(part for part in (_source_link(market_link.url, "Market") if market_link else "", _source_link(url, "Source")) if part),
         )
-        dedupe = _short_hash("nba-intel", headline.lower(), url)
+        dedupe = _short_hash("nba-intel", url or item.get("id") or headline.lower())
         messages.append(
             MessageCandidate(
                 topic="nba",
@@ -292,7 +292,7 @@ def format_nba_predictor(payload: Dict[str, Any]) -> List[MessageCandidate]:
     return messages
 
 
-def format_weather_map(payload: Dict[str, Any]) -> List[MessageCandidate]:
+def format_weather_map(payload: Dict[str, Any], *, summary_only: bool = False) -> List[MessageCandidate]:
     messages: List[MessageCandidate] = []
     summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
     hottest = summary.get("hottestCity") if isinstance(summary.get("hottestCity"), dict) else None
@@ -311,6 +311,8 @@ def format_weather_map(payload: Dict[str, Any]) -> List[MessageCandidate]:
         )
         messages.append(MessageCandidate(topic="weather", dedupe_key=dedupe, text=text, priority="normal", metadata={"panel": "global-weather-map"}))
 
+    if summary_only:
+        return messages
     for item in _iter_items(payload):
         top_bin = item.get("topBin") if isinstance(item.get("topBin"), dict) else {}
         market_url = _first_url(item.get("marketUrl"))
@@ -369,7 +371,7 @@ def format_weather_news(payload: Dict[str, Any]) -> List[MessageCandidate]:
             meme="🌩 Vibe: skies are speaking",
             url="\n".join(part for part in (_source_link(market_link.url, "Market") if market_link else "", _source_link(url, "Source")) if part),
         )
-        dedupe = _short_hash("weather-news", article.get("id"), title.lower(), url)
+        dedupe = _short_hash("weather-news", url or article.get("id") or title.lower())
         priority = "high" if severity == "warning" else "normal"
         messages.append(
             MessageCandidate(
@@ -404,7 +406,7 @@ def format_latest_content(payload: Dict[str, Any]) -> List[MessageCandidate]:
             meme="🗞 Vibe: fresh tape",
             url="\n".join(part for part in (_source_link(market_link.url, "Market") if market_link else "", _source_link(url, "Source")) if part),
         )
-        dedupe = _short_hash("latest-content", item.get("id"), title.lower(), url)
+        dedupe = _short_hash("latest-content", url or item.get("id") or title.lower())
         messages.append(
             MessageCandidate(
                 topic="news",
@@ -481,6 +483,9 @@ def format_related_news(payload: Dict[str, Any]) -> List[MessageCandidate]:
         version_items.extend(grouped[key])
     version = "|".join(version_items)
     dedupe = _short_hash("related-news-summary", market_id, version, len(items), count_line)
+    if len(items) == 1:
+        item = items[0]
+        dedupe = _short_hash("related-news-article", first_url or item.get("id") or item.get("title") or item.get("headline"))
     return [
         MessageCandidate(
             topic="intel",
@@ -621,7 +626,7 @@ def _title_tags(title: str) -> List[str]:
     return [tag for tag in known if tag.lower() in lowered]
 
 
-def _format_specialized(panel_id: str, payload: Dict[str, Any]) -> List[MessageCandidate]:
+def _format_specialized(panel_id: str, payload: Dict[str, Any], *, live: bool = False) -> List[MessageCandidate]:
     if panel_id == "latest-content":
         return format_latest_content(payload)
     if panel_id == "related-news":
@@ -641,14 +646,14 @@ def _format_specialized(panel_id: str, payload: Dict[str, Any]) -> List[MessageC
     if panel_id == "espn-matchup-predictor":
         return format_nba_predictor(payload)
     if panel_id == "global-weather-map":
-        return format_weather_map(payload)
+        return format_weather_map(payload, summary_only=live)
     if panel_id == "weather-news":
         return format_weather_news(payload)
     return []
 
 
 def format_panel_snapshot_outcome(
-    panel_id: str, payload: Dict[str, Any], *, latest_only: bool = False,
+    panel_id: str, payload: Dict[str, Any], *, live: bool = False,
 ) -> FormatOutcome:
     requested_id = str(panel_id or "").strip()
     canonical_id = {
@@ -669,9 +674,9 @@ def format_panel_snapshot_outcome(
         )
     try:
         if contract.mode is DeliveryMode.SPECIALIZED:
-            candidates = _format_specialized(canonical_id, payload)
+            candidates = _format_specialized(canonical_id, payload, live=live)
         elif contract.mode is DeliveryMode.GENERIC:
-            formatter = format_latest_generic_snapshot if latest_only else format_generic_snapshot
+            formatter = format_live_generic_snapshot if live else format_generic_snapshot
             candidates = formatter(canonical_id, payload, topic=contract.topic)
         else:
             return FormatOutcome(
@@ -700,7 +705,7 @@ def format_panel_snapshot(panel_id: str, payload: Dict[str, Any]) -> List[Messag
 
 
 def format_all_snapshots_with_stats(
-    snapshots: Dict[str, Dict[str, Any]], *, latest_only: bool = False,
+    snapshots: Dict[str, Dict[str, Any]], *, live: bool = False,
 ) -> tuple[List[MessageCandidate], Dict[str, int]]:
     messages: List[MessageCandidate] = []
     stats = {
@@ -715,7 +720,7 @@ def format_all_snapshots_with_stats(
         "format_errors": 0,
     }
     for panel_id, payload in snapshots.items():
-        outcome = format_panel_snapshot_outcome(panel_id, payload, latest_only=latest_only)
+        outcome = format_panel_snapshot_outcome(panel_id, payload, live=live)
         messages.extend(outcome.candidates)
         if outcome.mode == DeliveryMode.SPECIALIZED.value:
             stats["specialized"] += 1

@@ -10,9 +10,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List
 
+from requests.exceptions import ConnectTimeout
+
 from .api_client import PolyDataApiClient, resolve_polydata_api_base
 from .catalog import DELIVERY_CATALOG, SERVER_RUNTIME_PANEL_IDS
-from .client import TelegramClient
+from .client import SAFE_TEXT_LENGTH, TelegramClient, TelegramSendRejected
 from .config import TelegramSettings, load_settings
 from .formatters import format_all_snapshots_with_stats, format_related_news
 from .models import MessageCandidate, source_clock
@@ -20,11 +22,11 @@ from .state import PublishState, state_lock
 
 
 PANEL_ENDPOINTS = {
-    "latest-content": ("/content/latest", {"limit": 8}),
+    "latest-content": ("/content/latest", {"limit": 36}),
     "alpha-signal": ("/runtime/signals/alpha", {"limit": 8}),
     "new-market-signals": ("/runtime/markets/new-signals", {"limit": 12}),
-    "whale-tracker": ("/runtime/panels/whale-tracker", {"limit": 12}),
-    "suspicious-flow": ("/runtime/panels/suspicious-flow", {"limit": 12}),
+    "whale-tracker": ("/runtime/panels/whale-tracker", {"limit": 24}),
+    "suspicious-flow": ("/runtime/panels/suspicious-flow", {"limit": 24}),
     "polymarket-macro-map": ("/runtime/macro/polymarket-map", {"limit": 12}),
     "cpi-release-command-center": ("/runtime/macro/cpi-release-command-center", {"limit": 12}),
     "nba-scoreboard": ("/runtime/sports/nba", {"limit": 10}),
@@ -67,6 +69,8 @@ class PublishResult:
     skipped_seen: int = 0
     skipped_unconfigured: int = 0
     failed_sends: int = 0
+    uncertain_sends: int = 0
+    retryable_keys: list[str] = field(default_factory=list)
     fetch_failed: int = 0
     dry_run: bool = False
     api_base: str = ""
@@ -82,12 +86,13 @@ class PublishResult:
     format_errors: int = 0
     catalog_primed: bool = False
     last_message_id_by_topic: dict[str, int] = field(default_factory=dict)
+    message_ids_by_topic: dict[str, list[int]] = field(default_factory=dict)
     historical_fetched: list[str] = field(default_factory=list)
     historical_unready: list[str] = field(default_factory=list)
     related_markets_checked: int = 0
     baselined_sources: list[str] = field(default_factory=list)
     empty_sources: list[str] = field(default_factory=list)
-    selected_by_topic: dict[str, str] = field(default_factory=dict)
+    selected_by_topic: dict[str, list[str]] = field(default_factory=dict)
 
 
 def _write_heartbeat(*, phase: str, result: PublishResult | None = None, error: str = "") -> None:
@@ -127,7 +132,7 @@ def fetch_snapshots(
                     return panel_api.get_json(path, params=params)
                 envelope = panel_api.get_json(
                     "/v1/runtime/panels",
-                    params={"ids": panel_id, "limit": 12},
+                    params={"ids": panel_id, "limit": 36},
                 )
             data = envelope.get("data") or {}
             payload = (data.get("panels") or {}).get(panel_id)
@@ -173,16 +178,15 @@ def _fetch_related_candidates(api: PolyDataApiClient, macro_snapshot: Dict) -> t
     checked = 0
     for market_id in list(market_ids)[:6]:
         try:
-            payload = api.get_json(f"/content/market/{market_id}", params={"limit": 8}, timeout_seconds=3)
+            payload = api.get_json(f"/content/market/{market_id}", params={"limit": 24}, timeout_seconds=3)
         except Exception as exc:
             print(f"[telegram-publisher] WARN related-news fetch failed error_class={type(exc).__name__}", file=sys.stderr)
             continue
         checked += 1
         if _snapshot_ready(payload) and payload.get("marketId") == market_id:
-            articles = payload.get("items") or []
-            newest = max(articles, key=lambda row: source_clock(row, "publishedAt", "published_at") or 0, default=None)
-            if newest:
-                candidates.extend(format_related_news({**payload, "items": [newest]}))
+            for article in payload.get("items") or []:
+                if isinstance(article, dict) and source_clock(article, "publishedAt", "published_at"):
+                    candidates.extend(format_related_news({**payload, "items": [article]}))
     return candidates, checked
 
 
@@ -193,7 +197,7 @@ def _candidate_targets(candidate: MessageCandidate, settings: TelegramSettings) 
             yield target
 
 
-def _listing_change(snapshot: Dict, prior: Dict, now: float) -> tuple[dict | None, MessageCandidate | None]:
+def _listing_changes(snapshot: Dict, prior: Dict, now: float) -> tuple[dict | None, list[MessageCandidate]]:
     stamp = source_clock(snapshot, "generatedAt")
     modes = snapshot.get("productModes")
     previous_stamp = prior.get("at", 0)
@@ -201,71 +205,74 @@ def _listing_change(snapshot: Dict, prior: Dict, now: float) -> tuple[dict | Non
         snapshot.get("status") != "ok" or not isinstance(modes, dict) or not modes
         or stamp is None or stamp <= previous_stamp or not 0 <= now - stamp <= MAX_MESSAGE_AGE_SECONDS
     ):
-        return None, None
+        return None, []
     observation = {"at": stamp, "productModes": modes}
     previous_modes = prior.get("productModes")
     if not previous_modes or stamp - previous_stamp > MAX_MESSAGE_AGE_SECONDS:
-        return observation, None
-    pair = min(
-        (pair for pair, mode in modes.items() if mode != "unknown" and mode != previous_modes.get(pair)),
-        key=lambda pair: (pair in previous_modes, pair),
-        default=None,
-    )
-    if pair is None:
-        return observation, None
-    mode = modes[pair]
-    before = previous_modes.get(pair)
-    change = f"{before} → {mode}" if before else f"Newly observed product | {mode}"
-    return observation, MessageCandidate(
-        topic=DELIVERY_CATALOG[LISTING_PANEL].topic,
-        dedupe_key=f"listing:{pair}:{stamp}:{mode}",
-        text=f"📡 Coinbase Exchange product update\n{pair} | {change}\n#CryptoListing",
-        metadata={"panel": LISTING_PANEL, "formatter": "coinbase-product-change"},
-    )
+        return observation, []
+    candidates = []
+    for pair, mode in sorted(modes.items()):
+        before = previous_modes.get(pair)
+        if mode == "unknown" or mode == before:
+            continue
+        change = f"{before} → {mode}" if before else f"Newly observed product | {mode}"
+        candidates.append(MessageCandidate(
+            topic=DELIVERY_CATALOG[LISTING_PANEL].topic,
+            dedupe_key=f"listing:{pair}:{previous_stamp}:{mode}",
+            text=f"📡 Coinbase Exchange product update\n{pair} | {change}\n#CryptoListing",
+            metadata={"panel": LISTING_PANEL, "formatter": "coinbase-product-change"},
+        ))
+    return observation, candidates
 
 
-def _latest_candidates(
+def _new_candidates(
     candidates: list[MessageCandidate], snapshots: Dict[str, Dict], state: PublishState, *,
-    now: float, prime: bool, dry_run: bool,
-) -> tuple[dict[str, tuple[float, MessageCandidate]], dict, list[str]]:
-    feeds: dict[str, list[tuple[float, MessageCandidate]]] = {}
+    now: float, live_since: float, prime: bool, dry_run: bool,
+) -> tuple[list[MessageCandidate], dict, list[str]]:
+    snapshots_by_source: dict[str, list[MessageCandidate]] = {}
+    heads = state.payload["sourceHeads"]
+    chosen: dict[tuple[str, str], tuple[float, MessageCandidate]] = {}
+    baselined = set()
+    if prime:
+        baselined.update(snapshots)
+        baselined.update(candidate.metadata["panel"] for candidate in candidates)
+    updated = {f"{panel}:event": {"after": now} for panel in baselined}
+
+    def select(candidate: MessageCandidate, stamp: float) -> None:
+        key = (candidate.topic, candidate.dedupe_key)
+        if not live_since < stamp <= now or now - stamp > MAX_MESSAGE_AGE_SECONDS or state.seen(*key):
+            return
+        prior = chosen.get(key)
+        if prior is None or stamp > prior[0]:
+            chosen[key] = (stamp, candidate)
+
     for candidate in candidates:
         panel = candidate.metadata["panel"]
         stamp = candidate.observed_at
-        key = panel if stamp is None else f"{panel}:event"
         if stamp is None:
-            stamp = source_clock(snapshots.get(panel, {}), "collectedAt", "generatedAt", "updatedAt")
-        if stamp is not None and stamp <= now:
-            feeds.setdefault(key, []).append((stamp, candidate))
-
-    heads = state.payload["sourceHeads"]
-    topic_clocks = state.payload["topicClocks"]
-    chosen = {}
-    updated = {}
-    baselined = []
-    for key, entries in feeds.items():
-        latest_at = max(stamp for stamp, _ in entries)
-        prior = heads.get(key)
-        keys = sorted({c.dedupe_key for _, c in entries})
+            snapshots_by_source.setdefault(panel, []).append(candidate)
+        elif not prime and stamp > heads.get(f"{panel}:event", {}).get("after", 0):
+            select(candidate, stamp)
+    for panel, entries in snapshots_by_source.items():
+        stamp = source_clock(snapshots.get(panel, {}), "collectedAt", "generatedAt", "updatedAt")
+        if stamp is None or stamp > now:
+            continue
+        prior = heads.get(panel)
+        keys = sorted({candidate.dedupe_key for candidate in entries})
         if prime or (prior is None and not dry_run):
-            updated[key] = {"at": max(now, (prior or {}).get("at", 0)), "keys": keys}
-            baselined.append(entries[0][1].metadata["panel"])
+            updated[panel] = {"at": stamp, "keys": keys}
+            baselined.add(panel)
             continue
         prior_at = (prior or {}).get("at", 0)
+        if stamp <= prior_at:
+            continue
         prior_keys = set((prior or {}).get("keys", []))
-        updated[key] = {"at": max(prior_at, latest_at), "keys": keys}
-        for stamp, candidate in entries:
-            topic = candidate.topic
-            if (
-                stamp != latest_at or stamp <= max(prior_at, topic_clocks.get(topic, 0))
-                or now - stamp > MAX_MESSAGE_AGE_SECONDS or candidate.dedupe_key in prior_keys
-                or state.seen(topic, candidate.dedupe_key)
-            ):
-                continue
-            incumbent = chosen.get(topic)
-            if not incumbent or (stamp, candidate.priority == "high") > (incumbent[0], incumbent[1].priority == "high"):
-                chosen[topic] = (stamp, candidate)
-    return chosen, updated, sorted(set(baselined))
+        updated[panel] = {"at": stamp, "keys": keys}
+        for candidate in entries:
+            if candidate.dedupe_key not in prior_keys:
+                select(candidate, stamp)
+    ordered = sorted(chosen.values(), key=lambda entry: entry[0])
+    return [candidate for _, candidate in ordered], updated, sorted(baselined)
 
 
 def publish_candidates(
@@ -302,10 +309,13 @@ def publish_candidates(
                 result.primed += 1
                 continue
             else:
+                panel = candidate.metadata.get("panel", "")
+                state.mark(target, candidate.dedupe_key, panel_id=panel, pending=True)
+                state.save()
                 try:
                     receipts = telegram.send_message(
                         chat_id=config.chat_id,
-                        text=candidate.text,
+                        text=candidate.text[:SAFE_TEXT_LENGTH] if primary_only else candidate.text,
                         message_thread_id=config.message_thread_id,
                         disable_web_page_preview=not candidate.link_preview,
                         disable_notification=settings.disable_notification,
@@ -313,20 +323,32 @@ def publish_candidates(
                     )
                 except Exception as exc:
                     result.failed_sends += 1
+                    if isinstance(exc, (ConnectTimeout, TelegramSendRejected)):
+                        state.forget(target, candidate.dedupe_key)
+                        state.save()
+                        result.retryable_keys.append(candidate.dedupe_key)
+                    else:
+                        result.uncertain_sends += 1
                     print(
                         f"[telegram-publisher] WARN send failed target={target} dedupe={candidate.dedupe_key} error_class={exc.__class__.__name__}",
                         file=sys.stderr,
                     )
                     continue
                 receipt = receipts[-1].get("result") if receipts else None
+                if primary_only and not (receipt and receipt.get("message_id")):
+                    result.failed_sends += 1
+                    result.uncertain_sends += 1
+                    continue
                 if receipt and receipt.get("message_id"):
                     result.last_message_id_by_topic[target] = receipt["message_id"]
+                    result.message_ids_by_topic.setdefault(target, []).append(receipt["message_id"])
                 state.mark(
-                    target, candidate.dedupe_key, panel_id=candidate.metadata.get("panel", ""),
+                    target, candidate.dedupe_key, panel_id=panel,
                     receipt=receipt if receipt and receipt.get("message_id") else None,
                 )
+                state.save()
                 result.sent += 1
-    if not dry_run:
+    if prime and not dry_run:
         state.save()
     return result
 
@@ -341,6 +363,7 @@ def run_once(
     historical_panels: tuple[str, ...] = (),
     include_related: bool = False,
 ) -> PublishResult:
+    started_at = time.time()
     api_candidates = (api_base_override.rstrip("/"),) if api_base_override else settings.polydata_api_candidates
     resolution = resolve_polydata_api_base(api_candidates, timeout_seconds=min(5, settings.request_timeout_seconds))
     if not resolution.healthy:
@@ -359,7 +382,7 @@ def run_once(
         for panel_id, payload in snapshots.items()
         if panel_id not in historical_unready
     }
-    candidates, format_stats = format_all_snapshots_with_stats(publishable_snapshots, latest_only=True)
+    candidates, format_stats = format_all_snapshots_with_stats(publishable_snapshots, live=True)
     related_checked = 0
     if include_related and (macro := publishable_snapshots.get("polymarket-macro-map")):
         related, related_checked = _fetch_related_candidates(api, macro)
@@ -367,21 +390,24 @@ def run_once(
     with state_lock(settings.state_path):
         state = PublishState(settings.state_path)
         now = time.time()
+        window = state.payload["deliveryWindow"]
+        live_since = window.get("startedAt", started_at)
+        if not dry_run and not prime:
+            window.setdefault("startedAt", live_since)
         listing_prior = state.payload["sourceHeads"].get(LISTING_PANEL, {})
-        listing_observation, listing_candidate = _listing_change(
+        listing_observation, listing_candidates = _listing_changes(
             publishable_snapshots.get(LISTING_PANEL, {}), {} if prime else listing_prior, now,
         )
-        if listing_candidate is not None:
-            candidates.append(listing_candidate)
-        chosen, observations, baselined = _latest_candidates(
-            candidates, publishable_snapshots, state, now=now, prime=prime, dry_run=dry_run,
+        candidates.extend(listing_candidates)
+        chosen, observations, baselined = _new_candidates(
+            candidates, publishable_snapshots, state, now=now, live_since=live_since, prime=prime, dry_run=dry_run,
         )
         if listing_observation is not None:
             observations.setdefault(LISTING_PANEL, {}).update(listing_observation)
             if prime or not listing_prior.get("productModes"):
                 baselined.append(LISTING_PANEL)
         result = publish_candidates(
-            [candidate for _, candidate in chosen.values()],
+            chosen,
             settings=settings,
             state=state,
             telegram=telegram,
@@ -389,12 +415,10 @@ def run_once(
             primary_only=True,
         )
         if not dry_run:
-            for topic, (stamp, candidate) in chosen.items():
-                if topic in result.last_message_id_by_topic:
-                    state.payload["topicClocks"][topic] = stamp
-                elif result.failed_sends:
-                    panel = candidate.metadata["panel"]
-                    observations.pop(panel if candidate.observed_at is None else f"{panel}:event", None)
+            retryable = set(result.retryable_keys)
+            for candidate in chosen:
+                if candidate.observed_at is None and candidate.dedupe_key in retryable:
+                    observations.pop(candidate.metadata["panel"], None)
             state.payload["sourceHeads"].update(observations)
             state.save()
     result.baselined_sources = baselined
@@ -402,7 +426,8 @@ def run_once(
     result.empty_sources = sorted(
         panel for panel in publishable_snapshots if DELIVERY_CATALOG[panel].pushable and panel not in candidate_panels
     )
-    result.selected_by_topic = {topic: candidate.metadata["panel"] for topic, (_, candidate) in chosen.items()}
+    for candidate in chosen:
+        result.selected_by_topic.setdefault(candidate.topic, []).append(candidate.metadata["panel"])
     result.candidates = len(candidates)
     result.fetched = len(snapshots)
     result.fetch_failed = len(TARGET_PANELS.get(target, TARGET_PANELS["all"])) + len(historical_panels) - len(snapshots)

@@ -54,6 +54,9 @@ _EVENT_CLOCK_FIELDS = (
     "observedAt", "timestamp", "occurredAt", "eventTime", "event_time",
     "updatedAt", "lastUpdate", "receivedAt",
 )
+_SAMPLED_PANELS = {
+    "crypto-funding-watch", "crypto-order-flow", "crypto-oracle-reference", "options-implied-probability",
+}
 
 
 def _safe_text(value: Any, *, limit: int = 180) -> str:
@@ -232,7 +235,7 @@ def format_generic_snapshot(panel_id: str, payload: Mapping[str, Any], *, topic:
     ]
 
 
-def format_latest_generic_snapshot(panel_id: str, payload: Mapping[str, Any], *, topic: str) -> list[MessageCandidate]:
+def format_live_generic_snapshot(panel_id: str, payload: Mapping[str, Any], *, topic: str) -> list[MessageCandidate]:
     if panel_id == "crypto-listing-watch":
         # The publisher compares product modes against its last observation.
         return []
@@ -281,18 +284,29 @@ def format_latest_generic_snapshot(panel_id: str, payload: Mapping[str, Any], *,
         return []
     # Ignore schedule dates and fetch clocks when a row has a real event or publication time.
     now = time.time()
-    timed = (
-        (stamp, key, row)
-        for key, rows in collections.items()
-        for row in rows
-        if (stamp := source_clock(row, *_EVENT_CLOCK_FIELDS)) is not None and stamp <= now
-    )
-    latest = max(timed, key=lambda entry: entry[0], default=None)
     projection = {key: actual[key] for key in _STATUS_KEYS if key in actual}
-    if latest:
-        stamp, key, row = latest
-        projection[key] = [row]
-        return [replace(message, observed_at=stamp) for message in format_generic_snapshot(panel_id, projection, topic=topic)]
+    if panel_id in _SAMPLED_PANELS:
+        return format_generic_snapshot(panel_id, {**projection, **collections}, topic=topic)
     if any(field in row for rows in collections.values() for row in rows for field in _EVENT_CLOCK_FIELDS):
-        return []
+        messages = []
+        for key, rows in collections.items():
+            sampled = [row for row in rows if panel_id == "ai-model-race" and row.get("category") == "USAGE"]
+            if sampled:
+                messages.extend(format_generic_snapshot(panel_id, {**projection, key: sampled}, topic=topic))
+            for row in rows:
+                if panel_id == "ai-model-race" and row.get("category") == "USAGE":
+                    continue
+                stamp = source_clock(row, *_EVENT_CLOCK_FIELDS)
+                if stamp is None or stamp > now:
+                    continue
+                for message in format_generic_snapshot(panel_id, {**projection, key: [row]}, topic=topic):
+                    article_id = row.get("url") or row.get("id")
+                    if article_id and source_clock(row, "publishedAt", "published_at"):
+                        message = replace(message, dedupe_key=f"article:{panel_id}:" + hashlib.sha256(
+                            str(article_id).encode()
+                        ).hexdigest()[:24])
+                    if panel_id in {"whale-tracker", "suspicious-flow"} and row.get("id"):
+                        message = replace(message, dedupe_key=f"chain-trade:{row['id']}")
+                    messages.append(replace(message, observed_at=stamp))
+        return messages
     return format_generic_snapshot(panel_id, {**projection, **collections}, topic=topic)
