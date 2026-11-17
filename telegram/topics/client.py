@@ -75,6 +75,7 @@ class TelegramClient:
         disable_web_page_preview: bool = True,
         disable_notification: bool = False,
         reply_markup: Optional[Dict[str, Any]] = None,
+        expires_at: float | None = None,
     ) -> List[Dict[str, Any]]:
         if not self.bot_token:
             raise RuntimeError("POLYDATA_TELEGRAM_BOT_TOKEN is required unless dry-run is enabled")
@@ -93,6 +94,8 @@ class TelegramClient:
             body: Dict[str, Any] = {}
             response: Optional[requests.Response] = None
             for attempt in range(MAX_SEND_ATTEMPTS):
+                if expires_at is not None and time.time() >= expires_at:
+                    raise TelegramSendRejected("Source observation expired before Telegram accepted it")
                 response = self.session.post(
                     f"{self.api_base}/bot{self.bot_token}/sendMessage",
                     json=payload,
@@ -103,7 +106,10 @@ class TelegramClient:
                 except ValueError:
                     body = {}
                 if response.status_code == 429 and attempt < MAX_SEND_ATTEMPTS - 1:
-                    time.sleep(_retry_after_seconds(response, body) + 1)
+                    delay = _retry_after_seconds(response, body) + 1
+                    if expires_at is not None and time.time() + delay >= expires_at:
+                        raise TelegramSendRejected("Telegram retry would outlast the source observation")
+                    time.sleep(delay)
                     continue
                 break
             if response is None:

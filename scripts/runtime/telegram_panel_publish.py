@@ -26,6 +26,7 @@ def publish_cached_panel_snapshot(panel_id: str, payload: Dict[str, Any]) -> int
         from telegram.topics.config import load_settings
         from telegram.topics.formatters import format_panel_snapshot_outcome
         from telegram.topics.publisher import publish_candidates
+        from telegram.topics.source_alerts import SOURCE_LIMITS
         from telegram.topics.state import PublishState, state_lock
     except Exception as exc:
         print(
@@ -35,6 +36,8 @@ def publish_cached_panel_snapshot(panel_id: str, payload: Dict[str, Any]) -> int
         return 0
 
     try:
+        if panel_id in SOURCE_LIMITS:
+            return 0
         settings = load_settings()
         if not settings.bot_token and not settings.dry_run:
             return 0

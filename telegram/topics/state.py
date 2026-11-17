@@ -39,7 +39,8 @@ class PublishState:
         return key in self.payload.setdefault("sent", {})
 
     def mark(
-        self, target: str, dedupe_key: str, *, panel_id: str = "", receipt: dict | None = None, pending: bool = False,
+        self, target: str, dedupe_key: str, *, panel_id: str = "", receipt: dict | None = None,
+        pending: bool = False, source_at: float | None = None,
     ) -> None:
         key = self._key(target, dedupe_key)
         entry = {"sentAt": int(time.time())}
@@ -47,6 +48,8 @@ class PublishState:
             entry.update(panelId=panel_id, delivery="uncertain")
         if receipt is not None:
             entry.update(panelId=panel_id, messageId=receipt["message_id"], telegramDate=receipt.get("date"))
+            if source_at is not None:
+                entry["sourceAt"] = source_at
         self.payload.setdefault("sent", {})[key] = entry
         self._trim()
 

@@ -19,6 +19,7 @@ from .config import TelegramSettings, load_settings
 from .formatters import format_all_snapshots_with_stats, format_related_news
 from .generic_formatter import SUMMARY_KEY_PREFIX
 from .models import MessageCandidate, source_clock
+from .source_alerts import COMMODITIES, ESPORTS, ORACLE, ORDER_FLOW, SOURCE_LIMITS, STATE_SUFFIX, plan_source_alerts
 from .state import PublishState, state_lock
 
 
@@ -33,6 +34,10 @@ PANEL_ENDPOINTS = {
     "nba-scoreboard": ("/runtime/sports/nba", {"limit": 10}),
     "nba-intel": ("/runtime/sports/nba-intel", {"limit": 12}),
     "espn-matchup-predictor": ("/runtime/sports/nba-matchup-predictor", {"limit": 8}),
+    ESPORTS: ("/runtime/esports/grid-intel", {"limit": 36}),
+    ORDER_FLOW: ("/runtime/crypto/order-flow", {}),
+    ORACLE: ("/runtime/crypto/oracle-reference", {}),
+    COMMODITIES: ("/runtime/markets/commodities", {"limit": 36}),
     "global-weather-map": ("/runtime/weather/global-map", {"limit": 34}),
     "weather-news": ("/runtime/weather/news", {"limit": 24}),
     "geo-sanctions-shock": ("/runtime/panels/geo-sanctions-shock", {"limit": 12}),
@@ -51,9 +56,9 @@ ROTATING_PANELS = tuple(
 TARGET_PANELS = {
     "all": tuple(PANEL_ENDPOINTS),
     "news": ("latest-content",),
-    "intel": ("geo-sanctions-shock", "policy-progress"),
+    "intel": ("geo-sanctions-shock", "policy-progress", ESPORTS, ORDER_FLOW, ORACLE),
     "alpha": ("alpha-signal", "new-market-signals", "whale-tracker", "suspicious-flow"),
-    "macro": ("polymarket-macro-map", "cpi-release-command-center"),
+    "macro": ("polymarket-macro-map", "cpi-release-command-center", COMMODITIES),
     "nba": ("nba-scoreboard", "nba-intel", "espn-matchup-predictor"),
     "weather": ("global-weather-map", "weather-news"),
     "all-panels": (*SERVER_RUNTIME_PANEL_IDS, "latest-content"),
@@ -127,7 +132,7 @@ def fetch_snapshots(
         try:
             with panel_api.session:
                 if panel_id in PANEL_ENDPOINTS and (
-                    target != "all-panels" or panel_id not in SERVER_RUNTIME_PANEL_IDS
+                    target != "all-panels" or panel_id in SOURCE_LIMITS or panel_id not in SERVER_RUNTIME_PANEL_IDS
                 ):
                     path, params = PANEL_ENDPOINTS[panel_id]
                     return panel_api.get_json(path, params=params)
@@ -293,6 +298,10 @@ def publish_candidates(
 ) -> PublishResult:
     result = PublishResult(candidates=len(candidates), dry_run=dry_run)
     for candidate in candidates:
+        panel = candidate.metadata.get("panel", "")
+        limits = SOURCE_LIMITS.get(panel)
+        if limits and (candidate.observed_at is None or time.time() - candidate.observed_at > limits[0]):
+            continue
         if primary_only:
             targets = [candidate.topic] if settings.topic_config(candidate.topic).enabled or dry_run else []
         else:
@@ -315,7 +324,6 @@ def publish_candidates(
                 result.primed += 1
                 continue
             else:
-                panel = candidate.metadata.get("panel", "")
                 state.mark(target, candidate.dedupe_key, panel_id=panel, pending=True)
                 state.save()
                 try:
@@ -326,6 +334,7 @@ def publish_candidates(
                         disable_web_page_preview=not candidate.link_preview,
                         disable_notification=settings.disable_notification,
                         reply_markup=candidate.reply_markup,
+                        **({"expires_at": candidate.observed_at + limits[0]} if limits else {}),
                     )
                 except Exception as exc:
                     result.failed_sends += 1
@@ -351,6 +360,7 @@ def publish_candidates(
                 state.mark(
                     target, candidate.dedupe_key, panel_id=panel,
                     receipt=receipt if receipt and receipt.get("message_id") else None,
+                    source_at=candidate.observed_at if limits else None,
                 )
                 state.save()
                 result.sent += 1
@@ -392,7 +402,10 @@ def run_once(
         for panel_id, payload in snapshots.items()
         if panel_id not in historical_unready
     }
-    candidates, format_stats = format_all_snapshots_with_stats(publishable_snapshots, live=True)
+    ordinary_snapshots = {
+        panel_id: payload for panel_id, payload in publishable_snapshots.items() if panel_id not in SOURCE_LIMITS
+    }
+    candidates, format_stats = format_all_snapshots_with_stats(ordinary_snapshots, live=True)
     related_checked = 0
     if include_related and (macro := publishable_snapshots.get("polymarket-macro-map")):
         related, related_checked = _fetch_related_candidates(api, macro)
@@ -410,14 +423,19 @@ def run_once(
         )
         candidates.extend(listing_candidates)
         chosen, observations, baselined = _new_candidates(
-            candidates, publishable_snapshots, state, now=now, live_since=live_since, prime=prime, dry_run=dry_run,
+            candidates, ordinary_snapshots, state, now=now, live_since=live_since, prime=prime, dry_run=dry_run,
         )
+        source_candidates, source_observations, source_baselined = plan_source_alerts(
+            publishable_snapshots, state.payload["sourceHeads"], now=now, prime=prime,
+        )
+        baselined.extend(source_baselined)
+        observations.update(source_observations)
         if listing_observation is not None:
             observations.setdefault(LISTING_PANEL, {}).update(listing_observation)
             if prime or not listing_prior.get("productModes"):
                 baselined.append(LISTING_PANEL)
         result = publish_candidates(
-            chosen,
+            source_candidates + chosen,
             settings=settings,
             state=state,
             telegram=telegram,
@@ -426,13 +444,18 @@ def run_once(
         )
         if not dry_run:
             retryable = set(result.retryable_keys)
-            for candidate in chosen:
-                if candidate.observed_at is None and candidate.dedupe_key in retryable:
-                    observations.pop(candidate.metadata["panel"], None)
+            for candidate in source_candidates + chosen:
+                if candidate.dedupe_key not in retryable:
+                    continue
+                panel = candidate.metadata["panel"]
+                if panel in SOURCE_LIMITS:
+                    observations.pop(panel + STATE_SUFFIX, None)
+                elif candidate.observed_at is None:
+                    observations.pop(panel, None)
             state.payload["sourceHeads"].update(observations)
             state.save()
     result.baselined_sources = baselined
-    candidate_panels = {candidate.metadata["panel"] for candidate in candidates}
+    candidate_panels = {candidate.metadata["panel"] for candidate in candidates + source_candidates}
     result.empty_sources = sorted(
         panel for panel in publishable_snapshots if DELIVERY_CATALOG[panel].pushable and panel not in candidate_panels
     )
