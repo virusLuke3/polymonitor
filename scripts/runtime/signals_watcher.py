@@ -465,6 +465,10 @@ def main() -> int:
             except KeyboardInterrupt:
                 return 0
             except Exception as exc:
+                # A collector lease timeout can occur before run_once enters the
+                # fetch path. Retry on the existing failure cadence so workers
+                # that start together can acquire the shared lease out of phase.
+                result = {"sourceError": isinstance(exc, TimeoutError)}
                 watcher.store_seed_meta_fail_soft(
                     status="error",
                     record_count=0,
