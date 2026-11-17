@@ -17,7 +17,6 @@ from telegram.topics.formatters import (
     format_related_news,
     format_weather_map,
     format_weather_news,
-    format_worldcup_intel,
 )
 from telegram.topics.market_linker import MarketLink
 from telegram.topics.models import MessageCandidate
@@ -75,7 +74,6 @@ def make_settings(state_path: str) -> TelegramSettings:
         alpha=TopicConfig(name="alpha", chat_id="@alpha"),
         macro=TopicConfig(name="macro", chat_id="@macro"),
         nba=TopicConfig(name="nba", chat_id="@nba"),
-        worldcup=TopicConfig(name="worldcup", chat_id="@worldcup"),
         weather=TopicConfig(name="weather", chat_id="@weather"),
         monitor=TopicConfig(name="monitor", chat_id="@monitor"),
     )
@@ -278,15 +276,6 @@ def test_new_market_dedupe_ignores_status_updates():
     assert format_new_market_signals(first)[0].dedupe_key == format_new_market_signals(second)[0].dedupe_key
 
 
-def test_worldcup_dedupe_ignores_generated_at_when_visible_content_is_same():
-    first = {"generatedAt": "2026-06-10T01:00:00Z", "signals": [{"id": "s1", "title": "Mexico vs South Africa: Scheduled"}]}
-    second = {"generatedAt": "2026-06-10T01:05:00Z", "signals": [{"id": "s1", "title": "Mexico vs South Africa: Scheduled"}]}
-    changed = {"generatedAt": "2026-06-10T01:10:00Z", "signals": [{"id": "s2", "title": "Canada vs Bosnia: Scheduled"}]}
-
-    assert format_worldcup_intel(first)[0].dedupe_key == format_worldcup_intel(second)[0].dedupe_key
-    assert format_worldcup_intel(first)[0].dedupe_key != format_worldcup_intel(changed)[0].dedupe_key
-
-
 def test_related_news_formatter_includes_market_context_and_routes_to_intel():
     payload = {
         "marketId": 1871431,
@@ -362,53 +351,6 @@ def test_related_news_formatter_accepts_single_item_payload():
     assert "- ESPN | Lineup update moves player props" in message.text
     assert "Top source: https://news.example/nba-lineup" in message.text
     assert message.link_preview is True
-
-
-def test_worldcup_intel_formatter_routes_to_worldcup_topic():
-    message = format_worldcup_intel(
-        {
-            "generatedAt": "2026-06-08T11:49:40Z",
-            "summary": "World Cup operations board is live.",
-            "signals": [
-                {
-                    "id": "signal-1",
-                    "source": "ESPN SCOREBOARD",
-                    "title": "South Africa at Mexico: Scheduled",
-                    "url": "https://www.espn.com/soccer/match/_/gameId/760415/south-africa-mexico",
-                }
-            ],
-            "news": [
-                {
-                    "id": "news-1",
-                    "source": "ESPN",
-                    "title": "World Cup opener team news",
-                    "url": "https://www.espn.com/soccer/story/world-cup-opener",
-                }
-            ],
-            "weather": [
-                {
-                    "cityId": "dallas",
-                    "current": {"condition": "Partly cloudy", "tempC": 26, "precipitationProbability": 5},
-                    "forecast": [{"precipitationProbability": 40}],
-                }
-            ],
-        }
-    )[0]
-
-    assert message.topic == "worldcup"
-    assert "⚽ worldcup" in message.text
-    assert "FIFA World Cup 2026 workspace" in message.text
-    assert "Signals 1 | News 1 | Weather 1" in message.text
-    assert "Signals:" in message.text
-    assert "- ESPN SCOREBOARD | South Africa at Mexico: Scheduled" in message.text
-    assert "News:" in message.text
-    assert "- ESPN | World Cup opener team news" in message.text
-    assert "Weather:" in message.text
-    assert "- dallas: Partly cloudy | 26C | rain 40%" in message.text
-    assert "Workspace: https://www.polymonitor.club/?workspace=worldcup" in message.text
-    assert message.link_preview is True
-    assert message.reply_markup
-    assert "PolyMonitorQuery_bot" in str(message.reply_markup)
 
 
 def test_publish_state_dedupes_and_dry_run_does_not_mark(tmp_path: Path):
@@ -512,5 +454,6 @@ def test_format_panel_snapshot_routes_known_panel_ids():
     assert format_panel_snapshot("related-news", {"marketId": 1, "marketTitle": "Market", "items": [{"id": "r1", "title": "Intel"}]})[0].topic == "intel"
     assert format_panel_snapshot("alpha-signal", {"items": [{"id": "a1", "title": "Signal"}]})[0].topic == "alpha"
     assert format_panel_snapshot("polymarket-macro-map", {"items": [{"id": "m1", "title": "Macro"}]})[0].topic == "macro"
-    assert format_panel_snapshot("worldcup-intel", {"signals": [{"id": "w1", "title": "Kickoff radar"}]})[0].topic == "worldcup"
+    for panel_id in ("worldcup-intel", "worldcup-dashboard", "world-cup-match-ops"):
+        assert format_panel_snapshot(panel_id, {"signals": [{"id": "w1", "title": "Kickoff radar"}]}) == []
     assert format_panel_snapshot("unknown", {"items": [{"id": "x", "title": "Nope"}]}) == []

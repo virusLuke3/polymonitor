@@ -84,7 +84,6 @@ _SPECIALIZED = {
     "nba-scoreboard": ("nba", True, True),
     "nba-intel": ("nba", True, True),
     "espn-matchup-predictor": ("nba", True, True),
-    "worldcup-intel": ("worldcup", False, True),
     "global-weather-map": ("weather", True, True),
     "weather-news": ("weather", True, True),
 }
@@ -158,7 +157,6 @@ _AGGREGATES = {
     "weather-quote-table": "global-weather-map",
     "weather-trend-detail": "global-weather-map",
     "weather-trend-7d": "global-weather-map",
-    "world-cup-match-ops": "worldcup-intel",
 }
 
 
@@ -211,7 +209,7 @@ def _build_catalog() -> dict[str, DeliveryContract]:
             reason="covered by an aggregate feed",
             aggregate_source=source,
             server_runtime=panel_id in {
-                "global-temperature-monitor", "weather-market-browser", "world-cup-match-ops"
+                "global-temperature-monitor", "weather-market-browser"
             },
         )
     for panel_id, reason in _MARKET_SCOPED.items():

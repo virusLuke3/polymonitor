@@ -19,13 +19,6 @@ from telegram.topics.api_client import resolve_polydata_api_base
 
 
 BOT_COMMANDS = [
-    {"command": "worldcup", "description": "World Cup overview"},
-    {"command": "matches", "description": "World Cup matches"},
-    {"command": "match", "description": "Match detail"},
-    {"command": "team", "description": "Team schedule and intel"},
-    {"command": "venue", "description": "Venue and weather"},
-    {"command": "news", "description": "World Cup news"},
-    {"command": "odds", "description": "Polymarket odds"},
     {"command": "market", "description": "Search Polymarket markets"},
     {"command": "help", "description": "Command help"},
 ]

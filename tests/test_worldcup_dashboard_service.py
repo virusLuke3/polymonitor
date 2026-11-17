@@ -12,7 +12,6 @@ from api.services import worldcup_dashboard_service
 from api.services.worldcup.odds import bookmaker
 from api.services.worldcup import builder as worldcup_builder
 from api.services.worldcup.panels import build_worldcup_panel_payloads, panel_ttl_seconds
-from runtime import worldcup_dashboard_watcher
 
 
 class _FakeOddsApiResponse:
@@ -516,30 +515,3 @@ def test_worldcup_panel_payloads_are_independent_cache_projections():
     assert panels["news-impact"]["data"]["news"][0]["title"] == "Spain team news"
     assert panel_ttl_seconds("win-probability", 86400, 300) == 86400
     assert panel_ttl_seconds("news-impact", 86400, 300) == 300
-
-
-def test_worldcup_dashboard_watcher_builds_new_odds_alert_candidate():
-    previous = {"odds": [{"matchId": "wc2026-001"}]}
-    current = {
-        "odds": [
-            {"matchId": "wc2026-001"},
-            {
-                "matchId": "wc2026-002",
-                "homeTeam": "South Korea",
-                "awayTeam": "Czech Republic",
-                "marketTitle": "South Korea vs Czech Republic - FIFA World Cup 2026 winner",
-                "marketUrl": "https://polymarket.com/event/south-korea-czech-republic",
-                "probabilities": [{"outcome": "South Korea", "price": "0.42"}],
-            },
-        ]
-    }
-
-    new_rows = worldcup_dashboard_watcher._new_odds(previous, current)
-    candidate = worldcup_dashboard_watcher._odds_alert_candidate(new_rows[0])
-
-    assert len(new_rows) == 1
-    assert candidate.topic == "worldcup"
-    assert candidate.priority == "normal"
-    assert "World Cup odds listed" in candidate.text
-    assert "South Korea vs Czech Republic" in candidate.text
-    assert candidate.reply_markup

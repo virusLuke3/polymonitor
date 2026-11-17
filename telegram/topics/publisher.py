@@ -28,7 +28,6 @@ PANEL_ENDPOINTS = {
     "nba-scoreboard": ("/runtime/sports/nba", {"limit": 10}),
     "nba-intel": ("/runtime/sports/nba-intel", {"limit": 12}),
     "espn-matchup-predictor": ("/runtime/sports/nba-matchup-predictor", {"limit": 8}),
-    "worldcup-intel": ("/runtime/sports/worldcup-intel", {"limit": 24}),
     "global-weather-map": ("/runtime/weather/global-map", {"limit": 34}),
     "weather-news": ("/runtime/weather/news", {"limit": 24}),
     "geo-sanctions-shock": ("/runtime/panels/geo-sanctions-shock", {"limit": 12}),
@@ -54,9 +53,8 @@ TARGET_PANELS = {
     "alpha": ("alpha-signal", "new-market-signals"),
     "macro": ("polymarket-macro-map", "cpi-release-command-center"),
     "nba": ("nba-scoreboard", "nba-intel", "espn-matchup-predictor"),
-    "worldcup": ("worldcup-intel",),
     "weather": ("global-weather-map", "weather-news"),
-    "all-panels": (*SERVER_RUNTIME_PANEL_IDS, "latest-content", "worldcup-intel"),
+    "all-panels": (*SERVER_RUNTIME_PANEL_IDS, "latest-content"),
 }
 
 

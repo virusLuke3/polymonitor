@@ -24,14 +24,12 @@ POLYDATA_TELEGRAM_CHANNEL_INTEL=-1001234567890
 POLYDATA_TELEGRAM_CHANNEL_ALPHA=-1001234567890
 POLYDATA_TELEGRAM_CHANNEL_MACRO=-1001234567890
 POLYDATA_TELEGRAM_CHANNEL_NBA=@your_nba_channel
-POLYDATA_TELEGRAM_CHANNEL_WORLDCUP=-1001234567890
 POLYDATA_TELEGRAM_CHANNEL_WEATHER=@your_weather_channel
 POLYDATA_TELEGRAM_CHANNEL_MONITOR=@your_main_channel
 POLYDATA_TELEGRAM_THREAD_NEWS=12
 POLYDATA_TELEGRAM_THREAD_INTEL=14
 POLYDATA_TELEGRAM_THREAD_ALPHA=10
 POLYDATA_TELEGRAM_THREAD_MACRO=8
-POLYDATA_TELEGRAM_THREAD_WORLDCUP=16
 ```
 
 `latest-content` publishes global headlines to News. Scheduled Intel posts come
@@ -39,9 +37,6 @@ from Geo Sanctions Shock, Policy Progress, and the original Intel feeds.
 The publisher checks market-specific Related News against one leading contract
 per event from the macro monitor, up to six contracts per rotation. It sends
 the matched public articles with their original publication time and relation.
-`worldcup-intel` publishes a compact Signals / News /
-Weather summary to the World Cup topic and links to
-`https://www.polymonitor.club/?workspace=worldcup`.
 
 Dry run:
 
@@ -79,7 +74,7 @@ Panel. Each entry has exactly one delivery mode:
 - `browser-only`: no independent server snapshot exists;
 - `non-pushable`: high-frequency visual data that should not become messages.
 
-The watch loop checks 13 primary sources plus six original generic sources per
+The watch loop checks 12 primary sources plus six original generic sources per
 cycle, rotating through the 42 that lack another delivery path. Retained stale
 and warming snapshots wait for usable data. The send state records the
 Telegram message ID, server date and source when returned by the Bot API.

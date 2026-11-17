@@ -11,8 +11,6 @@ from .market_linker import MarketLink, resolve_market_link
 from .models import FormatOutcome, MessageCandidate
 
 RELATED_NEWS_GROUP_LIMIT = 2
-WORLDCUP_WORKSPACE_URL = "https://www.polymonitor.club/?workspace=worldcup"
-QUERY_BOT_URL = "https://t.me/PolyMonitorQuery_bot"
 NEW_MARKET_PLACEHOLDER_TITLE_PREFIXES = (
     "On-chain recovered market ",
     "Trade indexer placeholder market ",
@@ -290,100 +288,6 @@ def format_nba_predictor(payload: Dict[str, Any]) -> List[MessageCandidate]:
             )
         )
     return messages
-
-
-def _iter_list(payload: Dict[str, Any], key: str) -> Iterable[Dict[str, Any]]:
-    for item in payload.get(key) or []:
-        if isinstance(item, dict):
-            yield item
-
-
-def _weather_risk(row: Dict[str, Any]) -> int:
-    current = row.get("current") if isinstance(row.get("current"), dict) else {}
-    forecast = row.get("forecast") if isinstance(row.get("forecast"), list) else []
-    probs = [_number(current.get("precipitationProbability")) or 0]
-    for day in forecast[:3]:
-        if isinstance(day, dict):
-            probs.append(_number(day.get("precipitationProbability")) or 0)
-    return int(max(probs or [0]))
-
-
-def format_worldcup_intel(payload: Dict[str, Any]) -> List[MessageCandidate]:
-    signals = list(_iter_list(payload, "signals"))
-    news = list(_iter_list(payload, "news"))
-    weather = list(_iter_list(payload, "weather"))
-    if not signals and not news and not weather:
-        return []
-
-    lines: List[str] = []
-    summary = _text(payload.get("summary"))
-    if summary:
-        lines.append(summary[:240])
-    lines.append(f"Signals {len(signals)} | News {len(news)} | Weather {len(weather)}")
-
-    signal_lines = []
-    for item in signals[:3]:
-        title = _text(item.get("title"))
-        source = _text(item.get("source") or item.get("provider"), "signal")
-        if title:
-            signal_lines.append(f"- {source} | {title[:130]}")
-    if signal_lines:
-        lines.append("Signals:")
-        lines.extend(signal_lines)
-
-    news_lines = []
-    for item in news[:3]:
-        title = _text(item.get("title"))
-        source = _text(item.get("source"), "news")
-        if title:
-            news_lines.append(f"- {source} | {title[:130]}")
-    if news_lines:
-        lines.append("News:")
-        lines.extend(news_lines)
-
-    weather_lines = []
-    for item in sorted(weather, key=_weather_risk, reverse=True)[:2]:
-        city = _text(item.get("cityId"), "venue")
-        current = item.get("current") if isinstance(item.get("current"), dict) else {}
-        temp = _text(current.get("tempC"))
-        condition = _text(current.get("condition"))
-        rain = _weather_risk(item)
-        detail = " | ".join(part for part in (condition, f"{temp}C" if temp else "", f"rain {rain}%") if part)
-        weather_lines.append(f"- {city}: {detail}" if detail else f"- {city}")
-    if weather_lines:
-        lines.append("Weather:")
-        lines.extend(weather_lines)
-
-    first_url = _first_url(
-        *(item.get("url") for item in signals[:3]),
-        *(item.get("url") for item in news[:3]),
-        payload.get("sourceUrl"),
-    )
-    text = _compose_post(
-        header="⚽ worldcup",
-        title="FIFA World Cup 2026 workspace",
-        lines=lines,
-        tags=_hashtags("WorldCup", "Polymonitor", "Football"),
-        url=_source_link(WORLDCUP_WORKSPACE_URL, "Workspace"),
-    )
-    version = "|".join(lines)
-    dedupe = _short_hash("worldcup-intel", version)
-    return [
-        MessageCandidate(
-            topic="worldcup",
-            dedupe_key=dedupe,
-            text=text,
-            priority="normal",
-            metadata={"panel": "worldcup-intel"},
-            link_preview=bool(first_url or WORLDCUP_WORKSPACE_URL),
-            reply_markup={
-                "inline_keyboard": [
-                    [{"text": "Ask bot", "url": QUERY_BOT_URL}, {"text": "Matches", "url": f"{QUERY_BOT_URL}?start=worldcup"}],
-                    [{"text": "Odds", "url": f"{QUERY_BOT_URL}?start=odds"}, {"text": "Open Workspace", "url": WORLDCUP_WORKSPACE_URL}],
-                ]
-            },
-        )
-    ]
 
 
 def format_weather_map(payload: Dict[str, Any]) -> List[MessageCandidate]:
@@ -728,8 +632,6 @@ def _format_specialized(panel_id: str, payload: Dict[str, Any]) -> List[MessageC
         return format_nba_intel(payload)
     if panel_id == "espn-matchup-predictor":
         return format_nba_predictor(payload)
-    if panel_id == "worldcup-intel":
-        return format_worldcup_intel(payload)
     if panel_id == "global-weather-map":
         return format_weather_map(payload)
     if panel_id == "weather-news":
@@ -741,7 +643,6 @@ def format_panel_snapshot_outcome(panel_id: str, payload: Dict[str, Any]) -> For
     requested_id = str(panel_id or "").strip()
     canonical_id = {
         "related-intel": "related-news",
-        "worldcup-dashboard": "worldcup-intel",
     }.get(requested_id, requested_id)
     contract = delivery_contract(canonical_id)
     if contract is None:
