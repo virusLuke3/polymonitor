@@ -86,6 +86,7 @@ class GridEsportsDependencies:
     snapshot_store: Any
     utc_now_iso: Callable[..., Any] | None
     previous_payload: Dict[str, Any] | None = None
+    http_json_get: Callable[..., Any] | None = None
 
     @classmethod
     def from_context(
@@ -106,6 +107,7 @@ class GridEsportsDependencies:
                 context,
                 "search_markets",
             ),
+            http_json_get=resolve_optional_service_callable(context, "http_json_get"),
             get_cached_json=resolve_optional_service_callable(
                 context,
                 "get_cached_json",
@@ -478,11 +480,86 @@ def _pm_context(
     return {
         "status": "matched",
         "marketId": market.get("id"),
+        "gammaMarketId": market.get("gammaMarketId"),
+        "conditionId": market.get("conditionId"),
+        "slug": market.get("slug"),
         "title": market.get("title"),
         "probability": price,
         "delta": None,
         "signal": "PM LINKED" if price is not None else "PM MATCH",
         "matchQuality": "medium",
+    }
+
+
+def _gamma_array(value: Any) -> list:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return []
+    return value if isinstance(value, list) else []
+
+
+def _verified_market_context(dependencies: GridEsportsDependencies, event: dict, hint: dict, *, timeout: float) -> dict:
+    get = dependencies.http_json_get
+    base = str(getattr(dependencies.settings, "gamma_api_base", "") or "").rstrip("/")
+    slug = str(hint.get("slug") or "")
+    condition = str(hint.get("conditionId") or "").lower()
+    scheduled = _parse_iso(event.get("scheduledAt"))
+    if not get or not base or not scheduled or not re.fullmatch(r"[a-z0-9-]{1,160}", slug) or not condition:
+        return {}
+    try:
+        payload = get(f"{base}/events/slug/{slug}", timeout=timeout)
+    except (request_errors.RequestException, OSError, ValueError):
+        return {}
+    if not isinstance(payload, dict) or payload.get("slug") != slug:
+        return {}
+    start = _parse_iso(payload.get("startTime"))
+    title = str(payload.get("title") or "")
+    title_head, _, tournament = title.partition(" - ")
+    game = {"CS2": "counter strike", "DOTA": "dota", "DOTA2": "dota"}.get(event.get("gameTitle"))
+    fmt = _market_text(event.get("format"))
+    if (not start or abs(start - scheduled) > timedelta(hours=1) or not game
+            or not _market_text(title_head).startswith(game + " ") or not fmt
+            or fmt not in _market_text(title_head).split()):
+        return {}
+
+    def competition(value: str) -> set[str]:
+        words = _market_text(value.split("(", 1)[0]).split()
+        return {word for word in words if not word.isdigit()} - {"group", "stage", "playoffs", "series", "season"}
+
+    grid_words = competition(event["tournament"])
+    required_words = min(len(grid_words), max(2, len(grid_words) - 1))
+    if not required_words or len(grid_words & competition(tournament)) < required_words:
+        return {}
+    markets = payload.get("markets")
+    if not isinstance(markets, list):
+        return {}
+    markets = [row for row in markets if isinstance(row, dict)]
+    main = next((row for row in markets if row.get("sportsMarketType") == "moneyline"
+                 and row.get("slug") == slug and str(row.get("conditionId") or "").lower() == condition
+                 and str(row.get("id")) == str(hint.get("gammaMarketId"))), None)
+    if not main:
+        return {}
+    teams = _gamma_array(main.get("outcomes"))
+
+    def team_name(value: Any) -> str:
+        return re.sub(r" (?:esports?|gaming)$", "", _market_text(value))
+
+    if len(teams) != 2 or {team_name(x) for x in teams} != {team_name(x) for x in event["teams"]}:
+        return {}
+
+    available = {row.get("sportsMarketType") for row in markets if isinstance(row.get("sportsMarketType"), str)}
+    resolution = str(main.get("umaResolutionStatus") or "").lower()
+    prices = [_safe_float(value) for value in _gamma_array(main.get("outcomePrices"))]
+    winner = None
+    if resolution == "resolved" and main.get("closed") is True and prices in ([0, 1], [1, 0]):
+        winner = teams[prices.index(1)]
+    return {
+        "eventSlug": slug, "gammaMarketId": str(main["id"]), "conditionId": condition,
+        "resolution": resolution, "winner": winner, "closed": main.get("closed") is True,
+        "acceptingOrders": main.get("acceptingOrders") is True, "checkedAt": _iso(_utc_now()),
+        "types": [kind for kind in ("moneyline", "child_moneyline", "map_handicap", "totals") if kind in available],
     }
 
 
@@ -551,7 +628,12 @@ def _verified_events(items: List[Dict[str, Any]], previous: Dict[str, Any], refe
             if stamp and cutoff < stamp <= reference:
                 event_id = f"{series_id}:{key}"
                 events.setdefault(event_id, {"id": event_id, "title": title, "tournament": item["tournament"],
-                                            "format": item["format"], "action": action, "score": score, "occurredAt": _iso(stamp)})
+                                            "format": item["format"], "action": action, "score": score, "occurredAt": _iso(stamp),
+                                            "gameTitle": item["gameTitle"], "teams": [item["teamA"], item["teamB"]],
+                                            "scheduledAt": item["startTime"], "seriesScore": item["score"],
+                                            "maps": [{name: game[name] for name in ("number", "map", "score")}
+                                                     for game in item["games"] if game["state"] == "finished" and game["score"]]
+                                            if key == "final" else []})
 
         prior = old.get(series_id)
         started = _parse_iso(item["startedAt"])
@@ -765,6 +847,21 @@ def fetch_live_grid_esports_payload(
     items = items[:limit]
     for item in items:
         item["pm"] = _pm_context(dependencies, [item["teamA"], item["teamB"]])
+    visible = {item["id"]: item["pm"] for item in items}
+    previous_event_ids = {event["id"] for event in previous.get("events") or []}
+    for event in events:
+        if event["id"] in previous_event_ids:
+            continue
+        series_id = event["id"].split(":", 1)[0]
+        hints = (prior_items.get(series_id, {}).get("pm", {}), visible.get(series_id, {}))
+        tried = set()
+        for hint in hints:
+            if not (slug := hint.get("slug")) or slug in tried or deadline - time.monotonic() < 3:
+                continue
+            tried.add(slug)
+            if market := _verified_market_context(dependencies, event, hint, timeout=3):
+                event["polymarket"] = market
+                break
     live_count = sum(item["state"] == "live" and item["sourceStatus"] == "ok" for item in items)
     state_failures = [state for state in state_statuses if state not in {"ok", "not-due"}]
     status = "degraded" if state_failures else "ok" if items else "empty"

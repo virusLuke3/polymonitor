@@ -1,6 +1,6 @@
 """Select Telegram updates from upstream clocks and meaningful changes."""
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from math import isfinite
 
@@ -147,7 +147,7 @@ def plan_source_alerts(snapshots, heads, *, now, prime):
                     continue
                 readings[series] = {"at": stamp, "event": event.dedupe_key}
                 if now - stamp <= max_age:
-                    candidates.append(replace(event, text=f"{event.text}\nGRID · {_clock(stamp)}"))
+                    candidates.append(event)
         else:
             for row in _readings(panel, payload):
                 old = readings.get(row.entity)

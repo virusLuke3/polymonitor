@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional
 from urllib.parse import quote_plus
 
 from .catalog import DeliveryMode, delivery_contract
 from .generic_formatter import format_generic_snapshot, format_live_generic_snapshot
-from .market_linker import MarketLink, resolve_market_link
+from .market_linker import MarketLink, market_url_from_row, resolve_market_link
 from .models import FormatOutcome, MessageCandidate, source_clock
 
 RELATED_NEWS_GROUP_LIMIT = 2
@@ -295,18 +295,52 @@ def format_nba_predictor(payload: Dict[str, Any]) -> List[MessageCandidate]:
 
 def format_esports_intel(payload: Dict[str, Any]) -> List[MessageCandidate]:
     messages = []
+    market_types = {
+        "moneyline": "全场胜负", "child_moneyline": "单图胜负", "map_handicap": "地图让分", "totals": "总地图数",
+    }
     for event in payload.get("events") or []:
         if not isinstance(event, dict):
             continue
         stamp = source_clock(event, "occurredAt")
         if not stamp or not all(event.get(field) for field in ("id", "title", "action")):
             continue
-        result = " · ".join(_text(event.get(key)) for key in ("action", "score") if event.get(key))
+        phase = str(event["id"]).partition(":")[2].partition(":")[0]
+        action = {"started": "开赛", "final": "完赛"}.get(phase, event["action"])
+        score = event.get("score")
+        result_parts = [action]
+        if score:
+            result_parts.append(score)
+        if phase == "game" and event.get("seriesScore"):
+            result_parts.append(f"系列赛 {event['seriesScore']}")
+        result = " · ".join(result_parts)
         context = " · ".join(_text(event.get(key)) for key in ("tournament", "format") if event.get(key))
+        lines = [result, context]
+        if maps := event.get("maps"):
+            unit = "单图" if event.get("gameTitle") == "CS2" else "单局"
+            games = " | ".join(f"{game.get('map') or game['number']} {game['score']}" for game in maps)
+            lines.append(f"{unit}比分（按队名顺序） · {games}")
+        market = event.get("polymarket") or {}
+        link = market_url_from_row(market)
+        if link:
+            resolution = market.get("resolution")
+            if resolution == "resolved" and market.get("closed"):
+                winner = market.get("winner")
+                status = f"{winner} 胜，已结算" if winner else "已结算"
+            elif resolution in ("proposed", "disputed"):
+                status = "结算结果已提议" if resolution == "proposed" else "结算有争议"
+            elif market.get("acceptingOrders"):
+                status = "接受订单"
+            else:
+                status = "最终结果待确认"
+            lines.append(f"Polymarket 全场胜负 · {status}")
+            if kinds := [market_types[k] for k in market.get("types", []) if k in market_types]:
+                lines.append(f"盘口 · {'、'.join(kinds)}")
+        source_time = datetime.fromtimestamp(stamp, timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M:%S")
+        lines.append(f"GRID · 北京时间 {source_time}")
         messages.append(MessageCandidate(
             topic="intel",
             dedupe_key=f"grid-esports:{event['id']}",
-            text=_compose_post(header="🎮 Esports · GRID", title=event["title"], lines=[result, context]),
+            text=_compose_post(header="🎮 Esports · GRID", title=event["title"], lines=lines, url=link),
             metadata={"panel": "esports-intel"},
             observed_at=stamp,
         ))

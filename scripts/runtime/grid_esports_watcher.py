@@ -98,6 +98,14 @@ class GridEsportsWatcher:
             body = read_response_bytes(response, 8 * 1024 * 1024, deadline=deadline)
             return json.loads(body) if body else None
 
+    def http_json_get(self, url: str, *, timeout: float) -> Any:
+        from urllib3.util import Timeout
+        deadline = time.monotonic() + timeout
+        proxy_url = os.environ.get("POLYDATA_API_HTTP_PROXY_URL", "").strip()
+        proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
+        with self.requests.get(url, timeout=Timeout(total=timeout), proxies=proxies, stream=True) as response:
+            return json.loads(read_response_bytes(response, 1024 * 1024, deadline=deadline))
+
     def service_context(self) -> Dict[str, Any]:
         context = {
             "SETTINGS": self.settings,
@@ -107,6 +115,7 @@ class GridEsportsWatcher:
         }
         if bool(getattr(self.settings, "grid_esports_pm_search_enabled", False)):
             context["search_markets"] = build_market_search(self.settings)
+            context["http_json_get"] = self.http_json_get
         return context
 
     def load_previous_payload(self) -> Dict[str, Any]:
