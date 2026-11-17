@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from math import isfinite
 
-from .formatters import format_esports_intel
+from .formatters import format_crypto_fear_greed, format_esports_intel
 from .models import MessageCandidate, source_clock
 
 
@@ -13,6 +13,7 @@ ORDER_FLOW = "crypto-order-flow"
 ORACLE = "crypto-oracle-reference"
 COMMODITIES = "commodity-equity-transmission"
 WEATHER = "global-weather-map"
+FEAR_GREED = "crypto-fear-greed"
 
 # Seconds: maximum source age and minimum interval between alerts for the same instrument.
 SOURCE_LIMITS = {
@@ -21,6 +22,7 @@ SOURCE_LIMITS = {
     ORACLE: (45, 30 * 60),
     COMMODITIES: (20 * 60, 60 * 60),
     WEATHER: (75 * 60, 2 * 60 * 60),
+    FEAR_GREED: (6 * 60 * 60, 0),
 }
 STATE_SUFFIX = ":source-alerts-v1"
 COMMODITY_FUTURES = {"oil", "brent", "gasoline", "copper", "aluminum", "natgas", "ttf"}
@@ -148,6 +150,16 @@ def plan_source_alerts(snapshots, heads, *, now, prime):
                 readings[series] = {"at": stamp, "event": event.dedupe_key}
                 if now - stamp <= max_age:
                     candidates.append(event)
+        elif panel == FEAR_GREED:
+            index = (payload.get("summary") or {}).get("cryptoIndex") or {}
+            history = index.get("history") or []
+            stamp = source_clock(history[0], "observedAt") if history else None
+            prior_at = readings.get("alternativeMe", {}).get("at", 0)
+            if (payload.get("sources", {}).get("alternativeMe") == "ok" and stamp and stamp <= now
+                    and int(stamp) // 86400 > int(prior_at) // 86400):
+                readings["alternativeMe"] = {"at": stamp}
+                if after < stamp and now - stamp <= max_age and (alert := format_crypto_fear_greed(index)):
+                    candidates.append(alert)
         else:
             for row in _readings(panel, payload):
                 old = readings.get(row.entity)

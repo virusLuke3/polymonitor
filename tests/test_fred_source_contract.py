@@ -46,7 +46,11 @@ def test_fred_rejects_an_html_success_response_without_injecting_dynamic_date_qu
 
 
 def test_fear_greed_reports_fred_failure_without_losing_other_sources(monkeypatch):
-    monkeypatch.setattr(sentiment, "_http_json_get", lambda *a, **k: {"data": [{"value": "50"}]})
+    monkeypatch.setattr(sentiment, "utc_now_iso", lambda: "2026-11-06T13:50:00Z")
+    observed = str(int(datetime(2026, 11, 6, tzinfo=timezone.utc).timestamp()))
+    monkeypatch.setattr(sentiment, "_http_json_get", lambda *a, **k: {"data": [
+        {"value": "50", "timestamp": observed, "value_classification": "Neutral"},
+    ]})
     monkeypatch.setattr(sentiment, "_fetch_cnn_fng", lambda *a: None)
     monkeypatch.setattr(sentiment, "_fetch_aaii_sentiment", lambda *a: None)
     monkeypatch.setattr(sentiment, "_fetch_barchart_last_price", lambda *a: None)
@@ -69,7 +73,10 @@ def test_fear_greed_reports_fred_failure_without_losing_other_sources(monkeypatc
 
 
 def test_fear_greed_keeps_fred_observation_and_fetch_clocks_separate(monkeypatch):
-    monkeypatch.setattr(sentiment, "_http_json_get", lambda *a, **k: {"data": [{"value": "50"}]})
+    observed = str(int(datetime(2026, 11, 6, tzinfo=timezone.utc).timestamp()))
+    monkeypatch.setattr(sentiment, "_http_json_get", lambda *a, **k: {"data": [
+        {"value": "50", "timestamp": observed, "value_classification": "Neutral"},
+    ]})
     monkeypatch.setattr(sentiment, "_fetch_cnn_fng", lambda *a: None)
     monkeypatch.setattr(sentiment, "_fetch_aaii_sentiment", lambda *a: None)
     monkeypatch.setattr(sentiment, "_fetch_barchart_last_price", lambda *a: None)

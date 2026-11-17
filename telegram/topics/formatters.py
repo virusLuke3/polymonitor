@@ -353,6 +353,53 @@ def format_esports_intel(payload: Dict[str, Any]) -> List[MessageCandidate]:
     return messages
 
 
+def format_crypto_fear_greed(index: Dict[str, Any]) -> MessageCandidate | None:
+    history = index.get("history") or []
+    if index.get("source") != "Alternative.me" or len(history) < 2:
+        return None
+    latest = history[0]
+    stamp = source_clock(latest, "observedAt")
+    if stamp is None:
+        return None
+    day = int(stamp) // 86400
+    by_day = {row["observedAt"] // 86400: row for row in history}
+    previous = by_day.get(day - 1)
+    if previous is None:
+        return None
+    score, classification = latest["score"], latest["classification"]
+    change = score - previous["score"]
+    if abs(change) < 5 and classification == previous["classification"]:
+        return None
+
+    labels = {
+        "Extreme Fear": "极度恐惧", "Fear": "恐惧", "Neutral": "中性",
+        "Greed": "贪婪", "Extreme Greed": "极度贪婪",
+    }
+    signal = labels.get(classification, classification)
+    previous_label = labels.get(previous["classification"], previous["classification"])
+    lines = [f"{score}/100 · {signal}", f"较昨日 {change:+d} 点（{previous['score']} → {score}）"]
+    if classification != previous["classification"]:
+        lines.append(f"情绪级别 · {previous_label} → {signal}")
+    comparisons = [
+        f"{days} 日前 {row['score']}（{score - row['score']:+d} 点）"
+        for days in (7, 30) if (row := by_day.get(day - days))
+    ]
+    if comparisons:
+        lines.append(" · ".join(comparisons))
+    month = [row for date, row in by_day.items() if day - 29 <= date <= day]
+    if len(month) > 1:
+        values = [row["score"] for row in month]
+        extreme = sum(row["classification"] == "Extreme Fear" for row in month)
+        lines.append(f"近 30 日区间 {min(values)}–{max(values)} · 极度恐惧 {extreme}/{len(month)} 个有读数日")
+    source_time = datetime.fromtimestamp(stamp, timezone(timedelta(hours=8))).strftime("%Y-%m-%d %H:%M")
+    lines.append(f"Alternative.me · Bitcoin 情绪指数 · 源时间 {source_time} 北京时间")
+    return MessageCandidate(
+        topic="alpha", dedupe_key=f"alternative-me:fng:{day}",
+        text="\n".join(["📊 加密恐惧与贪婪指数", *lines]),
+        metadata={"panel": "crypto-fear-greed"}, observed_at=stamp,
+    )
+
+
 def format_funding_settlements(payload: Dict[str, Any]) -> List[MessageCandidate]:
     messages = []
     for batch in (payload.get("settlementWatch") or {}).get("batches") or []:

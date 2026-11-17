@@ -268,11 +268,12 @@ class FinanceWatchPanelsWatcher:
                     previous = bounded_rows(self.load_previous_payload(panel_id), utc_now_iso())
                     record_count = len(payload.get("items") or [])
                     status = str(payload.get("status") or ("ok" if record_count else "empty"))
+                    index_available = panel_id == "crypto-fear-greed" and (payload.get("sources") or {}).get("alternativeMe") == "ok"
                     replace_with_empty = panel_id == "broker-research-watch" and status == "empty"
                     if (panel_id in {"defi-security-watch", "ipo-news-watch", "blockchain-policy-news"}
                             and status == "empty" and (payload.get("sources") or {}).get("googleNewsRss") == "empty"):
                         replace_with_empty = True
-                    if previous and (status == "error" or record_count <= 0) and not replace_with_empty:
+                    if previous and (status == "error" or (record_count <= 0 and not index_available)) and not replace_with_empty:
                         self.store_payload(panel_id, retained_snapshot(previous, sources=payload.get("sources")))
                         self.store_seed_meta(
                             panel_id,

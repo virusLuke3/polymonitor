@@ -40,6 +40,7 @@ FNG_WEIGHTS = {
     "macro": 0.05,
     "crossAsset": 0.05,
 }
+CRYPTO_INDEX_LOOKBACK_DAYS = 31
 
 
 def _fetch_yahoo_closes(
@@ -201,12 +202,51 @@ def _fetch_aaii_sentiment(
             "sourceObservedAt": None, "sourceFetchedAt": utc_now_iso()}
 
 
+def _fetch_crypto_index(ctx: FinanceWatchContext, now: datetime) -> Dict[str, Any]:
+    response = _http_json_get(
+        ctx, _setting(ctx, "finance_alternative_fng_url"),
+        params={"limit": CRYPTO_INDEX_LOOKBACK_DAYS, "format": "json"}, timeout=12,
+    )
+    if not isinstance(response, dict) or (response.get("metadata") or {}).get("error"):
+        raise ValueError("Alternative.me response unavailable")
+    days = {}
+    current_time = now.timestamp()
+    for row in response.get("data") or []:
+        if not isinstance(row, dict):
+            continue
+        timestamp, value = str(row.get("timestamp")), str(row.get("value"))
+        classification = row.get("value_classification")
+        if not timestamp.isascii() or not timestamp.isdigit() or not value.isascii() or not value.isdigit():
+            continue
+        stamp, score = int(timestamp), int(value)
+        if not current_time - CRYPTO_INDEX_LOOKBACK_DAYS * 86400 <= stamp <= current_time:
+            continue
+        if score > 100 or not isinstance(classification, str) or not classification.strip():
+            continue
+        day = stamp // 86400
+        if day not in days or stamp > days[day]["observedAt"]:
+            days[day] = {"observedAt": stamp, "score": score, "classification": classification.strip()}
+    if not days:
+        raise ValueError("Alternative.me response has no valid daily readings")
+    history = [days[day] for day in sorted(days, reverse=True)[:CRYPTO_INDEX_LOOKBACK_DAYS]]
+    return {"source": "Alternative.me", "history": history, "sourceFetchedAt": utc_now_iso()}
+
+
 def build_fear_greed_payload(
     ctx: FinanceWatchContext,
     limit: int,
 ) -> Dict[str, Any]:
     errors = {}
     source_details = {}
+    dependencies = _dependencies(ctx)
+    prior = {}
+    if dependencies.snapshot_store is not None:
+        prior = dependencies.snapshot_store.get_stale(
+            finance_watch_namespace("crypto-fear-greed"), FINANCE_WATCH_CACHE_KEY,
+        ) or {}
+        if not isinstance(prior, dict):
+            prior = {}
+
     def isolated(name, fetch, fallback):
         try:
             return fetch()
@@ -232,13 +272,28 @@ def build_fear_greed_payload(
         }
         return rows
 
-    raw = isolated("alternativeMe", lambda: _http_json_get(ctx, _setting(ctx, "finance_alternative_fng_url"),
-                   params={"limit": 2, "format": "json"}, timeout=12), {})
-    data = (raw.get("data") or []) if isinstance(raw, dict) else []
-    item = data[0] if data and isinstance(data[0], dict) else {}
-    previous = data[1] if len(data) > 1 and isinstance(data[1], dict) else {}
-    crypto_score = _safe_float(item.get("value"))
-    crypto_prev_score = _safe_float(previous.get("value"))
+    index = (prior.get("summary") or {}).get("cryptoIndex") or {}
+    now = datetime.fromisoformat(utc_now_iso().replace("Z", "+00:00"))
+    today = int(now.timestamp()) // 86400
+    history = index.get("history") or []
+    latest = history[0]["observedAt"] if history else 0
+    if latest // 86400 != today:
+        fetched = isolated("alternativeMe", lambda: _fetch_crypto_index(ctx, now), None)
+        if fetched and fetched["history"][0]["observedAt"] > latest:
+            index = fetched
+            history = index["history"]
+            latest = history[0]["observedAt"]
+    index_status = "ok" if latest // 86400 == today else "stale" if history else "unavailable"
+    source_details["alternativeMe"] = {
+        **source_details.get("alternativeMe", {}),
+        "status": index_status,
+        "sourceObservedAt": _source_timestamp(latest) if latest else None,
+        "sourceFetchedAt": index.get("sourceFetchedAt"),
+        "sourcePublishedAt": None,
+        "observationCount": len(history),
+    }
+    crypto_score = history[0]["score"] if history else None
+    crypto_prev_score = history[1]["score"] if len(history) > 1 else None
     cnn = isolated("cnn", lambda: _fetch_cnn_fng(ctx), None)
     aaii = isolated("aaii", lambda: _fetch_aaii_sentiment(ctx), None)
     for name, reading in (("cnn", cnn), ("aaii", aaii)):
@@ -333,14 +388,8 @@ def build_fear_greed_payload(
     if not any(not row.get("degraded") for row in category_rows):
         score = crypto_score
     previous_score = None
-    dependencies = _dependencies(ctx)
-    if dependencies.snapshot_store is not None:
-        prior = dependencies.snapshot_store.get_stale(
-            finance_watch_namespace("crypto-fear-greed"),
-            FINANCE_WATCH_CACHE_KEY,
-        )
-        if isinstance(prior, dict) and (prior.get("summary") or {}).get("categories"):
-            previous_score = _safe_float((prior.get("headline") or {}).get("score"))
+    if (prior.get("summary") or {}).get("categories"):
+        previous_score = _safe_float((prior.get("headline") or {}).get("score"))
     delta = score - previous_score if score is not None and previous_score is not None else None
     label = _score_label(score).upper()
     regime = _fear_greed_regime(score)
@@ -394,13 +443,13 @@ def build_fear_greed_payload(
         "crypto-fear-greed",
         title="FEAR & GREED",
         items=drivers[:limit],
-        summary={"score": score, "classification": label, "headerMetrics": header_metrics, "categories": category_rows, "cryptoScore": crypto_score, "cryptoPreviousScore": crypto_prev_score},
-        sources={"alternativeMe": "ok" if crypto_score is not None else "empty", "cnn": "ok" if cnn else "empty", "aaii": "ok" if aaii else "empty", "fred": "ok" if all(fred.values()) else "partial" if any(fred.values()) else "empty",
+        summary={"score": score, "classification": label, "headerMetrics": header_metrics, "categories": category_rows, "cryptoScore": crypto_score, "cryptoPreviousScore": crypto_prev_score, "cryptoIndex": index},
+        sources={"alternativeMe": index_status, "cnn": "ok" if cnn else "empty", "aaii": "ok" if aaii else "empty", "fred": "ok" if all(fred.values()) else "partial" if any(fred.values()) else "empty",
                  **{"fred." + series: "ok" if rows else "unavailable" for series, rows in fred.items()}},
         status="ok" if score is not None else "empty",
     )
     payload["headline"] = {"label": label, "score": score, "previousScore": previous_score, "delta": delta, "regime": regime, "tone": "up" if score and score >= 55 else ("down" if score and score <= 45 else "neutral")}
-    if errors or (score is not None and any(row["degraded"] for row in category_rows)):
+    if errors or index_status != "ok" or (score is not None and (not drivers or any(row["degraded"] for row in category_rows))):
         payload["status"] = "partial" if score is not None else "error"
     payload["errors"] = errors
     payload["sourceDetails"] = source_details
