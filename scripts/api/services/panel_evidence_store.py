@@ -64,6 +64,7 @@ def fetch_bytes(url, *, deadline=None, max_bytes=8 * 1024**2, timeout=45, header
 def archive(store, key, body, data, acquired_at):
     configured = source_value("POLYMONITOR_EXTERNAL_EVIDENCE_SQLITE_PATH")
     path = Path(configured).expanduser() if configured else Path(store.db_path).with_name("external-panel-evidence.sqlite3")
+    capacity_bytes = int(source_value("POLYMONITOR_EXTERNAL_EVIDENCE_MAX_BYTES") or 2 * 1024**3)
     path.parent.mkdir(parents=True, exist_ok=True)
     revision = hashlib.sha256(body).hexdigest()
     encoded_body = zlib.compress(body)
@@ -74,7 +75,7 @@ def archive(store, key, body, data, acquired_at):
         old = db.execute("SELECT length(normalized) FROM evidence WHERE source=? AND revision=?", (key, revision)).fetchone()
         incremental = max(0, len(encoded_data) - old[0]) if old else len(encoded_body) + len(encoded_data)
         physical = sum(p.stat().st_size for p in (path, Path(str(path)+"-wal")) if p.exists())
-        if incremental and physical + incremental > 2 * 1024**3:
+        if incremental and physical + incremental > capacity_bytes:
             raise ValueError("External evidence archive capacity requires review")
         db.execute("INSERT INTO evidence VALUES(?,?,?,?,?,?) ON CONFLICT(source,revision) DO UPDATE SET last_received=excluded.last_received, normalized=excluded.normalized",
             (key, revision, acquired_at, acquired_at, encoded_body, encoded_data))
