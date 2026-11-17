@@ -99,7 +99,6 @@ _GENERIC_TOPIC_GROUPS = {
     ),
     "macro": (
         "commodities-watch", "global-index-monitor", "commodity-equity-transmission",
-        "finance-market-atlas", "finance-liquidity-regime",
         "cpi-components-pressure-registry", "goods-tariff-supply-watch",
         "labor-services-inflation-monitor", "fed-reaction-growth-risk-board",
         "cpi-release-calendar", "inflation-nowcast", "energy-gasoline-shock",
@@ -179,6 +178,8 @@ _NON_PUSHABLE = {
     "price-chart": ("high-frequency selected-market visualization", False),
     "big-tech-market-cap": ("market-cap rankings are dashboard-only", True),
     "consumer-app-pulse": ("app rankings are dashboard-only", True),
+    "finance-market-atlas": ("legacy market classification does not qualify for finance alerts", True),
+    "finance-liquidity-regime": ("legacy score includes loosely classified prediction-market volume", True),
 }
 
 
