@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { DEFAULT_PANEL_IDS, PANEL_LIBRARY } from '@/panels/registry';
 import type { PanelLayoutPrefs } from './panelLayout';
 import { reconcileDefaultPanels } from './defaultPanels';
-import { migratePanelLayout } from './panelIdentity';
 import { AuthApiError, fetchAuthSession } from '@/services/auth';
 import { fetchWorkspaceLayout, saveWorkspaceLayout } from '@/services/product';
 import { clampMapZoom, isWorldEventRegion, type WorldEventRegion } from '@/features/world-event-map';
@@ -19,6 +18,7 @@ export const DEFAULT_MAP_VIEW_MODE: MapViewMode = '2d';
 const VIEW_STORAGE_KEY = 'polydata:map-view:v4';
 const LIBRARY_STORAGE_KEY = 'polydata:panel-library-open:v1';
 const WORKSPACE_SYNC_META_KEY = 'polydata:workspace-sync-meta:v1';
+const registeredPanelIds = new Set(PANEL_LIBRARY.map(({ id }) => id));
 function isMapViewMode(value: unknown): value is MapViewMode {
   return value === '3d' || value === '2d';
 }
@@ -33,13 +33,11 @@ function reorderPanelIds(panelIds: string[], draggedPanelId: string, targetPanel
 }
 
 function sanitizePanelIds(panelIds: string[]) {
-  const valid = new Set(PANEL_LIBRARY.map((panel) => panel.id));
-  const unique: string[] = [];
-  for (const panelId of panelIds) {
-    if (!valid.has(panelId) || unique.includes(panelId)) continue;
-    unique.push(panelId);
-  }
-  return unique;
+  return [...new Set(panelIds.filter((id) => registeredPanelIds.has(id)))];
+}
+
+function sanitizePanelLayout(layout: PanelLayoutPrefs) {
+  return Object.fromEntries(Object.entries(layout).filter(([id]) => registeredPanelIds.has(id)));
 }
 
 function defaultWorkspacePanelIds(bootstrapPayload?: BootstrapPayload | null) {
@@ -109,7 +107,7 @@ export function useWorkspacePreferences() {
     return JSON.stringify(ids) !== JSON.stringify(next.activePanelIds)
       || JSON.stringify(knownIds) !== JSON.stringify(next.knownDefaultPanelIds);
   }, []);
-  const [panelLayoutPrefs, setPanelLayoutPrefs] = useState<PanelLayoutPrefs>(() => migratePanelLayout(readJsonStorage<PanelLayoutPrefs>(PANEL_LAYOUT_STORAGE_KEY, {})));
+  const [panelLayoutPrefs, setPanelLayoutPrefs] = useState<PanelLayoutPrefs>(() => sanitizePanelLayout(readJsonStorage<PanelLayoutPrefs | null>(PANEL_LAYOUT_STORAGE_KEY, {}) ?? {}));
   const [panelPrefsLoaded, setPanelPrefsLoaded] = useState(false);
   const [viewMode, setViewMode] = useState<MapViewMode>(() => {
     const override = readSearchParam('view');
@@ -311,9 +309,11 @@ export function useWorkspaceSync(workspace: ReturnType<typeof useWorkspacePrefer
       } else {
         applying.current = true;
         const { workspace: target, camera: map } = latest.current;
-        accountDefaultsAdded.current = target.applyAccountPanels(server.activePanelIds, server.preferences?.knownDefaultPanelIds);
-        const valid = new Set(PANEL_LIBRARY.map((panel) => panel.id));
-        target.setPanelLayoutPrefs(Object.fromEntries(Object.entries(migratePanelLayout(server.panelLayout || {})).filter(([id]) => valid.has(id))));
+        const savedPanelLayout = server.panelLayout ?? {};
+        const panelLayout = sanitizePanelLayout(savedPanelLayout);
+        accountDefaultsAdded.current = target.applyAccountPanels(server.activePanelIds, server.preferences?.knownDefaultPanelIds)
+          || Object.keys(panelLayout).length !== Object.keys(savedPanelLayout).length;
+        target.setPanelLayoutPrefs(panelLayout);
         const prefs = server.preferences || {};
         // URL camera and view always take precedence over account defaults.
         if (!readSearchParam('region') && !readSearchParam('center') && !readSearchParam('zoom') && isWorldEventRegion(prefs.region)) map.setRegion(prefs.region);

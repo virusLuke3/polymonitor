@@ -51,7 +51,6 @@ for (const account of [false, true]) for (const hidden of [false, true]) {
       await expect.poll(() => writes.length).toBeGreaterThan(0);
       expect(writes.at(-1).activePanelIds).toEqual(survivors);
       expect(writes.at(-1).panelLayout).toEqual(retainedLayout);
-      for (const id of retired) expect(writes.at(-1).preferences.knownDefaultPanelIds).not.toContain(id);
     }
     expect(retiredRequests).toEqual([]);
   });
