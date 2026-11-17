@@ -221,7 +221,6 @@ def format_generic_snapshot(panel_id: str, payload: Mapping[str, Any], *, topic:
     if count_line:
         lines.append(f"Records: {count_line}")
     lines.extend(_display_rows(payload))
-    lines.append("#PanelUpdate")
     text = "\n".join([f"📡 {_title_case_panel_id(panel_id)}", *lines])
     return [
         MessageCandidate(
