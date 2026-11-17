@@ -110,6 +110,9 @@ class GridEsportsWatcher:
         return context
 
     def load_previous_payload(self) -> Dict[str, Any]:
+        stale = self.snapshot_store.get_stale(self.namespace(), self.cache_key())
+        if isinstance(stale, dict):
+            return stale
         if self.snapshot_store.backend == "redis":
             return {}
         try:
@@ -120,8 +123,7 @@ class GridEsportsWatcher:
                     return payload
         except Exception:
             print("[grid-esports] WARN redis read failed", file=sys.stderr)
-        stale = self.snapshot_store.get_stale(self.namespace(), self.cache_key())
-        return stale if isinstance(stale, dict) else {}
+        return {}
 
     def store_payload(self, payload: Dict[str, Any]) -> None:
         ttl_seconds = self.ttl_seconds()
@@ -166,7 +168,8 @@ class GridEsportsWatcher:
     def run_once(self) -> Dict[str, Any]:
         previous = self.load_previous_payload()
         try:
-            payload = grid_esports_service.fetch_live_grid_esports_payload(self.service_context(), limit=self.limit)
+            context = {**self.service_context(), "previous_grid_snapshot": previous}
+            payload = grid_esports_service.fetch_live_grid_esports_payload(context, limit=self.limit)
         except Exception as exc:
             if previous:
                 retained = retained_snapshot(previous, sources={"gridCentralData": "error"})
@@ -237,13 +240,18 @@ def main() -> int:
         print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
         return 0
     while True:
+        started = time.monotonic()
         try:
-            print(json.dumps(watcher.run_once(), ensure_ascii=False), file=sys.stderr)
+            result = watcher.run_once()
+            payload = result["payload"]
+            print(json.dumps({"status": result["status"], "generatedAt": payload.get("generatedAt"),
+                              "sources": payload.get("sources"), "summary": payload.get("summary"),
+                              "eventCount": len(payload.get("events") or [])}, ensure_ascii=False), file=sys.stderr)
         except KeyboardInterrupt:
             return 0
         except Exception as exc:
             print(f"[grid-esports] ERROR watch loop failed: {exc}", file=sys.stderr)
-        time.sleep(watcher.interval_seconds)
+        time.sleep(max(5, watcher.interval_seconds - (time.monotonic() - started)))
 
 
 if __name__ == "__main__":

@@ -84,6 +84,7 @@ _SPECIALIZED = {
     "nba-scoreboard": ("nba", True, True),
     "nba-intel": ("nba", True, True),
     "espn-matchup-predictor": ("nba", True, True),
+    "esports-intel": ("intel", True, False),
     "global-weather-map": ("weather", True, True),
     "weather-news": ("weather", True, True),
 }
@@ -113,7 +114,7 @@ _GENERIC_TOPIC_GROUPS = {
         "jin10-flash",
     ),
     "intel": (
-        "equity-event-command", "global-transport-shipping", "esports-intel",
+        "equity-event-command", "global-transport-shipping",
         "sports-odds", "f1-trackside", "geo-sanctions-shock",
     ),
     "monitor": ("natural-hazards",),

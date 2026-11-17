@@ -978,6 +978,8 @@ export type RuntimeGridEsportsItem = {
   format?: string | null;
   startTime?: string | null;
   startedAt?: string | null;
+  stateUpdatedAt?: string | null;
+  sourceStatus?: 'ok' | 'schedule' | 'stale' | null;
   state?: 'live' | 'upcoming' | 'finished' | 'pending-state' | 'scheduled' | string | null;
   score?: string | null;
   currentMap?: string | null;

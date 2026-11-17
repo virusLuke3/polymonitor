@@ -35,6 +35,7 @@ query EsportsIntelSeries($recentGte: String!, $now: String!, $upcomingLte: Strin
       node {
         id
         startTimeScheduled
+        format { nameShortened }
         teams { baseInfo { id name logoUrl } }
         tournament { id name }
         title { id nameShortened }
@@ -52,6 +53,7 @@ query EsportsIntelSeries($recentGte: String!, $now: String!, $upcomingLte: Strin
       node {
         id
         startTimeScheduled
+        format { nameShortened }
         teams { baseInfo { id name logoUrl } }
         tournament { id name }
         title { id nameShortened }
@@ -61,21 +63,14 @@ query EsportsIntelSeries($recentGte: String!, $now: String!, $upcomingLte: Strin
 }
 """
 
-SERIES_STATE_QUERY = """
-query EsportsIntelSeriesState($id: ID!) {
-  seriesState(id: $id) {
-    startedAt
-    started
-    finished
-    teams {
-      won
-      score
-      kills
-      deaths
-      players { kills deaths }
-    }
+SERIES_STATE_FIELDS = """
+  id valid format startedAt updatedAt started finished
+  teams { id name score won kills deaths }
+  games {
+    id sequenceNumber startedAt started finished
+    map { name }
+    teams { id name score won }
   }
-}
 """
 
 
@@ -90,6 +85,7 @@ class GridEsportsDependencies:
     set_cached_json: Callable[..., Any] | None
     snapshot_store: Any
     utc_now_iso: Callable[..., Any] | None
+    previous_payload: Dict[str, Any] | None = None
 
     @classmethod
     def from_context(
@@ -119,6 +115,7 @@ class GridEsportsDependencies:
                 "set_cached_json",
             ),
             snapshot_store=context.get("SNAPSHOT_STORE"),
+            previous_payload=context.get("previous_grid_snapshot"),
             utc_now_iso=resolve_optional_service_callable(
                 context,
                 "utc_now_iso",
@@ -207,7 +204,7 @@ def _source_status(has_key: bool, central_status: str, state_statuses: Iterable[
     elif any(status == "ok" for status in queried_states):
         state_status = "ok"
     else:
-        state_status = "empty" if queried_states else "not-queried"
+        state_status = ("empty" if all(s == "empty" for s in queried_states) else "error") if queried_states else "not-queried"
     return {
         "gridCentralData": central_status if has_key else "missing-key",
         "gridSeriesState": state_status,
@@ -322,89 +319,99 @@ def _extract_series_nodes(
     return nodes, total_count
 
 
-def _team_names(node: Dict[str, Any]) -> List[str]:
-    names: List[str] = []
+def _metadata_teams(node: Dict[str, Any]) -> Dict[str, str]:
+    teams = {}
     for team in node.get("teams") or []:
         if not isinstance(team, dict):
             continue
         base_info = team.get("baseInfo") if isinstance(team.get("baseInfo"), dict) else {}
+        team_id = str(base_info.get("id") or "").strip()
         name = str(base_info.get("name") or "").strip()
-        if name:
-            names.append(name)
-    return names
+        if team_id:
+            teams[team_id] = name
+    return teams
 
 
-def _state_team_metrics(state: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    if not isinstance(state, dict):
+def _named_team(name: str) -> bool:
+    return bool(name) and not re.fullmatch(r"(?i)(?:tbd|tba|unknown|(?:team|cs2|dota2?|lol|valorant)[ -]?\d+)", name)
+
+
+def _state_teams(state: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    return {str(team["id"]): team for team in state.get("teams") or []
+            if isinstance(team, dict) and team.get("id")}
+
+
+def _state_team_metrics(state: Dict[str, Any], team_ids: List[str]) -> List[Dict[str, Any]]:
+    teams = _state_teams(state)
+    if len(team_ids) != 2 or set(teams) != set(team_ids):
         return []
-    rows: List[Dict[str, Any]] = []
-    for team in state.get("teams") or []:
-        if not isinstance(team, dict):
+    return [{"id": team_id, "score": _safe_int(teams[team_id].get("score")),
+             "kills": _safe_int(teams[team_id].get("kills")), "deaths": _safe_int(teams[team_id].get("deaths")),
+             "won": teams[team_id].get("won") is True} for team_id in team_ids]
+
+
+def _score_label(metrics: List[Dict[str, Any]]) -> str | None:
+    if len(metrics) == 2 and all(item["score"] is not None and item["score"] >= 0 for item in metrics):
+        return f"{metrics[0]['score']}-{metrics[1]['score']}"
+    return None
+
+
+def _game_states(state: Dict[str, Any], team_ids: List[str]) -> List[Dict[str, Any]]:
+    games = []
+    for game in state.get("games") or []:
+        if not isinstance(game, dict) or not game.get("id") or not game.get("started"):
             continue
-        players = [player for player in (team.get("players") or []) if isinstance(player, dict)]
-        player_kills = sum(_safe_int(player.get("kills")) or 0 for player in players)
-        player_deaths = sum(_safe_int(player.get("deaths")) or 0 for player in players)
-        rows.append(
-            {
-                "won": bool(team.get("won")),
-                "score": _safe_int(team.get("score")) or 0,
-                "kills": _safe_int(team.get("kills")) if _safe_int(team.get("kills")) is not None else player_kills,
-                "deaths": _safe_int(team.get("deaths")) if _safe_int(team.get("deaths")) is not None else player_deaths,
-            }
-        )
-    return rows
+        sequence = _safe_int(game.get("sequenceNumber"))
+        if sequence is None or sequence < 1:
+            continue
+        map_data = game.get("map") or {}
+        metrics = _state_team_metrics(game, team_ids)
+        games.append({
+            "id": str(game["id"]), "number": sequence, "map": map_data.get("name"),
+            "startedAt": game.get("startedAt"), "state": "finished" if game.get("finished") is True else "live",
+            "score": _score_label(metrics), "teams": metrics,
+        })
+    return sorted(games, key=lambda game: game["number"])
 
 
-def _momentum_score(metrics: List[Dict[str, Any]]) -> int:
-    if len(metrics) < 2:
-        return 50
-    left = (_safe_int(metrics[0].get("kills")) or 0) - (_safe_int(metrics[0].get("deaths")) or 0) + (_safe_int(metrics[0].get("score")) or 0) * 3
-    right = (_safe_int(metrics[1].get("kills")) or 0) - (_safe_int(metrics[1].get("deaths")) or 0) + (_safe_int(metrics[1].get("score")) or 0) * 3
-    diff = left - right
-    return max(1, min(99, 50 + diff * 4))
-
-
-def _score_label(metrics: List[Dict[str, Any]]) -> str:
-    if len(metrics) < 2:
-        return "--"
-    return f"{metrics[0].get('score', 0)}-{metrics[1].get('score', 0)}"
-
-
-def _context_tags(status: str, metrics: List[Dict[str, Any]], state: Optional[Dict[str, Any]]) -> List[str]:
-    tags = [status.upper()]
-    if isinstance(state, dict) and state.get("startedAt"):
-        tags.append("STATE")
-    if len(metrics) >= 2:
-        kill_diff = (_safe_int(metrics[0].get("kills")) or 0) - (_safe_int(metrics[1].get("kills")) or 0)
-        if kill_diff > 8:
-            tags.append("A KILL EDGE")
-        elif kill_diff < -8:
-            tags.append("B KILL EDGE")
-        elif abs(kill_diff) > 0:
-            tags.append("KILLS EVEN")
-    return tags[:4]
-
-
-def _series_state(
+def _series_states(
     ctx: GridEsportsContext,
-    series_id: str,
+    series_ids: List[str],
     *, deadline: float | None = None,
-) -> Tuple[Optional[Dict[str, Any]], str]:
+) -> Dict[str, Tuple[Optional[Dict[str, Any]], str]]:
+    if not series_ids:
+        return {}
     dependencies = _dependencies(ctx)
     settings = dependencies.settings
     url = str(getattr(settings, "grid_series_state_graphql_url", "") or "").strip()
     if not url:
-        return None, "missing-url"
+        return {series_id: (None, "missing-url") for series_id in series_ids}
+    variables = {f"series{i}": series_id for i, series_id in enumerate(series_ids)}
+    declarations = ", ".join(f"${alias}: ID!" for alias in variables)
+    selections = " ".join(f"{alias}: seriesState(id: ${alias}) {{ {SERIES_STATE_FIELDS} }}" for alias in variables)
+    query = f"query EsportsIntelSeriesStates({declarations}) {{ {selections} }}"
     try:
-        payload = _post_graphql(dependencies, url, SERIES_STATE_QUERY, {"id": series_id}, timeout=45, deadline=deadline)
-        _raise_graphql_errors(payload)
-        state = (payload.get("data") or {}).get("seriesState") if isinstance(payload.get("data"), dict) else None
-        return state if isinstance(state, dict) else None, "ok" if isinstance(state, dict) else "empty"
+        payload = _post_graphql(dependencies, url, query, variables, timeout=30, deadline=deadline)
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            _raise_graphql_errors(payload)
+            data = {}
+        failed = {err["path"][0] for err in payload.get("errors") or [] if isinstance(err, dict) and err.get("path")}
+        states = {}
+        for alias, series_id in variables.items():
+            state = data.get(alias)
+            if alias in failed:
+                states[series_id] = None, "error"
+            elif isinstance(state, dict) and str(state.get("id")) == series_id and state.get("valid") is True:
+                states[series_id] = state, "ok"
+            else:
+                states[series_id] = None, "invalid" if state else "empty"
+        return states
     except Exception as exc:
         logger = getattr(dependencies.application, "logger", None)
         if logger is not None:
-            logger.exception("GRID series state fetch failed series_id=%s error_type=%s http_status=%s", series_id, type(exc).__name__, getattr(getattr(exc, "response", None), "status_code", None))
-        return None, "error"
+            logger.warning("GRID series-state batch unavailable: count=%s error=%s http=%s", len(series_ids), type(exc).__name__, getattr(getattr(exc, "response", None), "status_code", None))
+        return {series_id: (None, "error") for series_id in series_ids}
 
 
 def _market_text(value: Any) -> str:
@@ -482,18 +489,30 @@ def _pm_context(
 def _normalize_series(
     node: Dict[str, Any],
     state: Optional[Dict[str, Any]],
-    *,
-    ctx: GridEsportsContext,
 ) -> Dict[str, Any]:
-    team_names = _team_names(node)
+    metadata = _metadata_teams(node)
+    official = _state_teams(state or {})
+    team_ids = list(metadata)
+    if len(official) == 2 and (len(metadata) != 2 or not all(_named_team(name) for name in metadata.values())):
+        team_ids = list(official)
+    team_names = []
+    for team_id in team_ids:
+        name = str(official.get(team_id, {}).get("name") or "").strip()
+        team_names.append(name if _named_team(name) else metadata.get(team_id, ""))
     title = node.get("title") if isinstance(node.get("title"), dict) else {}
     tournament = node.get("tournament") if isinstance(node.get("tournament"), dict) else {}
-    metrics = _state_team_metrics(state)
+    metrics = _state_team_metrics(state or {}, team_ids)
+    updated = _parse_iso((state or {}).get("updatedAt"))
+    if not metrics or not updated or updated > _utc_now() + timedelta(seconds=60):
+        state, updated, metrics = None, None, []
     status = _status_from_state(state, node.get("startTimeScheduled"))
-    momentum = _momentum_score(metrics)
+    games = _game_states(state or {}, team_ids)
+    current = next((game for game in reversed(games) if game["state"] == "live"), games[-1] if games else None)
     game_title = str(title.get("nameShortened") or title.get("name") or "ESPORTS").upper()
-    team_a = team_names[0] if len(team_names) >= 1 else "TBD"
-    team_b = team_names[1] if len(team_names) >= 2 else "TBD"
+    team_a, team_b = (team_names + ["", ""])[:2]
+    team_a = team_a if _named_team(team_a) else "TBD"
+    team_b = team_b if _named_team(team_b) else "TBD"
+    format_label = (node.get("format") or {}).get("nameShortened") or (state or {}).get("format")
     return {
         "id": str(node.get("id") or ""),
         "gameTitle": game_title,
@@ -501,18 +520,63 @@ def _normalize_series(
         "series": f"{team_a} vs {team_b}",
         "teamA": team_a,
         "teamB": team_b,
-        "format": "BO?",
+        "teamIds": team_ids,
+        "format": format_label,
         "startTime": node.get("startTimeScheduled"),
-        "startedAt": state.get("startedAt") if isinstance(state, dict) else None,
+        "startedAt": (state or {}).get("startedAt"),
+        "stateUpdatedAt": _iso(updated) if updated else None,
+        "sourceStatus": "ok" if status in {"live", "finished"} else "schedule",
         "state": status,
-        "score": _score_label(metrics),
-        "currentMap": "series",
+        "score": _score_label(metrics) if status in {"live", "finished"} else None,
+        "currentMap": " · ".join(str(part) for part in (f"Game {current['number']}", current["map"], current["score"]) if part) if current else None,
+        "games": games,
         "liveContext": "Official state snapshot" if state else "Series metadata only",
-        "momentum": momentum,
-        "contextTags": _context_tags(status, metrics, state),
         "teamMetrics": metrics,
-        "pm": _pm_context(ctx, team_names),
     }
+
+
+def _verified_events(items: List[Dict[str, Any]], previous: Dict[str, Any], reference: datetime) -> Tuple[str, List[Dict[str, Any]]]:
+    since = _parse_iso(previous.get("eventsSince")) or reference
+    cutoff = max(since, reference - timedelta(minutes=20))
+    old = {row["id"]: row for row in previous.get("items") or [] if row.get("stateUpdatedAt")}
+    events = {row["id"]: row for row in previous.get("events") or []
+              if (stamp := _parse_iso(row.get("occurredAt"))) and cutoff < stamp <= reference}
+    for item in items:
+        if item["sourceStatus"] != "ok":
+            continue
+        series_id = item["id"]
+        title = f"{item['gameTitle']} · {item['series']}"
+
+        def record(key: str, action: str, stamp: datetime | None, score: str | None = None) -> None:
+            if stamp and cutoff < stamp <= reference:
+                event_id = f"{series_id}:{key}"
+                events.setdefault(event_id, {"id": event_id, "title": title, "tournament": item["tournament"],
+                                            "format": item["format"], "action": action, "score": score, "occurredAt": _iso(stamp)})
+
+        prior = old.get(series_id)
+        started = _parse_iso(item["startedAt"])
+        if item["state"] == "live" and not (prior and prior["state"] == "finished"):
+            record("started", "Series started", started)
+        stamp = _parse_iso(item["stateUpdatedAt"])
+        previous_stamp = _parse_iso(prior["stateUpdatedAt"]) if prior else None
+        if not previous_stamp or prior["state"] != "live" or not stamp or stamp <= previous_stamp:
+            continue
+        if item["state"] == "finished" and item["score"]:
+            record("final", "Final series score", stamp, item["score"])
+            continue
+        previous_games = {game["id"]: game for game in prior.get("games") or []}
+        for game in item["games"]:
+            former = previous_games.get(game["id"])
+            game_start = _parse_iso(game["startedAt"])
+            if game["state"] == "finished" and game["score"] and (
+                (former and former["state"] == "live") or
+                (not former and game_start is not None and game_start > previous_stamp)
+            ):
+                label = f"Game {game['number']} finished"
+                if game["map"]:
+                    label += f" · {game['map']}"
+                record(f"game:{game['id']}", label, stamp, game["score"])
+    return _iso(since), list(events.values())
 
 
 def _window(settings: Any, now_iso: str | None = None) -> Tuple[str, str]:
@@ -640,7 +704,8 @@ def fetch_live_grid_esports_payload(
     _raise_graphql_errors(payload)
     recent_nodes, recent_count = _extract_series_nodes(payload, "recent")
     upcoming_nodes, upcoming_count = _extract_series_nodes(payload, "upcoming")
-    uses_nearby_windows = bool(recent_nodes or upcoming_nodes)
+    data = payload["data"] if isinstance(payload.get("data"), dict) else {}
+    uses_nearby_windows = "recent" in data and "upcoming" in data
     if not uses_nearby_windows:
         # Compatibility for fixtures and older GraphQL proxies that expose a
         # single allSeries connection.
@@ -653,44 +718,56 @@ def fetch_live_grid_esports_payload(
                 nodes_by_id.setdefault(series_id, node)
         nodes = list(nodes_by_id.values())
         total_count = recent_count + upcoming_count
-    selected = _select_relevant_series(nodes, limit=limit, reference_at=generated_at)
     reference_at = _parse_iso(generated_at) or _utc_now()
-    state_statuses: List[str] = []
-    items: List[Dict[str, Any]] = []
+    previous = dependencies.previous_payload or {}
+    prior_items = {row["id"]: row for row in previous.get("items") or [] if row.get("stateUpdatedAt")}
+    selected = _select_relevant_series(nodes, limit=len(nodes), reference_at=generated_at)
+    due, upcoming = [], []
     for node in selected:
-        series_id = str(node.get("id") or "").strip()
-        scheduled_at = _parse_iso(node.get("startTimeScheduled"))
-        state_due = (
-            not uses_nearby_windows
-            or scheduled_at is None
-            or scheduled_at <= reference_at + timedelta(minutes=15)
-        )
-        if time.monotonic() >= deadline:
-            state, state_status = None, "budget-exhausted"
-        elif not state_due:
-            state, state_status = None, "not-due"
+        if not node.get("id"):
+            continue
+        scheduled = _parse_iso(node.get("startTimeScheduled"))
+        if scheduled and scheduled > reference_at:
+            if len(upcoming) < limit:
+                upcoming.append(node)
         else:
-            state, state_status = (
-                _series_state(dependencies, series_id, deadline=deadline)
-                if series_id
-                else (None, "missing-id")
-            )
-            if (
-                state_status == "empty"
-                and scheduled_at is not None
-                and scheduled_at > reference_at
-            ):
-                state_status = "not-due"
-        state_statuses.append(state_status)
-        items.append(_normalize_series(node, state, ctx=dependencies))
+            due.append(node)
+    due.sort(key=lambda node: prior_items.get(str(node["id"]), {}).get("state") != "live")
+    due = due[:limit]
+    states = _series_states(dependencies, [str(node["id"]) for node in due], deadline=deadline)
+    reference_at = _utc_now()
+    generated_at = _iso(reference_at)
+    items, state_statuses = [], []
+    for node in (*due, *upcoming):
+        series_id = str(node["id"])
+        state, status = states.get(series_id, (None, "not-due"))
+        row = _normalize_series(node, state)
+        if status == "ok" and not row["stateUpdatedAt"]:
+            status = "invalid"
+        state_statuses.append(status)
+        if status != "ok" and (prior := prior_items.get(series_id)):
+            prior_stamp = _parse_iso(prior["stateUpdatedAt"])
+            if prior_stamp and reference_at - timedelta(minutes=15) <= prior_stamp <= reference_at:
+                row = {**prior, "sourceStatus": "stale"}
+        stamp = _parse_iso(row["stateUpdatedAt"])
+        if row["state"] == "live" and stamp and reference_at - stamp > timedelta(minutes=8):
+            row["sourceStatus"] = "stale"
+        if row["teamA"] != "TBD" and row["teamB"] != "TBD":
+            items.append(row)
 
-    live_count = sum(1 for item in items if item.get("state") == "live")
-    state_failures = [
-        state_status
-        for state_status in state_statuses
-        if state_status not in {"ok", "not-due"}
-    ]
-    status = "ok" if items and not state_failures else "degraded" if items else "empty"
+    def display_rank(item: Dict[str, Any]) -> tuple[int, float]:
+        phase = {"live": 0, "finished": 1, "upcoming": 2}.get(item["state"], 3)
+        stamp = _parse_iso(item["stateUpdatedAt"] or item["startTime"])
+        return phase, (stamp.timestamp() if phase == 2 else -stamp.timestamp()) if stamp else 0
+
+    events_since, events = _verified_events(items, previous, reference_at)
+    items.sort(key=display_rank)
+    items = items[:limit]
+    for item in items:
+        item["pm"] = _pm_context(dependencies, [item["teamA"], item["teamB"]])
+    live_count = sum(item["state"] == "live" and item["sourceStatus"] == "ok" for item in items)
+    state_failures = [state for state in state_statuses if state not in {"ok", "not-due"}]
+    status = "degraded" if state_failures else "ok" if items else "empty"
     return normalize_grid_esports_payload(
         {
             "generatedAt": generated_at,
@@ -699,11 +776,13 @@ def fetch_live_grid_esports_payload(
             "status": status,
             "sources": _source_status(True, "ok", state_statuses),
             "window": {"gte": gte, "lte": lte},
+            "eventsSince": events_since,
+            "events": events,
             "summary": {
                 "totalSeries": total_count or len(items),
                 "visibleSeries": len(items),
                 "liveSeries": live_count,
-                "officialSnapshots": sum(1 for item in items if item.get("teamMetrics")),
+                "officialSnapshots": sum(1 for item in items if item["sourceStatus"] == "ok"),
                 "pmLinked": sum(1 for item in items if isinstance(item.get("pm"), dict) and item["pm"].get("status") == "matched"),
             },
             "items": items,

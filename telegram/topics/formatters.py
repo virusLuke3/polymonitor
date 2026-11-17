@@ -292,6 +292,26 @@ def format_nba_predictor(payload: Dict[str, Any]) -> List[MessageCandidate]:
     return messages
 
 
+def format_esports_intel(payload: Dict[str, Any]) -> List[MessageCandidate]:
+    messages = []
+    for event in payload.get("events") or []:
+        if not isinstance(event, dict):
+            continue
+        stamp = source_clock(event, "occurredAt")
+        if not stamp or not all(event.get(field) for field in ("id", "title", "action")):
+            continue
+        result = " · ".join(_text(event.get(key)) for key in ("action", "score") if event.get(key))
+        context = " · ".join(_text(event.get(key)) for key in ("tournament", "format") if event.get(key))
+        messages.append(MessageCandidate(
+            topic="intel",
+            dedupe_key=f"grid-esports:{event['id']}",
+            text=_compose_post(header="🎮 Esports · GRID", title=event["title"], lines=[result, context]),
+            metadata={"panel": "esports-intel"},
+            observed_at=stamp,
+        ))
+    return messages
+
+
 def format_weather_map(payload: Dict[str, Any], *, summary_only: bool = False) -> List[MessageCandidate]:
     messages: List[MessageCandidate] = []
     summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
@@ -645,6 +665,8 @@ def _format_specialized(panel_id: str, payload: Dict[str, Any], *, live: bool = 
         return format_nba_intel(payload)
     if panel_id == "espn-matchup-predictor":
         return format_nba_predictor(payload)
+    if panel_id == "esports-intel":
+        return format_esports_intel(payload)
     if panel_id == "global-weather-map":
         return format_weather_map(payload, summary_only=live)
     if panel_id == "weather-news":

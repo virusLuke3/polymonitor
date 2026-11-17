@@ -120,9 +120,9 @@ export function BookmakerPanel({ payload, game = false }: { payload?: Payload; g
   const { locale, formatDateTime, formatRelativeTime } = useI18n();
   const t = (en: string, zh: string) => locale === 'zh' ? zh : en;
   const runtime = usePanelRuntimeView();
-  const [sport, setSport] = useState(game ? 'lol' : 'nba');
+  const [sport, setSport] = useState(game ? 'cs2' : 'nba');
   const [eventId, setEventId] = useState('');
-  const [tab, setTab] = useState('odds');
+  const [tab, setTab] = useState(game ? 'facts' : 'odds');
   const [provider, setProvider] = useState('');
   const [browse, setBrowse] = useState(false);
   const board = payload?.bookmakerBoard;
@@ -173,8 +173,12 @@ export function BookmakerPanel({ payload, game = false }: { payload?: Payload; g
     {tab === 'facts' && <div className="wm-bookmaker-facts">
       {game && <><p className="wm-bookmaker-caption">{t('GRID · official series state; CS2 / Dota coverage depends on access.', 'GRID 官方系列赛赛况；CS2 / Dota 覆盖取决于账号权限。')}</p>
         {(payload?.items || []).filter(i => sport === 'cs2' ? /counter|cs2/i.test(i.gameTitle || '') : sport === 'dota2' ? /dota/i.test(i.gameTitle || '') : sport === 'lol' ? /league/i.test(i.gameTitle || '') : /valorant/i.test(i.gameTitle || '')).map(i =>
-          <article key={i.id}><div><small>{i.gameTitle} · {i.state}</small><b>{i.score || '—'}</b></div><strong>{i.teamA || '—'} <em>vs</em> {i.teamB || '—'}</strong>
-            <p>{i.currentMap || i.tournament || '—'}</p><small>{payload?.officialGeneratedAt ? formatRelativeTime(payload.officialGeneratedAt) : t('Time unknown', '时间未知')}</small></article>)}
+          <article key={i.id}><div><small>{i.gameTitle} · {i.sourceStatus === 'stale' ? t('Last verified', '上次确认') : i.state}</small><b>{i.score || '—'}</b></div>
+            <strong>{i.teamA || '—'} <em>vs</em> {i.teamB || '—'}</strong>
+            <p>{[i.tournament, i.format].filter(Boolean).join(' · ')}</p>
+            {i.currentMap && <p>{i.currentMap}</p>}
+            <small>{i.stateUpdatedAt ? formatRelativeTime(i.stateUpdatedAt) :
+              i.startTime ? `${t('Scheduled', '原定开赛')} · ${formatDateTime(i.startTime)}` : t('Time unknown', '时间未知')}</small></article>)}
         {(sport === 'lol' || sport === 'valorant') && <p className="wm-bookmaker-empty">{t('This GRID account has no verified state feed for this game. Bookmaker odds are available independently.', '当前 GRID 账号尚未取得此游戏的赛况权限；博彩公司赔率是独立数据链路。')}</p>}
       </>}
       {(payload?.sportsContext || []).filter(c => game ? sport === 'dota2' : sport === 'nba' ? c.source.id.includes('standings') : sport === 'tennis' && c.source.id.includes('tournament')).map(c =>
