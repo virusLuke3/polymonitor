@@ -430,12 +430,13 @@ def run_once(
         )
         baselined.extend(source_baselined)
         observations.update(source_observations)
+        chosen = source_candidates + chosen
         if listing_observation is not None:
             observations.setdefault(LISTING_PANEL, {}).update(listing_observation)
             if prime or not listing_prior.get("productModes"):
                 baselined.append(LISTING_PANEL)
         result = publish_candidates(
-            source_candidates + chosen,
+            chosen,
             settings=settings,
             state=state,
             telegram=telegram,
@@ -444,7 +445,7 @@ def run_once(
         )
         if not dry_run:
             retryable = set(result.retryable_keys)
-            for candidate in source_candidates + chosen:
+            for candidate in chosen:
                 if candidate.dedupe_key not in retryable:
                     continue
                 panel = candidate.metadata["panel"]
@@ -461,7 +462,7 @@ def run_once(
     )
     for candidate in chosen:
         result.selected_by_topic.setdefault(candidate.topic, []).append(candidate.metadata["panel"])
-    result.candidates = len(candidates)
+    result.candidates = len(candidates) + len(source_candidates)
     result.fetched = len(snapshots)
     result.fetch_failed = len(TARGET_PANELS.get(target, TARGET_PANELS["all"])) + len(historical_panels) - len(snapshots)
     result.api_base = api.base_url
