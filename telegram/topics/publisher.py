@@ -382,7 +382,11 @@ def run_once(
         timeout_seconds=settings.request_timeout_seconds,
     )
     snapshots = fetch_snapshots(api, target=target, historical_panels=historical_panels)
-    historical_unready = [panel_id for panel_id, payload in snapshots.items() if not _snapshot_ready(payload)]
+    historical_unready = [
+        panel_id for panel_id, payload in snapshots.items()
+        if not _snapshot_ready(payload)
+        and not (panel_id == "crypto-funding-watch" and (payload.get("settlementWatch") or {}).get("batches"))
+    ]
     publishable_snapshots = {
         panel_id: payload
         for panel_id, payload in snapshots.items()

@@ -35,6 +35,7 @@ from runtime.redis_snapshot_store import seed_writer
 from api.clients.source_transport import source_session
 from api.config import load_api_settings
 from api.services import crypto_funding_service
+from api.services.crypto_funding import settlements
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot, SnapshotPublicationError
 from runtime.redis_snapshot_store import create_snapshot_store as SnapshotStore
 
@@ -74,8 +75,10 @@ class CryptoFundingWatcher:
         self.http_lock = threading.Lock()
         self.executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="funding-venue")
         self.market_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="funding-market")
+        self.settlement_executor = ThreadPoolExecutor(max_workers=6, thread_name_prefix="funding-settlement")
         self.market_jobs = {}
         self.venue_jobs = {}
+        self.settlement_jobs = {}
 
     def ttl_seconds(self) -> int:
         configured = int(os.environ.get("POLYDATA_CRYPTO_FUNDING_SEED_TTL_SECONDS", "0") or 0)
@@ -142,6 +145,7 @@ class CryptoFundingWatcher:
     def close(self) -> None:
         self.executor.shutdown(wait=True, cancel_futures=True)
         self.market_executor.shutdown(wait=True, cancel_futures=True)
+        self.settlement_executor.shutdown(wait=True, cancel_futures=True)
         for session in self.http_sessions:
             session.close()
 
@@ -220,6 +224,12 @@ class CryptoFundingWatcher:
                            for asset in previous.get("assets", [])],
                 "coverage": {**previous.get("coverage", {}), "succeeded": 0, "retained": len(items)},
                 "errorCode": type(exc).__name__}
+        settlement_watch = settlements.collect(
+            previous.get("settlementWatch") or {}, payload,
+            urls={"Binance": self.settings.crypto_funding_watch_api_url, "Bybit": self.settings.crypto_funding_watch_bybit_api_url},
+            get=self.http_json_get, executor=self.settlement_executor, jobs=self.settlement_jobs, now=int(time.time()),
+        )
+        payload["settlementWatch"] = settlement_watch
         payload["refreshIntervalSeconds"] = self.interval_seconds
         self.store_payload(payload)
         status = str(payload.get("status") or "unavailable")
@@ -232,6 +242,7 @@ class CryptoFundingWatcher:
                 "assets": len(payload.get("assets", [])), "sources": payload.get("sources", {}),
                 "succeeded": succeeded, "retained": payload.get("coverage", {}).get("retained", 0),
                 "missing": payload.get("coverage", {}).get("missing", 0),
+                "settlementContracts": len(settlement_watch["plans"]), "settlementBatches": len(settlement_watch["batches"]),
                 "marketUniverse": payload.get("marketUniverse", {}).get("status")}
 
 

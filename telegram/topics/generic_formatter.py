@@ -55,7 +55,7 @@ _EVENT_CLOCK_FIELDS = (
     "updatedAt", "lastUpdate", "receivedAt",
 )
 _SAMPLED_PANELS = {
-    "crypto-funding-watch", "crypto-order-flow", "crypto-oracle-reference", "options-implied-probability",
+    "crypto-order-flow", "crypto-oracle-reference", "options-implied-probability",
 }
 SUMMARY_KEY_PREFIX = "summary:"
 _UNUSABLE_ROW_STATES = {"stale", "retained", "unavailable", "error", "failed", "warming"}

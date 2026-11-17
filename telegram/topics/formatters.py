@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 from urllib.parse import quote_plus
 
@@ -307,6 +308,31 @@ def format_esports_intel(payload: Dict[str, Any]) -> List[MessageCandidate]:
             dedupe_key=f"grid-esports:{event['id']}",
             text=_compose_post(header="🎮 Esports · GRID", title=event["title"], lines=[result, context]),
             metadata={"panel": "esports-intel"},
+            observed_at=stamp,
+        ))
+    return messages
+
+
+def format_funding_settlements(payload: Dict[str, Any]) -> List[MessageCandidate]:
+    messages = []
+    for batch in (payload.get("settlementWatch") or {}).get("batches") or []:
+        stamp = source_clock(batch, "settledAt")
+        if not stamp or not batch.get("id"):
+            continue
+        assets: dict[str, list[str]] = {}
+        for row in sorted(batch.get("rows") or [], key=lambda item: (item["asset"], item["exchange"], item["symbol"])):
+            rate = _number(row.get("ratePercent"))
+            if rate is not None:
+                assets.setdefault(row["asset"], []).append(f"{row['exchange']} {row['symbol']} {rate:+.6f}%")
+        if not assets:
+            continue
+        time_label = datetime.fromtimestamp(batch["dueAt"], timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        lines = [f"{asset} · {' | '.join(values)}" for asset, values in assets.items()]
+        messages.append(MessageCandidate(
+            topic="alpha",
+            dedupe_key=f"funding-settlement:{batch['id']}",
+            text="\n".join(["💰 资金费率已结算", time_label, *lines]),
+            metadata={"panel": "crypto-funding-watch"},
             observed_at=stamp,
         ))
     return messages
@@ -667,6 +693,8 @@ def _format_specialized(panel_id: str, payload: Dict[str, Any], *, live: bool = 
         return format_nba_predictor(payload)
     if panel_id == "esports-intel":
         return format_esports_intel(payload)
+    if panel_id == "crypto-funding-watch":
+        return format_funding_settlements(payload)
     if panel_id == "global-weather-map":
         return format_weather_map(payload, summary_only=live)
     if panel_id == "weather-news":

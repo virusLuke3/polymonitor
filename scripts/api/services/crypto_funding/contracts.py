@@ -13,6 +13,15 @@ FRESH_SECONDS = 180
 RETAIN_SECONDS = 900
 CATALOG_SECONDS = 600
 CATALOG_RETAIN_SECONDS = 1800
+FUNDING_PANEL_ORDER = ("BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "ADA", "AVAX", "LINK", "TRX", "DOT", "BCH", "SUI", "NEAR", "APT")
+FUNDING_PANEL_LIMIT = 24
+
+
+def ordered_funding_assets(assets: list[dict], limit: int = FUNDING_PANEL_LIMIT) -> list[dict]:
+    by_asset = {str(row.get("asset") or row.get("symbol") or "").upper(): row for row in assets if isinstance(row, dict)}
+    ordered = [by_asset[asset] for asset in FUNDING_PANEL_ORDER if asset in by_asset]
+    ordered.extend(row for asset, row in by_asset.items() if asset not in FUNDING_PANEL_ORDER)
+    return ordered[:limit]
 
 
 def number(value: Any) -> float | None:

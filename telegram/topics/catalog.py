@@ -79,6 +79,7 @@ _SPECIALIZED = {
     "related-news": ("intel", False, False),
     "alpha-signal": ("alpha", True, True),
     "new-market-signals": ("alpha", True, True),
+    "crypto-funding-watch": ("alpha", True, False),
     "polymarket-macro-map": ("macro", True, True),
     "cpi-release-command-center": ("macro", True, True),
     "nba-scoreboard": ("nba", True, True),
@@ -92,8 +93,8 @@ _SPECIALIZED = {
 
 _GENERIC_TOPIC_GROUPS = {
     "alpha": (
-        "crypto-watch", "crypto-funding-watch", "defi-token-watch",
-        "defi-yield-monitor", "defi-security-watch", "crypto-perp-funding",
+        "crypto-watch", "defi-token-watch",
+        "defi-yield-monitor", "defi-security-watch",
         "tradfi-perp-radar", "crypto-fear-greed", "crypto-etf-flow",
         "stablecoin-monitor", "onchain-tradfi-perp-radar",
         "whale-tracker", "suspicious-flow",
@@ -179,6 +180,7 @@ _NON_PUSHABLE = {
     "price-chart": ("high-frequency selected-market visualization", False),
     "big-tech-market-cap": ("market-cap rankings are dashboard-only", True),
     "consumer-app-pulse": ("app rankings are dashboard-only", True),
+    "crypto-perp-funding": ("indicative funding belongs to the dashboard; confirmed settlements use crypto-funding-watch", True),
     "finance-market-atlas": ("legacy market classification does not qualify for finance alerts", True),
     "finance-liquidity-regime": ("legacy score includes loosely classified prediction-market volume", True),
 }

@@ -34,25 +34,6 @@ GLOBAL_INDEX_SYMBOLS = (
 )
 
 
-CRYPTO_PERP_ORDER = (
-    "BTC",
-    "ETH",
-    "SOL",
-    "BNB",
-    "XRP",
-    "DOGE",
-    "ADA",
-    "AVAX",
-    "LINK",
-    "TRX",
-    "DOT",
-    "BCH",
-    "SUI",
-    "NEAR",
-    "APT",
-)
-
-
 RELIABLE_DEFI_PROJECTS = {
     "aave-v3": 120,
     "aave": 118,
@@ -144,7 +125,7 @@ def build_crypto_perps_payload(
     limit: int,
 ) -> Dict[str, Any]:
     dependencies = _dependencies(ctx)
-    requested_limit = max(limit, len(CRYPTO_PERP_ORDER), 24)
+    requested_limit = max(limit, crypto_funding_service.contracts.FUNDING_PANEL_LIMIT)
     if dependencies.get_crypto_funding_watch_snapshot is not None:
         base = dependencies.get_crypto_funding_watch_snapshot(
             limit=requested_limit,
@@ -154,13 +135,8 @@ def build_crypto_perps_payload(
             dependencies.crypto_funding,
             limit=requested_limit,
         )
-    asset_map = {str(asset.get("asset") or asset.get("symbol") or "").upper(): asset for asset in (base.get("assets") or []) if isinstance(asset, dict)}
-    ordered_assets = [asset_map[symbol] for symbol in CRYPTO_PERP_ORDER if symbol in asset_map]
-    extras = [asset for symbol, asset in asset_map.items() if symbol not in CRYPTO_PERP_ORDER]
     rows: List[Dict[str, Any]] = []
-    for asset in (ordered_assets + extras)[:limit]:
-        if not isinstance(asset, dict):
-            continue
+    for asset in crypto_funding_service.contracts.ordered_funding_assets(base.get("assets") or [], limit):
         funding = _safe_float(asset.get("consensusFundingPercent") if asset.get("consensusFundingPercent") is not None else asset.get("maxAbsFundingPercent"))
         bias = str(asset.get("bias") or "mixed")
         signed = funding
