@@ -139,8 +139,7 @@ _GENERIC_TOPIC_GROUPS = {
 }
 
 
-# Explicit classification of the registered external-data expansion. This adds
-# opt-in all-panels coverage only; the eleven default deliveries stay unchanged.
+# External-data expansion is opt-in through all-panels.
 _EXTERNAL_TOPIC_GROUPS = {
     'alpha': ('chain-metrics-monitor', 'crypto-listing-watch', 'crypto-project-milestones'),
     'macro': ('fiscal-tax-monitor', 'merger-progress', 'private-valuation-watch'),

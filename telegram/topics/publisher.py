@@ -6,7 +6,7 @@ import json
 import os
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List
 
@@ -31,14 +31,17 @@ PANEL_ENDPOINTS = {
     "worldcup-intel": ("/runtime/sports/worldcup-intel", {"limit": 24}),
     "global-weather-map": ("/runtime/weather/global-map", {"limit": 34}),
     "weather-news": ("/runtime/weather/news", {"limit": 24}),
+    "geo-sanctions-shock": ("/runtime/panels/geo-sanctions-shock", {"limit": 12}),
+    "policy-progress": ("/runtime/panels/policy-progress", {"limit": 12}),
 }
-ALL_PANELS_MAX_WORKERS = 4
-ALL_PANELS_REQUEST_TIMEOUT_SECONDS = 10
-
+INTEL_PANELS = ("geo-sanctions-shock", "policy-progress")
+FETCH_MAX_WORKERS = 4
+FETCH_TIMEOUT_SECONDS = 10
 
 TARGET_PANELS = {
     "all": tuple(PANEL_ENDPOINTS),
     "news": ("latest-content",),
+    "intel": INTEL_PANELS,
     "alpha": ("alpha-signal", "new-market-signals"),
     "macro": ("polymarket-macro-map", "cpi-release-command-center"),
     "nba": ("nba-scoreboard", "nba-intel", "espn-matchup-predictor"),
@@ -72,6 +75,7 @@ class PublishResult:
     format_unsupported: int = 0
     format_errors: int = 0
     catalog_primed: bool = False
+    last_message_id_by_topic: dict[str, int] = field(default_factory=dict)
 
 
 def _write_heartbeat(*, phase: str, result: PublishResult | None = None, error: str = "") -> None:
@@ -95,69 +99,42 @@ def _write_heartbeat(*, phase: str, result: PublishResult | None = None, error: 
 
 
 def fetch_snapshots(api: PolyDataApiClient, *, target: str) -> Dict[str, Dict]:
-    if target == "all-panels":
-        runtime_snapshots: Dict[str, Dict] = {}
+    panel_ids = TARGET_PANELS.get(target, TARGET_PANELS["all"])
+    timeout = min(FETCH_TIMEOUT_SECONDS, api.timeout_seconds)
 
-        def fetch_runtime_panel(panel_id: str) -> tuple[str, Dict | None, int]:
-            panel_api = api.isolated(timeout_seconds=ALL_PANELS_REQUEST_TIMEOUT_SECONDS)
-            try:
+    def fetch(panel_id: str) -> Dict | None:
+        panel_api = api.isolated(timeout_seconds=timeout)
+        try:
+            with panel_api.session:
+                if target != "all-panels" or panel_id not in SERVER_RUNTIME_PANEL_IDS:
+                    path, params = PANEL_ENDPOINTS[panel_id]
+                    return panel_api.get_json(path, params=params)
                 envelope = panel_api.get_json(
                     "/v1/runtime/panels",
                     params={"ids": panel_id, "limit": 12},
-                    timeout_seconds=ALL_PANELS_REQUEST_TIMEOUT_SECONDS,
                 )
-                data = envelope.get("data") if isinstance(envelope.get("data"), dict) else {}
-                panels = data.get("panels") if isinstance(data.get("panels"), dict) else {}
-                errors = envelope.get("errors") if isinstance(envelope.get("errors"), list) else []
-                payload = panels.get(panel_id)
-                return panel_id, payload if isinstance(payload, dict) else None, len(errors)
-            except Exception as exc:
+            data = envelope.get("data") or {}
+            payload = (data.get("panels") or {}).get(panel_id)
+            if envelope.get("errors") or not isinstance(payload, dict):
                 print(
-                    "[telegram-publisher] WARN all-panels panel failed "
-                    f"panel={panel_id} error_class={exc.__class__.__name__}",
+                    f"[telegram-publisher] WARN runtime panel response panel={panel_id} "
+                    f"returned={isinstance(payload, dict)}",
                     file=sys.stderr,
                 )
-                return panel_id, None, 1
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=ALL_PANELS_MAX_WORKERS) as executor:
-            for panel_id, payload, error_count in executor.map(fetch_runtime_panel, SERVER_RUNTIME_PANEL_IDS):
-                if payload is not None:
-                    runtime_snapshots[panel_id] = payload
-                if error_count:
-                    print(
-                        "[telegram-publisher] WARN all-panels panel partial "
-                        f"panel={panel_id} returned={payload is not None} errors={error_count}",
-                        file=sys.stderr,
-                    )
-
-        snapshots: Dict[str, Dict] = {
-            panel_id: runtime_snapshots[panel_id]
-            for panel_id in SERVER_RUNTIME_PANEL_IDS
-            if panel_id in runtime_snapshots
-        }
-        for panel_id in ("latest-content", "worldcup-intel"):
-            path, params = PANEL_ENDPOINTS[panel_id]
-            try:
-                snapshots[panel_id] = api.get_json(path, params=params)
-            except Exception as exc:
-                print(
-                    f"[telegram-publisher] WARN fetch failed panel={panel_id} error_class={exc.__class__.__name__}",
-                    file=sys.stderr,
-                )
-        return snapshots
-
-    panel_ids = TARGET_PANELS.get(target, TARGET_PANELS["all"])
-    snapshots: Dict[str, Dict] = {}
-    for panel_id in panel_ids:
-        path, params = PANEL_ENDPOINTS[panel_id]
-        try:
-            snapshots[panel_id] = api.get_json(path, params=params)
+            return payload if isinstance(payload, dict) else None
         except Exception as exc:
             print(
                 f"[telegram-publisher] WARN fetch failed panel={panel_id} error_class={exc.__class__.__name__}",
                 file=sys.stderr,
             )
-    return snapshots
+            return None
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=FETCH_MAX_WORKERS) as executor:
+        return {
+            panel_id: payload
+            for panel_id, payload in zip(panel_ids, executor.map(fetch, panel_ids))
+            if payload is not None
+        }
 
 
 def _candidate_targets(candidate: MessageCandidate, settings: TelegramSettings) -> Iterable[str]:
@@ -203,7 +180,7 @@ def publish_candidates(
                 continue
             else:
                 try:
-                    telegram.send_message(
+                    receipts = telegram.send_message(
                         chat_id=config.chat_id,
                         text=candidate.text,
                         message_thread_id=config.message_thread_id,
@@ -220,6 +197,10 @@ def publish_candidates(
                     continue
                 state.mark(target, candidate.dedupe_key)
                 result.sent += 1
+                if receipts:
+                    message_id = receipts[-1].get("result", {}).get("message_id")
+                    if isinstance(message_id, int):
+                        result.last_message_id_by_topic[target] = message_id
     if not dry_run:
         state.save()
     return result
@@ -245,7 +226,16 @@ def run_once(
         timeout_seconds=settings.request_timeout_seconds,
     )
     snapshots = fetch_snapshots(api, target=target)
-    candidates, format_stats = format_all_snapshots_with_stats(snapshots)
+    publishable_snapshots = {
+        panel_id: payload
+        for panel_id, payload in snapshots.items()
+        if (
+            target == "all-panels"
+            or panel_id not in INTEL_PANELS
+            or (payload.get("status") == "ok" and payload.get("items"))
+        )
+    }
+    candidates, format_stats = format_all_snapshots_with_stats(publishable_snapshots)
     with state_lock(settings.state_path):
         state = PublishState(settings.state_path)
         auto_prime = target == "all-panels" and not dry_run and not state.catalog_primed(CATALOG_VERSION)

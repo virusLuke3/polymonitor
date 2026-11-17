@@ -34,9 +34,9 @@ POLYDATA_TELEGRAM_THREAD_MACRO=8
 POLYDATA_TELEGRAM_THREAD_WORLDCUP=16
 ```
 
-`latest-content` publishes to the News topic. Market-scoped `related-news`
-publishes one compact summary to the Intel topic so the News topic stays focused
-on global headlines. `worldcup-intel` publishes a compact Signals / News /
+`latest-content` publishes global headlines to News. Scheduled Intel posts come
+from healthy, nonempty Geo Sanctions Shock and Policy Progress snapshots.
+`worldcup-intel` publishes a compact Signals / News /
 Weather summary to the World Cup topic and links to
 `https://www.polymonitor.club/?workspace=worldcup`.
 
@@ -76,11 +76,10 @@ Panel. Each entry has exactly one delivery mode:
 - `browser-only`: no independent server snapshot exists;
 - `non-pushable`: high-frequency visual data that should not become messages.
 
-The normal publisher remains intentionally limited to the original 11 sources.
-It does not start polling every Panel after an upgrade. Operators may audit the
-complete server-side catalog explicitly with four bounded, isolated runtime
-requests at a time plus the two existing non-runtime feeds. A slow Panel is
-reported independently and cannot discard the other Panel snapshots:
+The normal publisher polls 13 sources. Both the normal schedule and the
+explicit all-panels audit fetch up to four snapshots concurrently, with at most
+10 seconds of read timeout per request. Other snapshots are still delivered
+when one Panel times out:
 
 ```bash
 python -m telegram.topics.publisher --once --target all-panels --dry-run
