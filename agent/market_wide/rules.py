@@ -92,7 +92,7 @@ def _summary_metrics(payload: dict[str, Any]) -> dict[str, Any]:
         'tradeRows': len(_items(payload, 'trades')), 'oracleEvents': len(_items(payload, 'oracle')),
         'contentItems': len(_items(payload, 'content')), 'fillTapeMarkets': len(_items(payload, 'topMarketFillTape')),
         'fillTapeConflicts': sum(bool(item.get('priceSourceConflict')) for item in _items(payload, 'topMarketFillTape') if isinstance(item, dict)),
-        **{key: len(_signal_items(payload, key)) for key in ('whaleSignals', 'suspiciousSignals', 'alphaSignals')},
+        **{key: len(_signal_items(payload, key)) for key in ('whaleSignals', 'suspiciousSignals')},
         'sourceStates': payload.get('sourceStates') or {},
     }
 

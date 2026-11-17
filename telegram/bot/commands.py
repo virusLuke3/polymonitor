@@ -12,12 +12,10 @@ from .formatters import (
     format_alerts,
     format_market_search,
     format_pnl_coverage,
-    format_signals,
     format_wallet,
     help_text,
     is_address,
     market_search_action_links,
-    signal_action_links,
     start_text,
 )
 from .models import BotReply, CommandRequest
@@ -26,7 +24,6 @@ from .state import BotState
 
 class BotApi(Protocol):
     def search_markets(self, query: str, *, limit: int = 5): ...
-    def alpha_signals(self, *, limit: int = 5): ...
     def wallet_summary(self, address: str, *, days: int = 30): ...
     def wallet_trades(self, address: str, *, limit: int = 5): ...
     def pnl(self, address: str): ...
@@ -53,13 +50,6 @@ def _market_search_keyboard(payload: dict) -> dict | None:
     return _keyboard([links[:2]])
 
 
-def _signal_keyboard(payload: dict) -> dict | None:
-    links = signal_action_links(payload)
-    if not links:
-        return None
-    return _keyboard([links[:2], [("Open Workspace", "https://www.polymonitor.club")]])
-
-
 COMMAND_ALIASES = {
     "帮助": "help",
 }
@@ -70,7 +60,6 @@ def _usage(command: str) -> BotReply:
         "market": "请使用：/market nba 或 /market bitcoin",
         "wallet": "请使用：/wallet 0x...",
         "pnl": "请使用：/pnl 0x...",
-        "signal": "请使用：/signal polymarket",
         "alert": "请使用：/alert BTC 95000",
     }
     return BotReply(f"⚠️ {command}\n{usages.get(command, '请使用 /help 查看命令')}")
@@ -116,13 +105,6 @@ def handle_command(request: CommandRequest, api: BotApi, state: Optional[BotStat
             )
         except requests.RequestException:
             return _service_error("Market")
-    if command == "signal":
-        topic = args or "polymarket"
-        try:
-            payload = api.alpha_signals(limit=5)
-            return BotReply(format_signals(topic, payload), link_preview=True, reply_markup=_signal_keyboard(payload))
-        except requests.RequestException:
-            return _service_error("Signal")
     if command == "wallet":
         if not args or not is_address(args.split()[0]):
             return _usage("wallet")

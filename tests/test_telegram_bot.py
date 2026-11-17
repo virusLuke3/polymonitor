@@ -34,18 +34,6 @@ class FakeApi:
             ]
         }
 
-    def alpha_signals(self, *, limit: int = 5):
-        return {
-            "items": [
-                {
-                    "title": "Bitcoin Up or Down",
-                    "summary": "Clustered smart-wallet buying detected.",
-                    "kind": "whale",
-                    "severity": "watch",
-                }
-            ]
-        }
-
     def wallet_summary(self, address: str, *, days: int = 30):
         return {
             "address": address,
@@ -263,7 +251,6 @@ def test_handle_command_routes_first_version_commands():
     assert "Unknown command" in handle_command(CommandRequest(command="worldcup", args="", **base), api).text
     assert "Market:" in handle_command(CommandRequest(command="help", args="", **base), api).text
     assert "Spurs vs. Thunder" in handle_command(CommandRequest(command="market", args="nba", **base), api).text
-    assert "Alpha Signals" in handle_command(CommandRequest(command="signal", args="polymarket", **base), api).text
     assert "Wallet" in handle_command(
         CommandRequest(command="wallet", args="0x1234567890abcdef1234567890abcdef12345678", **base),
         api,
@@ -272,37 +259,6 @@ def test_handle_command_routes_first_version_commands():
         CommandRequest(command="pnl", args="0x1234567890abcdef1234567890abcdef12345678", **base),
         api,
     ).text
-
-
-def test_market_and_signal_commands_return_trade_buttons(monkeypatch):
-    import telegram.bot.formatters as formatters
-
-    def fake_resolve(item, *, title="", extra_text=()):
-        text = " ".join(str(value or "") for value in (title, item.get("title"), item.get("marketTitle"), *extra_text)).lower()
-        if "bitcoin" in text:
-            return formatters.MarketLink(
-                url="https://polymarket.com/event/bitcoin-up-or-down",
-                title="Bitcoin Up or Down",
-                matched_by="test",
-                score=1.0,
-            )
-        return None
-
-    monkeypatch.setattr(formatters, "resolve_market_link", fake_resolve)
-    base = {
-        "update_id": 1,
-        "chat_id": 1,
-        "user_id": 2,
-        "message_id": 3,
-        "text": "",
-        "raw": {},
-    }
-
-    signal_reply = handle_command(CommandRequest(command="signal", args="bitcoin", **base), FakeApi())
-
-    assert "Market: https://polymarket.com/event/bitcoin-up-or-down" in signal_reply.text
-    assert signal_reply.reply_markup
-    assert "Trade Polymarket" in str(signal_reply.reply_markup)
 
 
 def test_alert_commands_create_list_and_remove(tmp_path: Path):

@@ -15,7 +15,6 @@ interface SignalCard {
   eventSlug: string;
   outcome: string;
   side: 'BUY' | 'SELL';
-  wallet: string;
   amountUsdc: string;
   averagePrice: string;
   fragments: number;
@@ -49,7 +48,6 @@ function AlphaSignal({ snapshot }: { snapshot?: SignalSnapshot }) {
       <dl className="wm-alpha-metrics">
         <div><dt>{copy('Trade value', '成交金额')}</dt><dd>{format.format(Number(item.amountUsdc))} USDC</dd></div>
         <div><dt>{copy('Average fill price', '成交均价')}</dt><dd>{format.format(Number(item.averagePrice) * 100)}¢</dd></div>
-        <div><dt>{copy('Wallet', '钱包')}</dt><dd title={item.wallet}>{item.wallet.slice(0, 8)}…{item.wallet.slice(-6)}</dd></div>
         <div><dt>{copy('Matched fills', '合并成交')}</dt><dd>{item.fragments}</dd></div>
       </dl>
       {!!item.tags.length && <p className="wm-alpha-tags">{item.tags.join(' / ')}</p>}
@@ -63,8 +61,8 @@ const renderers: PanelRenderMap<never> = {
 
 export const panel = runtimePanelFromRenderer(renderers, {
   id: 'alpha-signal',
-  snapshot: { ...snapshotContract, parse: (value) => {
-    if ((value as { source?: string } | null)?.source !== 'matched-trades-v1') throw new Error('Smart Money snapshot unavailable');
+  snapshot: { ...snapshotContract, key: 'smart-money-signals:matched-trades-v2', parse: (value) => {
+    if ((value as { source?: string } | null)?.source !== 'matched-trades-v2') throw new Error('Smart Money snapshot unavailable');
     return snapshotContract.parse(value);
   } },
   title: 'Alpha Signal',

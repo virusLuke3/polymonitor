@@ -45,9 +45,6 @@ class PolyDataBotApi:
                 return {"items": [slug_payload]}
         return self.get_json("/markets", params={"q": cleaned, "pageSize": limit})
 
-    def alpha_signals(self, *, limit: int = 5) -> Dict[str, Any]:
-        return self.get_json("/runtime/signals/alpha", params={"limit": limit})
-
     def crypto_markets(self) -> Dict[str, Any]:
         return self.get_json("/runtime/markets/crypto")
 

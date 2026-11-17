@@ -17,7 +17,6 @@ QUANT_SNAPSHOT_NAMESPACE = "agent:market-wide:quant"
 QUANT_HISTORY_NAMESPACE = "agent:market-wide:quant-history"
 SNAPSHOT_VERSION = "v1"
 DEFAULT_LENSES = ("overview", "special", "trend")
-SIGNAL_SNAPSHOT_NAMESPACE_ALPHA = "snapshot:signals:alpha"
 SIGNAL_SNAPSHOT_NAMESPACE_SUSPICIOUS = "snapshot:signals:suspicious"
 
 
@@ -431,7 +430,6 @@ def build_market_wide_seed_payload(helpers: dict[str, Any], lens: Any, *, run_id
         "trades": trades,
         "oracle": _safe_call(helpers, "get_recent_oracle_snapshot", [], 24)[:24],
         "content": _items(content)[:12],
-        "alphaSignals": _cached_signal_items(helpers, SIGNAL_SNAPSHOT_NAMESPACE_ALPHA, _json_key({"limit": 8}), 8),
         "whaleSignals": whales,
         "sourceStates": {"trades": trade_state, "whaleSignals": whale_state},
         "suspiciousSignals": _cached_signal_items(helpers, SIGNAL_SNAPSHOT_NAMESPACE_SUSPICIOUS, _json_key({"limit": 12}), 10),

@@ -10,7 +10,6 @@ Interactive Telegram bot for user-called polyData queries.
 - `/market bitcoin`
 - `/wallet 0xabc...`
 - `/pnl 0xabc...`
-- `/signal polymarket`
 - `/alert BTC 95000`
 - `/alerts`
 - `/alert_remove 1`

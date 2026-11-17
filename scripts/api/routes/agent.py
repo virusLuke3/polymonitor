@@ -170,7 +170,6 @@ def _cache_key(kind: str, payload: dict[str, Any]) -> str:
         "trades": [_event_identity(item) for item in _list(payload.get("trades"))[:24]],
         "oracle": [_event_identity(item) for item in _list(payload.get("oracle"))[:24]],
         "content": [_event_identity(item) for item in _list(payload.get("content"))[:12]],
-        "alphaSignals": [_event_identity(item) for item in _list(payload.get("alphaSignals"))[:10]],
         "whaleSignals": [_event_identity(item) for item in _list(payload.get("whaleSignals"))[:10]],
         "suspiciousSignals": [_event_identity(item) for item in _list(payload.get("suspiciousSignals"))[:10]],
     }

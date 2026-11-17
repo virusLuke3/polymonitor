@@ -131,7 +131,6 @@ class BootstrapPrewarmDependencies:
     get_finance_liquidity_regime_snapshot: Callable[..., Any]
     get_whale_trades_snapshot: Callable[..., Any]
     get_suspicious_trades_snapshot: Callable[..., Any]
-    get_alpha_signal_snapshot: Callable[..., Any]
     get_jin10_panel_snapshot: Callable[..., Any]
 
     @classmethod
@@ -184,10 +183,6 @@ class BootstrapPrewarmDependencies:
             get_suspicious_trades_snapshot=_service_callable(
                 context,
                 "get_suspicious_trades_snapshot",
-            ),
-            get_alpha_signal_snapshot=_service_callable(
-                context,
-                "get_alpha_signal_snapshot",
             ),
             get_jin10_panel_snapshot=_service_callable(
                 context,
@@ -479,11 +474,6 @@ def _prewarm_snapshot_payloads(
             "suspicious",
             30,
             lambda: dependencies.get_suspicious_trades_snapshot(limit=12),
-        ),
-        (
-            "alpha",
-            45,
-            lambda: dependencies.get_alpha_signal_snapshot(limit=8),
         ),
         (
             "jin10",

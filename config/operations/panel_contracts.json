@@ -53,7 +53,6 @@
       "healthStrategy": "seed",
       "dataSources": ["redis", "seed-meta:signals"],
       "serviceNames": [
-        "polydata-alpha-signal-seed.service",
         "polydata-whale-trades-seed.service",
         "polydata-suspicious-trades-seed.service"
       ],
@@ -63,7 +62,7 @@
         "suspicious-flow": "suspicious-trades"
       },
       "degradationPolicy": "Keep last-good signal evidence, never fabricate a current signal.",
-      "panelIds": ["alpha-signal", "whale-tracker", "suspicious-flow"]
+      "panelIds": ["whale-tracker", "suspicious-flow"]
     },
     {
       "owner": "market-groups",

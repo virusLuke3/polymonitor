@@ -1,20 +1,16 @@
 from __future__ import annotations
 
 import json
-from copy import deepcopy
 from datetime import datetime, timezone
-from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
-from . import clickhouse_orderfilled_service, outcome_semantics_service
+from . import outcome_semantics_service
 from .trade_watch.common import normalize_signal_payload
 from .signal_reads import read_verified_seed
 
 
-SIGNAL_SNAPSHOT_NAMESPACE_ALPHA = "snapshot:signals:alpha"
 SIGNAL_SNAPSHOT_NAMESPACE_WHALES = "snapshot:signals:whales"
 SIGNAL_SNAPSHOT_NAMESPACE_SUSPICIOUS = "snapshot:signals:suspicious"
-DEFAULT_ALPHA_SIGNAL_LIMIT = 8
 DEFAULT_WHALE_TRADES_LIMIT = 14
 DEFAULT_SUSPICIOUS_TRADES_LIMIT = 12
 
@@ -24,10 +20,6 @@ def build_whale_trades_cache_key(limit: int = 14) -> str:
 
 
 def build_suspicious_trades_cache_key(limit: int = 12) -> str:
-    return json.dumps({"limit": limit}, sort_keys=True, ensure_ascii=True)
-
-
-def build_alpha_signal_cache_key(limit: int = 8) -> str:
     return json.dumps({"limit": limit}, sort_keys=True, ensure_ascii=True)
 
 
@@ -47,11 +39,10 @@ def get_signal_snapshot(ctx: dict, *, namespace: str, cache_key: str, limit: int
     return _limit_signal_payload(ctx, payload, limit=limit)
 
 
-def _sanitize_signal_payload(ctx: dict, namespace: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+def _sanitize_signal_payload(ctx: dict, payload: Dict[str, Any]) -> Dict[str, Any]:
     sanitized = dict(payload)
     items = [dict(item) for item in payload.get("items") or [] if isinstance(item, dict)]
     positions_by_mode: Dict[str, List[int]] = {"raw": [], "aggregate": [], "probe": []}
-    currently_verified_positions: set[int] = set()
     aggregate_kinds = {"volume-flow", "market-flow", "momentum"}
     for index, item in enumerate(items):
         if (item.get("marketId") or item.get("market_id")) is None:
@@ -79,21 +70,6 @@ def _sanitize_signal_payload(ctx: dict, namespace: str, payload: Dict[str, Any])
         )
         for index, row in zip(positions, annotated):
             items[index] = row
-            currently_verified_positions.add(index)
-    if namespace == SIGNAL_SNAPSHOT_NAMESPACE_ALPHA:
-        if any(item.get("outcomeSemanticsStatus") in {"semantics_query_failed", "semantics_database_unavailable"} for item in items):
-            from .alpha_signal_service import AlphaVerificationUnavailable
-            raise AlphaVerificationUnavailable("Current Alpha labels could not be checked")
-        items = [
-            item
-            for index, item in enumerate(items)
-            if index in currently_verified_positions
-            and item.get("outcomeSemanticsValid")
-            and (outcome_semantics_service.directional_semantics_allowed(item)
-                 or (item.get("kind") == "token-flow" and item.get("tokenId")
-                     and (item.get("outcomeSemanticsCapabilities") or {}).get("supportsYesNoWording")))
-            and item.get("outcomeSemanticsIdentityMode") in {"raw", "aggregate"}
-        ]
     sanitized["items"] = items
     if payload.get("schemaVersion") == "trade-watch-v1":
         sanitized["coverage"] = {**(payload.get("coverage") or {}),
@@ -104,13 +80,7 @@ def _sanitize_signal_payload(ctx: dict, namespace: str, payload: Dict[str, Any])
             sanitized["error"] = "Outcome labels could not be checked; neutral token observations remain visible."
             if sanitized.get("status") in {"ok", "empty"}:
                 sanitized["status"] = "partial"
-    if namespace == SIGNAL_SNAPSHOT_NAMESPACE_ALPHA and payload.get("policyVersion") == "token-flow-v1":
-        removed = len(payload.get("items") or []) - len(items)
-        if removed:
-            sanitized["coverage"] = {**(payload.get("coverage") or {}), "lastReadRejectedCount": removed}
-            sanitized["status"] = "partial" if items or payload.get("candidates") else "degraded"
-            sanitized["error"] = "Cached Alpha labels could not be revalidated"
-    elif not items and sanitized.get("status") == "ok":
+    if not items and sanitized.get("status") == "ok":
         sanitized["status"] = "empty"
     return sanitized
 
@@ -121,10 +91,10 @@ def _read_cached_signal_snapshot(
     payload = _load_signal_seed(ctx, namespace=namespace, cache_key=cache_key)
     if payload is None:
         return None
-    verification_ctx = ctx.get("alpha_context", ctx)
+    verification_ctx = ctx.get("verification_context", ctx)
     payload = read_verified_seed(
         verification_ctx, namespace, payload,
-        lambda value: _sanitize_signal_payload(verification_ctx, namespace, value),
+        lambda value: _sanitize_signal_payload(verification_ctx, value),
     )
     return _signal_freshness(ctx, payload, ttl_seconds=ttl_seconds)
 
@@ -175,34 +145,3 @@ def get_suspicious_trades_snapshot(ctx: dict, limit: int = DEFAULT_SUSPICIOUS_TR
 def fetch_live_suspicious_trades_payload(ctx: dict, limit: int = 12) -> Dict[str, Any]:
     from .trade_watch import flow
     return flow.fetch_live_suspicious_trades_payload(ctx, limit=limit)
-
-
-def fetch_live_alpha_signal_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
-    # Compatibility entrypoint for the existing worker and bindings.
-    from .alpha_signal_service import fetch_live_alpha_signal_payload as fetch_alpha
-
-    return fetch_alpha(ctx, limit=limit)
-
-
-def _build_alpha_signal_payload(ctx: dict, limit: int = 8) -> Dict[str, Any]:
-    """Legacy builder entrypoint; Alpha implementation belongs to its service."""
-    return fetch_live_alpha_signal_payload(ctx, limit=limit)
-
-
-def get_alpha_signal_snapshot(ctx: dict, limit: int = DEFAULT_ALPHA_SIGNAL_LIMIT) -> Dict[str, Any]:
-    from .alpha_signal_service import read_public_snapshot
-    ctx = ctx.get("alpha_context", ctx)
-    payload = _load_signal_seed(ctx, namespace=SIGNAL_SNAPSHOT_NAMESPACE_ALPHA, cache_key=build_alpha_signal_cache_key())
-    if payload is None:
-        return {"items": [], "candidates": [], "generatedAt": None, "status": "warming", "cacheMode": "seeded"}
-    def validate(value):
-        return _sanitize_signal_payload(ctx, SIGNAL_SNAPSHOT_NAMESPACE_ALPHA, value)
-    # Alpha already owns its checked-data cache and recovery policy. Only bound
-    # the wait here; a second cache must not extend its verification lifetime.
-    public = read_verified_seed(
-        ctx, SIGNAL_SNAPSHOT_NAMESPACE_ALPHA, payload,
-        lambda value: read_public_snapshot(ctx, value, validate=validate), cache_seconds=0,
-    )
-    public = _limit_signal_payload(ctx, public, limit=limit)
-    public["candidates"] = public.get("candidates", [])[:max(0, int(limit))]
-    return _signal_freshness(ctx, public, ttl_seconds=ctx["SIGNAL_RUNTIME_TTL_SECONDS"])

@@ -67,12 +67,12 @@ class ServiceRuntime:
         from api.bindings import bind_services
 
         bind_services(self)
-        alpha_db_context = {**self.api_db_context}
-        self.alpha_signal_context = {
+        signal_db_context = {**self.api_db_context}
+        signal_verification_context = {
             **self.signal_context,
-            "query_all": lambda sql, params=None: api_db.query_all(alpha_db_context, sql, params),
+            "query_all": lambda sql, params=None: api_db.query_all(signal_db_context, sql, params),
         }
-        self.signal_context["alpha_context"] = self.alpha_signal_context
+        self.signal_context["verification_context"] = signal_verification_context
 
     def _runtime_coordination_dir(self) -> Path:
         candidate = Path(self.SETTINGS.snapshot_sqlite_path).expanduser()

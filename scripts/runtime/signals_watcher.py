@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Seed Alpha, whale, and suspicious flow snapshots."""
+"""Seed whale and suspicious flow snapshots."""
 
 from __future__ import annotations
 
@@ -34,7 +34,6 @@ from runtime.redis_snapshot_store import create_snapshot_store as SnapshotStore
 from runtime.telegram_panel_publish import publish_cached_panel_snapshot
 
 
-DEFAULT_ALPHA_LIMIT = 8
 DEFAULT_WHALE_LIMIT = 14
 DEFAULT_SUSPICIOUS_LIMIT = 12
 DEFAULT_SIGNAL_DATA_STALE_AFTER_SECONDS = 7 * 24 * 60 * 60
@@ -42,16 +41,6 @@ SEED_META_NAMESPACE = "seed-meta:signals"
 
 
 COMPONENTS = {
-    "alpha": {
-        "panel_id": "alpha-signal",
-        "cache_key": "alpha-signal",
-        "namespace": signal_service.SIGNAL_SNAPSHOT_NAMESPACE_ALPHA,
-        "service_name": "polydata-alpha-signal-seed.service",
-        "limit_env": "POLYDATA_ALPHA_SIGNAL_LIMIT",
-        "default_limit": DEFAULT_ALPHA_LIMIT,
-        "cache_key_builder": signal_service.build_alpha_signal_cache_key,
-        "fetcher": signal_service.fetch_live_alpha_signal_payload,
-    },
     "whales": {
         "panel_id": "whale-trades",
         "cache_key": "whale-trades",
@@ -304,8 +293,6 @@ class SignalsWatcher:
             # Collection runs outside HTTP requests. Allow bounded tunnel
             # latency; keep ClickHouse execution, memory and concurrency caps.
             self._service_runtime.resources.clickhouse_read_timeout_seconds = 10.0
-        if self.component == "alpha":
-            return self._service_runtime.alpha_signal_context
         return self._service_runtime.signal_context
 
     def fetch_payload(self) -> Dict[str, Any]:
@@ -343,38 +330,18 @@ class SignalsWatcher:
     @seed_writer
     def run_once(self) -> Dict[str, Any]:
         previous = self.load_previous_payload()
-        payload = None
         try:
             payload = self.fetch_payload()
             if payload.get("status") in {"error", "unavailable", "degraded"}:
                 raise RuntimeError("Signal sources unavailable")
         except Exception as exc:
-            if self.component == "alpha" and isinstance(payload, dict):
-                # Preserve valid cards, but publish the latest failed assessment.
-                # An unverified candidate set is not a successful empty result.
-                retained = bool(previous and (previous.get("items") or previous.get("candidates")))
-                failed = {**(previous if retained else payload), "cacheMode": "seeded",
-                          "status": "stale" if retained else "degraded",
-                          "freshness": "stale" if retained else "degraded",
-                          "lastAttemptAt": payload.get("generatedAt"),
-                          "coverage": payload.get("coverage"),
-                          "sourceStates": payload.get("sourceStates"),
-                          "error": payload.get("error") or "Alpha source unavailable"}
-                self.store_payload(failed)
-                self.store_seed_meta(status="preserved" if retained else "error",
-                                     record_count=_record_count(failed),
-                                     error_summary=failed["error"], preserve_last_success=True,
-                                     source_states=failed.get("sourceStates"), payload_status=failed["status"])
-                return {"status": failed["status"], "recordCount": _record_count(failed), "error": type(exc).__name__,
-                        "sourceError": _source_failed(payload) or isinstance(exc, TimeoutError)}
             if previous:
                 preserved = {**previous, "cacheMode": "seeded", "status": "stale"}
-                if self.component in {"whales", "suspicious"}:
-                    preserved.update(lastAttemptAt=utc_now_iso(),
-                                     error=f"{self.component} source refresh failed ({type(exc).__name__}); showing the previous snapshot.",
-                                     errorCode="trade-source-refresh-failed",
-                                     sourceStates={**(previous.get("sourceStates") or {}),
-                                                   "refresh": {"status": "error", "errorCode": type(exc).__name__}})
+                preserved.update(lastAttemptAt=utc_now_iso(),
+                                 error=f"{self.component} source refresh failed ({type(exc).__name__}); showing the previous snapshot.",
+                                 errorCode="trade-source-refresh-failed",
+                                 sourceStates={**(previous.get("sourceStates") or {}),
+                                               "refresh": {"status": "error", "errorCode": type(exc).__name__}})
                 self.store_payload(preserved)
                 stats = _payload_timestamp_stats(previous, stale_after_seconds=self.stale_after_seconds())
                 self.store_seed_meta(
@@ -407,11 +374,8 @@ class SignalsWatcher:
         if record_count > 0 and isinstance(data_age, int) and data_age > self.stale_after_seconds():
             status = "stale"
         stored_payload = {**payload, "status": status, "cacheMode": "seeded"}
-        if self.component == "alpha":
-            stored_payload.update(generatedAt=utc_now_iso(), lastAttemptAt=payload.get("generatedAt"))
-        if self.component in {"whales", "suspicious"}:
-            stored_payload.update(lastAttemptAt=utc_now_iso(), refreshIntervalSeconds=self.interval_seconds,
-                                  freshnessWindowSeconds=self.ttl_seconds())
+        stored_payload.update(lastAttemptAt=utc_now_iso(), refreshIntervalSeconds=self.interval_seconds,
+                              freshnessWindowSeconds=self.ttl_seconds())
         self.store_payload(stored_payload)
         telegram_sent = publish_cached_panel_snapshot(str(self.spec["panel_id"]), stored_payload)
         self.store_seed_meta(

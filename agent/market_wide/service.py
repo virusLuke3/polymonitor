@@ -230,7 +230,6 @@ def _limit_context_chars(context: dict[str, Any], max_chars: int) -> dict[str, A
         ("topMarketFillTape", 5),
         ("content", 4),
         ("oracle", 4),
-        ("alphaSignals", 4),
         ("whaleSignals", 4),
         ("suspiciousSignals", 4),
         ("trades", 4),
@@ -241,7 +240,7 @@ def _limit_context_chars(context: dict[str, Any], max_chars: int) -> dict[str, A
             reduced[key] = reduced[key][:limit]
     if len(json.dumps(reduced, ensure_ascii=False, default=str)) <= max_chars:
         return reduced
-    for key in ("trades", "oracle", "alphaSignals", "whaleSignals", "suspiciousSignals", "searchResults"):
+    for key in ("trades", "oracle", "whaleSignals", "suspiciousSignals", "searchResults"):
         reduced[key] = []
     if len(json.dumps(reduced, ensure_ascii=False, default=str)) <= max_chars:
         return reduced
@@ -280,7 +279,6 @@ def _build_agent_context(payload: dict[str, Any], lens: str, search_results: lis
         "trades": _compact_list(_items(payload, "trades"), 6, _compact_trade),
         "oracle": _compact_list(_items(payload, "oracle"), 6, _compact_oracle),
         "content": _compact_list(_items(payload, "content"), 6, _compact_content),
-        "alphaSignals": _compact_list(_signal_items(payload, "alphaSignals"), 5, _compact_signal),
         "whaleSignals": _compact_list(_signal_items(payload, "whaleSignals"), 5, _compact_signal),
         "suspiciousSignals": _compact_list(_signal_items(payload, "suspiciousSignals"), 5, _compact_signal),
         "searchResults": _compact_list(search_results, 3, _compact_search_result),

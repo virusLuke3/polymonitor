@@ -30,7 +30,6 @@ class CryptoFundingWatchTestCase(unittest.TestCase):
             "get_nba_intel_snapshot": lambda limit=12: {"limit": limit},
             "get_nba_matchup_predictor_snapshot": lambda limit=8: {"limit": limit},
             "get_inflation_nowcast_snapshot": lambda: {"items": []},
-            "get_alpha_signal_snapshot": lambda limit=8: {"limit": limit},
             "get_crypto_funding_watch_snapshot": lambda limit=80: seen_limits.append(limit) or {"limit": limit},
             "get_cpi_release_calendar_snapshot": lambda limit=8: {"limit": limit},
             "get_energy_gasoline_shock_snapshot": lambda limit=6: {"limit": limit},

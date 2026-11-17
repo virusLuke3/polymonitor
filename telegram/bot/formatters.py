@@ -165,7 +165,6 @@ def start_text() -> str:
             "/market bitcoin - 搜索 Polymarket 市场",
             "/wallet 0x... - 查看地址交易画像",
             "/pnl 0x... - 查看地址 PnL 覆盖状态",
-            "/signal polymarket - 查看最新 alpha signals",
             "/alert BTC 95000 - 创建价格提醒",
             "",
             "Workspace: https://www.polymonitor.club",
@@ -187,7 +186,6 @@ def help_text() -> str:
             "  /pnl 0x123...",
             "",
             "Signals:",
-            "  /signal polymarket",
             "",
             "Alerts:",
             "  /alert BTC 95000",
@@ -330,34 +328,6 @@ def format_pnl_coverage(address: str, payload: Dict[str, Any] | None = None) -> 
             f"- position snapshot: {coverage.get('positionSnapshot', False)}",
         ]
     )
-
-
-def format_signals(topic: str, payload: Dict[str, Any]) -> str:
-    items = payload.get("items") if isinstance(payload.get("items"), list) else []
-    if not items:
-        return f"⚠️ Signal\n暂时没有找到信号：{topic}"
-    lines = [f"🐳 Alpha Signals: {topic}", ""]
-    for index, item in enumerate(items[:5], start=1):
-        if not isinstance(item, dict):
-            continue
-        title = _truncate(item.get("title") or item.get("marketTitle") or item.get("summary"), 100)
-        summary = _truncate(item.get("summary") or item.get("signal") or item.get("reason"), 150)
-        tags = _tags([item.get("kind"), item.get("severity"), item.get("contributors") or [], item.get("sourceTag")])
-        lines.append(f"{index}. {title}")
-        if summary and summary != title:
-            lines.append(summary)
-        if tags:
-            lines.append(tags)
-        link = _resolved_market_link(item, title=title, extra_text=(summary, topic, item.get("sourceTag"), item.get("kind")))
-        if link:
-            lines.append(f"Market: {link.url}")
-        lines.append("")
-    return "\n".join(lines).strip()
-
-
-def signal_action_links(payload: Dict[str, Any]) -> List[tuple[str, str]]:
-    items = payload.get("items") if isinstance(payload.get("items"), list) else []
-    return _trade_links_from_items([item for item in items if isinstance(item, dict)], limit=2)
 
 
 def crypto_price_map(payload: Dict[str, Any]) -> Dict[str, float]:

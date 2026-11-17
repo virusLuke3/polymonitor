@@ -647,7 +647,6 @@ export type MarketWideAiInsightPayload = {
   flowCoverage?: { fromBlock: number; toBlock: number; globalCompleteness: string } | null;
   oracle: OracleEvent[];
   content: ContentItem[];
-  alphaSignals?: RuntimeTradeSignal[];
   whaleSignals?: RuntimeTradeSignal[];
   suspiciousSignals?: RuntimeTradeSignal[];
 };

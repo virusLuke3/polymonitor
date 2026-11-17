@@ -57,8 +57,6 @@ class RuntimeResources:
     agent_rate_lock: Any = field(default_factory=threading.Lock)
     agent_rate_buckets: dict[str, list[float]] = field(default_factory=dict)
 
-    alpha_read_lock: Any = field(default_factory=threading.Lock)
-    alpha_read_snapshot: dict[str, Any] = field(default_factory=dict)
 
     signal_read_lock: Any = field(default_factory=threading.Lock)
     signal_reads: dict[str, Any] = field(default_factory=dict)

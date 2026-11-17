@@ -545,44 +545,6 @@ def format_related_news(payload: Dict[str, Any]) -> List[MessageCandidate]:
     ]
 
 
-def format_alpha_signal(payload: Dict[str, Any]) -> List[MessageCandidate]:
-    messages: List[MessageCandidate] = []
-    for item in _iter_items(payload):
-        title = _text(item.get("title") or item.get("marketTitle") or item.get("question") or item.get("name") or item.get("label"))
-        if not title:
-            continue
-        signal = _text(item.get("signal") or item.get("reason") or item.get("summary") or item.get("status"))
-        score = _text(item.get("score") or item.get("confidence") or item.get("rank"))
-        action = item.get("action") if isinstance(item.get("action"), dict) else {}
-        action_text = " ".join(part for part in (_text(action.get("label")), _text(action.get("outcome"))) if part)
-        market_link = resolve_market_link(item, title=title, extra_text=(signal, action_text, item.get("sourceTag"), item.get("labels") or []))
-        url = market_link.url if market_link else _polymarket_url(item, title=title)
-        lines = [signal[:260] if signal else "", f"Action: {action_text}" if action_text else "", f"score/confidence: {score}" if score else ""]
-        text = _compose_post(
-            header="🐳 Alpha Signal",
-            title=title,
-            lines=lines,
-            tags=_hashtags("Alpha", "Polymarket", action.get("outcome") or item.get("outcome"), item.get("sourceTag"), item.get("labels") or []),
-            meme="🐋 Vibe: smart money splashed",
-            url=_source_link(url, "Market"),
-        )
-        direction = _text(action.get("outcome") or item.get("outcome") or action.get("label")).lower()
-        dedupe = _short_hash("alpha-signal", _market_identity(item, title=title), direction)
-        messages.append(
-            MessageCandidate(
-                topic="alpha",
-                dedupe_key=dedupe,
-                text=text,
-                priority="high",
-                metadata={"panel": "alpha-signal", "marketLink": url},
-                observed_at=source_clock(item, "observedAt", "timestamp") or 0,
-                link_preview=bool(url),
-                reply_markup=_trade_markup(market_link or (MarketLink(url=url, title=title, matched_by="fallback") if url else None)),
-            )
-        )
-    return messages
-
-
 def format_new_market_signals(payload: Dict[str, Any]) -> List[MessageCandidate]:
     messages: List[MessageCandidate] = []
     for item in _iter_items(payload):
@@ -677,8 +639,6 @@ def _format_specialized(panel_id: str, payload: Dict[str, Any], *, live: bool = 
         return format_latest_content(payload)
     if panel_id == "related-news":
         return format_related_news(payload)
-    if panel_id == "alpha-signal":
-        return format_alpha_signal(payload)
     if panel_id == "new-market-signals":
         return format_new_market_signals(payload)
     if panel_id == "polymarket-macro-map":

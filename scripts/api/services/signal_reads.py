@@ -1,6 +1,6 @@
 """Bound read verification without blocking HTTP workers on database transport.
 
-Only the three canonical signal seeds use this lane. Collection remains owned
+Only the two canonical trade-watch seeds use this lane. Collection remains owned
 by the seed workers; a pending check cannot publish unverified rows or renew a
 source clock. One task per channel also bounds work when a driver ignores its
 deadline. Completed trade label checks may be reused for thirty seconds.
@@ -15,9 +15,9 @@ from typing import Callable
 
 from api.context import runtime_resources
 
-# Alpha, whales, and suspicious flow each retain one check. This
+# Whales and suspicious flow each retain one check. This
 # bounds both in-flight work and cached channels; completed checks still count.
-MAX_SIGNAL_CHANNELS = 3
+MAX_SIGNAL_CHANNELS = 2
 
 
 class SignalReadPending(RuntimeError):

@@ -8,7 +8,6 @@ from unittest.mock import Mock, patch
 from api.context import RuntimeResources
 
 
-from api.services import signal_service
 
 
 class FakeLogger:
@@ -57,45 +56,6 @@ class SignalSnapshotOptimizationTestCase(unittest.TestCase):
             "app": FakeApp(),
             "utc_now_iso": lambda: "2026-04-21T00:00:00Z",
         }
-
-    def test_alpha_snapshot_returns_stale_without_scheduling_refresh(self):
-        cache_key = json.dumps({"limit": 8}, sort_keys=True, ensure_ascii=True)
-        stale_payload = {"items": [{"title": "stale alpha"}], "generatedAt": "stale"}
-        ctx = self.make_signal_context(
-            snapshot_store=FakeSnapshotStore(
-                stale={(signal_service.SIGNAL_SNAPSHOT_NAMESPACE_ALPHA, cache_key): stale_payload}
-            ),
-        )
-
-        with patch.object(
-            signal_service,
-            "_build_alpha_signal_payload",
-            return_value={"items": [{"title": "fresh"}], "generatedAt": "fresh"},
-        ) as builder:
-            first = signal_service.get_alpha_signal_snapshot(ctx, limit=8)
-            second = signal_service.get_alpha_signal_snapshot(ctx, limit=8)
-
-        self.assertEqual(first["items"], [])
-        self.assertEqual(second["items"], [])
-        self.assertEqual(first["generatedAt"], stale_payload["generatedAt"])
-        # Read verification is allowed; request-driven collection remains forbidden.
-        builder.assert_not_called()
-
-    def test_alpha_snapshot_cold_miss_waits_for_watcher(self):
-        cache_key = json.dumps({"limit": 8}, sort_keys=True, ensure_ascii=True)
-        snapshot_store = FakeSnapshotStore()
-        ctx = self.make_signal_context(snapshot_store=snapshot_store)
-        payload = {"items": [{"title": "fresh alpha"}], "generatedAt": "fresh"}
-
-        with patch.object(signal_service, "_build_alpha_signal_payload", return_value=payload) as builder:
-            result = signal_service.get_alpha_signal_snapshot(ctx, limit=8)
-
-        self.assertEqual(result["items"], [])
-        self.assertEqual("warming", result["status"])
-        self.assertEqual("seeded", result["cacheMode"])
-        builder.assert_not_called()
-        self.assertIsNone(snapshot_store.get(signal_service.SIGNAL_SNAPSHOT_NAMESPACE_ALPHA, cache_key))
-
 
 def test_shared_snapshot_refresh_accepts_empty_results_and_marks_stale(tmp_path):
     from api.cache import CacheState, get_snapshot_payload

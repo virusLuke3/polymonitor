@@ -143,9 +143,6 @@ def bind_services(runtime: ServiceRuntime) -> None:
     )
     fetch_trade_count_estimate = lambda: query_service.fetch_trade_count_estimate(runtime.trade_count_estimate)
     get_active_markets_snapshot = lambda page_size=40, **_: runtime.panel_reader.catalog(page_size=page_size)
-    get_alpha_signal_snapshot = lambda limit=8: signal_service.get_alpha_signal_snapshot(
-        runtime.signal_context, limit=limit
-    )
     get_cached_json = lambda namespace, cache_key: api_cache.get_cached_json(runtime.cache, namespace, cache_key)
     get_cached_runtime_payload = lambda namespace, cache_key: api_cache.get_cached_runtime_payload(
         runtime.cache, namespace, cache_key
@@ -497,7 +494,6 @@ def bind_services(runtime: ServiceRuntime) -> None:
         get_finance_liquidity_regime_snapshot=get_finance_liquidity_regime_snapshot,
         get_whale_trades_snapshot=get_whale_trades_snapshot,
         get_suspicious_trades_snapshot=get_suspicious_trades_snapshot,
-        get_alpha_signal_snapshot=get_alpha_signal_snapshot,
         get_jin10_panel_snapshot=get_jin10_panel_snapshot,
     )
     runtime.breaking_event_radar = breaking_event_radar_service.BreakingEventRadarDependencies(
@@ -849,9 +845,6 @@ def build_blueprints(runtime: ServiceRuntime):
                     get_external_panel_snapshot=lambda panel_id, limit=100: get_external_panel_snapshot(runtime.SNAPSHOT_STORE, panel_id, limit=limit),
                     get_politics_snapshot=lambda panel_id, limit=200: get_politics_snapshot(runtime.SNAPSHOT_STORE, panel_id, limit=limit),
                     get_crypto_strategy_snapshot=lambda reference_only=False: _crypto_strategy_snapshot(_crypto_strategy_path(runtime.SETTINGS.snapshot_sqlite_path), reference_only=reference_only),
-                    get_alpha_signal_snapshot=lambda limit=8: signal_service.get_alpha_signal_snapshot(
-                        runtime.signal_context, limit=limit
-                    ),
                     get_whale_trades_snapshot=lambda limit=14: signal_service.get_whale_trades_snapshot(
                         runtime.signal_context, limit=limit
                     ),

@@ -820,7 +820,6 @@ def _react_tool_catalyst_scan(context: dict[str, Any]) -> dict[str, Any]:
         "content": context.get("content", [])[:4],
         "oracle": context.get("oracle", [])[:4],
         "watchSignals": [
-            *(context.get("alphaSignals", [])[:2] if isinstance(context.get("alphaSignals"), list) else []),
             *(context.get("whaleSignals", [])[:2] if isinstance(context.get("whaleSignals"), list) else []),
         ],
     }
@@ -1010,7 +1009,6 @@ def _specialist_prompt(
             "trades": _compact_prompt_list(context.get("trades"), 2),
             "oracle": context.get("oracle", [])[:2],
             "content": context.get("content", [])[:2],
-            "alphaSignals": context.get("alphaSignals", [])[:2],
             "whaleSignals": context.get("whaleSignals", [])[:2],
             "searchResults": context.get("searchResults", [])[:1],
             "specialistAgents": _compact_agents_for_prompt(context.get("specialistAgents"), 4),

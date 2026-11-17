@@ -82,13 +82,6 @@ class ClickHouseSettings:
     whale_relative_min_notional: float = 500.0
     signal_min_price: float = 0.02
     signal_max_price: float = 0.98
-    alpha_volume_window_minutes: int = 15
-    alpha_market_baseline_minutes: int = 60
-    alpha_min_flow_notional: float = 1000.0
-    alpha_min_single_trade_notional: float = 2500.0
-    alpha_relative_min_flow_notional: float = 500.0
-    alpha_market_share_threshold: float = 0.12
-    alpha_min_net_strength: float = 0.55
     whale_volume_window_minutes: int = 60
     max_threads: int = 2
     max_memory_bytes: int = 536870912
@@ -123,17 +116,6 @@ class ClickHouseSettings:
             ),
             signal_min_price=max(0.0, min(_get_float("POLYDATA_SIGNAL_MIN_PRICE", 0.02), 0.49)),
             signal_max_price=max(0.51, min(_get_float("POLYDATA_SIGNAL_MAX_PRICE", 0.98), 1.0)),
-            alpha_volume_window_minutes=max(5, min(_get_int("POLYDATA_ALPHA_VOLUME_WINDOW_MINUTES", 15), 360)),
-            alpha_market_baseline_minutes=max(15, min(_get_int("POLYDATA_ALPHA_MARKET_BASELINE_MINUTES", 60), 1440)),
-            alpha_min_flow_notional=max(0.0, min(_get_float("POLYDATA_ALPHA_MIN_FLOW_NOTIONAL", 1000.0), 1000000000.0)),
-            alpha_min_single_trade_notional=max(
-                0.0, min(_get_float("POLYDATA_ALPHA_MIN_SINGLE_TRADE_NOTIONAL", 2500.0), 1000000000.0)
-            ),
-            alpha_relative_min_flow_notional=max(
-                0.0, min(_get_float("POLYDATA_ALPHA_RELATIVE_MIN_FLOW_NOTIONAL", 500.0), 1000000000.0)
-            ),
-            alpha_market_share_threshold=max(0.0, min(_get_float("POLYDATA_ALPHA_MARKET_SHARE_THRESHOLD", 0.12), 1.0)),
-            alpha_min_net_strength=max(0.0, min(_get_float("POLYDATA_ALPHA_MIN_NET_STRENGTH", 0.55), 1.0)),
             whale_volume_window_minutes=max(5, min(_get_int("POLYDATA_WHALE_VOLUME_WINDOW_MINUTES", 60), 1440)),
             max_threads=max(1, min(_get_int("POLYDATA_ORDERFILLED_CLICKHOUSE_MAX_THREADS", 2), 8)),
             max_memory_bytes=max(

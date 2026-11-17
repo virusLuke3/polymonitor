@@ -976,34 +976,6 @@ def test_clickhouse_stats_do_not_emit_yes_price_for_source_first(monkeypatch, in
     ]
 
 
-def test_clickhouse_directional_aggregate_without_receipt_is_dropped(
-    monkeypatch,
-    install_semantics,
-):
-    install_semantics("up_down_labels", ("Up", "Down"))
-    monkeypatch.setattr(
-        clickhouse_orderfilled_service,
-        "_query_json_rows",
-        lambda *_args, **_kwargs: [
-            {
-                "market_id": 7,
-                "outcome": "YES",
-                "direction": "bullish",
-                "avg_price": "0.60",
-                "entry_yes_price": "0.60",
-                "latest_block": 100,
-                "source_from_block": 70,
-                "source_through_block": 100,
-                "score": "90",
-            }
-        ],
-    )
-
-    rows = clickhouse_orderfilled_service.get_alpha_volume_signal_rows({}, limit=4)
-
-    assert rows == []
-
-
 def test_catalog_quote_binds_both_actual_prices_and_uses_one_semantics_batch(monkeypatch):
     semantics = _semantics('yes_no_labels', ('Yes', 'No'))
     calls = []

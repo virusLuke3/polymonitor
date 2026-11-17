@@ -9,7 +9,6 @@ from telegram.topics.api_client import resolve_polydata_api_base
 from telegram.topics.client import TelegramClient
 from telegram.topics.config import TelegramSettings, TopicConfig
 from telegram.topics.formatters import (
-    format_alpha_signal,
     format_latest_content,
     format_new_market_signals,
     format_nba_scoreboard,
@@ -137,7 +136,7 @@ def test_weather_formatters_emit_market_and_warning_only():
     assert news_messages[0].priority == "high"
 
 
-def test_rich_news_and_alpha_messages_include_tags_meme_and_links():
+def test_rich_news_includes_tags_meme_and_links():
     news_message = format_latest_content(
         {
             "items": [
@@ -151,31 +150,11 @@ def test_rich_news_and_alpha_messages_include_tags_meme_and_links():
             ]
         }
     )[0]
-    alpha_message = format_alpha_signal(
-        {
-            "items": [
-                {
-                    "marketId": "m1",
-                    "title": "12 accounts put $400 on YES: Bitcoin above $100k?",
-                    "marketTitle": "Bitcoin above $100k?",
-                    "summary": "Clustered smart-wallet buying detected.",
-                    "outcome": "YES",
-                    "sourceTag": "whale-flow",
-                }
-            ]
-        }
-    )[0]
-
     assert "#News" in news_message.text
     assert "Vibe:" in news_message.text
     assert "Source: https://news.example/fed" in news_message.text
     assert news_message.link_preview is True
 
-    assert "#Alpha" in alpha_message.text
-    assert "#Polymarket" in alpha_message.text
-    assert "Vibe:" in alpha_message.text
-    assert "Market: https://polymarket.com/search?query=Bitcoin+above+%24100k%3F" in alpha_message.text
-    assert alpha_message.link_preview is True
 
 
 def test_news_message_adds_trade_button_when_market_link_matches(monkeypatch):
@@ -226,47 +205,6 @@ def test_nba_scoreboard_adds_market_link_button(monkeypatch):
 
     assert "Market: https://polymarket.com/event/lakers-rockets" in message.text
     assert message.reply_markup["inline_keyboard"][0][0]["url"] == "https://polymarket.com/event/lakers-rockets"
-
-
-def test_alpha_dedupe_ignores_flow_and_score_updates_for_same_market_direction():
-    base = {
-        "items": [
-            {
-                "marketId": "m1",
-                "marketTitle": "Mexico vs South Africa",
-                "title": "BUY NO flow $10.9k: Mexico vs South Africa",
-                "summary": "net 79.9%; 75 fills",
-                "score": 81,
-                "outcome": "NO",
-            }
-        ]
-    }
-    updated = {
-        "items": [
-            {
-                "marketId": "m1",
-                "marketTitle": "Mexico vs South Africa",
-                "title": "BUY NO flow $12.1k: Mexico vs South Africa",
-                "summary": "net 82.4%; 91 fills",
-                "score": 88,
-                "outcome": "NO",
-            }
-        ]
-    }
-    reversed_side = {
-        "items": [
-            {
-                "marketId": "m1",
-                "marketTitle": "Mexico vs South Africa",
-                "title": "BUY YES flow: Mexico vs South Africa",
-                "summary": "direction flipped",
-                "outcome": "YES",
-            }
-        ]
-    }
-
-    assert format_alpha_signal(base)[0].dedupe_key == format_alpha_signal(updated)[0].dedupe_key
-    assert format_alpha_signal(base)[0].dedupe_key != format_alpha_signal(reversed_side)[0].dedupe_key
 
 
 def test_new_market_dedupe_ignores_status_updates():
@@ -452,7 +390,6 @@ def test_resolve_polydata_api_base_skips_dead_local_and_uses_remote():
 def test_format_panel_snapshot_routes_known_panel_ids():
     assert format_panel_snapshot("latest-content", {"items": [{"id": "n1", "title": "Hello", "source": "RSS"}]})[0].topic == "news"
     assert format_panel_snapshot("related-news", {"marketId": 1, "marketTitle": "Market", "items": [{"id": "r1", "title": "Intel"}]})[0].topic == "intel"
-    assert format_panel_snapshot("alpha-signal", {"items": [{"id": "a1", "title": "Signal"}]})[0].topic == "alpha"
     assert format_panel_snapshot("polymarket-macro-map", {"items": [{"id": "m1", "title": "Macro"}]})[0].topic == "macro"
     for panel_id in ("worldcup-intel", "worldcup-dashboard", "world-cup-match-ops"):
         assert format_panel_snapshot(panel_id, {"signals": [{"id": "w1", "title": "Kickoff radar"}]}) == []

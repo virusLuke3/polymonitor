@@ -10,7 +10,7 @@ import subprocess
 from runtime.seed_meta import publish_snapshot, utc_now_iso
 
 NAMESPACE = "snapshot:signals:smart-money"
-CACHE_KEY = "matched-trades-v1"
+CACHE_KEY = "matched-trades-v2"
 LIMIT = 12
 FRESH_SECONDS = 900
 
@@ -18,15 +18,15 @@ FRESH_SECONDS = 900
 def collect(store):
     root = Path(os.environ["POLYMONITOR_SMART_MONEY_WORKTREE"]).resolve(strict=True)
     python = Path(os.environ["POLYMONITOR_SMART_MONEY_PYTHON"]).resolve(strict=True)
+    source_env = Path(os.environ["POLYMONITOR_SMART_MONEY_ENV_FILE"]).resolve(strict=True)
     with store.fetch_lock(NAMESPACE, CACHE_KEY, timeout=0):
         result = subprocess.run(
             [str(python), "-m", "smart_money", "signals", "--limit", str(LIMIT)],
             cwd=root,
             env={
-                **os.environ,
                 "PYTHONPATH": str(root / "src"),
                 "PYTHONDONTWRITEBYTECODE": "1",
-                "SMART_MONEY_ENV_FILE": str(root / "var/postgres.env"),
+                "SMART_MONEY_ENV_FILE": str(source_env),
             },
             capture_output=True,
             text=True,
@@ -46,7 +46,7 @@ def collect(store):
             ]
             items.append({
                 "id": row["signal_id"], "title": row["title"], "eventSlug": row["event_slug"],
-                "outcome": row["outcome"], "side": row["side"], "wallet": row["wallet"],
+                "outcome": row["outcome"], "side": row["side"],
                 "amountUsdc": row["amount_usdc"], "averagePrice": row["average_price"],
                 "fragments": row["fragments"], "tradedAt": row["last_trade_at"],
                 "tags": list(dict.fromkeys(reasons)),

@@ -10,9 +10,9 @@ test('mobile Alpha reserves space before deferred content and loads when scrolle
   await page.route('**/wm-api/runtime/signals/smart-money?*', route => {
     requests++;
     const item = { id: 'mobile-alpha', title: 'Mobile matched trade', eventSlug: 'matched-trade',
-      side: 'BUY', outcome: 'Up', wallet: '0x0000000000000000000000000000000000000001',
+      side: 'BUY', outcome: 'Up',
       amountUsdc: '150', averagePrice: '.62', fragments: 2, tradedAt: GENERATED_AT, tags: ['CRYPTO · B1'] };
-    return route.fulfill({ json: { source: 'matched-trades-v1', status: 'ok', generatedAt: GENERATED_AT,
+    return route.fulfill({ json: { source: 'matched-trades-v2', status: 'ok', generatedAt: GENERATED_AT,
       sourceObservedAt: GENERATED_AT, items: [item] } });
   });
   await page.goto('/');

@@ -122,15 +122,6 @@ class SeedHealthTestCase(unittest.TestCase):
                 "cacheMode": "seeded",
                 "payloadStatus": "ok",
             },
-            ("seed-meta:signals", "alpha-signal"): {
-                "status": "ok",
-                "lastAttemptAt": "2999-05-03T08:29:15Z",
-                "lastSuccessAt": "2999-05-03T08:29:15Z",
-                "recordCount": 8,
-                "sourceStates": {"database": "ok"},
-                "cacheMode": "seeded",
-                "payloadStatus": "ok",
-            },
             ("seed-meta:signals", "whale-trades"): {
                 "status": "ok",
                 "lastAttemptAt": "2999-05-03T08:29:10Z",

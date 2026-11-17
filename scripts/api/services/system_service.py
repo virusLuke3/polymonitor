@@ -408,14 +408,6 @@ SEED_META_SPECS = [
         "defaultIntervalSeconds": 1800,
     },
     {
-        "panelId": "alpha-signal",
-        "namespace": "seed-meta:signals",
-        "cacheKey": "alpha-signal",
-        "serviceName": "polydata-alpha-signal-seed.service",
-        "intervalEnv": "POLYDATA_SIGNAL_WATCH_INTERVAL_SECONDS",
-        "defaultIntervalSeconds": 120,
-    },
-    {
         "panelId": "whale-trades",
         "namespace": "seed-meta:signals",
         "cacheKey": "whale-trades",

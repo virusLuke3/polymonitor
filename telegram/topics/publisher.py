@@ -25,7 +25,6 @@ from .state import PublishState, state_lock
 
 PANEL_ENDPOINTS = {
     "latest-content": ("/content/latest", {"limit": 36}),
-    "alpha-signal": ("/runtime/signals/alpha", {"limit": 8}),
     "new-market-signals": ("/runtime/markets/new-signals", {"limit": 12}),
     "whale-tracker": ("/runtime/panels/whale-tracker", {"limit": 24}),
     "suspicious-flow": ("/runtime/panels/suspicious-flow", {"limit": 24}),
@@ -57,7 +56,7 @@ TARGET_PANELS = {
     "all": tuple(PANEL_ENDPOINTS),
     "news": ("latest-content",),
     "intel": ("geo-sanctions-shock", "policy-progress", ESPORTS, ORDER_FLOW, ORACLE),
-    "alpha": ("alpha-signal", "new-market-signals", "whale-tracker", "suspicious-flow"),
+    "alpha": ("new-market-signals", "whale-tracker", "suspicious-flow"),
     "macro": ("polymarket-macro-map", "cpi-release-command-center", COMMODITIES),
     "nba": ("nba-scoreboard", "nba-intel", "espn-matchup-predictor"),
     "weather": ("global-weather-map", "weather-news"),

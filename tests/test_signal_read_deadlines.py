@@ -118,19 +118,19 @@ def test_stalled_work_has_a_fixed_capacity_and_shutdown_does_not_admit_more(ctx)
         release.wait(5)
         return value
     try:
-        for name in ("alpha", "whales", "flow"):
+        for name in ("whales", "flow"):
             with pytest.raises(SignalReadPending):
                 read_verified_seed(ctx, name, {}, blocked, wait_seconds=.01)
         with pytest.raises(SignalReadPending, match="capacity"):
             read_verified_seed(ctx, "unexpected", {}, blocked)
-        assert len(ctx["_resources"].signal_reads) == 3
+        assert len(ctx["_resources"].signal_reads) == 2
     finally:
         release.set()
         for check in ctx["_resources"].signal_reads.values():
             check.future.result(timeout=1)
     ctx["_resources"].close()
     with pytest.raises(RuntimeError, match="closed"):
-        read_verified_seed(ctx, "alpha", {"new": True}, lambda value: value)
+        read_verified_seed(ctx, "whales", {"new": True}, lambda value: value)
 
 
 def test_verifier_exception_is_not_reclassified_as_pending_or_retried_in_a_loop(ctx):
@@ -140,7 +140,7 @@ def test_verifier_exception_is_not_reclassified_as_pending_or_retried_in_a_loop(
         raise TimeoutError("database timed out")
     for _ in range(3):
         with pytest.raises(TimeoutError, match="database timed out"):
-            read_verified_seed(ctx, "alpha", {}, broken)
+            read_verified_seed(ctx, "whales", {}, broken)
     assert len(calls) == 1
 
 
@@ -150,7 +150,7 @@ def test_pending_routes_return_retry_after_and_no_unverified_payload():
     app = Flask(__name__)
     register_http_hooks(app, set())
     helpers = {
-        "get_alpha_signal_snapshot": pending, "get_whale_trades_snapshot": pending,
+        "get_whale_trades_snapshot": pending,
         "get_suspicious_trades_snapshot": pending,
     }
     dependencies = RuntimePanelRouteDependencies(
@@ -159,7 +159,7 @@ def test_pending_routes_return_retry_after_and_no_unverified_payload():
         natural_hazard_related_markets=None, aviation_viewport_snapshot=None,
     )
     app.register_blueprint(create_runtime_panels_blueprint(dependencies))
-    for path in ("/runtime/signals/alpha", "/runtime/trades/whales", "/runtime/trades/suspicious"):
+    for path in ("/runtime/trades/whales", "/runtime/trades/suspicious"):
         response = app.test_client().get(path)
         assert response.status_code == 503
         assert response.headers["Retry-After"] == "1"
@@ -172,9 +172,9 @@ def test_pending_routes_return_retry_after_and_no_unverified_payload():
 def test_trade_reads_use_isolated_context_and_keep_the_original_source_clock(ctx):
     seed = {"items": [{"marketId": 1}], "generatedAt": "2026-10-03T07:00:00Z", "status": "ok"}
     read_ctx = {**ctx, "query_all": object()}
-    ctx.update(get_cached_json=lambda *_args: seed, alpha_context=read_ctx)
+    ctx.update(get_cached_json=lambda *_args: seed, verification_context=read_ctx)
     contexts = []
-    def sanitize(current, _namespace, value):
+    def sanitize(current, value):
         contexts.append(current)
         return value
     with patch.object(signal_service, "_sanitize_signal_payload", side_effect=sanitize):

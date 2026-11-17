@@ -32,8 +32,3 @@ def test_directional_clickhouse_queries_exclude_unknown_outcomes(monkeypatch) ->
     )
     assert captured
     assert "outcome_code IN (1, 2)" in captured[-1]
-
-    captured.clear()
-    clickhouse_orderfilled_service.get_alpha_volume_signal_rows({}, limit=1)
-    assert captured and "f.outcome_code IN (1, 2)" in captured[-1]
-    assert captured[-1].count("outcome_code IN (1, 2)") >= 3
