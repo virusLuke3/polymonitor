@@ -210,17 +210,15 @@ def _priority(payload: Mapping[str, Any]) -> str:
 def format_generic_snapshot(panel_id: str, payload: Mapping[str, Any], *, topic: str) -> list[MessageCandidate]:
     if not isinstance(payload, Mapping):
         return []
-    projection = semantic_projection(panel_id, payload)
-    has_status = bool(projection["status"] or projection["summaryStatus"])
-    has_collections = bool(projection["collections"])
-    if not has_status and not has_collections:
+    rows = _display_rows(payload)
+    if not rows:
         return []
 
     lines = [f"Status: {_status_line(payload)}"]
     count_line = _collection_count_line(payload)
     if count_line:
         lines.append(f"Records: {count_line}")
-    lines.extend(_display_rows(payload))
+    lines.extend(rows)
     text = "\n".join([f"📡 {_title_case_panel_id(panel_id)}", *lines])
     return [
         MessageCandidate(
