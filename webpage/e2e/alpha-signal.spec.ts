@@ -7,67 +7,20 @@ test('mobile Alpha reserves space before deferred content and loads when scrolle
   await page.setViewportSize({ width: 390, height: 844 });
   await installDashboard(page, 'en', ['alpha-signal']);
   let requests = 0;
-  await page.route('**/wm-api/runtime/signals/alpha?*', route => {
+  await page.route('**/wm-api/runtime/signals/smart-money?*', route => {
     requests++;
-    const item = { id: 'mobile-alpha', marketId: 1, tokenId: 'token-a', marketTitle: 'Mobile verified flow', side: 'BUY', logicalOutcome: 'YES', sourceOutcomeLabel: 'Yes', price: '.62', outcomeSemanticsValid: true, outcomeSemanticsCapabilities: { supportsYesNoWording: true }, metrics: { totalNotional: 15000, netFlowNotional: 14000, netDirectionStrength: .875, marketShare: .3, uniqueTraderCount: 6, tradeCount: 12, score: 88 } };
-    return route.fulfill({ json: { policyVersion: 'token-flow-v1', scope: 'global', status: 'ok', generatedAt: GENERATED_AT, windowMinutes: 15, baselineMinutes: 60, items: [item], candidates: [], coverage: { candidateCount: 1, verifiedCount: 1, rejectedCount: 0, rejectionReasons: {} } } });
+    const item = { id: 'mobile-alpha', title: 'Mobile matched trade', eventSlug: 'matched-trade',
+      side: 'BUY', outcome: 'Up', wallet: '0x0000000000000000000000000000000000000001',
+      amountUsdc: '150', averagePrice: '.62', fragments: 2, tradedAt: GENERATED_AT, tags: ['CRYPTO · B1'] };
+    return route.fulfill({ json: { source: 'matched-trades-v1', status: 'ok', generatedAt: GENERATED_AT,
+      sourceObservedAt: GENERATED_AT, items: [item] } });
   });
   await page.goto('/');
   const slot = page.locator('.wm-panel-slot[data-workspace-panel-id="alpha-signal"]');
   await expect(slot).toBeAttached();
   await expect.poll(() => slot.evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThan(0);
   await slot.scrollIntoViewIfNeeded();
-  await expect(slot.getByRole('button', { name: 'Mobile verified flow' })).toBeVisible();
+  await expect(slot.getByRole('link', { name: 'Mobile matched trade' })).toBeVisible();
   expect(requests).toBeGreaterThan(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
-});
-
-test('Alpha uses its resource to apply scheduled updates, retain failures and separate pending labels', async ({ page }) => {
-  await installDashboard(page);
-  await page.clock.install({ time: new Date(GENERATED_AT) });
-  let version = 1, fail = false, verificationFailed = false, knownInvalid = false, requests = 0;
-  await page.route('**/wm-api/runtime/signals/alpha?*', route => {
-    requests++;
-    if (fail) return route.fulfill({ status: 503, json: { error: 'Fixture outage' } });
-    if (verificationFailed) return route.fulfill({ json: { policyVersion: 'token-flow-v1', scope: 'global', status: 'degraded', readIntegrity: knownInvalid ? 'invalid' : 'unavailable', generatedAt: GENERATED_AT, windowMinutes: 15, baselineMinutes: 60, items: [], candidates: [], error: knownInvalid ? 'Token ownership changed' : 'Ownership check unavailable', coverage: { candidateCount: 2, verifiedCount: 0, rejectedCount: 2, rejectionReasons: {} } } });
-    const item = { id: `alpha-${version}`, marketId: 1, tokenId: 'token-a', marketTitle: `Verified flow ${version}`, side: 'BUY', logicalOutcome: 'YES', sourceOutcomeLabel: 'Yes', price: '.62', outcomeSemanticsValid: true, outcomeSemanticsCapabilities: { supportsYesNoWording: true }, metrics: { totalNotional: 15000, netFlowNotional: 14000, netDirectionStrength: .875, marketShare: .3, uniqueTraderCount: 6, tradeCount: 12, score: 88 } };
-    return route.fulfill({ json: { policyVersion: 'token-flow-v1', scope: 'global', status: 'partial', generatedAt: GENERATED_AT, windowMinutes: 15, baselineMinutes: 60, items: [item], candidates: [{ ...item, id: 'pending', marketTitle: 'Pending flow', qualification: 'labels-unavailable', marketIdentityVerified: true, outcomeSemanticsValid: false }], coverage: { candidateCount: 2, verifiedCount: 1, rejectedCount: 1, rejectionReasons: { projection_missing: 1 } } } });
-  });
-  await page.goto('/e2e/panels.html');
-  await page.waitForFunction(() => window.panelHarness);
-  await page.evaluate(() => window.panelHarness.mount('alpha-signal', {}, {}));
-  await expect(page.locator('.wm-alpha-card')).toHaveCount(2);
-  await expect(page.getByText('Unverified labels · neutral flow only.')).toHaveCount(0);
-  await expect(page.getByText('Some candidates remain unverified.', { exact: true })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Pending official labels' })).toBeVisible();
-  const panel = page.locator('.wm-alpha-signal-panel');
-  await panel.evaluate(element => { element.style.height = '270px'; element.style.display = 'flex'; element.style.flexDirection = 'column'; });
-  await panel.locator('.wm-panel-body').evaluate(element => { element.style.minHeight = '0'; element.style.overflowY = 'auto'; });
-  const bounds = await panel.locator('.wm-panel-body').boundingBox();
-  const title = await panel.getByRole('button', { name: 'Verified flow 1' }).boundingBox();
-  expect(title!.y + title!.height).toBeLessThan(bounds!.y + bounds!.height);
-  await expect(page.getByRole('button', { name: 'Verified flow 1' })).toBeVisible();
-  await expect(page.locator('.wm-alpha-card.is-pending')).not.toContainText('88/100');
-  await expect(page.locator('.wm-alpha-card.is-pending')).not.toContainText('Buy Yes');
-  await expect(page.locator('.wm-alpha-card').first()).toContainText('Unique takers6');
-  version = 2;
-  await page.clock.runFor(31_000);
-  await expect(page.getByRole('button', { name: 'Verified flow 2' })).toBeVisible();
-  expect(requests).toBeGreaterThanOrEqual(2);
-  fail = true;
-  await page.clock.runFor(31_000);
-  await expect(page.getByRole('button', { name: 'Verified flow 2' })).toBeVisible();
-  await expect(page.getByText('Alpha data cannot currently be verified.', { exact: false })).toBeVisible();
-  fail = false; verificationFailed = true;
-  const beforeVerification = requests;
-  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
-  await expect.poll(() => requests).toBeGreaterThan(beforeVerification);
-  await expect(page.getByRole('button', { name: 'Verified flow 2' })).toBeVisible();
-  await expect(page.getByText('Ownership check unavailable', { exact: false })).toBeVisible();
-  expect(await page.evaluate(() => Boolean(localStorage.getItem('polymonitor:panel-resource:alpha-signal:global:token-flow-v1:8')))).toBe(true);
-  knownInvalid = true;
-  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
-  await expect(page.locator('.wm-alpha-card')).toHaveCount(0);
-  await expect(page.locator('[role="status"]').filter({ hasText: 'Token ownership changed' })).toBeVisible();
-  expect(await page.evaluate(() => localStorage.getItem('polymonitor:panel-resource:alpha-signal:global:token-flow-v1:8')?.includes('"readIntegrity":"invalid"'))).toBe(true);
 });

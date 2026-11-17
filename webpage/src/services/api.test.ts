@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ApiHttpError, ApiTimeoutError, withRuntimeRequestBudget, fetchMarketsPage, fetchLatestContent, fetchRuntimePanels, fetchAviationViewport, fetchMarketWideAiSnapshot, fetchNaturalHazardMapSource, fetchRuntimeAlpha, fetchRuntimeGeoSanctionsShock, fetchCryptoStrategyInputs, fetchRuntimeGlobalTemperatureMonitor, fetchSystemHealth, fetchWorkspaceBundle } from './api';
+import { ApiHttpError, ApiTimeoutError, withRuntimeRequestBudget, fetchMarketsPage, fetchLatestContent, fetchRuntimePanels, fetchAviationViewport, fetchMarketWideAiSnapshot, fetchNaturalHazardMapSource, fetchRuntimeSmartMoneySignals, fetchRuntimeGeoSanctionsShock, fetchCryptoStrategyInputs, fetchRuntimeGlobalTemperatureMonitor, fetchSystemHealth, fetchWorkspaceBundle } from './api';
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
@@ -10,7 +10,7 @@ describe('HTTP lifecycle', () => {
       const headers = new Headers({ 'Retry-After': '1' });
       if (marker) headers.set('X-Panel-Verification', marker);
       vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status, headers })));
-      await expect(fetchRuntimeAlpha()).rejects.toMatchObject({ status, verificationPending: pending, retryAfterMs: 1000 });
+      await expect(fetchRuntimeSmartMoneySignals()).rejects.toMatchObject({ status, verificationPending: pending, retryAfterMs: 1000 });
     });
   it('revalidates hazard snapshots instead of accepting a browser-fresh but source-expired body', async () => {
     vi.stubGlobal('window', globalThis);
@@ -177,12 +177,12 @@ describe('shared Runtime admission', () => {
       return { ok: true, json: async () => ({ items: [] }) };
     }));
     const geography = fetchRuntimeGeoSanctionsShock();
-    const signal = fetchRuntimeAlpha();
+    const signal = fetchRuntimeSmartMoneySignals();
     expect(started).toHaveLength(0);
     releases.shift()!();
     try {
       await signal; await geography;
-      expect(started[0]).toContain('/runtime/signals/alpha');
+      expect(started[0]).toContain('/runtime/signals/smart-money');
       expect(started[1]).toContain('/runtime/world/geo-sanctions-shock');
     } finally {
       releases.forEach(release => release()); await Promise.all(active);

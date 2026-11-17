@@ -427,8 +427,8 @@ export function fetchNaturalHazardRelatedMarkets(eventId: string, signal?: Abort
   );
 }
 
-export function fetchRuntimeAlpha(limit = 8, signal?: AbortSignal) {
-  return apiGet<RuntimeSignalPayload>(`/runtime/signals/alpha?limit=${limit}`, signal);
+export function fetchRuntimeSmartMoneySignals(limit = 12, signal?: AbortSignal) {
+  return apiGet<unknown>(`/runtime/signals/smart-money?limit=${limit}`, signal);
 }
 
 export function fetchRuntimeMarketTvWire(limit = 24, category?: string | null, signal?: AbortSignal) {

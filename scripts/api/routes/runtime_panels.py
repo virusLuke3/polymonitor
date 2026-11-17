@@ -517,6 +517,11 @@ def create_runtime_panels_blueprint(dependencies: RuntimePanelRouteDependencies)
             )
         )
 
+    @bp.route("/runtime/signals/alpha", methods=["GET"])
+    def legacy_alpha_flow():
+        limit = max(1, min(20, request.args.get("limit", default=8, type=int)))
+        return jsonify(dependencies.panel_context.get_alpha_signal_snapshot(limit=limit))
+
     for panel in RUNTIME_PANEL_MODULES:
         endpoint = f"api_runtime_panel_{panel.panel_id.replace('-', '_')}"
 

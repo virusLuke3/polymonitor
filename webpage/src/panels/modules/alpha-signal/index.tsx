@@ -1,58 +1,79 @@
-import { Component, type ComponentChildren } from 'preact';
-import { Panel, PanelLoading } from '@/components/Panel';
-import { panelFromRenderer } from '@/panels/definePanel';
-import type { PanelInputs, PanelRenderMap } from '@/panels/types';
+import { Panel } from '@/components/Panel';
+import { runtimePanelFromRenderer } from '@/panels/definePanel';
+import { publicFeedSnapshot } from '@/panels/shared/public-feed-snapshot';
+import type { PanelRenderMap } from '@/panels/types';
+import { fetchRuntimeSmartMoneySignals } from '@/services/api';
 import { useI18n } from '@/services/i18n';
-import { useAlphaFeed } from './useAlphaFeed';
-import { alphaCoverageSummary, alphaRejectionLabel, signalDirection, type AlphaSignal, type AlphaCandidate } from './model';
 import './styles.css';
 
-function AlphaCard({ item, onSelect }: { item: AlphaSignal | AlphaCandidate; onSelect?: (id: number) => void }) {
-  const i18n = useI18n(), cn = i18n.locale.startsWith('zh');
-  const verified = 'logicalOutcome' in item;
-  const displayedTime = item.timestamp || item.observedAt;
-  const money = (value: number) => new Intl.NumberFormat(i18n.locale, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(value);
-  return <article className={`wm-alpha-card is-${verified ? signalDirection(item) : 'pending'}`} data-alpha-id={item.id}>
-    <div className="wm-alpha-card-heading"><b>{verified ? `${cn ? '资金流评分' : 'Flow score'} ${item.metrics.score}/100` : cn ? '待核验标签 · 资金流候选' : 'Labels pending · flow candidate'}</b><time dateTime={displayedTime || undefined}>{displayedTime ? `${item.timestamp ? cn ? '最近成交' : 'Last fill' : cn ? '来源观测' : 'Source observed'} ${i18n.formatDateTime(displayedTime)}` : cn ? '来源时间尚未提供' : 'Source clock unavailable'}</time></div>
-    {!item.timestamp && item.observedAt && <p className="wm-alpha-help">{cn ? '逐笔成交时间待补' : 'Exact fill time pending'}{item.latestBlock && ` · ${cn ? '来源区块' : 'Source block'} ${item.latestBlock}`}</p>}
-    <button type="button" className="wm-alpha-market" onClick={() => onSelect?.(item.marketId)}>{item.marketTitle}</button>
-    <p>{cn ? '观测方向' : 'Observed flow'}: {item.side === 'BUY' ? cn ? '买入' : 'Buy' : cn ? '卖出' : 'Sell'} {verified ? item.outcome : 'token'}</p>
-    {!verified && <p className="wm-alpha-help" title={item.tokenId}>Token {item.tokenId.slice(0, 8)}…{item.tokenId.slice(-6)}</p>}
-    <dl className="wm-alpha-metrics">
-      <div><dt>{cn ? '净资金流' : 'Net flow'}</dt><dd>{money(item.metrics.netFlowNotional)}</dd></div>
-      <div><dt>{cn ? '方向强度' : 'Net strength'}</dt><dd>{(item.metrics.netDirectionStrength * 100).toFixed(1)}%</dd></div>
-      <div><dt>{cn ? '成交笔数' : 'Fills'}</dt><dd>{item.metrics.tradeCount}</dd></div>
-      <div><dt>{cn ? '独立成交方' : 'Unique takers'}</dt><dd>{item.metrics.uniqueTraderCount}</dd></div>
-      <div><dt>{cn ? '主方向成交额' : 'Dominant flow'}</dt><dd>{money(item.metrics.totalNotional)}</dd></div>
-      {verified && <div><dt>{cn ? '最后成交价格' : 'Last fill price'}</dt><dd>{(item.price * 100).toFixed(1)}¢</dd></div>}
-    </dl>
-  </article>;
+const LIMIT = 12;
+const snapshotContract = publicFeedSnapshot('alpha-signal', LIMIT);
+
+interface SignalCard {
+  id: string;
+  title: string;
+  eventSlug: string;
+  outcome: string;
+  side: 'BUY' | 'SELL';
+  wallet: string;
+  amountUsdc: string;
+  averagePrice: string;
+  fragments: number;
+  tradedAt: string;
+  tags: string[];
 }
 
-function AlphaView({ ctx }: { ctx: PanelInputs<'setSelectedMarketId'> }) {
-  const i18n = useI18n(), cn = i18n.locale.startsWith('zh');
-  const copy = (en: string, zh: string) => cn ? zh : en;
-  const feed = useAlphaFeed(), data = feed.data;
-  const checked = feed.status.checkedAt ? new Date(feed.status.checkedAt).toISOString() : null;
-  const clock = (value: string) => new Intl.DateTimeFormat(i18n.locale, { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(value));
-  return <Panel title="ALPHA SIGNAL" badge="FLOW" count={data ? data.items.length : feed.loading ? '…' : '—'} className="wm-alpha-signal-panel">
-    <div className="wm-alpha-toolbar"><span>{copy('Global', '全市场')} · {data?.windowMinutes ?? 15}{copy('m flow window', '分钟资金流窗口')}</span><button type="button" disabled={feed.status.fetching} onClick={() => void feed.refresh()}>{feed.status.fetching ? copy('Refreshing…', '刷新中…') : copy('Refresh', '刷新')}</button></div>
-    <p className="wm-alpha-clock">{checked && <span>{copy('Checked', '检查')} <time data-alpha-checked-at dateTime={checked} title={i18n.formatDateTime(checked)}>{clock(checked)}</time></span>}{data && <span>{copy('Snapshot', '快照')} <time data-alpha-updated-at dateTime={data.generatedAt} title={i18n.formatDateTime(data.generatedAt)}>{clock(data.generatedAt)}</time></span>}</p>
-    {feed.loading && <PanelLoading />}
-    {feed.fromCache && <p role="status">{copy('Showing a saved snapshot while checking updates.', '显示已保存快照，正在检查更新。')}</p>}
-    {(feed.error || data?.status === 'degraded') && <p role="status">{copy('Alpha data cannot currently be verified.', '当前无法核验 Alpha 数据。')} {data?.error || feed.error}</p>}
-    {data && (data.status === 'stale' || feed.status.phase === 'stale') && <p role="status">{copy('The source or saved snapshot is overdue. Refreshing without clearing verified signals.', '来源或快照已过期，更新期间保留已核验信号。')}</p>}
-    {data && alphaCoverageSummary(data, cn) && <p className="wm-alpha-help" role="status">{alphaCoverageSummary(data, cn)}</p>}
-    {data && !data.items.length && ['empty', 'ok'].includes(data.status) && <p role="status">{copy('No verified flows in this scan meet the active-market policy.', '本轮候选中暂无符合可交易市场策略的已核验资金流。')}</p>}
-    {data && <p className="wm-alpha-help">{copy('Verified signals', '已核验信号')} {data.items.length} · {copy('Flow candidates', '资金流候选')} {data.candidates.length}</p>}
-    <div className="wm-alpha-list">{!!data?.items.length && <h3>{copy('Verified token flows', '已核验 token 资金流')}</h3>}{data?.items.map(item => <AlphaCard key={item.id} item={item} onSelect={ctx.setSelectedMarketId} />)}{!!data?.candidates.length && <h3>{copy('Pending official labels', '官方标签待补候选')}</h3>}{data?.candidates.map(item => <AlphaCard key={item.id} item={item} onSelect={ctx.setSelectedMarketId} />)}</div>
-    {data && <details className="wm-alpha-source"><summary>{copy('Source and coverage', '来源与覆盖')} · {data.coverage.verifiedCount}/{data.coverage.candidateCount}</summary><p>OrderFilled · {copy('canonical token labels', '已核验 token 标签')}</p><p>{copy('Unclassified token flow carries no outcome prediction. Verified token flow is ranked by a heuristic score.', '待分类 token 资金流不表示结果预测；已核验资金流按启发式评分排序。')}</p>{data.error && <p>{data.error}</p>}<p>{copy('Source time', '来源时间')}: {data.sourceObservedAt ? i18n.formatDateTime(data.sourceObservedAt) : copy('Unknown', '未知')}</p><p>{copy('Candidates', '候选')} {data.coverage.candidateCount} · {copy('Verified', '已核验')} {data.coverage.verifiedCount} · {copy('Excluded', '排除')} {data.coverage.rejectedCount}{data.coverage.truncated ? copy(' · limited candidate coverage', ' · 候选覆盖受限') : ''}</p>{Object.entries(data.coverage.rejectionReasons).map(([reason, count]) => <p key={reason}>{alphaRejectionLabel(reason, cn)}: {count}</p>)}<p>{copy('Block-based window; heuristic score has no validated return forecast.', '窗口按来源区块估算；评分尚未形成经验证的收益预测。')}</p></details>}
+interface SignalSnapshot {
+  sourceObservedAt: string | null;
+  status: string;
+  items: SignalCard[];
+}
+
+function AlphaSignal({ snapshot }: { snapshot?: SignalSnapshot }) {
+  const i18n = useI18n();
+  const chinese = i18n.locale.startsWith('zh');
+  const copy = (en: string, zh: string) => chinese ? zh : en;
+  const format = new Intl.NumberFormat(i18n.locale, { maximumFractionDigits: 4 });
+  const items = snapshot?.items ?? [];
+
+  return <Panel title="ALPHA SIGNAL" badge="SMART MONEY" count={items.length} className="wm-alpha-signal-panel">
+    {snapshot?.status === 'stale' && <p className="wm-alpha-clock" role="status">{copy('Showing saved signals. The latest available trade is over 15 minutes old.', '正在展示已保存信号，最新可用成交距今已超过 15 分钟。')}</p>}
+    {snapshot?.sourceObservedAt && <p className="wm-alpha-clock">{copy('Latest source trade', '来源最新成交')} <time dateTime={snapshot.sourceObservedAt}>{i18n.formatDateTime(snapshot.sourceObservedAt)}</time></p>}
+    {snapshot && !items.length && <p role="status">{copy('No matched trade signals are available.', '暂无可展示的筛选信号。')}</p>}
+    {items.map(item => <article className={item.side === 'SELL' ? 'wm-alpha-card is-sell' : 'wm-alpha-card'} key={item.id}>
+      <div className="wm-alpha-card-heading">
+        <b>{item.side === 'BUY' ? copy('Buy', '买入') : copy('Sell', '卖出')} {item.outcome}</b>
+        <time dateTime={item.tradedAt}>{i18n.formatDateTime(item.tradedAt)}</time>
+      </div>
+      {item.eventSlug ? <a className="wm-alpha-market" href={`https://polymarket.com/event/${encodeURIComponent(item.eventSlug)}`} target="_blank" rel="noopener noreferrer">{item.title}</a> : <strong className="wm-alpha-market">{item.title}</strong>}
+      <dl className="wm-alpha-metrics">
+        <div><dt>{copy('Trade value', '成交金额')}</dt><dd>{format.format(Number(item.amountUsdc))} USDC</dd></div>
+        <div><dt>{copy('Average fill price', '成交均价')}</dt><dd>{format.format(Number(item.averagePrice) * 100)}¢</dd></div>
+        <div><dt>{copy('Wallet', '钱包')}</dt><dd title={item.wallet}>{item.wallet.slice(0, 8)}…{item.wallet.slice(-6)}</dd></div>
+        <div><dt>{copy('Matched fills', '合并成交')}</dt><dd>{item.fragments}</dd></div>
+      </dl>
+      {!!item.tags.length && <p className="wm-alpha-tags">{item.tags.join(' / ')}</p>}
+    </article>)}
   </Panel>;
 }
-class AlphaBoundary extends Component<{ children: ComponentChildren }, { failed: boolean }> {
-  state = { failed: false };
-  componentDidCatch() { this.setState({ failed: true }); }
-  render() { return this.state.failed ? <Panel title="ALPHA SIGNAL"><p role="alert">Unable to display Alpha Signal / Alpha 显示失败</p><button type="button" onClick={() => this.setState({ failed: false })}>Retry / 重试</button></Panel> : this.props.children; }
-}
-const renderers: PanelRenderMap<'setSelectedMarketId'> = { 'alpha-signal': { render: ctx => <AlphaBoundary><AlphaView ctx={ctx} /></AlphaBoundary> } };
-export const panel = panelFromRenderer(renderers, { contextKeys: ['setSelectedMarketId'], id: 'alpha-signal', title: 'Alpha Signal', eyebrow: 'signal', description: 'Global canonical-token flow signals with source freshness and explicit coverage.', defaultEnabled: true });
+
+const renderers: PanelRenderMap<never> = {
+  'alpha-signal': { render: ctx => <AlphaSignal snapshot={ctx.runtimeData['alpha-signal'] as SignalSnapshot | undefined} /> },
+};
+
+export const panel = runtimePanelFromRenderer(renderers, {
+  id: 'alpha-signal',
+  snapshot: { ...snapshotContract, parse: (value) => {
+    if ((value as { source?: string } | null)?.source !== 'matched-trades-v1') throw new Error('Smart Money snapshot unavailable');
+    return snapshotContract.parse(value);
+  } },
+  title: 'Alpha Signal',
+  eyebrow: 'signal',
+  description: 'Matched trade signals from the Smart Money worktree.',
+  defaultEnabled: true,
+}, {
+  tier: 'slow',
+  intervalMs: 300_000,
+  limit: LIMIT,
+  fetchData: (context, limit) => fetchRuntimeSmartMoneySignals(limit, context?.signal),
+});

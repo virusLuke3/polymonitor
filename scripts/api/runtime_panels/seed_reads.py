@@ -28,7 +28,7 @@ ALIASES = {
     "geo-sanctions-shock": "snapshot:world:geo-sanctions-shock",
     "natural-hazards": "snapshot:world:natural-hazards",
     "global-transport-shipping": "snapshot:transport:global-shipping",
-    "alpha-signal": "snapshot:signals:alpha",
+    "alpha-signal": "snapshot:signals:smart-money",
     "whale-tracker": "snapshot:signals:whales",
     "suspicious-flow": "snapshot:signals:suspicious",
     "crypto-order-flow": "snapshot:crypto-strategy",

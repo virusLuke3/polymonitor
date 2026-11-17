@@ -14,6 +14,7 @@ OWNERS = {
     'bookmakers': 'bookmaker_panels.snapshot_service',
     'finance': 'finance_expansion',
     'culture-tech': 'culture_tech',
+    'smart-money': 'smart_money_signals_service',
 }
 
 

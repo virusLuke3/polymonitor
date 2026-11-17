@@ -14,6 +14,7 @@ const policies = {
   'f1-trackside': { fresh: 300_000, identity: ['id', 'title'] },
   'defi-token-watch': { fresh: 900_000, identity: ['id', 'symbol', 'name'] },
   'new-market-signals': { fresh: 900_000, identity: ['marketId', 'title'] },
+  'alpha-signal': { fresh: 900_000, identity: ['id'] },
 } as const;
 type PublicFeedId = keyof typeof policies;
 const object = (value: unknown): value is Record<string, unknown> => value != null && typeof value === 'object' && !Array.isArray(value);
