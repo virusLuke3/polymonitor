@@ -3,7 +3,6 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Mapping
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
@@ -65,6 +64,7 @@ class FinancePanelDependencies:
     get_crypto_funding_watch_snapshot: Callable[..., Any] | None
     external_sources: finance_external_sources_service.FinanceExternalSourceDependencies
     seed_writer: bool = False
+    map_yahoo: Callable[..., Any] | None = None
 
     @classmethod
     def from_context(
@@ -76,6 +76,7 @@ class FinancePanelDependencies:
         return cls(
             application=context.get("app"),
             seed_writer=context.get("finance_seed_writer") is True,
+            map_yahoo=context.get("map_yahoo"),
             utc_now_iso=resolve_optional_service_callable(
                 context,
                 "utc_now_iso",
@@ -406,12 +407,10 @@ def _quote_snapshots(
                 )
             return symbol, None
 
-    with ThreadPoolExecutor(max_workers=min(3, max(1, len(symbols)))) as executor:
-        futures = [executor.submit(_load, symbol) for symbol in symbols]
-        for future in as_completed(futures):
-            symbol, row = future.result()
-            if isinstance(row, dict):
-                rows[symbol] = row
+    mapper = dependencies.map_yahoo or map
+    for symbol, row in mapper(_load, symbols):
+        if isinstance(row, dict):
+            rows[symbol] = row
     return rows
 
 

@@ -231,7 +231,8 @@ class FinanceWatchPanelsWatcher:
             return payload
 
         context = {**runtime.finance_panels_context, "finance_seed_writer": True,
-                   "get_snapshot_payload": publish, "get_yahoo_market_snapshot": self.get_yahoo_market_snapshot}
+                   "get_snapshot_payload": publish, "get_yahoo_market_snapshot": self.get_yahoo_market_snapshot,
+                   "map_yahoo": self.map_yahoo}
         result = {}
         for panel_id, reader, limit in (
             ("finance-market-atlas", finance_panels_service.get_finance_market_atlas_snapshot, 40),
