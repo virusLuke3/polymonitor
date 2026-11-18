@@ -20,13 +20,13 @@ from .formatters import format_all_snapshots_with_stats, format_related_news
 from .generic_formatter import SUMMARY_KEY_PREFIX
 from .models import MessageCandidate, source_clock
 from .nba_scoreboard import NBA
+from .smart_money_feed import SMART_MONEY, relay as relay_smart_money
 from .source_alerts import COMMODITIES, ESPORTS, ORACLE, ORDER_FLOW, SOURCE_LIMITS, STATE_SUFFIX, plan_source_alerts
 from .state import PublishState, state_lock
 
 
 PANEL_ENDPOINTS = {
     "latest-content": ("/content/latest", {"limit": 36}),
-    "alpha-signal": ("/runtime/signals/smart-money", {"limit": 12}),
     "new-market-signals": ("/runtime/markets/new-signals", {"limit": 12}),
     "whale-tracker": ("/runtime/panels/whale-tracker", {"limit": 24}),
     "suspicious-flow": ("/runtime/panels/suspicious-flow", {"limit": 24}),
@@ -51,18 +51,18 @@ ROTATING_PANELS_PER_CYCLE = 12
 LISTING_PANEL = "crypto-listing-watch"
 ROTATING_PANELS = tuple(
     panel_id for panel_id in SERVER_RUNTIME_PANEL_IDS
-    if panel_id not in PANEL_ENDPOINTS and DELIVERY_CATALOG[panel_id].pushable
+    if panel_id not in PANEL_ENDPOINTS and panel_id != SMART_MONEY and DELIVERY_CATALOG[panel_id].pushable
 )
 
 TARGET_PANELS = {
     "all": tuple(PANEL_ENDPOINTS),
     "news": ("latest-content",),
     "intel": ("geo-sanctions-shock", "policy-progress", ESPORTS, ORDER_FLOW, ORACLE),
-    "alpha": ("alpha-signal", "new-market-signals", "whale-tracker", "suspicious-flow"),
+    "alpha": ("new-market-signals", "whale-tracker", "suspicious-flow"),
     "macro": ("polymarket-macro-map", "cpi-release-command-center", COMMODITIES),
     "nba": (NBA, "nba-intel", "espn-matchup-predictor"),
     "weather": ("global-weather-map", "weather-news"),
-    "all-panels": (*SERVER_RUNTIME_PANEL_IDS, "latest-content"),
+    "all-panels": (*(p for p in SERVER_RUNTIME_PANEL_IDS if p != SMART_MONEY), "latest-content"),
 }
 
 
@@ -100,6 +100,7 @@ class PublishResult:
     baselined_sources: list[str] = field(default_factory=list)
     empty_sources: list[str] = field(default_factory=list)
     selected_by_topic: dict[str, list[str]] = field(default_factory=dict)
+    smart_money: dict = field(default_factory=dict)
 
 
 def _write_heartbeat(*, phase: str, result: PublishResult | None = None, error: str = "") -> None:
@@ -473,6 +474,12 @@ def run_once(
             dry_run=dry_run,
             primary_only=True,
         )
+        if target in ("all", "alpha", "all-panels") and not (dry_run or prime):
+            try:
+                result.smart_money = relay_smart_money(settings, state, telegram)
+            except Exception as exc:
+                result.smart_money = {"error": type(exc).__name__}
+                print(f"[telegram-publisher] Smart Money relay failed error_class={type(exc).__name__}", file=sys.stderr)
         if not dry_run:
             retryable = set(result.retryable_keys)
             for candidate in chosen:

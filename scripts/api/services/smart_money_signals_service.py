@@ -15,42 +15,43 @@ LIMIT = 12
 FRESH_SECONDS = 900
 
 
-def collect(store):
+def run_source(*args, include_runtime=False, input_data=None):
     root = Path(os.environ["POLYMONITOR_SMART_MONEY_WORKTREE"]).resolve(strict=True)
     python = Path(os.environ["POLYMONITOR_SMART_MONEY_PYTHON"]).resolve(strict=True)
     source_env = Path(os.environ["POLYMONITOR_SMART_MONEY_ENV_FILE"]).resolve(strict=True)
+    pythonpath = str(root / "src")
+    if include_runtime:
+        pythonpath += os.pathsep + str(Path(__file__).resolve().parents[2])
+    result = subprocess.run(
+        [str(python), *args], cwd=root,
+        env={"PYTHONPATH": pythonpath, "PYTHONDONTWRITEBYTECODE": "1", "SMART_MONEY_ENV_FILE": str(source_env)},
+        input=input_data, capture_output=True, text=True, timeout=20, check=False,
+    )
+    if result.returncode:
+        raise RuntimeError(f"Smart Money signal export failed (exit {result.returncode})")
+    return result.stdout
+
+
+def public_card(row):
+    reasons = [
+        f"{sector} · {bucket['id']} {bucket['name']}"
+        for selection in row["selection"]
+        for sector, buckets in selection.get("buckets", {}).items()
+        for bucket in buckets
+    ]
+    return {
+        "id": row["signal_id"], "title": row["title"], "eventSlug": row["event_slug"],
+        "outcome": row["outcome"], "side": row["side"],
+        "amountUsdc": row["amount_usdc"], "averagePrice": row["average_price"],
+        "fragments": row["fragments"], "tradedAt": row["last_trade_at"],
+        "tags": list(dict.fromkeys(reasons)),
+    }
+
+
+def collect(store):
     with store.fetch_lock(NAMESPACE, CACHE_KEY, timeout=0):
-        result = subprocess.run(
-            [str(python), "-m", "smart_money", "signals", "--limit", str(LIMIT)],
-            cwd=root,
-            env={
-                "PYTHONPATH": str(root / "src"),
-                "PYTHONDONTWRITEBYTECODE": "1",
-                "SMART_MONEY_ENV_FILE": str(source_env),
-            },
-            capture_output=True,
-            text=True,
-            timeout=20,
-            check=False,
-        )
-        if result.returncode:
-            raise RuntimeError(f"Smart Money signal export failed (exit {result.returncode})")
-        items = []
-        for line in result.stdout.splitlines():
-            row = json.loads(line)
-            reasons = [
-                f"{sector} · {bucket['id']} {bucket['name']}"
-                for selection in row["selection"]
-                for sector, buckets in selection.get("buckets", {}).items()
-                for bucket in buckets
-            ]
-            items.append({
-                "id": row["signal_id"], "title": row["title"], "eventSlug": row["event_slug"],
-                "outcome": row["outcome"], "side": row["side"],
-                "amountUsdc": row["amount_usdc"], "averagePrice": row["average_price"],
-                "fragments": row["fragments"], "tradedAt": row["last_trade_at"],
-                "tags": list(dict.fromkeys(reasons)),
-            })
+        items = [public_card(json.loads(line)) for line in
+                 run_source("-m", "smart_money", "signals", "--limit", str(LIMIT)).splitlines()]
         items.sort(key=lambda item: (item["tradedAt"], item["id"]), reverse=True)
         previous = store.get_stale(NAMESPACE, CACHE_KEY)
         if not previous or previous.get("items") != items:

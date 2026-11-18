@@ -638,12 +638,14 @@ def format_smart_money_signals(payload: Dict[str, Any]) -> List[MessageCandidate
     messages = []
     for item in _iter_items(payload):
         signal_id = _text(item.get("id"))
-        title, outcome, side = (_text(item.get(key)) for key in ("title", "outcome", "side"))
+        title = _text(item.get("title"), "Polymarket trade")
+        outcome = _text(item.get("outcome"), "—")
+        side = _text(item.get("side"))
         stamp = source_clock(item, "tradedAt")
         amount, price = (_number(item.get(key)) for key in ("amountUsdc", "averagePrice"))
         if (
-            not re.fullmatch(r"[0-9a-f]{64}", signal_id) or not title or not outcome or side not in ("BUY", "SELL")
-            or stamp is None or amount is None or not 0 < amount < float("inf")
+            not re.fullmatch(r"[0-9a-f]{64}", signal_id) or side not in ("BUY", "SELL")
+            or stamp is None or amount is None or not 0 <= amount < float("inf")
             or price is None or not 0 <= price <= 1
         ):
             continue
@@ -654,16 +656,17 @@ def format_smart_money_signals(payload: Dict[str, Any]) -> List[MessageCandidate
         reasons = " / ".join(tag for tag in tags if isinstance(tag, str)) if isinstance(tags, list) else ""
         slug = _text(item.get("eventSlug"))
         url = f"https://polymarket.com/event/{slug}" if re.fullmatch(r"[a-z0-9-]+", slug) else ""
+        trade = f"{side.title()} {outcome} · {size_text} USDC @ {price_text}¢"
         messages.append(MessageCandidate(
             topic="alpha",
             dedupe_key=f"smart-money:{signal_id}",
             text=_compose_post(
                 header="🧠 Smart Money · Alpha Signal",
                 title=title,
-                lines=[f"{side.title()} {outcome} · {size_text} USDC @ {price_text}¢", traded_at, reasons],
+                lines=[trade, traded_at, reasons],
                 url=_source_link(url, "Polymarket"),
             ),
-            metadata={"panel": "alpha-signal"},
+            metadata={"panel": "alpha-signal", "market": (title, url, reasons), "line": f"{traded_at} · {trade}"},
             observed_at=stamp,
         ))
     return messages
