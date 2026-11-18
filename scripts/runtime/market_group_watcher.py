@@ -39,7 +39,7 @@ from api.clients.source_transport import source_session
 from api.config import load_api_settings
 from api.context import RuntimeResources
 from api.services import runtime_service
-from api.services import commodities_service, crypto_service
+from api.services import commodities_service, crypto_service, oil_market_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, publish_snapshot, SnapshotPublicationError
 from runtime.redis_snapshot_store import create_snapshot_store as SnapshotStore
 
@@ -283,6 +283,7 @@ class MarketGroupWatcher:
                 result[panel_id] = self.run_component(panel_id=panel_id, kind=kind, items=items)
             except SnapshotPublicationError:
                 result[panel_id] = {"status": "publication-failed"}
+        result["oil-context"] = oil_market_service.refresh(self.snapshot_store, self.settings.gamma_api_base)
         return result
 
 

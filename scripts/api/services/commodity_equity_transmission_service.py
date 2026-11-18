@@ -4,6 +4,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
+from . import oil_market_service
+
 PANEL_ID = "commodity-equity-transmission"
 
 
@@ -14,6 +16,7 @@ class CommodityEquityTransmissionDependencies:
     search_markets: Callable[..., Any] | None
     application: Any
     utc_now_iso: Callable[..., Any]
+    snapshot_store: Any = None
 
     @property
     def logger(self) -> Any:
@@ -310,7 +313,7 @@ def _build_chain(
         "winners": spec["winners"],
         "losers": spec["losers"],
         "spreadWatch": spec["spreadWatch"],
-        "linkedMarkets": _linked_markets(
+        "linkedMarkets": [] if commodity_id == "oil" else _linked_markets(
             dependencies,
             spec.get("marketQueries") or [],
         ),
@@ -367,10 +370,11 @@ def get_commodity_equity_transmission_snapshot(
             "spreadCount": sum(len(item.get("spreadWatch") or []) for item in chains),
         },
         "commodities": commodities[:10],
+        "oil": oil_market_service.read(dependencies.snapshot_store, rows.values()),
         "transmissions": chains,
         "sources": {
             "commodities": "existing commodities-watch runtime snapshot",
             "exposures": "curated commodity-to-equity exposure map",
-            "linkedMarkets": "local Polymarket market search when available",
+            "linkedMarkets": "Polymarket oil settlement rules and local search for other commodities",
         },
     }

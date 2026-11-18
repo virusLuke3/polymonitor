@@ -11,6 +11,7 @@ import type {
 import type { PanelRenderMap } from '../../types';
 import { runtimePanelFromRenderer } from '@/panels/definePanel';
 import { useSpecialistCopy } from '@/services/specialist-i18n';
+import { OilContext } from './OilContext';
 
 function statusBadge(payload?: RuntimeCommodityTransmissionPayload | null) {
   const status = String(payload?.status || '').toLowerCase();
@@ -151,8 +152,10 @@ function TransmissionRow({ chain }: { chain: RuntimeTransmissionChain }) {
 }
 
 function CommodityEquityTransmissionPanel({ payload }: { payload?: RuntimeCommodityTransmissionPayload | null }) {
-  const { copy, shared } = useSpecialistCopy('commodity-equity-transmission');
+  const { locale, copy, shared } = useSpecialistCopy('commodity-equity-transmission');
   const [showHelp, setShowHelp] = useState(false);
+  const [view, setView] = useState<'oil' | 'equity'>('oil');
+  const zh = locale === 'zh';
   const transmissions = payload?.transmissions || [];
   const commodities = payload?.commodities || [];
   const summary = payload?.summary;
@@ -187,6 +190,11 @@ function CommodityEquityTransmissionPanel({ payload }: { payload?: RuntimeCommod
       className="wm-market-panel wm-commodity-transmission-panel wm-monitor-panel"
       dataPanelId="commodity-equity-transmission"
     >
+      <div className="wm-oil-tabs">
+        <button type="button" aria-pressed={view === 'oil'} onClick={() => setView('oil')}>{zh ? '原油与盘口' : 'Oil & markets'}</button>
+        <button type="button" aria-pressed={view === 'equity'} onClick={() => setView('equity')}>{zh ? '股票传导' : 'Equity transmission'}</button>
+      </div>
+      {view === 'oil' ? <OilContext data={payload?.oil} /> : <>
       <div className={`wm-transmission-signal ${toneClass(bias)}`}>
         <div>
           <span>{summary?.signalLabel || copy('signalLabel', 'COMMODITY SHOCK MAP')}</span>
@@ -216,6 +224,7 @@ function CommodityEquityTransmissionPanel({ payload }: { payload?: RuntimeCommod
           </div>
         )}
       </div>
+      </>}
     </Panel>
   );
 }

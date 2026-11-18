@@ -69,7 +69,7 @@ export const nowcastSnapshot = publicSnapshot<unknown>({
 });
 
 export function transmissionSnapshot(limit: number) {
-  return publicSnapshot<unknown>({ key: `public:commodity-equity-transmission:limit:${limit}:v1`, version: 1,
+  return publicSnapshot<unknown>({ key: `public:commodity-equity-transmission:limit:${limit}:v2`, version: 2,
     maxAgeMs: 5 * 60_000, staleAgeMs: 15 * 60_000, acceptStale: true, updatedAt: runtimeTimestamp,
     parse(value) {
       const payload = publicPayload(value, 'commodity-equity-transmission');
@@ -77,6 +77,14 @@ export function transmissionSnapshot(limit: number) {
         || !payload.transmissions.every(row => textFields(row, ['chainLabel', 'formula', 'shockLabel', 'lagLabel', 'commodityId'])
           && ['winners', 'losers', 'spreadWatch', 'linkedMarkets'].every(key => optional(row[key], rows)))) {
         throw new RuntimeResponseError('Invalid commodity transmission');
+      }
+      const oil = payload.oil;
+      if (oil != null && (!record(oil) || !rows(oil.futures) || !record(oil.markets) || !rows(oil.markets.items)
+        || !oil.markets.items.every(row => textFields(row, ['id', 'benchmark', 'source', 'sourceUrl', 'basis', 'eventTitle', 'label', 'outcome', 'url', 'endsAt'])
+          && row.url.startsWith('https://polymarket.com/event/') && row.sourceUrl.startsWith('https://'))
+        || !['brentSpot', 'wtiSpot', 'inventory', 'spr', 'production', 'hormuz'].every(key => record(oil[key]) &&
+          optional(oil[key].points, data => rows(data) && data.every(row => typeof row.period === 'string' && Number.isFinite(row.value)))))) {
+        throw new RuntimeResponseError('Invalid oil observations');
       }
       return { ...payload, transmissions: payload.transmissions.slice(0, limit) };
     },

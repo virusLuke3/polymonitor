@@ -745,6 +745,40 @@ export type RuntimeTransmissionChain = {
   linkedMarkets?: RuntimeLinkedMarket[];
 };
 
+export type OilObservationSeries = {
+  status: 'ok' | 'stale' | 'unavailable';
+  source?: string;
+  series?: string;
+  unit?: string;
+  checkedAt?: string;
+  releaseOn?: string;
+  nextReleaseOn?: string;
+  points?: Array<{ period: string; value: number; tankers?: number | null }>;
+};
+
+export type OilSettlementMarket = {
+  id: string;
+  benchmark: 'brent' | 'wti' | 'hormuz' | 'eia';
+  source: string;
+  sourceUrl: string;
+  basis: string;
+  eventTitle: string;
+  title: string;
+  label: string;
+  outcome: string;
+  url: string;
+  bestBid?: number | null;
+  bestAsk?: number | null;
+  endsAt: string;
+  windowStartsAt?: string | null;
+};
+
+export type OilMarketContext = Record<'brentSpot' | 'wtiSpot' | 'inventory' | 'spr' | 'production' | 'hormuz', OilObservationSeries> & {
+  futures: Array<{ id: string; symbol: string; price?: number | null; changePercent?: number | null;
+    changeBasis?: string; quoteAt?: string; acquisitionState?: string; marketState?: string }>;
+  markets: { status: OilObservationSeries['status']; checkedAt?: string; items: OilSettlementMarket[] };
+};
+
 export type RuntimeCommodityTransmissionPayload = {
   generatedAt?: string;
   panelId?: string | null;
@@ -765,6 +799,7 @@ export type RuntimeCommodityTransmissionPayload = {
     spreadCount?: number | string | null;
   } | null;
   commodities?: RuntimeCommodityTapeItem[];
+  oil?: OilMarketContext;
   transmissions?: RuntimeTransmissionChain[];
 };
 

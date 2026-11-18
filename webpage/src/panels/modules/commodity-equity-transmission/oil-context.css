@@ -1,0 +1,76 @@
+.wm-commodity-transmission-panel .wm-oil-tabs,
+.wm-oil-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.wm-oil-tabs button {
+  border: 1px solid var(--border, #333);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 6px;
+  cursor: pointer;
+}
+
+.wm-oil-tabs button[aria-pressed=true] {
+  border-color: var(--wm-green, #50bf91);
+}
+
+.wm-oil-section h4 {
+  margin: 12px 0 5px;
+  font-size: inherit;
+}
+
+.wm-oil-section p, .wm-oil-section small {
+  margin: 3px 0;
+  color: var(--text-dim, #a0aaa6);
+  font-size: 10px;
+}
+
+.wm-oil-observation, .wm-oil-market {
+  padding: 6px;
+  border: 1px solid var(--border, #333);
+  overflow-wrap: anywhere;
+  font-size: 11px;
+}
+
+.wm-oil-observation > *, .wm-oil-market > small, .wm-oil-market-row > small {
+  display: block;
+}
+
+.wm-oil-observation strong {
+  margin: 3px 0;
+  font-size: 13px;
+}
+
+.wm-oil-observation em {
+  font-size: 10px;
+  font-style: normal;
+}
+
+.wm-oil-market {
+  margin: 5px 0;
+}
+
+.wm-oil-market summary {
+  cursor: pointer;
+}
+
+.wm-oil-market-row {
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid var(--border, #333);
+}
+
+.wm-oil-market-row > span {
+  display: block;
+  font-variant-numeric: tabular-nums;
+}
+
+.wm-oil-market table {
+  width: 100%;
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}

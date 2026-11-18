@@ -929,6 +929,7 @@ def build_blueprints(runtime: ServiceRuntime):
                                     search_markets=runtime.panel_reader.search,
                                     application=runtime.app,
                                     utc_now_iso=utc_now_iso,
+                                    snapshot_store=runtime.SNAPSHOT_STORE,
                                 ),
                                 limit=limit,
                             )
