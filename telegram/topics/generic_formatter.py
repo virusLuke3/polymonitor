@@ -7,6 +7,7 @@ import time
 from dataclasses import replace
 from typing import Any, Dict, Iterable, Mapping, Sequence
 
+from .evidence_messages import EVIDENCE_PANELS, format_evidence_message
 from .models import MessageCandidate, source_clock
 
 
@@ -291,6 +292,10 @@ def format_live_generic_snapshot(panel_id: str, payload: Mapping[str, Any], *, t
         return []
     # Ignore schedule dates and fetch clocks when a row has a real event or publication time.
     now = time.time()
+    if panel_id in EVIDENCE_PANELS:
+        return [message for row in collections.get("items", ())
+                if (message := format_evidence_message(panel_id, row, topic=topic, clean=_safe_text))
+                and message.observed_at <= now]
     projection = {key: actual[key] for key in _STATUS_KEYS if key in actual}
     if panel_id in _SAMPLED_PANELS:
         return format_generic_snapshot(panel_id, {**projection, **collections}, topic=topic, snapshot_summary=True)
@@ -312,7 +317,7 @@ def format_live_generic_snapshot(panel_id: str, payload: Mapping[str, Any], *, t
                         message = replace(message, dedupe_key=f"article:{panel_id}:" + hashlib.sha256(
                             str(article_id).encode()
                         ).hexdigest()[:24])
-                    if panel_id in {"whale-tracker", "suspicious-flow"} and row.get("id"):
+                    if panel_id == "whale-tracker" and row.get("id"):
                         message = replace(message, dedupe_key=f"chain-trade:{row['id']}")
                     messages.append(replace(message, observed_at=stamp))
         return messages

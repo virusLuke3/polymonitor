@@ -6,7 +6,7 @@ import json
 import os
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Dict, Iterable, List
 
@@ -16,6 +16,7 @@ from .api_client import PolyDataApiClient, resolve_polydata_api_base
 from .catalog import DELIVERY_CATALOG, SERVER_RUNTIME_PANEL_IDS
 from .client import SAFE_TEXT_LENGTH, TelegramClient, TelegramSendRejected
 from .config import TelegramSettings, load_settings
+from .evidence_messages import EVIDENCE_PANELS, FLOW_PANEL, verified_market_url
 from .formatters import format_all_snapshots_with_stats, format_related_news
 from .generic_formatter import SUMMARY_KEY_PREFIX
 from .models import MessageCandidate, source_clock
@@ -232,6 +233,34 @@ def _candidate_targets(candidate: MessageCandidate, settings: TelegramSettings) 
             yield target
 
 
+def _add_flow_market_links(api: PolyDataApiClient, candidates: list[MessageCandidate]) -> list[MessageCandidate]:
+    ids = {str(c.metadata.get("localMarketId")) for c in candidates if c.metadata.get("panel") == FLOW_PANEL}
+    ids = sorted(int(item) for item in ids if item.isdigit())
+    if not ids:
+        return candidates
+
+    def fetch(local_id):
+        try:
+            client = api.isolated(timeout_seconds=3)
+            with client.session:
+                return client.get_json(f"/markets/{local_id}")
+        except Exception:
+            return {}
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=FETCH_MAX_WORKERS) as executor:
+        markets = dict(zip(ids, executor.map(fetch, ids)))
+    result = []
+    for candidate in candidates:
+        raw = str(candidate.metadata.get("localMarketId"))
+        market = markets.get(int(raw), {}) if raw.isdigit() else {}
+        if candidate.metadata.get("panel") == FLOW_PANEL and market:
+            url = verified_market_url(market, raw, candidate.metadata.get("fillTokenId"))
+            if url:
+                candidate = replace(candidate, text=f"{candidate.text}\nPolymarket 盘口 · {url}")
+        result.append(candidate)
+    return result
+
+
 def _listing_changes(snapshot: Dict, prior: Dict, now: float) -> tuple[dict | None, list[MessageCandidate]]:
     stamp = source_clock(snapshot, "generatedAt")
     modes = snapshot.get("productModes")
@@ -278,7 +307,7 @@ def _new_candidates(
         if not live_since < stamp <= now or now - stamp > MAX_MESSAGE_AGE_SECONDS or state.seen(*key):
             return
         prior = chosen.get(key)
-        if prior is None or stamp > prior[0]:
+        if prior is None or stamp > prior[0] or (stamp == prior[0] and candidate.metadata["panel"] == FLOW_PANEL):
             chosen[key] = (stamp, candidate)
 
     for candidate in candidates:
@@ -389,7 +418,7 @@ def publish_candidates(
                 state.mark(
                     target, candidate.dedupe_key, panel_id=panel,
                     receipt=receipt if receipt and receipt.get("message_id") else None,
-                    source_at=candidate.observed_at if limits else None,
+                    source_at=candidate.observed_at if limits or panel in EVIDENCE_PANELS else None,
                 )
                 state.save()
                 result.sent += 1
@@ -456,6 +485,13 @@ def run_once(
         live_since = window.get("startedAt", started_at)
         if not dry_run and not prime:
             window.setdefault("startedAt", live_since)
+            evidence_from = window.setdefault("evidenceMessagesFrom", {})
+            for panel in EVIDENCE_PANELS:
+                if target == "all" or panel in snapshots:
+                    evidence_from.setdefault(panel, started_at)
+        evidence_from = window.get("evidenceMessagesFrom", {})
+        candidates = [c for c in candidates if c.metadata["panel"] not in evidence_from
+                      or (c.observed_at or 0) > evidence_from[c.metadata["panel"]]]
         listing_prior = state.payload["sourceHeads"].get(LISTING_PANEL, {})
         listing_observation, listing_candidates = _listing_changes(
             publishable_snapshots.get(LISTING_PANEL, {}), {} if prime else listing_prior, now,
@@ -470,6 +506,8 @@ def run_once(
         baselined.extend(source_baselined)
         observations.update(source_observations)
         chosen = source_candidates + chosen
+        if not prime:
+            chosen = _add_flow_market_links(api, chosen)
         if listing_observation is not None:
             observations.setdefault(LISTING_PANEL, {}).update(listing_observation)
             if prime or not listing_prior.get("productModes"):

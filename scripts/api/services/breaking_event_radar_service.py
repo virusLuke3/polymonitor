@@ -362,7 +362,7 @@ def _build_event_item(
         "country": str(seed.get("country") or "Global"),
         "team": None,
         "title": _article_title(latest_article) if latest_article else f"{seed.get('entity')}: daily Wikipedia attention",
-        "summary": (str(latest_article.get("description") or latest_article.get("summary") or seed.get("query") or "")
+        "summary": (str(latest_article.get("description") or latest_article.get("summary") or "")
                     if articles else f"Completed UTC day {evidence_day[:8]}; pageview activity, not a breaking-news report.")[:260],
         "eventTime": _article_time(latest_article) or evidence_time,
         "acquiredAt": acquired_at,

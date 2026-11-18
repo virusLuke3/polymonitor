@@ -211,7 +211,8 @@ class BreakingEventRadarWatcher:
                 continue
             seen.add(url)
             articles.append({"title": row["title"], "url": url, "domain": row["source"],
-                             "datetime": row["publishedAt"], "acquiredAt": acquired_at, "newsRss": True})
+                             "datetime": row["publishedAt"], "acquiredAt": acquired_at, "newsRss": True,
+                             "description": row.get("summary") or ""})
         return articles[:max(1, min(max_records, 50))]
 
     def service_context(self) -> Dict[str, Any]:
