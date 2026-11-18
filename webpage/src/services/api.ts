@@ -273,6 +273,10 @@ export function fetchRuntimeNba(limit = 10, signal?: AbortSignal) {
   return apiGet<RuntimeNbaPayload>(`/runtime/sports/nba?limit=${limit}`, signal);
 }
 
+export function fetchNbaGameDetail(gameId: string, signal?: AbortSignal) {
+  return apiGetWithTimeout<unknown>(`/runtime/sports/nba?gameId=${encodeURIComponent(gameId)}`, 20000, signal);
+}
+
 export function fetchRuntimeNbaIntel(limit = 12, signal?: AbortSignal) {
   return apiGet<RuntimeNbaIntelPayload>(`/runtime/sports/nba-intel?limit=${limit}`, signal);
 }

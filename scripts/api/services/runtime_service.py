@@ -350,7 +350,7 @@ def normalize_nba_scoreboard_payload(payload: Any, *, limit: int = 10, generated
     }
 
 
-def fetch_live_nba_scoreboard_payload(ctx: RuntimeServiceContext, limit: int = 10) -> Dict[str, Any]:
+def fetch_live_nba_scoreboard_payload(ctx: RuntimeServiceContext, limit: int = 10, *, include_source_events: bool = False) -> Dict[str, Any]:
     payload = _dependencies(ctx).http_json_get(
         f"{_dependencies(ctx).settings.espn_nba_base_url.rstrip('/')}/scoreboard",
         params={"limit": limit},
@@ -403,7 +403,10 @@ def fetch_live_nba_scoreboard_payload(ctx: RuntimeServiceContext, limit: int = 1
                 ],
             }
         )
-    return normalize_nba_scoreboard_payload({"items": games, "generatedAt": _dependencies(ctx).utc_now_iso()}, limit=limit)
+    snapshot = {"items": games, "generatedAt": _dependencies(ctx).utc_now_iso()}
+    if include_source_events:
+        snapshot["sourceEvents"] = events[:limit]
+    return normalize_nba_scoreboard_payload(snapshot, limit=limit)
 
 
 def _read_nba_seed(ctx: RuntimeServiceContext, *, namespace: str, cache_key: str, ttl_seconds: int) -> Optional[Dict[str, Any]]:

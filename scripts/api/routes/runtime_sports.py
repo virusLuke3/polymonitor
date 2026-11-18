@@ -15,6 +15,7 @@ class RuntimeSportsRouteDependencies:
     get_nba_scoreboard_snapshot: Callable[..., Any]
     get_nba_intel_snapshot: Callable[..., Any]
     get_nba_matchup_predictor_snapshot: Callable[..., Any]
+    get_nba_game_detail: Callable[..., Any] | None = None
     get_worldcup_intel_snapshot: Callable[..., Any]
     get_worldcup_dashboard_snapshot: Callable[..., Any]
     get_worldcup_core_snapshot: Callable[..., Any]
@@ -35,6 +36,13 @@ def create_runtime_sports_blueprint(dependencies: RuntimeSportsRouteDependencies
 
     @bp.route("/runtime/sports/nba", methods=["GET"])
     def api_runtime_nba():
+        game_id = request.args.get("gameId")
+        if game_id is not None:
+            if not (1 <= len(game_id) <= 20 and game_id.isascii() and game_id.isdigit()):
+                return jsonify({"error": "Invalid ESPN game ID"}), 400
+            if dependencies.get_nba_game_detail is None:
+                return jsonify({"eventId": game_id, "status": "unavailable"})
+            return jsonify(dependencies.get_nba_game_detail(game_id))
         limit = _bounded_int_arg("limit", 10, lower=1, upper=20)
         return jsonify(dependencies.get_nba_scoreboard_snapshot(limit=limit))
 

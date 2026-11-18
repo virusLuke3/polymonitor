@@ -9,6 +9,7 @@ import json
 import time
 from datetime import datetime
 
+from api.services import nba_game_detail
 from api.services.panel_evidence_store import SourceSpec, collect_one, collect_sources, fetch_bytes, payload, read_source
 from api.services.sports_expansion.parsers import (
     parse_dota_match, parse_leaders, parse_pro_matches, parse_standings, parse_summary, parse_tennis,
@@ -40,24 +41,24 @@ def _nba(store):
         "error": None if usable else "scoreboard-unavailable"}
 
 
+def _nba_summary(store):
+    board, _ = _nba(store)
+    games = sorted(board.get("items", []),
+                   key=lambda g: (g.get("state") == "in", g.get("state") == "post", str(g.get("tipoff") or "")),
+                   reverse=True)
+    for game in games:
+        detail = nba_game_detail.read(store, str(game.get("id", "")))
+        summary = detail.get("summary")
+        if isinstance(summary, dict) and isinstance(summary.get("boxscore"), dict):
+            return parse_summary(summary), {
+                "id": SUMMARY.key, "label": SUMMARY.label, "lastSuccessAt": detail["summaryFetchedAt"],
+                "usable": True, "stale": detail["status"] == "stale", "error": detail.get("summaryError"),
+            }
+    return read_source(store, SUMMARY)
+
+
 def collect(store, *, force=False):
     result = collect_sources(store, [STANDINGS, LEADERS, TENNIS, PRO_MATCHES], force=force, budget=300)
-    board, _ = _nba(store)
-    games = board.get("items", [])
-    # Live first, then newest completed game; pregame is useful if no final exists.
-    candidates = sorted(games, key=lambda g: (g.get("state") == "in", g.get("state") == "post", str(g.get("tipoff") or "")), reverse=True)
-    selected = next((g for g in candidates if str(g.get("id", "")).isdigit()), None)
-    def summary():
-        if not selected:
-            raise ValueError("NBA owner has no recent identified game")
-        url = source_value(SUMMARY.url_env).format(event_id=selected["id"])
-        raw = fetch_bytes(url, max_bytes=SUMMARY.max_bytes, timeout=SUMMARY.timeout)
-        data = parse_summary(raw)
-        if data["eventId"] != str(selected["id"]):
-            raise ValueError("NBA game identity mismatch")
-        return raw, data
-    state = collect_one(store, SUMMARY, acquire=summary, force=force)
-    result[SUMMARY.key] = state.get("error") or "stored-or-not-due"
     matches, _ = read_source(store, PRO_MATCHES)
     latest = next(iter(matches.get("matches", [])), None)
     def detail():
@@ -77,7 +78,7 @@ def get_snapshot(store, panel_id, *, limit=100):
     if panel_id not in PANEL_IDS:
         raise ValueError("Unknown sports expansion panel")
     if panel_id in {"sports-spread-monitor", "sports-total-monitor", "sports-player-props"}:
-        data, meta = read_source(store, SUMMARY)
+        data, meta = _nba_summary(store)
         return payload(panel_id, [meta], game=data or None,
             coverage="One identified NBA game; official game facts via ESPN, bookmaker reference lines are not executable quotes.")
     if panel_id == "sports-season-race":

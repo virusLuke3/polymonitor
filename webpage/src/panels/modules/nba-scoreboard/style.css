@@ -1,0 +1,92 @@
+.wm-nba-scoreboard-panel .wm-nba-detail-toggle,
+.wm-nba-detail button {
+  align-self: flex-start;
+  padding: 5px 8px;
+  border: 1px solid var(--border-color, #343836);
+  background: transparent;
+  color: var(--text, #edf0f0);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.wm-nba-scoreboard-panel .wm-nba-detail-toggle:hover,
+.wm-nba-detail button:hover,
+.wm-nba-detail button[aria-pressed=true] {
+  border-color: var(--wm-green, #53ba8b);
+}
+
+.wm-nba-detail {
+  min-width: 0;
+  border-top: 1px solid var(--border-color, #343836);
+  padding-top: 8px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.wm-nba-detail-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.wm-nba-source-time {
+  color: var(--text-dim, #a0aaa6);
+  font-variant-numeric: tabular-nums;
+}
+
+.wm-nba-detail .wm-nba-stat-block,
+.wm-nba-detail .wm-nba-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wm-nba-stat-block p {
+  margin: 0;
+}
+
+.wm-nba-table-wrap {
+  max-width: 100%;
+  overflow: auto;
+}
+
+.wm-nba-table-wrap table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.wm-nba-table-wrap caption {
+  text-align: left;
+  padding: 5px 0;
+  font-weight: 700;
+}
+
+.wm-nba-table-wrap :is(th, td) {
+  border-bottom: 1px solid var(--border-color, #343836);
+  padding: 4px 6px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.wm-nba-table-wrap th {
+  white-space: nowrap;
+}
+
+.wm-nba-table-wrap small {
+  display: block;
+  color: var(--text-dim, #a0aaa6);
+}
+
+.wm-nba-sections pre {
+  max-height: 280px;
+  max-width: 100%;
+  overflow: auto;
+  margin: 5px 0;
+  padding: 8px;
+  border: 1px solid var(--border-color, #343836);
+  font: 10px/1.45 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

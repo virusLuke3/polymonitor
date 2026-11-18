@@ -30,9 +30,9 @@ from api.context import worker_application
 from runtime.seed_meta import utc_now_iso
 from runtime.seed_meta import redis_key as _redis_key
 from runtime.redis_snapshot_store import seed_writer
-from api.clients.source_transport import source_session
+from api.clients.source_transport import read_response_bytes, source_session
 from api.config import load_api_settings
-from api.services import runtime_service
+from api.services import nba_game_detail, runtime_service
 from runtime.seed_meta import SeedMetaStore, build_seed_meta_payload, SnapshotPublicationError, publish_snapshot, retained_snapshot
 from runtime.redis_snapshot_store import create_snapshot_store as SnapshotStore
 from runtime.telegram_panel_publish import publish_cached_panel_snapshot
@@ -202,6 +202,16 @@ class NbaWatcher:
         except (TypeError, ValueError):
             return None
 
+    def fetch_game_summary(self, game_id: str) -> dict:
+        from urllib3.util import Timeout
+        with source_session(requests) as session:
+            session.trust_env = self.requests.trust_env
+            base_url = self.settings.espn_nba_base_url.rstrip("/")
+            deadline = time.monotonic() + 6
+            with session.get(f"{base_url}/summary", params={"event": game_id},
+                             timeout=Timeout(total=6), stream=True) as response:
+                return json.loads(read_response_bytes(response, 2 * 1024 * 1024, deadline=deadline))
+
     def service_context(self) -> Dict[str, Any]:
         return {
             "SETTINGS": self.settings,
@@ -238,10 +248,20 @@ class NbaWatcher:
                 return {"status": "preserved", "recordCount": previous_record_count, "error": f"{label} returned empty payload"}
 
             payload = {**payload, "cacheMode": "seeded"}
+            source_events = payload.pop("sourceEvents", None)
             self.store_payload(namespace, cache_key, payload)
             telegram_sent = publish_cached_panel_snapshot(panel_id, payload)
             status = "ok" if record_count > 0 else "empty"
-            return {"status": status, "recordCount": record_count, "error": None, "telegramSent": telegram_sent}
+            result = {"status": status, "recordCount": record_count, "error": None, "telegramSent": telegram_sent}
+            if source_events is not None:
+                try:
+                    result["gameDetailsUpdated"] = nba_game_detail.collect(
+                        self.snapshot_store, source_events, fetched_at=payload["generatedAt"],
+                        fetch_summary=self.fetch_game_summary,
+                    )
+                except Exception as exc:
+                    result["gameDetailsError"] = type(exc).__name__
+            return result
         except SnapshotPublicationError as exc:
             return {"status": "error", "recordCount": 0, "error": str(exc)}
 
@@ -253,7 +273,9 @@ class NbaWatcher:
                 panel_id="nba-scoreboard",
                 namespace=runtime_service.NBA_SCOREBOARD_NAMESPACE,
                 cache_key=runtime_service.build_nba_scoreboard_cache_key(limit=self.scoreboard_limit),
-                fetcher=lambda ctx: runtime_service.fetch_live_nba_scoreboard_payload(ctx, limit=self.scoreboard_limit),
+                fetcher=lambda ctx: runtime_service.fetch_live_nba_scoreboard_payload(
+                    ctx, limit=max(20, self.scoreboard_limit), include_source_events=True,
+                ),
             ),
             "intel": self._run_component(
                 label="intel",

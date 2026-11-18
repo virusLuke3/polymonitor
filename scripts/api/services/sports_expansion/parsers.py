@@ -69,7 +69,7 @@ def parse_leaders(raw):
 
 
 def parse_summary(raw):
-    p = json.loads(raw)
+    p = raw if isinstance(raw, dict) else json.loads(raw)
     header = p.get("header", {})
     if not header.get("id") or not isinstance(p.get("boxscore"), dict):
         raise ValueError("Missing identified game summary")

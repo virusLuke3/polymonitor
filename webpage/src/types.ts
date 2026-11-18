@@ -889,11 +889,17 @@ export type RuntimeNbaGame = {
   homeScore?: string | number | null;
   awayScore?: string | number | null;
   broadcast?: string | null;
+  period?: number | null;
+  displayClock?: string | null;
+  homePeriods?: Array<{ period: number; value: number | null }>;
+  awayPeriods?: Array<{ period: number; value: number | null }>;
+  leaders?: Array<{ side: string; category: string; athleteId?: string; name?: string; value?: number | null }>;
 };
 
 export type RuntimeNbaPayload = {
   items: RuntimeNbaGame[];
   generatedAt?: string;
+  status?: string;
 };
 
 export type RuntimeNbaIntelItem = {

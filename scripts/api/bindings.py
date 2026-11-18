@@ -36,6 +36,7 @@ from api.services import (
     global_weather_map_service,
     weather_market_service,
     jin10_runtime_service,
+    nba_game_detail,
     macro_cpi_panels_service,
     macro_cpi_registry_service,
     market_service,
@@ -787,6 +788,9 @@ def build_blueprints(runtime: ServiceRuntime):
             runtime_sports_routes.RuntimeSportsRouteDependencies(
                 get_nba_scoreboard_snapshot=lambda limit=10: runtime_service.get_nba_scoreboard_snapshot(
                     runtime.runtime_context, limit=limit
+                ),
+                get_nba_game_detail=lambda game_id: nba_game_detail.read(
+                    runtime.runtime_context["SNAPSHOT_STORE"], game_id,
                 ),
                 get_nba_intel_snapshot=lambda limit=12: runtime_service.get_nba_intel_snapshot(
                     runtime.runtime_context, limit=limit
