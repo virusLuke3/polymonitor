@@ -35,7 +35,7 @@ FRONTEND_PANEL_IDS = (
     "active-markets", "global-orderfilled", "oracle-feed", "market-summary",
     "featured-market", "price-implications", "price-chart", "sample-chain-trades",
     "oracle-timeline", "related-news", "breaking-event-radar", "market-tv-wire",
-    "market-youtube-channels", "whale-tracker",
+    "market-youtube-channels", "alpha-signal", "whale-tracker",
     "suspicious-flow", "commodities-watch", "crypto-watch", "ai-model-race",
     "big-tech-market-cap", "consumer-app-pulse", "crypto-funding-watch",
     "defi-token-watch", "defi-yield-monitor", "defi-security-watch",
@@ -77,6 +77,7 @@ FRONTEND_PANEL_IDS = (
 _SPECIALIZED = {
     "latest-content": ("news", False, True),
     "related-news": ("intel", False, False),
+    "alpha-signal": ("alpha", True, True),
     "new-market-signals": ("alpha", True, True),
     "crypto-funding-watch": ("alpha", True, False),
     "polymarket-macro-map": ("macro", True, True),

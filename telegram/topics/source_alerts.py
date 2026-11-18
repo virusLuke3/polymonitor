@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from math import isfinite
 
-from .formatters import format_crypto_fear_greed, format_esports_intel
+from .formatters import format_crypto_fear_greed, format_esports_intel, format_smart_money_signals
 from .models import MessageCandidate, source_clock
 
 
@@ -14,6 +14,7 @@ ORACLE = "crypto-oracle-reference"
 COMMODITIES = "commodity-equity-transmission"
 WEATHER = "global-weather-map"
 FEAR_GREED = "crypto-fear-greed"
+SMART_MONEY = "alpha-signal"
 
 # Seconds: maximum source age and minimum interval between alerts for the same instrument.
 SOURCE_LIMITS = {
@@ -23,6 +24,7 @@ SOURCE_LIMITS = {
     COMMODITIES: (20 * 60, 60 * 60),
     WEATHER: (75 * 60, 2 * 60 * 60),
     FEAR_GREED: (6 * 60 * 60, 0),
+    SMART_MONEY: (15 * 60, 0),
 }
 STATE_SUFFIX = ":source-alerts-v1"
 COMMODITY_FUTURES = {"oil", "brent", "gasoline", "copper", "aluminum", "natgas", "ttf"}
@@ -130,6 +132,8 @@ def plan_source_alerts(snapshots, heads, *, now, prime):
         if panel not in snapshots:
             continue
         payload = snapshots[panel]
+        if panel == SMART_MONEY and (payload.get("source") != "matched-trades-v2" or payload.get("status") != "ok"):
+            continue
         state_key = panel + STATE_SUFFIX
         saved = heads.get(state_key)
         first = prime or saved is None
@@ -138,7 +142,12 @@ def plan_source_alerts(snapshots, heads, *, now, prime):
         if first:
             baselined.append(panel)
 
-        if panel == ESPORTS:
+        if panel == SMART_MONEY:
+            events = sorted(format_smart_money_signals(payload), key=lambda event: event.observed_at)
+            candidates.extend(
+                event for event in events if max(after, now - max_age) < event.observed_at <= now
+            )
+        elif panel == ESPORTS:
             readings = {series: old for series, old in readings.items() if now - old["at"] <= 86400}
             events = sorted(format_esports_intel(payload), key=lambda event: event.observed_at, reverse=True)
             for event in events:
