@@ -20,6 +20,7 @@ from .formatters import format_all_snapshots_with_stats, format_related_news
 from .generic_formatter import SUMMARY_KEY_PREFIX
 from .models import MessageCandidate, source_clock
 from .nba_scoreboard import NBA
+from .oil_alerts import OIL_STATE
 from .smart_money_feed import SMART_MONEY, relay as relay_smart_money
 from .source_alerts import COMMODITIES, ESPORTS, ORACLE, ORDER_FLOW, SOURCE_LIMITS, STATE_SUFFIX, plan_source_alerts
 from .state import PublishState, state_lock
@@ -430,6 +431,13 @@ def run_once(
         for panel_id, payload in snapshots.items()
         if panel_id not in historical_unready
     }
+    if COMMODITIES in (*TARGET_PANELS.get(target, TARGET_PANELS["all"]), *historical_panels):
+        try:
+            oil_payload = api.get_json("/runtime/finance/commodity-equity-transmission", params={"limit": 1}, timeout_seconds=5)
+            if oil_payload.get("panelId") == COMMODITIES and isinstance(oil_payload.get("oil"), dict):
+                publishable_snapshots.setdefault(COMMODITIES, {})["oil"] = oil_payload["oil"]
+        except Exception as exc:
+            print(f"[telegram-publisher] WARN oil context fetch failed error_class={type(exc).__name__}", file=sys.stderr)
     if NBA in publishable_snapshots:
         nba = publishable_snapshots[NBA]
         nba["gameDetails"] = _fetch_nba_details(api, nba, time.time())
@@ -486,7 +494,9 @@ def run_once(
                 if candidate.dedupe_key not in retryable:
                     continue
                 panel = candidate.metadata["panel"]
-                if panel in SOURCE_LIMITS:
+                if candidate.metadata.get("oilContext"):
+                    observations.pop(OIL_STATE, None)
+                elif panel in SOURCE_LIMITS:
                     observations.pop(panel + STATE_SUFFIX, None)
                 elif candidate.observed_at is None:
                     observations.pop(panel, None)

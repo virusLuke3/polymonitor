@@ -7,6 +7,7 @@ from math import isfinite
 from .formatters import format_crypto_fear_greed, format_esports_intel
 from .models import MessageCandidate, source_clock
 from .nba_scoreboard import NBA, format_nba_game_update
+from .oil_alerts import OIL_STATE, plan_oil_alerts
 
 
 ESPORTS = "esports-intel"
@@ -27,7 +28,7 @@ SOURCE_LIMITS = {
     NBA: (5 * 60, 0),
 }
 STATE_SUFFIX = ":source-alerts-v1"
-COMMODITY_FUTURES = {"oil", "brent", "gasoline", "copper", "aluminum", "natgas", "ttf"}
+COMMODITY_FUTURES = {"gasoline", "copper", "aluminum", "natgas", "ttf"}
 ALERT_DISPLAY = {
     ORDER_FLOW: ("Crypto spot flow alert", "intel", "Bybit trades"),
     ORACLE: ("Crypto oracle price alert", "intel", "Polymarket / Chainlink TWAP"),
@@ -128,6 +129,14 @@ def _clock(stamp):
 
 def plan_source_alerts(snapshots, heads, *, now, prime):
     candidates, updates, baselined = [], {}, []
+    if oil := (snapshots.get(COMMODITIES) or {}).get("oil"):
+        events, observation, primed = plan_oil_alerts(
+            oil, heads.get(OIL_STATE), now=now, prime=prime, max_age=SOURCE_LIMITS[COMMODITIES][0],
+        )
+        candidates.extend(events)
+        updates[OIL_STATE] = observation
+        if primed:
+            baselined.append(OIL_STATE)
     for panel, (max_age, cooldown) in SOURCE_LIMITS.items():
         if panel not in snapshots:
             continue
