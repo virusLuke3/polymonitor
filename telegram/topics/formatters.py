@@ -6,6 +6,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional
 from urllib.parse import quote_plus
 
+from telegram import env_bool
+
 from .catalog import DeliveryMode, delivery_contract
 from .generic_formatter import format_generic_snapshot, format_live_generic_snapshot
 from .market_linker import MarketLink, market_url_from_row, resolve_market_link
@@ -798,6 +800,8 @@ def format_panel_snapshot_outcome(
     canonical_id = {
         "related-intel": "related-news",
     }.get(requested_id, requested_id)
+    if canonical_id == "whale-tracker" and env_bool("POLYDATA_TELEGRAM_WHALE_TRACKER_PAUSED", False):
+        return FormatOutcome(panel_id=canonical_id, mode="paused", reason="Telegram forwarding paused")
     contract = delivery_contract(canonical_id)
     if contract is None:
         return FormatOutcome(
