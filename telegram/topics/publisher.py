@@ -19,6 +19,7 @@ from .config import TelegramSettings, load_settings
 from .formatters import format_all_snapshots_with_stats, format_related_news
 from .generic_formatter import SUMMARY_KEY_PREFIX
 from .models import MessageCandidate, source_clock
+from .nba_scoreboard import NBA
 from .source_alerts import COMMODITIES, ESPORTS, ORACLE, ORDER_FLOW, SOURCE_LIMITS, STATE_SUFFIX, plan_source_alerts
 from .state import PublishState, state_lock
 
@@ -31,7 +32,7 @@ PANEL_ENDPOINTS = {
     "suspicious-flow": ("/runtime/panels/suspicious-flow", {"limit": 24}),
     "polymarket-macro-map": ("/runtime/macro/polymarket-map", {"limit": 12}),
     "cpi-release-command-center": ("/runtime/macro/cpi-release-command-center", {"limit": 12}),
-    "nba-scoreboard": ("/runtime/sports/nba", {"limit": 10}),
+    NBA: ("/runtime/sports/nba", {"limit": 20}),
     "nba-intel": ("/runtime/sports/nba-intel", {"limit": 12}),
     "espn-matchup-predictor": ("/runtime/sports/nba-matchup-predictor", {"limit": 8}),
     ESPORTS: ("/runtime/esports/grid-intel", {"limit": 36}),
@@ -59,7 +60,7 @@ TARGET_PANELS = {
     "intel": ("geo-sanctions-shock", "policy-progress", ESPORTS, ORDER_FLOW, ORACLE),
     "alpha": ("alpha-signal", "new-market-signals", "whale-tracker", "suspicious-flow"),
     "macro": ("polymarket-macro-map", "cpi-release-command-center", COMMODITIES),
-    "nba": ("nba-scoreboard", "nba-intel", "espn-matchup-predictor"),
+    "nba": (NBA, "nba-intel", "espn-matchup-predictor"),
     "weather": ("global-weather-map", "weather-news"),
     "all-panels": (*SERVER_RUNTIME_PANEL_IDS, "latest-content"),
 }
@@ -170,6 +171,32 @@ def _snapshot_ready(payload: Dict) -> bool:
         payload.get("stale") or str(payload.get("status")).lower() in blocked
         or str(payload.get("cacheMode")).lower().startswith(("stale", "retained", "warming"))
     )
+
+
+def _fetch_nba_details(api: PolyDataApiClient, scoreboard: Dict, now: float) -> dict:
+    ids = []
+    for game in scoreboard.get("items") or ():
+        game_id = str(game.get("id", ""))
+        tipoff = source_clock(game, "tipoff")
+        if game_id.isdigit() and (game.get("state") == "in" or (
+            game.get("state") == "post" and tipoff is not None and 0 <= now - tipoff <= 6 * 3600
+        )):
+            ids.append(game_id)
+
+    def fetch(game_id):
+        client = api.isolated(timeout_seconds=min(FETCH_TIMEOUT_SECONDS, api.timeout_seconds))
+        try:
+            with client.session:
+                return client.get_json(PANEL_ENDPOINTS[NBA][0], params={"gameId": game_id})
+        except Exception as exc:
+            print(f"[telegram-publisher] WARN NBA detail fetch failed game={game_id} error_class={type(exc).__name__}", file=sys.stderr)
+            return None
+
+    if not ids:
+        return {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=FETCH_MAX_WORKERS) as executor:
+        return {game: detail for game, detail in zip(ids, executor.map(fetch, ids))
+                if isinstance(detail, dict) and str(detail.get("eventId")) == game}
 
 
 def _fetch_related_candidates(api: PolyDataApiClient, macro_snapshot: Dict) -> tuple[list[MessageCandidate], int]:
@@ -402,6 +429,9 @@ def run_once(
         for panel_id, payload in snapshots.items()
         if panel_id not in historical_unready
     }
+    if NBA in publishable_snapshots:
+        nba = publishable_snapshots[NBA]
+        nba["gameDetails"] = _fetch_nba_details(api, nba, time.time())
     ordinary_snapshots = {
         panel_id: payload for panel_id, payload in publishable_snapshots.items() if panel_id not in SOURCE_LIMITS
     }

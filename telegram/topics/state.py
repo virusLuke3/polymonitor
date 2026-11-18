@@ -50,7 +50,7 @@ class PublishState:
             entry.update(panelId=panel_id, messageId=receipt["message_id"], telegramDate=receipt.get("date"))
             if source_at is not None:
                 entry["sourceAt"] = source_at
-            if panel_id == "esports-intel" and isinstance(receipt.get("text"), str):
+            if panel_id in {"esports-intel", "nba-scoreboard"} and isinstance(receipt.get("text"), str):
                 entry["telegramText"] = receipt["text"]
         self.payload.setdefault("sent", {})[key] = entry
         self._trim()

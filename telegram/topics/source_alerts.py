@@ -6,6 +6,7 @@ from math import isfinite
 
 from .formatters import format_crypto_fear_greed, format_esports_intel, format_smart_money_signals
 from .models import MessageCandidate, source_clock
+from .nba_scoreboard import NBA, format_nba_game_update
 
 
 ESPORTS = "esports-intel"
@@ -25,6 +26,7 @@ SOURCE_LIMITS = {
     WEATHER: (75 * 60, 2 * 60 * 60),
     FEAR_GREED: (6 * 60 * 60, 0),
     SMART_MONEY: (15 * 60, 0),
+    NBA: (5 * 60, 0),
 }
 STATE_SUFFIX = ":source-alerts-v1"
 COMMODITY_FUTURES = {"oil", "brent", "gasoline", "copper", "aluminum", "natgas", "ttf"}
@@ -147,6 +149,17 @@ def plan_source_alerts(snapshots, heads, *, now, prime):
             candidates.extend(
                 event for event in events if max(after, now - max_age) < event.observed_at <= now
             )
+        elif panel == NBA:
+            readings = {game: old for game, old in readings.items() if now - old["at"] <= 86400}
+            for game, detail in (payload.get("gameDetails") or {}).items():
+                old = readings.get(game, {})
+                try:
+                    event = format_nba_game_update(detail, after=after, now=now, max_age=max_age, previous=old)
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if event:
+                    candidates.append(event)
+                    readings[game] = {"at": event.observed_at, "keys": [*old.get("keys", ()), event.metadata["milestone"]]}
         elif panel == ESPORTS:
             readings = {series: old for series, old in readings.items() if now - old["at"] <= 86400}
             events = sorted(format_esports_intel(payload), key=lambda event: event.observed_at, reverse=True)
