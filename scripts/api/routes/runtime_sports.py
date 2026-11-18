@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from flask import Blueprint, jsonify, request
@@ -15,7 +15,7 @@ class RuntimeSportsRouteDependencies:
     get_nba_scoreboard_snapshot: Callable[..., Any]
     get_nba_intel_snapshot: Callable[..., Any]
     get_nba_matchup_predictor_snapshot: Callable[..., Any]
-    get_nba_game_detail: Callable[..., Any] | None = None
+    get_nba_game_detail: Callable[..., Any] | None = field(default=None, kw_only=True)
     get_worldcup_intel_snapshot: Callable[..., Any]
     get_worldcup_dashboard_snapshot: Callable[..., Any]
     get_worldcup_core_snapshot: Callable[..., Any]
